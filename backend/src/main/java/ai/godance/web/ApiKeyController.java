@@ -65,8 +65,12 @@ public class ApiKeyController {
     }
 
     private static String clientIp(ServerWebExchange exchange) {
-        return exchange.getRequest().getRemoteAddress() == null
-                ? null
-                : exchange.getRequest().getRemoteAddress().getAddress().getHostAddress();
+        var remote = exchange.getRequest().getRemoteAddress();
+        if (remote == null) return null;
+        var addr = remote.getAddress();
+        // Behind a reverse proxy (forward-headers-strategy=framework) the
+        // remote address can be UNRESOLVED — getAddress() returns null.
+        // Fall back to the host string instead of NPE-ing.
+        return addr != null ? addr.getHostAddress() : remote.getHostString();
     }
 }
