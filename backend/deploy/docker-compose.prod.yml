@@ -1,0 +1,93 @@
+# =====================================================================
+# Godance — production compose stack.
+#
+# Run from the godance/ root:
+#   cd /opt/godance
+#   docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env.prod up -d
+#
+# Containers:
+#   caddy     — TLS terminator (Let's Encrypt) + reverse proxy on 80/443
+#   backend   — Spring Boot app on 8080 (not exposed to host)
+#   postgres  — Postgres 16 on 5432 (not exposed to host)
+#   redis     — Redis 7 on 6379 (not exposed to host)
+#
+# All inter-container traffic stays on the `godance` bridge network.
+# Only Caddy publishes ports to the host (80 + 443).
+# =====================================================================
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"          # HTTP/3
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data       # TLS cert storage — DO NOT delete
+      - caddy_config:/config
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks: [godance]
+
+  backend:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: godance/backend:latest
+    restart: unless-stopped
+    env_file:
+      - .env.prod
+    environment:
+      # These two override the .env.prod values to point at the
+      # in-network container hostnames rather than localhost.
+      DATABASE_URL: jdbc:postgresql://postgres:5432/godance
+      REDIS_HOST: redis
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks: [godance]
+    # backend is reachable only via caddy — no host port published.
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: godance
+      POSTGRES_USER: ${DATABASE_USERNAME}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DATABASE_USERNAME} -d godance"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks: [godance]
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks: [godance]
+
+volumes:
+  postgres_data:           # Postgres data — back this up.
+  redis_data:              # Redis AOF — losing this just costs a cache rebuild.
+  caddy_data:              # ACME certs + account — DO NOT delete.
+  caddy_config:
+
+networks:
+  godance:
+    driver: bridge

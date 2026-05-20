@@ -1,0 +1,20 @@
+# Keep the Docker build context lean — anything below is excluded.
+target/
+.mvn/
+.idea/
+.vscode/
+*.iml
+.DS_Store
+
+# Tests are baked into the image's source copy by Maven; no need to
+# exclude src/test, the build runs with -DskipTests anyway.
+
+# Local-only files
+deploy/.env.prod
+deploy/.env.local
+*.log
+logs/
+
+# Git internals — irrelevant to the runtime
+.git/
+.gitignore

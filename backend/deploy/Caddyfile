@@ -1,0 +1,61 @@
+# =====================================================================
+# Godance — Caddy reverse proxy + automatic TLS via Let's Encrypt.
+#
+# Caddy provisions and renews certs automatically. You do not need to
+# run certbot, manage cron jobs, or touch /etc/letsencrypt.
+#
+# Requirements for cert issuance:
+#   1. DNS A record api.godance.ai → this server's public IP
+#   2. Port 80 + 443 reachable from the public internet (HTTP-01 challenge)
+#   3. ACME_EMAIL set as env var (recommended) — Let's Encrypt uses it
+#      for expiry warnings.
+#
+# Replace api.godance.ai if you're using a different hostname.
+# =====================================================================
+
+{
+    email {$ACME_EMAIL:admin@godance.ai}
+    # Use Let's Encrypt's STAGING server when testing to avoid rate limits.
+    # Uncomment for dry runs, then re-comment + delete /data/caddy/acme
+    # to switch back to production certs.
+    # acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+}
+
+api.godance.ai {
+    # Forward everything to the backend container on its internal port.
+    reverse_proxy backend:8080 {
+        # Pass the original client IP through so audit logs are accurate.
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+        # Match Stripe / Coinbase webhook timeouts — they can take seconds
+        # to deliver large events, and SSE chat streams can run minutes.
+        flush_interval -1
+        transport http {
+            read_timeout 5m
+            write_timeout 5m
+        }
+    }
+
+    # Security headers. Strict CORS is set in the app; these are
+    # the non-CORS headers that protect against framing, MIME-sniffing,
+    # and downgrade attacks.
+    header {
+        Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+        X-Content-Type-Options    "nosniff"
+        X-Frame-Options           "DENY"
+        Referrer-Policy           "no-referrer"
+        # Don't advertise the server software in error pages.
+        -Server
+    }
+
+    encode gzip zstd
+
+    # Caddy logs to stdout by default; docker compose captures it.
+    log {
+        output stdout
+        format json
+        # Skip access logs for the very chatty health endpoint.
+        level info
+    }
+}

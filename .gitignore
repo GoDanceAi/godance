@@ -25,10 +25,15 @@ yarn-error.log
 npm-debug.log*
 pnpm-debug.log*
 
-# Environment + secrets (never commit)
+# Environment + secrets (never commit real env files).
+# Templates / examples are explicitly re-included.
+# NOTE: gitignore only treats `#` as a comment at the START of a line,
+# never mid-line — so do not append comments to pattern lines below.
 .env
 .env.*
 !.env.example
+!.env.*.template
+!.env.*.example
 *.pem
 *.key
 secrets/
