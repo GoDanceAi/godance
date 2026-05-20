@@ -31,27 +31,29 @@ export default function SignupPage() {
 
   return (
     <div className="mx-auto max-w-sm px-6 py-16">
-      <h1 className="text-2xl font-bold tracking-tight">Create your account</h1>
-      <p className="mt-2 text-sm text-gray-600">
-        Already have one? <Link to="/login" className="text-brand-600 underline">Sign in</Link>
+      <h1 className="text-2xl font-bold tracking-tight text-fg">Create your account</h1>
+      <p className="mt-2 text-sm text-fg-muted">
+        Already have one?{' '}
+        <Link to="/login" className="text-brand-600 hover:text-brand-700 underline">
+          Sign in
+        </Link>
       </p>
       <form onSubmit={onSubmit} className="mt-8 space-y-4">
         <Field label="Full name" type="text" value={fullName} onChange={setFullName} autoComplete="name" required />
-        <Field label="Email"     type="email" value={email} onChange={setEmail} autoComplete="email" required />
-        <Field label="Password"  type="password" value={password} onChange={setPassword} autoComplete="new-password" required minLength={12} />
-        <p className="text-xs text-gray-500">Min 12 characters. We hash with BCrypt — we never store the plaintext.</p>
-        {error && <p className="text-sm text-red-600">{error}</p>}
-        <button
-          type="submit"
-          disabled={busy}
-          className="w-full bg-brand-600 hover:bg-brand-700 disabled:bg-brand-300 text-white font-medium py-2 rounded-md"
-        >
+        <Field label="Email" type="email" value={email} onChange={setEmail} autoComplete="email" required />
+        <Field label="Password" type="password" value={password} onChange={setPassword} autoComplete="new-password" required minLength={12} />
+        <p className="text-xs text-fg-subtle">
+          Min 12 characters. We hash with BCrypt — the plaintext is never stored.
+        </p>
+        {error && <p className="text-sm text-danger">{error}</p>}
+        <button type="submit" disabled={busy} className="btn btn-primary btn-lg w-full">
           {busy ? 'Creating…' : 'Create account'}
         </button>
       </form>
-      <p className="mt-6 text-xs text-gray-500">
-        By signing up you agree to our <a href="https://godance.ai/legal/terms" className="underline">Terms</a> and
-        {' '}<a href="https://godance.ai/legal/privacy" className="underline">Privacy Policy</a>.
+      <p className="mt-6 text-xs text-fg-subtle">
+        By signing up you agree to our{' '}
+        <a href="https://godance.ai/legal/terms" className="underline hover:text-fg">Terms</a> and{' '}
+        <a href="https://godance.ai/legal/privacy" className="underline hover:text-fg">Privacy Policy</a>.
       </p>
     </div>
   );

@@ -48,20 +48,20 @@ const itemList = {
 
 <Layout {title} {description} canonicalPath="/models" jsonLd={[itemList]}>
   <section class="mx-auto max-w-5xl px-6 pt-16 pb-12">
-    <h1 class="text-4xl font-bold tracking-tight">Every model, one URL.</h1>
-    <p class="mt-4 text-gray-600 max-w-2xl">
+    <h1 class="text-4xl font-bold tracking-tight text-fg">Every model, one URL.</h1>
+    <p class="mt-4 text-fg-muted max-w-2xl">
       The full set of models you can call through Godance today, with provider attribution
       and what each one costs. Prices are pass-through plus a flat 5% platform fee — see
-      <a href="/pricing" class="text-brand-600 underline">why we charge a single percentage</a>.
+      <a href="/pricing" class="underline" style="color: var(--color-primary)">why we charge a single percentage</a>.
       Catalog verified May 2026; new models arrive as providers ship them.
     </p>
   </section>
 
   <section class="mx-auto max-w-5xl px-6 pb-12">
-    <h2 class="text-2xl font-bold mb-4">Text models</h2>
-    <div class="overflow-x-auto">
-      <table class="w-full text-left text-sm border border-gray-200 rounded-lg">
-        <thead class="bg-gray-50">
+    <h2 class="text-2xl font-bold mb-4 text-fg">Text models</h2>
+    <div class="card overflow-hidden p-0">
+      <table class="w-full text-left text-sm">
+        <thead class="bg-bg-muted text-fg-subtle">
           <tr>
             <th class="px-4 py-3 font-semibold">Model ID</th>
             <th class="px-4 py-3 font-semibold">Provider</th>
@@ -69,13 +69,13 @@ const itemList = {
             <th class="px-4 py-3 font-semibold text-right">Output</th>
           </tr>
         </thead>
-        <tbody class="divide-y divide-gray-200">
+        <tbody class="divide-y divide-border">
           {text.map((m) => (
             <tr>
-              <td class="px-4 py-3 font-mono">{m.id}</td>
-              <td class="px-4 py-3">{m.provider}</td>
-              <td class="px-4 py-3 text-right">{m.input}</td>
-              <td class="px-4 py-3 text-right">{m.output}</td>
+              <td class="px-4 py-3 font-mono text-fg">{m.id}</td>
+              <td class="px-4 py-3 text-fg-muted">{m.provider}</td>
+              <td class="px-4 py-3 text-right text-fg-muted">{m.input}</td>
+              <td class="px-4 py-3 text-right text-fg-muted">{m.output}</td>
             </tr>
           ))}
         </tbody>
@@ -84,10 +84,10 @@ const itemList = {
   </section>
 
   <section class="mx-auto max-w-5xl px-6 pb-12">
-    <h2 class="text-2xl font-bold mb-4">Image models</h2>
-    <div class="overflow-x-auto">
-      <table class="w-full text-left text-sm border border-gray-200 rounded-lg">
-        <thead class="bg-gray-50">
+    <h2 class="text-2xl font-bold mb-4 text-fg">Image models</h2>
+    <div class="card overflow-hidden p-0">
+      <table class="w-full text-left text-sm">
+        <thead class="bg-bg-muted text-fg-subtle">
           <tr>
             <th class="px-4 py-3 font-semibold">Model ID</th>
             <th class="px-4 py-3 font-semibold">Provider</th>
@@ -95,13 +95,13 @@ const itemList = {
             <th class="px-4 py-3 font-semibold">Notes</th>
           </tr>
         </thead>
-        <tbody class="divide-y divide-gray-200">
+        <tbody class="divide-y divide-border">
           {image.map((m) => (
             <tr>
-              <td class="px-4 py-3 font-mono">{m.id}</td>
-              <td class="px-4 py-3">{m.provider}</td>
-              <td class="px-4 py-3 text-right">{m.price}</td>
-              <td class="px-4 py-3 text-gray-600">{m.notes}</td>
+              <td class="px-4 py-3 font-mono text-fg">{m.id}</td>
+              <td class="px-4 py-3 text-fg-muted">{m.provider}</td>
+              <td class="px-4 py-3 text-right text-fg-muted">{m.price}</td>
+              <td class="px-4 py-3 text-fg-muted">{m.notes}</td>
             </tr>
           ))}
         </tbody>
@@ -110,10 +110,10 @@ const itemList = {
   </section>
 
   <section class="mx-auto max-w-5xl px-6 pb-20">
-    <h2 class="text-2xl font-bold mb-4">Video models</h2>
-    <div class="overflow-x-auto">
-      <table class="w-full text-left text-sm border border-gray-200 rounded-lg">
-        <thead class="bg-gray-50">
+    <h2 class="text-2xl font-bold mb-4 text-fg">Video models</h2>
+    <div class="card overflow-hidden p-0">
+      <table class="w-full text-left text-sm">
+        <thead class="bg-bg-muted text-fg-subtle">
           <tr>
             <th class="px-4 py-3 font-semibold">Model ID</th>
             <th class="px-4 py-3 font-semibold">Provider</th>
@@ -121,20 +121,20 @@ const itemList = {
             <th class="px-4 py-3 font-semibold">Notes</th>
           </tr>
         </thead>
-        <tbody class="divide-y divide-gray-200">
+        <tbody class="divide-y divide-border">
           {video.map((m) => (
             <tr>
-              <td class="px-4 py-3 font-mono">{m.id}</td>
-              <td class="px-4 py-3">{m.provider}</td>
-              <td class="px-4 py-3 text-right">{m.price}</td>
-              <td class="px-4 py-3 text-gray-600">{m.notes}</td>
+              <td class="px-4 py-3 font-mono text-fg">{m.id}</td>
+              <td class="px-4 py-3 text-fg-muted">{m.provider}</td>
+              <td class="px-4 py-3 text-right text-fg-muted">{m.price}</td>
+              <td class="px-4 py-3 text-fg-muted">{m.notes}</td>
             </tr>
           ))}
         </tbody>
       </table>
     </div>
-    <p class="mt-6 text-sm text-gray-500">
-      Need a model that's not here? <a href="mailto:hello@godance.ai" class="text-brand-600 underline">Email us</a> —
+    <p class="mt-6 text-sm text-fg-subtle">
+      Need a model that's not here? <a href="mailto:hello@godance.ai" class="underline" style="color: var(--color-primary)">Email us</a> —
       we add providers when there's demand.
     </p>
   </section>

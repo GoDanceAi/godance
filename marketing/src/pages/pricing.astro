@@ -29,11 +29,11 @@ const rows = [
 
 <Layout {title} {description} canonicalPath="/pricing" jsonLd={[breadcrumb]}>
   <section class="mx-auto max-w-4xl px-6 pt-20 pb-12 text-center">
-    <h1 class="text-4xl md:text-5xl font-bold tracking-tight">
+    <h1 class="text-4xl md:text-5xl font-bold tracking-tight text-fg">
       One number. Pinned to the floor.
     </h1>
-    <p class="mt-6 text-lg text-gray-600">
-      Pay the provider's list price plus a flat <strong class="text-gray-900">5% platform fee</strong>.
+    <p class="mt-6 text-lg text-fg-muted">
+      Pay the provider's list price plus a flat <strong class="text-fg">5% platform fee</strong>.
       Same percentage on text, image, and video. No tiers, no seats, no subscriptions, no
       minimums — top up once, spend across every model.
     </p>
@@ -41,44 +41,45 @@ const rows = [
 
   <section class="mx-auto max-w-4xl px-6 pb-20">
     <div class="grid md:grid-cols-2 gap-6">
-      <div class="rounded-lg border border-gray-200 p-6 bg-white">
-        <h2 class="text-xl font-semibold">Pay-as-you-go</h2>
-        <p class="text-3xl font-bold mt-3">
-          Provider price <span class="text-gray-500 text-base font-medium">+ 5%</span>
+      <div class="card">
+        <h2 class="text-xl font-semibold text-fg">Pay-as-you-go</h2>
+        <p class="text-3xl font-bold mt-3 text-fg">
+          Provider price <span class="text-fg-subtle text-base font-medium">+ 5%</span>
         </p>
-        <p class="mt-2 text-sm text-gray-500">For everyone, by default.</p>
-        <ul class="mt-6 space-y-2 text-gray-600">
-          <li class="flex gap-2"><span class="text-brand-600">✓</span> Every text, image, video, and audio model</li>
-          <li class="flex gap-2"><span class="text-brand-600">✓</span> Streaming chat + signed async webhooks</li>
-          <li class="flex gap-2"><span class="text-brand-600">✓</span> Fallback chains, region-aware routing</li>
-          <li class="flex gap-2"><span class="text-brand-600">✓</span> 7-day signed URL TTL on generated outputs</li>
-          <li class="flex gap-2"><span class="text-brand-600">✓</span> No minimum, no contract, no commitment</li>
+        <p class="mt-2 text-sm text-fg-faint">For everyone, by default.</p>
+        <ul class="mt-6 space-y-2 text-fg-muted">
+          <li class="flex gap-2"><span style="color: var(--color-primary)">✓</span> Every text, image, video, and audio model</li>
+          <li class="flex gap-2"><span style="color: var(--color-primary)">✓</span> Streaming chat + signed async webhooks</li>
+          <li class="flex gap-2"><span style="color: var(--color-primary)">✓</span> Fallback chains, region-aware routing</li>
+          <li class="flex gap-2"><span style="color: var(--color-primary)">✓</span> 7-day signed URL TTL on generated outputs</li>
+          <li class="flex gap-2"><span style="color: var(--color-primary)">✓</span> No minimum, no contract, no commitment</li>
         </ul>
       </div>
-      <div class="rounded-lg border-2 border-brand-600 p-6 bg-white">
-        <h2 class="text-xl font-semibold">Enterprise</h2>
-        <p class="text-3xl font-bold mt-3">Talk to us</p>
-        <p class="mt-2 text-sm text-gray-500">For volume, SLAs, or your own provider keys.</p>
-        <ul class="mt-6 space-y-2 text-gray-600">
-          <li class="flex gap-2"><span class="text-brand-600">✓</span> Volume discounts on the platform fee</li>
-          <li class="flex gap-2"><span class="text-brand-600">✓</span> Bring your own provider API keys</li>
-          <li class="flex gap-2"><span class="text-brand-600">✓</span> Uptime SLA + dedicated incident contact</li>
-          <li class="flex gap-2"><span class="text-brand-600">✓</span> Procurement + DPA workflows</li>
+      <div class="card" style="border: 2px solid var(--color-primary)">
+        <h2 class="text-xl font-semibold text-fg">Enterprise</h2>
+        <p class="text-3xl font-bold mt-3 text-fg">Talk to us</p>
+        <p class="mt-2 text-sm text-fg-faint">For volume, SLAs, or your own provider keys.</p>
+        <ul class="mt-6 space-y-2 text-fg-muted">
+          <li class="flex gap-2"><span style="color: var(--color-primary)">✓</span> Volume discounts on the platform fee</li>
+          <li class="flex gap-2"><span style="color: var(--color-primary)">✓</span> Bring your own provider API keys</li>
+          <li class="flex gap-2"><span style="color: var(--color-primary)">✓</span> Uptime SLA + dedicated incident contact</li>
+          <li class="flex gap-2"><span style="color: var(--color-primary)">✓</span> Procurement + DPA workflows</li>
         </ul>
-        <a href="mailto:hello@godance.ai" class="mt-6 inline-block text-brand-600 font-semibold hover:underline">
+        <a href="mailto:hello@godance.ai" class="mt-6 inline-block font-semibold hover:underline"
+           style="color: var(--color-primary)">
           Email hello@godance.ai →
         </a>
       </div>
     </div>
 
-    <h2 class="text-2xl font-bold mt-16 mb-2">What that actually costs</h2>
-    <p class="text-gray-600 mb-6">
+    <h2 class="text-2xl font-bold mt-16 mb-2 text-fg">What that actually costs</h2>
+    <p class="text-fg-muted mb-6">
       A sample of model rates — provider list price (left) and what you'd pay through Godance
-      (right). Full catalog on <a href="/models" class="text-brand-600 underline">/models</a>.
+      (right). Full catalog on <a href="/models" class="underline" style="color: var(--color-primary)">/models</a>.
     </p>
-    <div class="overflow-x-auto">
+    <div class="card overflow-hidden p-0">
       <table class="w-full text-left text-sm">
-        <thead class="bg-gray-50">
+        <thead class="bg-bg-muted text-fg-subtle">
           <tr>
             <th class="px-4 py-3 font-semibold">Model</th>
             <th class="px-4 py-3 font-semibold">Provider</th>
@@ -87,20 +88,20 @@ const rows = [
             <th class="px-4 py-3 font-semibold text-right">Godance price</th>
           </tr>
         </thead>
-        <tbody class="divide-y divide-gray-200">
+        <tbody class="divide-y divide-border">
           {rows.map((r) => (
             <tr>
-              <td class="px-4 py-3 font-mono">{r.model}</td>
-              <td class="px-4 py-3">{r.provider}</td>
-              <td class="px-4 py-3">{r.modality}</td>
-              <td class="px-4 py-3 text-right">{r.list}</td>
-              <td class="px-4 py-3 text-right font-medium">{r.godance}</td>
+              <td class="px-4 py-3 font-mono text-fg">{r.model}</td>
+              <td class="px-4 py-3 text-fg-muted">{r.provider}</td>
+              <td class="px-4 py-3 text-fg-muted">{r.modality}</td>
+              <td class="px-4 py-3 text-right text-fg-muted">{r.list}</td>
+              <td class="px-4 py-3 text-right font-medium text-fg">{r.godance}</td>
             </tr>
           ))}
         </tbody>
       </table>
     </div>
-    <p class="mt-4 text-xs text-gray-500">
+    <p class="mt-4 text-xs text-fg-faint">
       Rates track providers — when they change theirs, we change ours. Current prices live on
       <a href="/models" class="underline">/models</a>; this table verified May 2026.
     </p>

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { apiFetch, ApiError } from '../lib/api';
+import { Icon } from '../components/Brand';
 
 interface SecretResponse {
   secret: string;
@@ -49,27 +50,27 @@ export default function SettingsPage() {
 
   return (
     <div className="mx-auto max-w-3xl px-6 py-8">
-      <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
+      <h1 className="text-2xl font-bold tracking-tight text-fg">Settings</h1>
 
-      <section className="mt-8 rounded-lg border border-gray-200 bg-white p-6">
-        <h2 className="font-semibold">Webhook signing secret</h2>
-        <p className="mt-1 text-sm text-gray-600">
+      <section className="mt-8 card">
+        <h2 className="font-semibold text-fg">Webhook signing secret</h2>
+        <p className="mt-1 text-sm text-fg-muted">
           Outbound webhooks (async image/video job completions) are HMAC-signed with this
-          secret in the <code className="bg-gray-100 px-1 rounded">{header}</code> header,
-          Stripe format: <code className="bg-gray-100 px-1 rounded">t=&lt;unix&gt;,v1=&lt;hex&gt;</code>.
+          secret in the <code className="code-chip">{header}</code> header,
+          Stripe format: <code className="code-chip">t=&lt;unix&gt;,v1=&lt;hex&gt;</code>.
           After a rotation, both old and new signatures verify for 24 hours.
         </p>
 
-        {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+        {error && <p className="mt-3 text-sm text-danger">{error}</p>}
 
         {justRotated && (
-          <p className="mt-3 text-sm text-emerald-700">
-            ✓ Rotated. The previous secret is still accepted for the next 24 hours.
+          <p className="mt-3 text-sm text-success">
+            Rotated. The previous secret is still accepted for the next 24 hours.
           </p>
         )}
 
         <div className="mt-5 flex items-stretch gap-2">
-          <code className="flex-1 break-all font-mono text-xs bg-gray-50 border border-gray-200 rounded p-3">
+          <code className="flex-1 break-all embedded-surface font-mono text-xs p-3">
             {secret === null
               ? 'Loading…'
               : revealed
@@ -79,16 +80,18 @@ export default function SettingsPage() {
           {secret && (
             <button
               onClick={() => setRevealed((v) => !v)}
-              className="px-3 text-sm font-medium border border-gray-300 rounded-md hover:bg-gray-50"
+              className="btn btn-secondary btn-sm"
             >
+              <Icon name={revealed ? 'eyeOff' : 'eye'} size={14} />
               {revealed ? 'Hide' : 'Reveal'}
             </button>
           )}
           {secret && revealed && (
             <button
               onClick={() => void copy()}
-              className="px-3 text-sm font-medium border border-gray-300 rounded-md hover:bg-gray-50"
+              className="btn btn-secondary btn-sm"
             >
+              <Icon name="copy" size={14} />
               Copy
             </button>
           )}
@@ -97,19 +100,19 @@ export default function SettingsPage() {
         <button
           onClick={() => void rotate()}
           disabled={busy}
-          className="mt-5 px-4 py-2 text-sm font-medium border border-red-300 text-red-700 rounded-md hover:bg-red-50 disabled:opacity-50"
+          className="btn btn-danger btn-sm mt-5"
         >
           {busy ? 'Rotating…' : 'Rotate secret'}
         </button>
       </section>
 
-      <section className="mt-8 rounded-lg border border-gray-200 bg-white p-6">
-        <h2 className="font-semibold">Verification snippet</h2>
-        <p className="mt-1 text-sm text-gray-600">
-          Drop into your webhook handler. Walks all <code className="bg-gray-100 px-1 rounded">v1=</code>
+      <section className="mt-8 card">
+        <h2 className="font-semibold text-fg">Verification snippet</h2>
+        <p className="mt-1 text-sm text-fg-muted">
+          Drop into your webhook handler. Walks all <code className="code-chip">v1=</code>
           {' '}entries and accepts on any match — so rotations don't drop in-flight events.
         </p>
-        <pre className="mt-3 bg-gray-900 text-gray-100 rounded-md p-4 text-xs overflow-x-auto">
+        <pre className="code-block mt-3">
 {`import hmac, hashlib
 
 def verify_godance(payload: str, header: str, secret: str) -> bool:

@@ -1,0 +1,224 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* =========================================================================
+   Godance design tokens — "Unified Ledger".
+   Semantic --color-* vars flip under [data-theme="dark"]; raw --gd-* palette
+   tokens stay constant so brand values remain referenceable.
+   ========================================================================= */
+:root {
+  /* Ink + neutrals */
+  --gd-ink:      #111827;
+  --gd-white:    #ffffff;
+  --gd-gray-50:  #f9fafb;
+  --gd-gray-100: #f3f4f6;
+  --gd-gray-200: #e5e7eb;
+  --gd-gray-300: #d1d5db;
+  --gd-gray-400: #9ca3af;
+  --gd-gray-500: #6b7280;
+  --gd-gray-600: #4b5563;
+  --gd-gray-700: #374151;
+
+  /* Primary — Violet */
+  --gd-violet-50:  #f5f3ff;
+  --gd-violet-100: #ede9fe;
+  --gd-violet-300: #c4b5fd;
+  --gd-violet-500: #8b5cf6;
+  --gd-violet-600: #7c3aed;
+  --gd-violet-700: #6d28d9;
+
+  /* Accent — Cyan */
+  --gd-cyan-500: #06b6d4;
+  --gd-cyan-600: #0891b2;
+
+  /* Status palette */
+  --gd-emerald-50:  #ecfdf5;
+  --gd-emerald-700: #047857;
+  --gd-amber-50:    #fffbeb;
+  --gd-amber-700:   #b45309;
+  --gd-rose-50:     #fff1f2;
+  --gd-rose-300:    #fda4af;
+  --gd-rose-600:    #e11d48;
+  --gd-rose-700:    #be123c;
+
+  /* Semantic — light */
+  --color-bg:            var(--gd-white);
+  --color-bg-muted:      var(--gd-gray-50);
+  --color-surface:       var(--gd-white);
+  --color-surface-alt:   var(--gd-gray-50);
+  --color-fg:            var(--gd-ink);
+  --color-fg-muted:      var(--gd-gray-600);
+  --color-fg-subtle:     var(--gd-gray-500);
+  --color-fg-faint:      var(--gd-gray-400);
+  --color-border:        var(--gd-gray-200);
+  --color-border-strong: var(--gd-gray-300);
+  --color-primary:       var(--gd-violet-600);
+  --color-primary-hover: var(--gd-violet-700);
+  --color-code-bg:       #0f172a;
+  --color-code-fg:       #e5e7eb;
+
+  --color-success-fg: var(--gd-emerald-700);
+  --color-success-bg: var(--gd-emerald-50);
+  --color-warning-fg: var(--gd-amber-700);
+  --color-warning-bg: var(--gd-amber-50);
+  --color-danger-fg:  var(--gd-rose-700);
+  --color-danger-bg:  var(--gd-rose-50);
+
+  --shadow-focus: 0 0 0 3px rgba(124, 58, 237, 0.18);
+
+  /* Font stacks — referenced by inline brand primitives. */
+  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+[data-theme="dark"] {
+  --color-bg:            #0a0f1c;
+  --color-bg-muted:      #0f1626;
+  --color-surface:       #131b2e;
+  --color-surface-alt:   #0f1626;
+  --color-fg:            #f3f4f6;
+  --color-fg-muted:      #cbd5e1;
+  --color-fg-subtle:     #94a3b8;
+  --color-fg-faint:      #64748b;
+  --color-border:        #1f2a44;
+  --color-border-strong: #334155;
+  --color-primary:       #8b5cf6;
+  --color-primary-hover: #a78bfa;
+  --color-code-bg:       #050911;
+  --color-code-fg:       #e5e7eb;
+
+  --color-success-fg: #34d399;
+  --color-success-bg: rgba(16, 185, 129, 0.14);
+  --color-warning-fg: #fbbf24;
+  --color-warning-bg: rgba(245, 158, 11, 0.14);
+  --color-danger-fg:  #fb7185;
+  --color-danger-bg:  rgba(225, 29, 72, 0.14);
+
+  --shadow-focus: 0 0 0 3px rgba(139, 92, 246, 0.35);
+}
+
+/* ---- Base ---------------------------------------------------------------- */
+html { font-family: 'Inter', ui-sans-serif, system-ui, sans-serif; }
+body { background: var(--color-bg); color: var(--color-fg); }
+::selection { background: var(--gd-violet-100); color: var(--gd-violet-700); }
+
+/* =========================================================================
+   Component layer — branded atoms. Layout/spacing stay as Tailwind
+   utilities in the components; these classes carry the brand styling.
+   ========================================================================= */
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-sm
+           border border-transparent px-4 py-2.5 text-[13px] font-semibold
+           leading-none whitespace-nowrap cursor-pointer select-none
+           transition-colors;
+  }
+  .btn-sm { @apply px-3 py-1.5 text-xs; }
+  .btn-lg { @apply px-5 py-3 text-sm; }
+  .btn-primary { background: var(--color-primary); @apply text-white; }
+  .btn-primary:hover { background: var(--color-primary-hover); }
+  .btn-primary:disabled { background: var(--gd-violet-300); @apply cursor-default; }
+  .btn-secondary {
+    background: var(--color-surface);
+    border-color: var(--color-border-strong);
+    @apply text-fg;
+  }
+  .btn-secondary:hover { border-color: var(--color-fg-subtle); }
+  .btn-ghost { @apply bg-transparent text-fg; }
+  .btn-ghost:hover { color: var(--color-primary); }
+  .btn-danger {
+    background: transparent;
+    color: var(--color-danger-fg);
+    border-color: var(--gd-rose-300);
+  }
+  .btn-danger:hover { background: var(--color-danger-bg); }
+
+  .input {
+    @apply w-full rounded-sm px-3 py-2 text-[13px] leading-snug transition-colors;
+    background: var(--color-surface);
+    color: var(--color-fg);
+    border: 1px solid var(--color-border-strong);
+  }
+  .input::placeholder { color: var(--color-fg-faint); }
+  .input:focus {
+    outline: none;
+    border-color: var(--color-primary);
+    box-shadow: var(--shadow-focus);
+  }
+
+  .card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    @apply rounded-md p-5;
+  }
+  .card-hover { @apply transition-colors; }
+  .card-hover:hover { border-color: var(--color-primary); @apply shadow-sm; }
+
+  .nav-link {
+    @apply rounded-sm px-3 py-2 text-[13px] font-medium cursor-pointer
+           select-none transition-colors;
+    color: var(--color-fg-muted);
+  }
+  .nav-link:hover { background: var(--color-bg-muted); color: var(--color-fg); }
+  .nav-link.active {
+    background: var(--gd-violet-50);
+    color: var(--gd-violet-700);
+  }
+  [data-theme="dark"] .nav-link.active {
+    background: rgba(139, 92, 246, 0.16);
+    color: var(--gd-violet-300);
+  }
+
+  /* Status pill — 50/700 pair, rounded chip */
+  .pill {
+    @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5
+           text-[11px] font-semibold;
+    box-shadow: inset 0 0 0 1px var(--color-border);
+    background: var(--color-surface);
+    color: var(--color-fg);
+  }
+  .pill-emerald {
+    background: var(--color-success-bg); color: var(--color-success-fg);
+    box-shadow: inset 0 0 0 1px rgba(16, 185, 129, 0.35);
+  }
+  .pill-amber {
+    background: var(--color-warning-bg); color: var(--color-warning-fg);
+    box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.35);
+  }
+  .pill-rose {
+    background: var(--color-danger-bg); color: var(--color-danger-fg);
+    box-shadow: inset 0 0 0 1px rgba(225, 29, 72, 0.35);
+  }
+  .pill-violet {
+    background: var(--gd-violet-100); color: var(--gd-violet-700);
+    box-shadow: none;
+  }
+  [data-theme="dark"] .pill-violet {
+    background: rgba(139, 92, 246, 0.16); color: var(--gd-violet-300);
+  }
+
+  /* Dark code slab — the only dark surface in light mode */
+  .code-block {
+    background: var(--color-code-bg);
+    color: var(--color-code-fg);
+    @apply rounded-md p-5 overflow-x-auto font-mono text-[12px] leading-relaxed;
+  }
+  .code-chip {
+    background: var(--gd-gray-100);
+    color: var(--color-fg);
+    @apply rounded px-1.5 py-0.5 font-mono text-[0.92em];
+  }
+  [data-theme="dark"] .code-chip { background: rgba(255, 255, 255, 0.08); }
+
+  /* Embedded sub-panel — secret reveal box, dashboard sub-cards */
+  .embedded-surface {
+    background: var(--color-bg-muted);
+    border: 1px solid var(--color-border);
+    @apply rounded-sm;
+  }
+
+  /* Chat assistant bubble */
+  .bubble-assistant { background: var(--gd-gray-100); color: var(--color-fg); }
+  [data-theme="dark"] .bubble-assistant { background: rgba(255, 255, 255, 0.06); }
+}

@@ -7,24 +7,93 @@ const nav = [
   { href: '/status', label: 'Status' },
 ];
 const appUrl = import.meta.env.PUBLIC_APP_URL || 'https://app.godance.ai';
+const path = Astro.url.pathname;
+const isActive = (href: string) =>
+  href === '/' ? path === '/' : path.startsWith(href);
 ---
 
-<header class="border-b border-gray-200">
-  <nav class="mx-auto max-w-6xl px-6 py-4 flex items-center justify-between">
-    <a href="/" class="text-xl font-bold tracking-tight">
-      <span class="text-brand-600">go</span>dance
+<header
+  class="sticky top-0 z-20 border-b border-border bg-surface/95 backdrop-blur"
+>
+  <nav class="mx-auto max-w-6xl px-6 py-3 flex items-center justify-between">
+    <!-- Brand lockup: Unified Ledger mark + Godance wordmark. -->
+    <a href="/" class="inline-flex items-center gap-2" aria-label="Godance home">
+      <svg
+        width="30" height="30" viewBox="0 0 512 512" role="img" aria-hidden="true"
+        fill="none" xmlns="http://www.w3.org/2000/svg" style="color: var(--color-fg)"
+      >
+        <path d="M341 149A150 150 0 1 0 341 363" stroke="currentColor" stroke-width="31" stroke-linecap="round" />
+        <path d="M154 208H231" stroke="currentColor" stroke-width="23" stroke-linecap="round" />
+        <path d="M154 256H245" stroke="currentColor" stroke-width="23" stroke-linecap="round" />
+        <path d="M154 304H226" stroke="currentColor" stroke-width="23" stroke-linecap="round" />
+        <path d="M245 256H294C315 256 315 220 337 220H394" stroke="currentColor" stroke-width="25" stroke-linecap="round" />
+        <circle cx="420" cy="220" r="32" fill="var(--color-bg)" stroke="#06B6D4" stroke-width="18" />
+      </svg>
+      <span
+        class="text-fg"
+        style="font: 700 20px/1 var(--font-sans); letter-spacing: -0.025em;"
+      >Godance</span>
     </a>
-    <ul class="hidden md:flex items-center gap-8 text-sm font-medium">
+
+    <ul class="hidden md:flex items-center gap-1">
       {nav.map(({ href, label }) => (
-        <li><a href={href} class="hover:text-brand-600 transition-colors">{label}</a></li>
+        <li>
+          <a href={href} class:list={['nav-link', { active: isActive(href) }]}>
+            {label}
+          </a>
+        </li>
       ))}
     </ul>
-    <div class="flex items-center gap-3">
-      <a href={appUrl} class="text-sm font-medium hover:text-brand-600">Sign in</a>
-      <a href={`${appUrl}/signup`}
-         class="bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-4 py-2 rounded-md transition-colors">
-        Start free
-      </a>
+
+    <div class="flex items-center gap-2">
+      <button
+        id="theme-toggle"
+        type="button"
+        aria-label="Toggle dark mode"
+        title="Toggle dark mode"
+        class="inline-flex items-center justify-center rounded-md border border-border
+               text-fg-muted transition-colors hover:border-border-strong hover:text-fg"
+        style="width: 32px; height: 32px; background: transparent;"
+      >
+        <!-- moon (shown in light mode) -->
+        <svg data-theme-icon="light" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+        </svg>
+        <!-- sun (shown in dark mode) -->
+        <svg data-theme-icon="dark" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="display:none">
+          <circle cx="12" cy="12" r="4" />
+          <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
+        </svg>
+      </button>
+      <a href={appUrl} class="hidden sm:inline-flex nav-link">Sign in</a>
+      <a href={`${appUrl}/signup`} class="btn btn-primary btn-sm">Start free</a>
     </div>
   </nav>
 </header>
+
+<script is:inline>
+  (function () {
+    var btn = document.getElementById('theme-toggle');
+    if (!btn) return;
+    var sync = function () {
+      var dark =
+        document.documentElement.getAttribute('data-theme') === 'dark';
+      var light = btn.querySelector('[data-theme-icon="light"]');
+      var sun = btn.querySelector('[data-theme-icon="dark"]');
+      if (light) light.style.display = dark ? 'none' : '';
+      if (sun) sun.style.display = dark ? '' : 'none';
+    };
+    btn.addEventListener('click', function () {
+      var next =
+        document.documentElement.getAttribute('data-theme') === 'dark'
+          ? 'light'
+          : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      try {
+        localStorage.setItem('gd-theme', next);
+      } catch (e) {}
+      sync();
+    });
+    sync();
+  })();
+</script>

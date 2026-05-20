@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import { apiFetch, ApiError, type ApiKeySummary } from '../lib/api';
+import { Icon } from '../components/Brand';
 
 interface CreateResponse {
   id: string;
@@ -60,9 +61,9 @@ export default function ApiKeysPage() {
 
   return (
     <div className="mx-auto max-w-3xl px-6 py-8">
-      <h1 className="text-2xl font-bold tracking-tight">API keys</h1>
-      <p className="mt-2 text-sm text-gray-600">
-        Use these with the OpenAI SDK by setting <code className="bg-gray-100 px-1 rounded">api_key</code>.
+      <h1 className="text-2xl font-bold tracking-tight text-fg">API keys</h1>
+      <p className="mt-2 text-sm text-fg-muted">
+        Use these with the OpenAI SDK by setting <code className="code-chip">api_key</code>.
         Plaintext is shown once at creation — there's no way to recover it later.
       </p>
 
@@ -72,7 +73,7 @@ export default function ApiKeysPage() {
             Key created: {justCreated.name}
           </p>
           <p className="mt-2 text-xs text-emerald-900">Copy it now — it won't be shown again.</p>
-          <code className="mt-3 block break-all text-xs font-mono bg-white border border-emerald-200 rounded p-3">
+          <code className="mt-3 block break-all text-xs font-mono bg-surface border border-border rounded p-3 text-fg">
             {justCreated.plaintext}
           </code>
           <button
@@ -90,50 +91,51 @@ export default function ApiKeysPage() {
           value={newName}
           onChange={(e) => setNewName(e.target.value)}
           placeholder="Key name (e.g. 'production backend')"
-          className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-brand-600 focus:ring-1 focus:ring-brand-600"
+          className="input flex-1"
           disabled={busy}
         />
         <button
           type="submit"
           disabled={busy || !newName.trim()}
-          className="px-4 bg-brand-600 hover:bg-brand-700 disabled:bg-brand-300 text-white font-medium rounded-md text-sm"
+          className="btn btn-primary"
         >
+          <Icon name="plus" size={14} />
           {busy ? 'Creating…' : 'Create key'}
         </button>
       </form>
 
-      {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+      {error && <p className="mt-3 text-sm text-danger">{error}</p>}
 
-      <div className="mt-8 overflow-x-auto">
+      <div className="mt-8 card overflow-hidden" style={{ padding: 0 }}>
         <table className="w-full text-sm">
-          <thead className="bg-gray-50">
-            <tr className="text-left">
-              <th className="px-4 py-2 font-semibold">Name</th>
-              <th className="px-4 py-2 font-semibold">Prefix</th>
-              <th className="px-4 py-2 font-semibold">Created</th>
-              <th className="px-4 py-2 font-semibold">Last used</th>
-              <th className="px-4 py-2"></th>
+          <thead className="bg-surface-alt border-b border-border">
+            <tr className="text-left text-fg-subtle">
+              <th className="px-4 py-2.5 font-semibold">Name</th>
+              <th className="px-4 py-2.5 font-semibold">Prefix</th>
+              <th className="px-4 py-2.5 font-semibold">Created</th>
+              <th className="px-4 py-2.5 font-semibold">Last used</th>
+              <th className="px-4 py-2.5"></th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-200">
+          <tbody className="divide-y divide-border">
             {keys === null && (
-              <tr><td colSpan={5} className="px-4 py-6 text-center text-gray-400">Loading…</td></tr>
+              <tr><td colSpan={5} className="px-4 py-6 text-center text-fg-faint">Loading…</td></tr>
             )}
             {keys?.length === 0 && (
-              <tr><td colSpan={5} className="px-4 py-6 text-center text-gray-400">No keys yet.</td></tr>
+              <tr><td colSpan={5} className="px-4 py-6 text-center text-fg-faint">No keys yet.</td></tr>
             )}
             {keys?.map((k) => (
               <tr key={k.id}>
-                <td className="px-4 py-3">{k.name}</td>
-                <td className="px-4 py-3 font-mono text-xs">gd_live_{k.prefix}…</td>
-                <td className="px-4 py-3 text-gray-600">{new Date(k.createdAt).toLocaleDateString()}</td>
-                <td className="px-4 py-3 text-gray-600">
+                <td className="px-4 py-3 font-medium text-fg">{k.name}</td>
+                <td className="px-4 py-3 font-mono text-xs text-fg-muted">gd_live_{k.prefix}…</td>
+                <td className="px-4 py-3 text-fg-muted">{new Date(k.createdAt).toLocaleDateString()}</td>
+                <td className="px-4 py-3 text-fg-muted">
                   {k.lastUsedAt ? new Date(k.lastUsedAt).toLocaleDateString() : '—'}
                 </td>
                 <td className="px-4 py-3 text-right">
                   <button
                     onClick={() => void revoke(k.id)}
-                    className="text-xs text-red-600 hover:text-red-800 font-medium"
+                    className="text-xs text-danger hover:underline font-medium"
                   >
                     Revoke
                   </button>

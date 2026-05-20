@@ -2,42 +2,56 @@
 const year = new Date().getFullYear();
 ---
 
-<footer class="border-t border-gray-200 mt-24">
+<footer class="border-t border-border mt-24 bg-surface">
   <div class="mx-auto max-w-6xl px-6 py-12 grid md:grid-cols-4 gap-8 text-sm">
     <div>
-      <a href="/" class="text-lg font-bold tracking-tight">
-        <span class="text-brand-600">go</span>dance
+      <a href="/" class="inline-flex items-center gap-2" aria-label="Godance home">
+        <svg
+          width="28" height="28" viewBox="0 0 512 512" role="img" aria-hidden="true"
+          fill="none" xmlns="http://www.w3.org/2000/svg" style="color: var(--color-fg)"
+        >
+          <path d="M341 149A150 150 0 1 0 341 363" stroke="currentColor" stroke-width="31" stroke-linecap="round" />
+          <path d="M154 208H231" stroke="currentColor" stroke-width="23" stroke-linecap="round" />
+          <path d="M154 256H245" stroke="currentColor" stroke-width="23" stroke-linecap="round" />
+          <path d="M154 304H226" stroke="currentColor" stroke-width="23" stroke-linecap="round" />
+          <path d="M245 256H294C315 256 315 220 337 220H394" stroke="currentColor" stroke-width="25" stroke-linecap="round" />
+          <circle cx="420" cy="220" r="32" fill="var(--color-bg)" stroke="#06B6D4" stroke-width="18" />
+        </svg>
+        <span
+          class="text-fg"
+          style="font: 700 18px/1 var(--font-sans); letter-spacing: -0.025em;"
+        >Godance</span>
       </a>
-      <p class="mt-2 text-gray-600">
+      <p class="mt-3 text-fg-muted">
         One API for every AI model. Drop-in OpenAI compatible. Card or crypto.
       </p>
     </div>
     <div>
-      <h3 class="font-semibold mb-3">Product</h3>
-      <ul class="space-y-2 text-gray-600">
-        <li><a href="/models" class="hover:text-brand-600">Model catalog</a></li>
-        <li><a href="/pricing" class="hover:text-brand-600">Pricing</a></li>
-        <li><a href="/status" class="hover:text-brand-600">Status</a></li>
+      <h3 class="font-semibold mb-3 text-fg">Product</h3>
+      <ul class="space-y-2 text-fg-muted">
+        <li><a href="/models" class="hover:text-fg transition-colors">Model catalog</a></li>
+        <li><a href="/pricing" class="hover:text-fg transition-colors">Pricing</a></li>
+        <li><a href="/status" class="hover:text-fg transition-colors">Status</a></li>
       </ul>
     </div>
     <div>
-      <h3 class="font-semibold mb-3">Developers</h3>
-      <ul class="space-y-2 text-gray-600">
-        <li><a href="/docs" class="hover:text-brand-600">Documentation</a></li>
-        <li><a href="/docs/openai-compat" class="hover:text-brand-600">OpenAI SDK compatibility</a></li>
-        <li><a href="/llms.txt" class="hover:text-brand-600">llms.txt</a></li>
+      <h3 class="font-semibold mb-3 text-fg">Developers</h3>
+      <ul class="space-y-2 text-fg-muted">
+        <li><a href="/docs" class="hover:text-fg transition-colors">Documentation</a></li>
+        <li><a href="/docs/openai-compat" class="hover:text-fg transition-colors">OpenAI SDK compatibility</a></li>
+        <li><a href="/llms.txt" class="hover:text-fg transition-colors">llms.txt</a></li>
       </ul>
     </div>
     <div>
-      <h3 class="font-semibold mb-3">Company</h3>
-      <ul class="space-y-2 text-gray-600">
-        <li><a href="mailto:hello@godance.ai" class="hover:text-brand-600">Contact</a></li>
-        <li><a href="/legal/privacy" class="hover:text-brand-600">Privacy</a></li>
-        <li><a href="/legal/terms" class="hover:text-brand-600">Terms</a></li>
+      <h3 class="font-semibold mb-3 text-fg">Company</h3>
+      <ul class="space-y-2 text-fg-muted">
+        <li><a href="mailto:hello@godance.ai" class="hover:text-fg transition-colors">Contact</a></li>
+        <li><a href="/legal/privacy" class="hover:text-fg transition-colors">Privacy</a></li>
+        <li><a href="/legal/terms" class="hover:text-fg transition-colors">Terms</a></li>
       </ul>
     </div>
   </div>
-  <div class="border-t border-gray-200 py-6 text-center text-xs text-gray-500">
+  <div class="border-t border-border py-6 text-center text-xs text-fg-faint">
     © {year} Godance. All rights reserved.
   </div>
 </footer>

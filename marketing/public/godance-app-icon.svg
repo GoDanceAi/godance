@@ -1,0 +1,10 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title">
+  <title id="title">Godance app icon</title>
+  <rect x="32" y="32" width="960" height="960" rx="230" fill="#FFFFFF" stroke="#E5E7EB" stroke-width="24"></rect>
+  <path d="M676 298A300 300 0 1 0 676 726" stroke="#111827" stroke-width="62" stroke-linecap="round"></path>
+  <path d="M308 416H462" stroke="#111827" stroke-width="46" stroke-linecap="round"></path>
+  <path d="M308 512H490" stroke="#111827" stroke-width="46" stroke-linecap="round"></path>
+  <path d="M308 608H452" stroke="#111827" stroke-width="46" stroke-linecap="round"></path>
+  <path d="M490 512H588C630 512 630 440 674 440H788" stroke="#111827" stroke-width="50" stroke-linecap="round"></path>
+  <circle cx="840" cy="440" r="64" fill="#FFFFFF" stroke="#06B6D4" stroke-width="36"></circle>
+</svg>

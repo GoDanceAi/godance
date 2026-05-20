@@ -116,12 +116,13 @@ export default function ChatPage() {
   return (
     <div className="mx-auto max-w-3xl px-6 py-8 flex flex-col h-[calc(100vh-8rem)]">
       <div className="flex items-center justify-between mb-4">
-        <h1 className="text-xl font-semibold">Chat</h1>
+        <h1 className="text-xl font-semibold text-fg">Chat</h1>
         <select
           value={model}
           onChange={(e) => setModel(e.target.value)}
           disabled={streaming}
-          className="text-sm border border-gray-300 rounded-md px-2 py-1.5 bg-white"
+          className="input text-sm"
+          style={{ width: 'auto' }}
         >
           {models.map((m) => (
             <option key={m.id} value={m.id}>{m.label}</option>
@@ -129,32 +130,32 @@ export default function ChatPage() {
         </select>
       </div>
 
-      <div className="flex-1 overflow-y-auto border border-gray-200 rounded-lg bg-white p-4 space-y-4">
+      <div className="flex-1 overflow-y-auto card p-4 space-y-4">
         {messages.length === 0 && (
-          <p className="text-sm text-gray-400 text-center py-12">
+          <p className="text-sm text-fg-faint text-center py-12">
             Type a prompt below. Responses stream as tokens arrive.
           </p>
         )}
         {messages.map((m, i) => (
           <div key={i} className={m.role === 'user' ? 'text-right' : ''}>
-            <span className="text-xs font-medium uppercase tracking-wider text-gray-400">
+            <span className="text-xs font-semibold uppercase tracking-wider text-fg-faint">
               {m.role}
             </span>
             <div
-              className={`mt-1 inline-block max-w-[85%] whitespace-pre-wrap rounded-lg px-4 py-2 text-sm ${
+              className={`mt-1 inline-block max-w-[85%] whitespace-pre-wrap rounded-xl px-4 py-2 text-sm leading-relaxed ${
                 m.role === 'user'
                   ? 'bg-brand-600 text-white'
-                  : 'bg-gray-100 text-gray-900'
+                  : 'bubble-assistant text-fg'
               }`}
             >
-              {m.content || <span className="text-gray-400">…</span>}
+              {m.content || <span className="text-fg-faint">…</span>}
             </div>
           </div>
         ))}
       </div>
 
       {error && (
-        <p className="mt-2 text-sm text-red-600">{error}</p>
+        <p className="mt-2 text-sm text-danger">{error}</p>
       )}
 
       <form onSubmit={send} className="mt-4 flex gap-2">
@@ -166,23 +167,15 @@ export default function ChatPage() {
           }}
           placeholder="Ask anything…  (Enter to send, Shift+Enter for newline)"
           rows={2}
-          className="flex-1 resize-none rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-brand-600 focus:ring-1 focus:ring-brand-600"
+          className="input flex-1 resize-none"
           disabled={streaming}
         />
         {streaming ? (
-          <button
-            type="button"
-            onClick={stop}
-            className="px-4 bg-gray-200 hover:bg-gray-300 text-gray-800 font-medium rounded-md"
-          >
+          <button type="button" onClick={stop} className="btn btn-secondary">
             Stop
           </button>
         ) : (
-          <button
-            type="submit"
-            disabled={!input.trim()}
-            className="px-4 bg-brand-600 hover:bg-brand-700 disabled:bg-brand-300 text-white font-medium rounded-md"
-          >
+          <button type="submit" disabled={!input.trim()} className="btn btn-primary">
             Send
           </button>
         )}

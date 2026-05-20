@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { useAuth, formatCents } from '../lib/auth';
+import { Icon } from '../components/Brand';
 
 export default function DashboardPage() {
   const { user } = useAuth();
@@ -9,7 +10,7 @@ export default function DashboardPage() {
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-12">
-      <h1 className="text-3xl font-bold tracking-tight">
+      <h1 className="text-3xl font-bold tracking-tight text-fg">
         Hi, {user.fullName.split(' ')[0]}.
       </h1>
 
@@ -21,30 +22,27 @@ export default function DashboardPage() {
       )}
 
       {/* Balance card */}
-      <div className="mt-8 rounded-lg border border-gray-200 bg-white p-6 flex items-start justify-between">
+      <div className="mt-8 card flex items-start justify-between">
         <div>
-          <p className="text-sm font-medium text-gray-500 uppercase tracking-wider">
+          <p className="text-xs font-semibold uppercase tracking-wider text-fg-subtle">
             Available credit
           </p>
-          <p className="mt-2 text-4xl font-bold tracking-tight">
+          <p className="mt-2 text-4xl font-bold tracking-tight tabular-nums text-fg">
             {formatCents(user.creditBalanceCents)}
           </p>
           {lowBalance && (
-            <p className="mt-2 text-sm text-amber-700">
+            <p className="mt-2 text-sm text-warning">
               Low balance. Top up to keep requests flowing.
             </p>
           )}
         </div>
-        <Link
-          to="/billing"
-          className="bg-brand-600 hover:bg-brand-700 text-white font-medium px-4 py-2 rounded-md text-sm"
-        >
+        <Link to="/billing" className="btn btn-primary">
           Top up
         </Link>
       </div>
 
       {/* Quick links */}
-      <h2 className="mt-12 text-lg font-semibold">Get going</h2>
+      <h2 className="mt-12 text-lg font-semibold text-fg">Get going</h2>
       <div className="mt-4 grid sm:grid-cols-2 gap-4">
         <DashboardCard
           to="/chat"
@@ -68,7 +66,7 @@ export default function DashboardPage() {
         />
       </div>
 
-      <p className="mt-12 text-xs text-gray-400">
+      <p className="mt-12 text-xs text-fg-faint">
         Usage history and per-model spend lands with the observability work in the next release.
       </p>
     </div>
@@ -77,12 +75,12 @@ export default function DashboardPage() {
 
 function DashboardCard({ to, title, body }: { to: string; title: string; body: string }) {
   return (
-    <Link
-      to={to}
-      className="block rounded-lg border border-gray-200 bg-white p-5 hover:border-brand-600 hover:shadow-sm transition"
-    >
-      <h3 className="font-semibold">{title}</h3>
-      <p className="mt-1 text-sm text-gray-600">{body}</p>
+    <Link to={to} className="card card-hover block">
+      <h3 className="font-semibold text-fg flex items-center justify-between">
+        {title}
+        <Icon name="chevronRight" size={16} />
+      </h3>
+      <p className="mt-1 text-sm text-fg-muted">{body}</p>
     </Link>
   );
 }

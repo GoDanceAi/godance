@@ -31,19 +31,18 @@ export default function LoginPage() {
 
   return (
     <div className="mx-auto max-w-sm px-6 py-16">
-      <h1 className="text-2xl font-bold tracking-tight">Sign in</h1>
-      <p className="mt-2 text-sm text-gray-600">
-        New here? <Link to="/signup" className="text-brand-600 underline">Create an account</Link>
+      <h1 className="text-2xl font-bold tracking-tight text-fg">Sign in</h1>
+      <p className="mt-2 text-sm text-fg-muted">
+        New here?{' '}
+        <Link to="/signup" className="text-brand-600 hover:text-brand-700 underline">
+          Create an account
+        </Link>
       </p>
       <form onSubmit={onSubmit} className="mt-8 space-y-4">
         <Field label="Email" type="email" value={email} onChange={setEmail} autoComplete="email" required />
         <Field label="Password" type="password" value={password} onChange={setPassword} autoComplete="current-password" required />
-        {error && <p className="text-sm text-red-600">{error}</p>}
-        <button
-          type="submit"
-          disabled={busy}
-          className="w-full bg-brand-600 hover:bg-brand-700 disabled:bg-brand-300 text-white font-medium py-2 rounded-md"
-        >
+        {error && <p className="text-sm text-danger">{error}</p>}
+        <button type="submit" disabled={busy} className="btn btn-primary btn-lg w-full">
           {busy ? 'Signing in…' : 'Sign in'}
         </button>
       </form>
@@ -62,7 +61,7 @@ function Field(props: {
 }) {
   return (
     <label className="block">
-      <span className="text-sm font-medium text-gray-700">{props.label}</span>
+      <span className="text-sm font-medium text-fg">{props.label}</span>
       <input
         type={props.type}
         value={props.value}
@@ -70,7 +69,7 @@ function Field(props: {
         autoComplete={props.autoComplete}
         required={props.required}
         minLength={props.minLength}
-        className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand-600 focus:ring-1 focus:ring-brand-600 outline-none"
+        className="input mt-1.5"
       />
     </label>
   );

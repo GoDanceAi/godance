@@ -30,22 +30,28 @@ export default function VerifyEmailPage() {
 
   return (
     <div className="mx-auto max-w-md px-6 py-16 text-center">
-      {status === 'verifying' && <p className="text-gray-600">Verifying your email…</p>}
+      {status === 'verifying' && <p className="text-fg-muted">Verifying your email…</p>}
       {status === 'success' && (
         <>
-          <h1 className="text-2xl font-bold tracking-tight">Email verified.</h1>
-          <p className="mt-3 text-sm text-gray-600">You're all set.</p>
-          <Link to="/dashboard" className="inline-block mt-6 text-brand-600 underline">
-            Go to dashboard →
+          <h1 className="text-2xl font-bold tracking-tight text-fg">Email verified.</h1>
+          <p className="mt-3 text-sm text-fg-muted">You're all set.</p>
+          <Link
+            to="/dashboard"
+            className="mt-6 inline-flex items-center gap-1.5 text-brand-600 hover:text-brand-700 font-medium"
+          >
+            Go to dashboard
           </Link>
         </>
       )}
       {status === 'error' && (
         <>
-          <h1 className="text-2xl font-bold tracking-tight text-red-700">Couldn't verify.</h1>
-          <p className="mt-3 text-sm text-gray-600">{error}</p>
-          <Link to="/dashboard" className="inline-block mt-6 text-brand-600 underline">
-            Back to dashboard →
+          <h1 className="text-2xl font-bold tracking-tight text-danger">Couldn't verify.</h1>
+          <p className="mt-3 text-sm text-fg-muted">{error}</p>
+          <Link
+            to="/dashboard"
+            className="mt-6 inline-flex items-center gap-1.5 text-brand-600 hover:text-brand-700 font-medium"
+          >
+            Back to dashboard
           </Link>
         </>
       )}
