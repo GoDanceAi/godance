@@ -1,17 +1,17 @@
 # Godance
 
 > Drop-in OpenAI-compatible REST API that routes to 16+ AI providers across text, image,
-> video, and audio. One credit ledger, one billing line, one SDK. Pay with card, ACH, SEPA,
-> or USDC. Pass-through provider pricing plus a flat 5% platform fee — no tiers, no seats,
+> video, and audio. One credit ledger, one billing line, one SDK. Pay with card, ACH,
+> or SEPA. Pass-through provider pricing plus a flat 5% platform fee — no tiers, no seats,
 > no subscriptions.
 
 ## Positioning
 
-- vs. OpenRouter: Godance covers image and video too, not just text. Plus crypto top-ups.
+- vs. OpenRouter: Godance covers image and video too, not just text.
 - vs. Eden AI: simpler flat 5% fee (Eden charges 5.5%, tier-dependent).
 - vs. Fireworks / Together: pure aggregator — no GPUs, no model weights, no lock-in.
-- vs. B.AI / WorldClaw: crypto is a payment method here, not the brand identity. Targets
-  developer teams, not crypto-native funds.
+- vs. B.AI / WorldClaw: a drop-in developer API, not an end-user product — targets
+  engineering teams integrating models into their own apps.
 
 ## API surface (OpenAI-compatible)
 
@@ -25,7 +25,6 @@
 - GET /v1/models — catalog enumeration
 - CRUD /v1/keys — API key management (plaintext returned exactly once)
 - POST /v1/billing/topup — Stripe Checkout for card / ACH / SEPA
-- POST /v1/billing/coinbase/topup — Coinbase Commerce for USDC / USDT
 - GET /v1/webhooks/secret — signing secret (Stripe-style HMAC-SHA256)
 - POST /v1/webhooks/secret/rotate — rotate with 24h dual-signature grace
 

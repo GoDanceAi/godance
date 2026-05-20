@@ -8,8 +8,6 @@ interface TopUpResponse {
   amountCents: number;
 }
 
-type Provider = 'stripe' | 'coinbase';
-
 const PRESETS = [
   { label: '$10',  cents: 10_00  },
   { label: '$25',  cents: 25_00  },
@@ -20,7 +18,6 @@ const PRESETS = [
 export default function BillingPage() {
   const { user } = useAuth();
   const [amount, setAmount] = useState<number>(25_00);
-  const [provider, setProvider] = useState<Provider>('stripe');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -30,8 +27,7 @@ export default function BillingPage() {
     setError(null);
     setBusy(true);
     try {
-      const path = provider === 'stripe' ? '/v1/billing/topup' : '/v1/billing/coinbase/topup';
-      const resp = await apiFetch<TopUpResponse>(path, {
+      const resp = await apiFetch<TopUpResponse>('/v1/billing/topup', {
         method: 'POST',
         json: { amountCents: amount },
       });
@@ -86,19 +82,9 @@ export default function BillingPage() {
         {/* Payment method */}
         <div>
           <label className="text-sm font-medium text-fg-muted">Payment method</label>
-          <div className="mt-2 grid grid-cols-2 gap-3">
-            <PaymentOption
-              active={provider === 'stripe'}
-              onClick={() => setProvider('stripe')}
-              title="Card / ACH / SEPA"
-              subtitle="via Stripe"
-            />
-            <PaymentOption
-              active={provider === 'coinbase'}
-              onClick={() => setProvider('coinbase')}
-              title="USDC / USDT"
-              subtitle="via Coinbase Commerce"
-            />
+          <div className="mt-2 p-4 rounded-md border border-brand-600 bg-brand-50">
+            <p className="font-semibold text-sm text-fg">Card / ACH / SEPA</p>
+            <p className="text-xs text-fg-subtle mt-0.5">via Stripe</p>
           </div>
         </div>
 
@@ -109,31 +95,14 @@ export default function BillingPage() {
           disabled={busy || amount < 100 || amount > 100_000}
           className="btn btn-primary btn-lg w-full"
         >
-          {busy ? 'Opening checkout…' : `Continue to ${provider === 'stripe' ? 'Stripe' : 'Coinbase'}`}
+          {busy ? 'Opening checkout…' : 'Continue to Stripe'}
         </button>
 
         <p className="text-xs text-fg-subtle">
-          You'll be redirected to {provider === 'stripe' ? 'Stripe Checkout' : 'Coinbase Commerce'} to
-          complete payment. Your balance updates automatically once the webhook confirms.
+          You'll be redirected to Stripe Checkout to complete payment. Your
+          balance updates automatically once the webhook confirms.
         </p>
       </div>
     </div>
-  );
-}
-
-function PaymentOption(props: { active: boolean; onClick: () => void; title: string; subtitle: string }) {
-  return (
-    <button
-      type="button"
-      onClick={props.onClick}
-      className={`text-left p-4 rounded-md border ${
-        props.active
-          ? 'border-brand-600 bg-brand-50'
-          : 'border-border-strong bg-surface hover:border-fg-faint'
-      }`}
-    >
-      <p className="font-semibold text-sm text-fg">{props.title}</p>
-      <p className="text-xs text-fg-subtle mt-0.5">{props.subtitle}</p>
-    </button>
   );
 }

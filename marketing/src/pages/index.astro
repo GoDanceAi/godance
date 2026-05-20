@@ -4,7 +4,7 @@ import Layout from '../layouts/Layout.astro';
 const title = 'Godance — every AI model, one API, drop-in OpenAI compatible';
 const description =
   'OpenAI, Anthropic, Sora, Claude, Flux, Gemini, Volcengine Ark — text, image, video, audio behind one ' +
-  'OpenAI-compatible REST API. Swap base_url, ship. Pay with card, ACH, SEPA, or USDC.';
+  'OpenAI-compatible REST API. Swap base_url, ship. Pay with card, ACH, or SEPA.';
 
 const orgSchema = {
   '@context': 'https://schema.org',
@@ -54,10 +54,6 @@ const faqs = [
   {
     q: 'What does it actually cost?',
     a: 'Provider list price plus a flat 5% platform fee — same percentage across text, image, video. No tiers, no seats, no minimums. Top up the credit ledger; spend it across every model.',
-  },
-  {
-    q: 'Can I pay with crypto?',
-    a: 'Yes. USDC and USDT via Coinbase Commerce on Base, Ethereum, or Polygon. Card, ACH, and SEPA via Stripe. Same balance, same API — the gateway doesn\'t care how you paid.',
   },
   {
     q: 'What happens when a provider goes down?',
@@ -113,7 +109,7 @@ const providerNames = [
       </a>
     </div>
     <p class="mt-6 text-sm text-fg-subtle">
-      Pass-through pricing + 5% flat. Card, ACH, SEPA, or USDC. No subscription.
+      Pass-through pricing + 5% flat. Card, ACH, or SEPA. No subscription.
     </p>
   </section>
 
@@ -164,8 +160,8 @@ const providerNames = [
         <div>
           <h3 class="text-lg font-semibold text-fg">Pay how your customers pay</h3>
           <p class="mt-2 text-fg-muted leading-relaxed">
-            Stripe for card / ACH / SEPA. Coinbase Commerce for USDC / USDT on Base, Ethereum,
-            or Polygon. Same ledger, same balance — the API is payment-method-agnostic.
+            Card, ACH, and SEPA via Stripe. One credit ledger, one balance —
+            top it up once and spend it across every model.
           </p>
         </div>
         <div>
