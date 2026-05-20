@@ -41,6 +41,23 @@ jobs:
           distribution: temurin
           java-version: '21'
           cache: maven
+      # The @SpringBootTest integration tests boot the full context, which
+      # eagerly connects to object storage and uses Redis. Postgres is
+      # supplied per-test by Testcontainers; MinIO + Redis are not, so the
+      # workflow provides them — mirroring the local dev docker-compose.
+      - name: Start backing services (MinIO + Redis)
+        run: |
+          docker run -d --name redis -p 6380:6379 redis:7-alpine
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=godance -e MINIO_ROOT_PASSWORD=godancepw \
+            minio/minio server /data
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:9000/minio/health/ready >/dev/null 2>&1; then
+              echo "MinIO ready"; break
+            fi
+            if [ "$i" = 30 ]; then echo "MinIO not ready" >&2; docker logs minio; exit 1; fi
+            sleep 1
+          done
       - name: mvn verify
         working-directory: backend
         run: mvn -B verify
