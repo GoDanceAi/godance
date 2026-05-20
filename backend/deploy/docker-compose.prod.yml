@@ -24,7 +24,9 @@ services:
       - "443:443"
       - "443:443/udp"          # HTTP/3
     volumes:
-      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # Path is relative to THIS compose file's directory (deploy/),
+      # not the repo root — so it's ./Caddyfile, not ./deploy/Caddyfile.
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data       # TLS cert storage — DO NOT delete
       - caddy_config:/config
     depends_on:
