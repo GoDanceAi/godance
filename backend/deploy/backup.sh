@@ -6,7 +6,7 @@
 # RETENTION_DAYS (local + remote).
 #
 # Install as a daily cron — see deploy/README.md "Backups".
-# Requires on the droplet: docker compose, awscli (apt install -y awscli).
+# Requires on the droplet: docker compose + AWS CLI v2.
 
 set -euo pipefail
 
@@ -19,11 +19,17 @@ ENV_FILE="$DEPLOY_DIR/.env.prod"
 COMPOSE_FILE="$DEPLOY_DIR/docker-compose.prod.yml"
 
 [ -f "$ENV_FILE" ] || { echo "[backup] missing $ENV_FILE" >&2; exit 1; }
-set -a; . "$ENV_FILE"; set +a
 
-export AWS_ACCESS_KEY_ID="$OBJECT_STORAGE_ACCESS_KEY"
-export AWS_SECRET_ACCESS_KEY="$OBJECT_STORAGE_SECRET_KEY"
-export AWS_DEFAULT_REGION="$OBJECT_STORAGE_REGION"
+# Read individual keys — do NOT `source` the file. It is a docker env file;
+# values like JAVA_OPTS contain unquoted spaces that break shell parsing.
+getenv() { grep -E "^$1=" "$ENV_FILE" | head -1 | cut -d= -f2-; }
+
+DATABASE_USERNAME="$(getenv DATABASE_USERNAME)"
+OBJECT_STORAGE_BUCKET="$(getenv OBJECT_STORAGE_BUCKET)"
+OBJECT_STORAGE_ENDPOINT="$(getenv OBJECT_STORAGE_ENDPOINT)"
+export AWS_ACCESS_KEY_ID="$(getenv OBJECT_STORAGE_ACCESS_KEY)"
+export AWS_SECRET_ACCESS_KEY="$(getenv OBJECT_STORAGE_SECRET_KEY)"
+export AWS_DEFAULT_REGION="$(getenv OBJECT_STORAGE_REGION)"
 S3_BASE="s3://$OBJECT_STORAGE_BUCKET/db-backups"
 
 mkdir -p "$LOCAL_DIR"

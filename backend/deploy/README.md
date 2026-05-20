@@ -137,11 +137,18 @@ The data that matters lives in two named volumes:
 Install once on the droplet:
 
 ```bash
-apt install -y awscli                       # one-time: backup.sh needs it
+# One-time: install AWS CLI v2 (the `awscli` apt package is not in the
+# droplet's enabled repos).
+apt-get install -y unzip
+curl -fsSL https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o /tmp/awscliv2.zip
+cd /tmp && unzip -oq awscliv2.zip && ./aws/install --update && cd -
+
 /opt/godance/backend/deploy/backup.sh        # run once to verify it works
 
-# Daily cron at 02:00 UTC
+# Daily cron at 02:00 UTC. PATH is set explicitly — cron.d jobs run with a
+# minimal PATH that excludes /usr/local/bin, where `aws` is installed.
 cat >/etc/cron.d/godance-backup <<'EOF'
+PATH=/usr/local/bin:/usr/bin:/bin
 0 2 * * * root /opt/godance/backend/deploy/backup.sh >> /var/log/godance-backup.log 2>&1
 EOF
 ```
