@@ -6,13 +6,13 @@
 #   SSH_PRIVATE_KEY   — private key whose public half is in the droplet's
 #                       authorized_keys
 #
-# GHCR: the image is pushed with the built-in GITHUB_TOKEN. After the first
-# successful push, make the package public (Packages → godance-backend →
-# Package settings → Change visibility) OR run `docker login ghcr.io` on the
-# droplet so `docker compose pull` can fetch it.
+# GHCR: the image is pushed with the built-in GITHUB_TOKEN and stays a
+# private package. The deploy job logs the droplet into ghcr.io using the
+# workflow token (valid for that run only) so `docker compose pull` can
+# fetch it — no manual registry setup needed.
 #
-# Until the secrets exist, the `deploy` job fails harmlessly — `test` and
-# `build-and-push` still validate every push.
+# Until the SSH secrets exist, the `deploy` job fails harmlessly — `test`
+# and `build-and-push` still validate every push.
 
 name: Backend CI/CD
 
@@ -87,20 +87,30 @@ jobs:
   deploy:
     needs: build-and-push
     runs-on: ubuntu-latest
+    permissions:
+      packages: read
     steps:
       - name: SSH deploy
         uses: appleboy/ssh-action@v1
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: GHCR_TOKEN
           script: |
             set -euo pipefail
+            # The GHCR image is a private package — log in with the workflow's
+            # own token (valid for this run only) so `docker compose pull`
+            # can fetch it, then log out.
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
             cd /opt/godance
             git pull --ff-only
             cd backend
             docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env.prod pull backend
             docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env.prod up -d --no-build backend
+            docker logout ghcr.io
             docker image prune -f
       - name: Health check
         run: |
