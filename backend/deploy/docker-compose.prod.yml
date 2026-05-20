@@ -35,10 +35,12 @@ services:
     networks: [godance]
 
   backend:
+    # Deploys pull this prebuilt image from GHCR (see .github/workflows/deploy.yml).
+    # The build: block is kept as a fallback for manual `up -d --build backend`.
+    image: ghcr.io/godanceai/godance-backend:latest
     build:
       context: ..
       dockerfile: deploy/Dockerfile
-    image: godance/backend:latest
     restart: unless-stopped
     env_file:
       - .env.prod

@@ -12,6 +12,7 @@ deploy/
 ├── Caddyfile                Reverse proxy + Let's Encrypt config
 ├── Dockerfile               Multi-stage backend image
 ├── docker-compose.prod.yml  Compose stack: caddy + backend + postgres + redis
+├── backup.sh                Daily Postgres backup → DO Spaces
 └── README.md                This file
 ```
 
@@ -88,6 +89,12 @@ curl -s https://api.godance.ai/healthz | jq
 
 ## Updating after a code change
 
+Pushes to `main` that touch `backend/**` auto-deploy via GitHub Actions
+(`.github/workflows/deploy.yml`): test → build image → push to GHCR →
+SSH-deploy here. No manual step needed.
+
+To deploy by hand (e.g. CI is down):
+
 ```bash
 cd /opt/godance
 git pull
@@ -123,15 +130,25 @@ The data that matters lives in two named volumes:
 - `godance_postgres_data` — all user, ledger, conversation data.
 - `godance_caddy_data` — TLS certificates + Let's Encrypt account.
 
-Daily logical backup of Postgres:
+`backup.sh` runs a daily logical `pg_dump`, gzips it, uploads it to
+`s3://$OBJECT_STORAGE_BUCKET/db-backups/`, and prunes dumps older than
+14 days (local + remote).
+
+Install once on the droplet:
 
 ```bash
-docker compose -f deploy/docker-compose.prod.yml exec -T postgres \
-  pg_dump -U godance -d godance --no-owner --no-acl \
-  | gzip > /var/backups/godance-$(date +%F).sql.gz
+apt install -y awscli                       # one-time: backup.sh needs it
+/opt/godance/backend/deploy/backup.sh        # run once to verify it works
+
+# Daily cron at 02:00 UTC
+cat >/etc/cron.d/godance-backup <<'EOF'
+0 2 * * * root /opt/godance/backend/deploy/backup.sh >> /var/log/godance-backup.log 2>&1
+EOF
 ```
 
-Wire that into cron or a DigitalOcean droplet snapshot schedule.
+For remote retention beyond the script's 14-day prune you can also set a
+lifecycle expiry rule on the Spaces bucket. `godance_caddy_data` is
+recreatable (Caddy re-issues certs), so it isn't backed up.
 
 ## Troubleshooting
 
@@ -154,11 +171,9 @@ Wire that into cron or a DigitalOcean droplet snapshot schedule.
 
 Out of scope for the initial launch; add when traffic justifies it:
 
-- **Move Postgres to DO Managed Database** for automatic backups and
-  point-in-time recovery.
+- **Move Postgres to DO Managed Database** for point-in-time recovery
+  on top of the `backup.sh` logical dumps.
 - **Move Redis to DO Managed Redis** for similar reasons.
-- **Add CI/CD** via GitHub Actions: build image on push to `main`,
-  push to GHCR, SSH-deploy to the droplet.
 - **Add monitoring** — at minimum, set up DigitalOcean monitoring
   alerts on CPU + disk; ideally pipe `docker compose logs` to
   Loki/Promtail or a managed log service.
