@@ -1,0 +1,4 @@
+# Cloudflare Pages — SPA fallback so client-side routes don't 404.
+# Every unmatched path serves index.html and React Router takes over.
+
+/*    /index.html   200

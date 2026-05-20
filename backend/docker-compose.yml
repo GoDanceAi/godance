@@ -1,0 +1,55 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: godance-postgres
+    environment:
+      POSTGRES_USER: godance
+      POSTGRES_PASSWORD: godance
+      POSTGRES_DB: godance
+    # Host port 5433 → container 5432. 5432 on host is bound by a native
+    # Homebrew postgres@17, which takes precedence over Docker's 0.0.0.0
+    # listener and would reject Godance's credentials.
+    ports:
+      - "5433:5432"
+    volumes:
+      - godance_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U godance -d godance"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7
+    container_name: godance-redis
+    # Host port 6380 → container 6379. 6379 on host is reserved for a
+    # pre-existing shared redis container; Godance gets its own on 6380.
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    container_name: godance-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: godance
+      MINIO_ROOT_PASSWORD: godancepw
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - godance_minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  godance_pg_data:
+  godance_minio_data:

@@ -1,0 +1,43 @@
+# macOS
+.DS_Store
+
+# Editor / IDE
+.idea/
+.vscode/
+*.iml
+*.swp
+*.swo
+
+# Java / Maven
+**/target/
+**/.mvn/wrapper/maven-wrapper.jar
+*.class
+
+# Node / Vite / Astro
+**/node_modules/
+**/dist/
+**/.astro/
+**/.vite/
+**/build/
+.npm/
+.yarn/
+yarn-error.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Environment + secrets (never commit)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+
+# Logs
+*.log
+logs/
+
+# OS / tooling
+.cache/
+coverage/
+.nyc_output/

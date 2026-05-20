@@ -1,0 +1,87 @@
+# Godance
+
+> Drop-in OpenAI-compatible REST API that routes to 16+ AI providers across text, image,
+> video, and audio. One credit ledger, one billing line, one SDK. Pay with card, ACH, SEPA,
+> or USDC. Pass-through provider pricing plus a flat 5% platform fee — no tiers, no seats,
+> no subscriptions.
+
+## Positioning
+
+- vs. OpenRouter: Godance covers image and video too, not just text. Plus crypto top-ups.
+- vs. Eden AI: simpler flat 5% fee (Eden charges 5.5%, tier-dependent).
+- vs. Fireworks / Together: pure aggregator — no GPUs, no model weights, no lock-in.
+- vs. B.AI / WorldClaw: crypto is a payment method here, not the brand identity. Targets
+  developer teams, not crypto-native funds.
+
+## API surface (OpenAI-compatible)
+
+- POST /v1/chat/completions — streaming + non-streaming
+- POST /v1/images/generations — sync; HQ variants (e.g. gpt-image-1-hd) auto-promote to async
+- POST /v1/videos/generations — async only, signed webhook callback
+- GET /v1/jobs/{id} — poll status of any async generation
+- POST /v1/audio/speech — text-to-speech
+- POST /v1/audio/transcriptions — speech-to-text
+- POST /v1/embeddings — text embeddings
+- GET /v1/models — catalog enumeration
+- CRUD /v1/keys — API key management (plaintext returned exactly once)
+- POST /v1/billing/topup — Stripe Checkout for card / ACH / SEPA
+- POST /v1/billing/coinbase/topup — Coinbase Commerce for USDC / USDT
+- GET /v1/webhooks/secret — signing secret (Stripe-style HMAC-SHA256)
+- POST /v1/webhooks/secret/rotate — rotate with 24h dual-signature grace
+
+## Models
+
+### Text
+- OpenAI: gpt-4o-mini, gpt-4o, gpt-4.1
+- Anthropic: claude-3-5-sonnet-20241022, claude-3-5-haiku-20241022
+- Google Vertex: gemini-1.5-pro, gemini-1.5-flash
+- Roadmap: DeepSeek V4, Kimi K2.6, Qwen 3.6, GLM 4.7, MiniMax, Grok
+
+### Image
+- OpenAI: gpt-image-1 (sync), gpt-image-1-hd (auto-async)
+- Black Forest Labs: flux-1.1-pro, flux-2
+
+### Video (async-only by design — durations 1–5 minutes; HTTP sync would time out)
+- OpenAI: sora-2 ($0.15/sec)
+- Volcengine Ark: seedance-1.0 ($0.08/sec, Alicloud-allowed)
+- Roadmap: Veo 3.1, Kling, Runway Gen-4
+
+## Pricing
+
+Provider list price plus a flat 5% platform fee — same percentage across text, image,
+video. No tiers, no seats, no minimums. Top up the ledger; spend across every model.
+
+- Per-model rates: https://godance.ai/models
+- Pricing page: https://godance.ai/pricing
+
+## Deployment
+
+Two-region: DigitalOcean primary (NYC3 / FRA1), Alibaba Cloud secondary (HK / SG) for
+disaster recovery and low-latency to Chinese model providers. DNS-level failover via
+Cloudflare health checks on /healthz.
+
+Per-region provider allowlist enforced in code. The Alicloud region routes only DeepSeek,
+Moonshot (Kimi), Alibaba (Qwen), Zhipu (GLM), MiniMax, and Volcengine Ark (Doubao /
+Seedream / Seedance). Western frontier providers (Anthropic, OpenAI, Google Vertex, BFL
+Flux, ElevenLabs, Cartesia, Runway) never route through Alicloud — compliance with
+upstream terms of service for Chinese-hosted infrastructure.
+
+## Fallback chains
+
+Configure per-model fallbacks (e.g. claude-3-5-sonnet → claude-3-5-haiku → gpt-4o).
+On primary 5xx / timeout / 429, Godance transparently retries the next entry. Response
+carries fallback_used:true. Each fallback re-checks the regional allowlist.
+
+## Webhook signing
+
+Header: X-Godance-Signature: t=<unix>,v1=<hex>[,v1=<hex>...]
+
+Multiple v1=... entries appear during the 24-hour grace window after a secret rotation.
+Verifiers walk all v1 entries and accept the request if ANY matches the stored secret
+(Stripe-compatible pattern). Per-user secret retrievable via GET /v1/webhooks/secret;
+rotate via POST /v1/webhooks/secret/rotate.
+
+## Status
+
+Real-time per-provider availability and latency:
+https://godance.ai/status (launches with public beta)

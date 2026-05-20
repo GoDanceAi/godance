@@ -1,0 +1,15 @@
+# Cloudflare Pages — security headers + hashed-asset cache.
+#
+# Note: this app is a logged-in surface; we set noindex via <meta robots>
+# in index.html so it stays out of search engines.
+
+/*
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=()
+  Strict-Transport-Security: max-age=63072000; includeSubDomains; preload
+
+# Vite's content-hashed bundles — safe to cache for a year.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable

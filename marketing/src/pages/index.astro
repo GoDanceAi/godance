@@ -1,0 +1,259 @@
+---
+import Layout from '../layouts/Layout.astro';
+
+const title = 'Godance — every AI model, one API, drop-in OpenAI compatible';
+const description =
+  'OpenAI, Anthropic, Sora, Claude, Flux, Gemini, Volcengine Ark — text, image, video, audio behind one ' +
+  'OpenAI-compatible REST API. Swap base_url, ship. Pay with card, ACH, SEPA, or USDC.';
+
+const orgSchema = {
+  '@context': 'https://schema.org',
+  '@type': 'Organization',
+  name: 'Godance',
+  url: 'https://godance.ai',
+  description,
+  logo: 'https://godance.ai/logo.png',
+  sameAs: [],
+};
+
+const productSchema = {
+  '@context': 'https://schema.org',
+  '@type': 'SoftwareApplication',
+  name: 'Godance API',
+  applicationCategory: 'DeveloperApplication',
+  operatingSystem: 'Web, REST',
+  offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+  description:
+    'OpenAI-compatible REST API for text, image, video, and audio generation across 16+ upstream providers, ' +
+    'with built-in fallback chains, signed webhooks, and a 5% flat platform fee.',
+};
+
+const pythonSnippet = `from openai import OpenAI
+
+client = OpenAI(
+  base_url="https://api.godance.ai/v1",
+  api_key="gd_live_..."
+)
+
+# Same SDK. Different model. No code change.
+r = client.chat.completions.create(
+  model="claude-3-5-sonnet-20241022",
+  messages=[{"role": "user", "content": "Hi"}]
+)`;
+
+// FAQ — visible on the page AND structured for Google + AI agents.
+const faqs = [
+  {
+    q: 'Will my existing OpenAI SDK code work?',
+    a: 'Yes — swap base_url to https://api.godance.ai/v1 and use a Godance API key. /v1/chat/completions (streaming + non-streaming), /v1/images/generations, /v1/audio/speech, /v1/audio/transcriptions, /v1/embeddings, and /v1/models all match OpenAI\'s contract.',
+  },
+  {
+    q: 'Which providers and models do you support?',
+    a: 'OpenAI (GPT, Sora, gpt-image), Anthropic (Claude), Google Vertex (Gemini, Imagen, Veo), Black Forest Labs (Flux), Volcengine Ark (Doubao, Seedream, Seedance), DeepSeek, Moonshot (Kimi), Alibaba (Qwen), Zhipu (GLM), MiniMax, xAI (Grok), Kling, Runway, ElevenLabs, Cartesia, Deepgram, and Stability. New providers ship as needed — email us.',
+  },
+  {
+    q: 'What does it actually cost?',
+    a: 'Provider list price plus a flat 5% platform fee — same percentage across text, image, video. No tiers, no seats, no minimums. Top up the credit ledger; spend it across every model.',
+  },
+  {
+    q: 'Can I pay with crypto?',
+    a: 'Yes. USDC and USDT via Coinbase Commerce on Base, Ethereum, or Polygon. Card, ACH, and SEPA via Stripe. Same balance, same API — the gateway doesn\'t care how you paid.',
+  },
+  {
+    q: 'What happens when a provider goes down?',
+    a: 'Configure a fallback chain per model. When the primary returns a 5xx or times out, Godance transparently retries the next option in the chain — the response carries fallback_used:true so you know what happened.',
+  },
+  {
+    q: 'How do I verify webhook deliveries?',
+    a: 'Outbound webhooks carry X-Godance-Signature in Stripe format (t=<unix>,v1=<hex>). Per-user signing secret retrievable at GET /v1/webhooks/secret. After rotation, both old and new signatures are accepted for 24 hours so deployments don\'t drop events.',
+  },
+];
+
+const faqSchema = {
+  '@context': 'https://schema.org',
+  '@type': 'FAQPage',
+  mainEntity: faqs.map((f) => ({
+    '@type': 'Question',
+    name: f.q,
+    acceptedAnswer: { '@type': 'Answer', text: f.a },
+  })),
+};
+
+// Provider list anchors trust in the hero. Order: alphabetical inside category.
+const providerNames = [
+  'OpenAI', 'Anthropic', 'Google Vertex', 'Sora', 'Black Forest Labs',
+  'Volcengine Ark', 'DeepSeek', 'Moonshot', 'Qwen', 'MiniMax',
+  'xAI', 'Kling', 'Runway', 'ElevenLabs', 'Cartesia', 'Deepgram',
+];
+---
+
+<Layout {title} {description} canonicalPath="/" jsonLd={[orgSchema, productSchema, faqSchema]}>
+
+  <!-- ===== Hero ===== -->
+  <section class="mx-auto max-w-5xl px-6 pt-24 pb-12 text-center">
+    <p class="text-sm font-medium text-brand-600 tracking-wide uppercase">
+      One API. Every model. Text, image, video, audio.
+    </p>
+    <h1 class="mt-5 text-5xl md:text-6xl font-bold tracking-tight">
+      Build with every AI model.<br class="hidden md:block" />
+      Skip the integration tax.
+    </h1>
+    <p class="mt-6 text-lg md:text-xl text-gray-600 max-w-2xl mx-auto">
+      Godance is a drop-in OpenAI-compatible API that routes to 16+ providers — OpenAI,
+      Anthropic, Sora, Claude, Flux, Gemini, Volcengine Ark, and more. One credit ledger,
+      one billing line, one SDK.
+    </p>
+    <div class="mt-10 flex items-center justify-center gap-4 flex-wrap">
+      <a href="https://app.godance.ai/signup"
+         class="bg-brand-600 hover:bg-brand-700 text-white font-semibold px-6 py-3 rounded-md shadow-sm">
+        Start free — no card needed
+      </a>
+      <a href="/docs"
+         class="border border-gray-300 hover:border-gray-400 font-semibold px-6 py-3 rounded-md">
+        Read the docs →
+      </a>
+    </div>
+    <p class="mt-6 text-sm text-gray-500">
+      Pass-through pricing + 5% flat. Card, ACH, SEPA, or USDC. No subscription.
+    </p>
+  </section>
+
+  <!-- ===== Provider strip ===== -->
+  <section class="border-y border-gray-200 bg-gray-50">
+    <div class="mx-auto max-w-6xl px-6 py-8">
+      <p class="text-center text-xs font-medium text-gray-500 uppercase tracking-wider mb-4">
+        Routes to providers including
+      </p>
+      <ul class="flex flex-wrap justify-center gap-x-6 gap-y-2 text-sm text-gray-700">
+        {providerNames.map((name) => (
+          <li class="font-medium">{name}</li>
+        ))}
+      </ul>
+    </div>
+  </section>
+
+  <!-- ===== Why ===== -->
+  <section class="py-24">
+    <div class="mx-auto max-w-6xl px-6">
+      <div class="text-center max-w-2xl mx-auto">
+        <h2 class="text-3xl md:text-4xl font-bold tracking-tight">
+          Stop maintaining six SDKs.
+        </h2>
+        <p class="mt-4 text-lg text-gray-600">
+          Six provider integrations, six rate-limit dashboards, six invoices, six SDK upgrades
+          per quarter. Godance is the one URL that replaces all of them.
+        </p>
+      </div>
+
+      <div class="mt-16 grid md:grid-cols-3 gap-10">
+        <div>
+          <h3 class="text-lg font-semibold">Multimodal from day one</h3>
+          <p class="mt-2 text-gray-600">
+            Text completions, image generation, video clips, TTS, STT — same auth, same
+            billing, same shape. Switching from a Claude chat to a Sora render is one model
+            name away.
+          </p>
+        </div>
+        <div>
+          <h3 class="text-lg font-semibold">Truly drop-in for OpenAI clients</h3>
+          <p class="mt-2 text-gray-600">
+            Point the OpenAI SDK at <code class="text-sm bg-gray-100 px-1 py-0.5 rounded">api.godance.ai/v1</code>
+            and you're done. Same endpoints, same JSON, same error codes, same streaming format.
+            Migrating production is a one-line diff.
+          </p>
+        </div>
+        <div>
+          <h3 class="text-lg font-semibold">Pay how your customers pay</h3>
+          <p class="mt-2 text-gray-600">
+            Stripe for card / ACH / SEPA. Coinbase Commerce for USDC / USDT on Base, Ethereum,
+            or Polygon. Same ledger, same balance — the API is payment-method-agnostic.
+          </p>
+        </div>
+        <div>
+          <h3 class="text-lg font-semibold">Fallback chains, not pager duty</h3>
+          <p class="mt-2 text-gray-600">
+            Configure per-model fallbacks. Primary 5xx or times out? Godance retries the next
+            option, transparently. Response carries <code class="text-sm bg-gray-100 px-1 py-0.5 rounded">fallback_used:true</code>
+            so your observability stays honest.
+          </p>
+        </div>
+        <div>
+          <h3 class="text-lg font-semibold">Two regions, one DNS</h3>
+          <p class="mt-2 text-gray-600">
+            DigitalOcean primary, Alibaba Cloud secondary. Cloudflare DNS health-checked
+            failover. Per-region provider allowlist enforced in code — your Western-frontier
+            calls never route through Alicloud.
+          </p>
+        </div>
+        <div>
+          <h3 class="text-lg font-semibold">Streaming + signed webhooks</h3>
+          <p class="mt-2 text-gray-600">
+            SSE for chat completions. Async jobs for video and HD images, with Stripe-format
+            HMAC-signed callbacks and a 24-hour rotation grace window. Production-grade DX
+            with none of the fiddly bits.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== Code sample ===== -->
+  <section class="bg-gray-50 py-24">
+    <div class="mx-auto max-w-6xl px-6 grid md:grid-cols-2 gap-12 items-center">
+      <div>
+        <h2 class="text-3xl md:text-4xl font-bold tracking-tight">
+          Less migration, more shipping.
+        </h2>
+        <p class="mt-4 text-lg text-gray-600">
+          Existing OpenAI SDK code — Python, TypeScript, Java, Go — works without modification.
+          Change one URL. Start calling Claude, Gemini, or any other model the next request.
+        </p>
+        <p class="mt-4 text-sm text-gray-500">
+          Same idiom for <code class="bg-gray-100 px-1 py-0.5 rounded">/v1/images/generations</code>,
+          <code class="bg-gray-100 px-1 py-0.5 rounded">/v1/audio/speech</code>,
+          <code class="bg-gray-100 px-1 py-0.5 rounded">/v1/embeddings</code>, and the rest.
+        </p>
+      </div>
+      <pre class="bg-gray-900 text-gray-100 rounded-lg p-6 text-sm overflow-x-auto shadow-sm"><code set:html={pythonSnippet} /></pre>
+    </div>
+  </section>
+
+  <!-- ===== FAQ (visible — mirrors JSON-LD) ===== -->
+  <section class="py-24">
+    <div class="mx-auto max-w-3xl px-6">
+      <h2 class="text-3xl md:text-4xl font-bold tracking-tight text-center">
+        Questions, briefly answered
+      </h2>
+      <dl class="mt-12 space-y-8">
+        {faqs.map((f) => (
+          <div>
+            <dt class="text-lg font-semibold text-gray-900">{f.q}</dt>
+            <dd class="mt-2 text-gray-600 leading-relaxed">{f.a}</dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  </section>
+
+  <!-- ===== Closing CTA ===== -->
+  <section class="bg-brand-600">
+    <div class="mx-auto max-w-4xl px-6 py-20 text-center">
+      <h2 class="text-3xl md:text-4xl font-bold tracking-tight text-white">
+        Sixteen providers. One bill. Ten minutes to first call.
+      </h2>
+      <p class="mt-4 text-lg text-brand-50">
+        Free to sign up. Free to read the docs. Pay only for what you generate.
+      </p>
+      <div class="mt-10 flex items-center justify-center gap-4 flex-wrap">
+        <a href="https://app.godance.ai/signup"
+           class="bg-white text-brand-700 hover:bg-brand-50 font-semibold px-6 py-3 rounded-md shadow-sm">
+          Create an account
+        </a>
+        <a href="/pricing"
+           class="text-white border border-white/30 hover:border-white/60 font-semibold px-6 py-3 rounded-md">
+          See pricing
+        </a>
+      </div>
+    </div>
+  </section>
+</Layout>

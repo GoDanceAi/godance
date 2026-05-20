@@ -1,0 +1,7 @@
+# Cloudflare Pages — apex/www redirect handled at CF DNS level via 301 page rule,
+# but mirror here as a safety net. Also a few friendly shortcuts.
+
+# Friendly aliases
+/discord     https://discord.gg/godance       302
+/twitter     https://twitter.com/godance       302
+/github      https://github.com/godance         302

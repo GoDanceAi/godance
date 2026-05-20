@@ -1,0 +1,141 @@
+---
+import Layout from '../layouts/Layout.astro';
+
+const title = 'Model catalog — Godance';
+const description =
+  'Every model available on Godance: OpenAI, Anthropic, Google Vertex, Volcengine Ark, ' +
+  'Black Forest Labs, DeepSeek, Moonshot, Alibaba, Zhipu, MiniMax, xAI, Kling, Runway, ' +
+  'ElevenLabs, Cartesia, Deepgram, Stability.';
+
+// Catalog mirrors backend ai.godance.gateway.ModelCatalog. Kept synchronised
+// manually for v1; future tooling could fetch from a /v1/models endpoint at build time.
+const text = [
+  { id: 'gpt-4o',                    provider: 'OpenAI',     input: '$2.50/1M', output: '$10.00/1M' },
+  { id: 'gpt-4o-mini',               provider: 'OpenAI',     input: '$0.15/1M', output: '$0.60/1M' },
+  { id: 'gpt-4.1',                   provider: 'OpenAI',     input: '$2.00/1M', output: '$8.00/1M' },
+  { id: 'claude-3-5-sonnet-20241022', provider: 'Anthropic', input: '$3.00/1M', output: '$15.00/1M' },
+  { id: 'claude-3-5-haiku-20241022',  provider: 'Anthropic', input: '$0.80/1M', output: '$4.00/1M' },
+  { id: 'gemini-1.5-pro',            provider: 'Google',     input: '$1.25/1M', output: '$5.00/1M' },
+  { id: 'gemini-1.5-flash',          provider: 'Google',     input: '$0.075/1M', output: '$0.30/1M' },
+];
+
+const image = [
+  { id: 'gpt-image-1',     provider: 'OpenAI',           price: '$0.04 / image', notes: 'Standard 1024²' },
+  { id: 'gpt-image-1-hd',  provider: 'OpenAI',           price: '$0.08 / image', notes: 'HD; auto-async' },
+  { id: 'flux-1.1-pro',    provider: 'Black Forest Labs', price: '$0.04 / image', notes: 'Async via polling' },
+  { id: 'flux-2',          provider: 'Black Forest Labs', price: '$0.05 / image', notes: 'Async via polling' },
+];
+
+const video = [
+  { id: 'sora-2',       provider: 'OpenAI',         price: '$0.15 / second', notes: 'Async only' },
+  { id: 'seedance-1.0', provider: 'Volcengine Ark', price: '$0.08 / second', notes: 'Async only; Alicloud-allowed' },
+];
+
+// Itemized list for AI-agent consumption (LLMs scraping Markdown-shaped data).
+const itemList = {
+  '@context': 'https://schema.org',
+  '@type': 'ItemList',
+  name: 'Godance model catalog',
+  numberOfItems: text.length + image.length + video.length,
+  itemListElement: [...text, ...image, ...video].map((m, i) => ({
+    '@type': 'ListItem',
+    position: i + 1,
+    name: m.id,
+    description: `${m.provider} via Godance`,
+  })),
+};
+---
+
+<Layout {title} {description} canonicalPath="/models" jsonLd={[itemList]}>
+  <section class="mx-auto max-w-5xl px-6 pt-16 pb-12">
+    <h1 class="text-4xl font-bold tracking-tight">Every model, one URL.</h1>
+    <p class="mt-4 text-gray-600 max-w-2xl">
+      The full set of models you can call through Godance today, with provider attribution
+      and what each one costs. Prices are pass-through plus a flat 5% platform fee — see
+      <a href="/pricing" class="text-brand-600 underline">why we charge a single percentage</a>.
+      Catalog verified May 2026; new models arrive as providers ship them.
+    </p>
+  </section>
+
+  <section class="mx-auto max-w-5xl px-6 pb-12">
+    <h2 class="text-2xl font-bold mb-4">Text models</h2>
+    <div class="overflow-x-auto">
+      <table class="w-full text-left text-sm border border-gray-200 rounded-lg">
+        <thead class="bg-gray-50">
+          <tr>
+            <th class="px-4 py-3 font-semibold">Model ID</th>
+            <th class="px-4 py-3 font-semibold">Provider</th>
+            <th class="px-4 py-3 font-semibold text-right">Input</th>
+            <th class="px-4 py-3 font-semibold text-right">Output</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-200">
+          {text.map((m) => (
+            <tr>
+              <td class="px-4 py-3 font-mono">{m.id}</td>
+              <td class="px-4 py-3">{m.provider}</td>
+              <td class="px-4 py-3 text-right">{m.input}</td>
+              <td class="px-4 py-3 text-right">{m.output}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="mx-auto max-w-5xl px-6 pb-12">
+    <h2 class="text-2xl font-bold mb-4">Image models</h2>
+    <div class="overflow-x-auto">
+      <table class="w-full text-left text-sm border border-gray-200 rounded-lg">
+        <thead class="bg-gray-50">
+          <tr>
+            <th class="px-4 py-3 font-semibold">Model ID</th>
+            <th class="px-4 py-3 font-semibold">Provider</th>
+            <th class="px-4 py-3 font-semibold text-right">Price</th>
+            <th class="px-4 py-3 font-semibold">Notes</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-200">
+          {image.map((m) => (
+            <tr>
+              <td class="px-4 py-3 font-mono">{m.id}</td>
+              <td class="px-4 py-3">{m.provider}</td>
+              <td class="px-4 py-3 text-right">{m.price}</td>
+              <td class="px-4 py-3 text-gray-600">{m.notes}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="mx-auto max-w-5xl px-6 pb-20">
+    <h2 class="text-2xl font-bold mb-4">Video models</h2>
+    <div class="overflow-x-auto">
+      <table class="w-full text-left text-sm border border-gray-200 rounded-lg">
+        <thead class="bg-gray-50">
+          <tr>
+            <th class="px-4 py-3 font-semibold">Model ID</th>
+            <th class="px-4 py-3 font-semibold">Provider</th>
+            <th class="px-4 py-3 font-semibold text-right">Price</th>
+            <th class="px-4 py-3 font-semibold">Notes</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-200">
+          {video.map((m) => (
+            <tr>
+              <td class="px-4 py-3 font-mono">{m.id}</td>
+              <td class="px-4 py-3">{m.provider}</td>
+              <td class="px-4 py-3 text-right">{m.price}</td>
+              <td class="px-4 py-3 text-gray-600">{m.notes}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+    <p class="mt-6 text-sm text-gray-500">
+      Need a model that's not here? <a href="mailto:hello@godance.ai" class="text-brand-600 underline">Email us</a> —
+      we add providers when there's demand.
+    </p>
+  </section>
+</Layout>

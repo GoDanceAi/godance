@@ -1,0 +1,50 @@
+package ai.godance.repository;
+
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
+
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+
+import ai.godance.domain.User;
+
+public interface UserRepository extends JpaRepository<User, UUID> {
+    Optional<User> findByEmail(String email);
+    Optional<User> findByEmailVerificationToken(String token);
+    Optional<User> findByStripeCustomerId(String stripeCustomerId);
+    boolean existsByEmail(String email);
+
+    /**
+     * Cron safety-net candidates: auto-recharge ON, threshold configured,
+     * payment method on file, balance below threshold. Returns ids only —
+     * the cron iterates and re-loads each user inside its own tx.
+     */
+    @Query("SELECT u.id FROM User u "
+         + "WHERE u.autoRechargeEnabled = TRUE "
+         + "  AND u.autoRechargeThresholdCents IS NOT NULL "
+         + "  AND u.stripePaymentMethodId IS NOT NULL "
+         + "  AND u.creditBalanceCents < u.autoRechargeThresholdCents")
+    List<UUID> findAutoRechargeCandidates();
+
+    /**
+     * Atomic balance credit. Single UPDATE so concurrent top-ups can't
+     * lose writes; pair with a CreditLedger insert inside the same
+     * transaction.
+     */
+    @Modifying
+    @Query("UPDATE User u SET u.creditBalanceCents = u.creditBalanceCents + :delta WHERE u.id = :id")
+    int incrementBalance(@Param("id") UUID id, @Param("delta") long delta);
+
+    /**
+     * Atomic balance debit with affordability check. Returns 0 if the
+     * user can't afford the debit — caller treats that as "insufficient
+     * funds" and skips the ledger insert.
+     */
+    @Modifying
+    @Query("UPDATE User u SET u.creditBalanceCents = u.creditBalanceCents - :cost "
+         + "WHERE u.id = :id AND u.creditBalanceCents >= :cost")
+    int decrementBalanceIfSufficient(@Param("id") UUID id, @Param("cost") long cost);
+}

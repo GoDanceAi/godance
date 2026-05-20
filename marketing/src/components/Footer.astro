@@ -1,0 +1,43 @@
+---
+const year = new Date().getFullYear();
+---
+
+<footer class="border-t border-gray-200 mt-24">
+  <div class="mx-auto max-w-6xl px-6 py-12 grid md:grid-cols-4 gap-8 text-sm">
+    <div>
+      <a href="/" class="text-lg font-bold tracking-tight">
+        <span class="text-brand-600">go</span>dance
+      </a>
+      <p class="mt-2 text-gray-600">
+        One API for every AI model. Drop-in OpenAI compatible. Card or crypto.
+      </p>
+    </div>
+    <div>
+      <h3 class="font-semibold mb-3">Product</h3>
+      <ul class="space-y-2 text-gray-600">
+        <li><a href="/models" class="hover:text-brand-600">Model catalog</a></li>
+        <li><a href="/pricing" class="hover:text-brand-600">Pricing</a></li>
+        <li><a href="/status" class="hover:text-brand-600">Status</a></li>
+      </ul>
+    </div>
+    <div>
+      <h3 class="font-semibold mb-3">Developers</h3>
+      <ul class="space-y-2 text-gray-600">
+        <li><a href="/docs" class="hover:text-brand-600">Documentation</a></li>
+        <li><a href="/docs/openai-compat" class="hover:text-brand-600">OpenAI SDK compatibility</a></li>
+        <li><a href="/llms.txt" class="hover:text-brand-600">llms.txt</a></li>
+      </ul>
+    </div>
+    <div>
+      <h3 class="font-semibold mb-3">Company</h3>
+      <ul class="space-y-2 text-gray-600">
+        <li><a href="mailto:hello@godance.ai" class="hover:text-brand-600">Contact</a></li>
+        <li><a href="/legal/privacy" class="hover:text-brand-600">Privacy</a></li>
+        <li><a href="/legal/terms" class="hover:text-brand-600">Terms</a></li>
+      </ul>
+    </div>
+  </div>
+  <div class="border-t border-gray-200 py-6 text-center text-xs text-gray-500">
+    © {year} Godance. All rights reserved.
+  </div>
+</footer>

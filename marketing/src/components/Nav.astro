@@ -1,0 +1,30 @@
+---
+const nav = [
+  { href: '/', label: 'Home' },
+  { href: '/models', label: 'Models' },
+  { href: '/pricing', label: 'Pricing' },
+  { href: '/docs', label: 'Docs' },
+  { href: '/status', label: 'Status' },
+];
+const appUrl = import.meta.env.PUBLIC_APP_URL || 'https://app.godance.ai';
+---
+
+<header class="border-b border-gray-200">
+  <nav class="mx-auto max-w-6xl px-6 py-4 flex items-center justify-between">
+    <a href="/" class="text-xl font-bold tracking-tight">
+      <span class="text-brand-600">go</span>dance
+    </a>
+    <ul class="hidden md:flex items-center gap-8 text-sm font-medium">
+      {nav.map(({ href, label }) => (
+        <li><a href={href} class="hover:text-brand-600 transition-colors">{label}</a></li>
+      ))}
+    </ul>
+    <div class="flex items-center gap-3">
+      <a href={appUrl} class="text-sm font-medium hover:text-brand-600">Sign in</a>
+      <a href={`${appUrl}/signup`}
+         class="bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-4 py-2 rounded-md transition-colors">
+        Start free
+      </a>
+    </div>
+  </nav>
+</header>

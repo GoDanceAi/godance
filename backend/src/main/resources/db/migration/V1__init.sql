@@ -1,0 +1,24 @@
+-- =====================================================================
+-- Godance — V1 init migration (PLACEHOLDER)
+--
+-- Session 1 scope: no DDL. This file exists so Flyway is wired and the
+-- migration directory is discoverable. The actual schema lands in V2.
+--
+-- Schema is single-tenant by design (no tenant_id columns anywhere).
+--
+-- Core entities (V2):
+--   - User                + credit_balance_cents, daily_credit_cap_cents,
+--                           monthly_credit_cap_cents
+--   - ApiKey              + per-key daily/monthly caps
+--   - UsageRecord         + region, cache_hit, fallback_used
+--   - AuditLogEntry       (append-only, immutable)
+--   - ScheduledTrigger    (per-user cron, used by Quartz)
+--
+-- Godance-specific entities (designed for the billing + async model):
+--   - CreditLedger        append-only signed-delta ledger;
+--                         balance = SUM(delta_cents)
+--   - GenerationJob       async image/video/long-audio jobs with
+--                         status + webhook
+--   - ProviderHealth      rolling p50/p95/p99/error/rate-limit metrics
+--                         per (provider, model, window)
+-- =====================================================================

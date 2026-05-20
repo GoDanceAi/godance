@@ -1,0 +1,22 @@
+# Cloudflare Pages — security + caching headers.
+
+/*
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=()
+  Strict-Transport-Security: max-age=63072000; includeSubDomains; preload
+
+# Hashed asset bundles — immutable, year-long cache.
+/_astro/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# Crawler / agent surface — short cache so updates propagate.
+/llms.txt
+  Cache-Control: public, max-age=300, must-revalidate
+
+/robots.txt
+  Cache-Control: public, max-age=3600
+
+/sitemap-*.xml
+  Cache-Control: public, max-age=3600

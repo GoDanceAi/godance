@@ -1,0 +1,146 @@
+spring:
+  application:
+    name: godance
+  profiles:
+    default: dev
+  main:
+    web-application-type: reactive
+  webflux:
+    problemdetails:
+      enabled: true     # CLAUDE.md: all HTTP errors as application/problem+json
+  datasource:
+    url: jdbc:postgresql://localhost:5433/godance   # host 5433 → docker pg 5432 (see docker-compose.yml)
+    username: godance
+    password: godance
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        jdbc:
+          lob:
+            non_contextual_creation: true
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    locations: classpath:db/migration
+  quartz:
+    job-store-type: jdbc
+    jdbc:
+      initialize-schema: never   # Flyway V8 owns the qrtz_* tables (auditable + rollback-safe)
+    properties:
+      org.quartz.scheduler.instanceName: godance-scheduler
+      org.quartz.scheduler.instanceId:   AUTO
+      org.quartz.threadPool.threadCount: "4"
+      org.quartz.jobStore.class:               org.springframework.scheduling.quartz.LocalDataSourceJobStore
+      org.quartz.jobStore.driverDelegateClass: org.quartz.impl.jdbcjobstore.PostgreSQLDelegate
+      org.quartz.jobStore.tablePrefix: qrtz_
+      org.quartz.jobStore.isClustered: "false"        # active-passive 2-region deploy; no clustering until S14+
+      org.quartz.jobStore.useProperties: "false"
+      org.quartz.jobStore.misfireThreshold: "60000"   # 1 min — auto-recharge can wait that long
+  data:
+    redis:
+      host: localhost
+      port: 6380   # docker-compose maps host 6380 → container 6379 (see docker-compose.yml)
+      repositories:
+        enabled: false   # we use Redis for caching/rate-limits, not Spring Data Redis repositories
+                         # — silences strict-mode scanner warnings on JpaRepository interfaces
+
+server:
+  port: 8080
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info
+  endpoint:
+    health:
+      show-details: when-authorized
+  info:
+    git:
+      mode: full
+    build:
+      enabled: true
+
+# Godance-local conventions consumed by the app
+godance:
+  region: ${REGION:local}
+  security:
+    # CORS allow-list for browser-origin /v1/** calls. Comma-separate via env;
+    # prod must include https://app.godance.ai.
+    cors-allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:4173}
+  object-storage:
+    endpoint:         ${OBJECT_STORAGE_ENDPOINT:http://localhost:9000}
+    region:           ${OBJECT_STORAGE_REGION:us-east-1}   # MinIO accepts any placeholder
+    access-key:       ${OBJECT_STORAGE_ACCESS_KEY:godance}
+    secret-key:       ${OBJECT_STORAGE_SECRET_KEY:godancepw}
+    bucket:           ${OBJECT_STORAGE_BUCKET:godance-dev}
+    presign-ttl:      ${OBJECT_STORAGE_PRESIGN_TTL:7d}     # SigV4 max
+    path-style-access: ${OBJECT_STORAGE_PATH_STYLE:true}    # true for MinIO, false for AWS S3 prod
+  jwt:
+    # Dev-only default (must be ≥ 32 bytes for HS256). Override in prod via env var.
+    secret: ${JWT_SIGNING_KEY:dev-only-do-not-use-in-prod-godance-jwt-signing-key-must-be-32-bytes}
+    expiry-minutes: ${JWT_EXPIRY_MINUTES:60}
+    issuer: ${JWT_ISSUER:https://godance.ai}   # must be URI per RFC 7519 `iss` claim
+  stripe:
+    secret-key:     ${STRIPE_SECRET_KEY:sk_test_dev_dummy_key_do_not_use_for_real_calls}
+    webhook-secret: ${STRIPE_WEBHOOK_SECRET:whsec_dev_dummy_webhook_secret_do_not_use_for_real_calls}
+    success-url:    ${STRIPE_SUCCESS_URL:http://localhost:8080/billing/success}
+    cancel-url:     ${STRIPE_CANCEL_URL:http://localhost:8080/billing/cancel}
+    api-base:       ${STRIPE_API_BASE:}        # leave blank in dev/prod; set in tests to redirect to WireMock
+  coinbase:
+    api-key:        ${COINBASE_API_KEY:cb_dev_dummy_key_do_not_use_for_real_calls}
+    webhook-secret: ${COINBASE_WEBHOOK_SECRET:cb_dev_dummy_webhook_secret_do_not_use_for_real_calls}
+    api-base:       ${COINBASE_API_BASE:https://api.commerce.coinbase.com}
+    api-version:    ${COINBASE_API_VERSION:2018-03-22}
+  billing:
+    topup-min-cents: ${TOPUP_MIN_CENTS:100}    # $1.00 floor
+    topup-max-cents: ${TOPUP_MAX_CENTS:100000} # $1,000 ceiling per top-up
+    currency:        ${BILLING_CURRENCY:usd}
+    text-markup-percent:  ${TEXT_MARKUP_PERCENT:5}     # 5% platform fee on top of provider cost
+    image-markup-percent: ${IMAGE_MARKUP_PERCENT:5}    # symmetric across modalities
+    video-markup-percent: ${VIDEO_MARKUP_PERCENT:5}    # symmetric across modalities
+  providers:
+    openai:
+      api-key:  ${OPENAI_API_KEY:sk_dev_dummy_openai_key_do_not_use_for_real_calls}
+      api-base: ${OPENAI_API_BASE:https://api.openai.com}
+      timeout:  ${OPENAI_TIMEOUT:30s}
+    anthropic:
+      api-key:     ${ANTHROPIC_API_KEY:sk_ant_dev_dummy_key_do_not_use_for_real_calls}
+      api-base:    ${ANTHROPIC_API_BASE:https://api.anthropic.com}
+      api-version: ${ANTHROPIC_API_VERSION:2023-06-01}
+      timeout:     ${ANTHROPIC_TIMEOUT:60s}
+    google:
+      api-key:  ${GOOGLE_API_KEY:google_dev_dummy_key_do_not_use_for_real_calls}
+      api-base: ${GOOGLE_API_BASE:https://generativelanguage.googleapis.com}
+      timeout:  ${GOOGLE_TIMEOUT:60s}
+    bfl:
+      api-key:       ${BFL_API_KEY:bfl_dev_dummy_key_do_not_use_for_real_calls}
+      api-base:      ${BFL_API_BASE:https://api.bfl.ai}
+      poll-interval: ${BFL_POLL_INTERVAL:2s}
+      poll-timeout:  ${BFL_POLL_TIMEOUT:300s}     # 5 min — Flux Pro typically completes in <30s
+    volcengine:
+      api-key:       ${VOLCENGINE_API_KEY:volc_dev_dummy_key_do_not_use_for_real_calls}
+      api-base:      ${VOLCENGINE_API_BASE:https://ark.cn-beijing.volces.com}
+      poll-interval: ${VOLCENGINE_POLL_INTERVAL:5s}
+      poll-timeout:  ${VOLCENGINE_POLL_TIMEOUT:600s}   # 10 min — video gen can be slow
+  gateway:
+    fallback-chains:
+      # primary model -> ordered list of fallbacks. Allowlist enforcement
+      # re-runs per attempt; entries that fail it are silently skipped.
+      gpt-4o:                       [gpt-4o-mini]
+      gpt-4.1:                      [gpt-4o]
+      claude-3-5-sonnet-20241022:   [claude-3-5-haiku-20241022, gpt-4o]
+      gemini-1.5-pro:               [gemini-1.5-flash, gpt-4o-mini]
+
+logging:
+  level:
+    root: INFO
+    ai.godance: DEBUG
