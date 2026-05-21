@@ -30,7 +30,9 @@ public final class AlicloudProviderAllowlist {
             Provider.ALIBABA_DASHSCOPE,
             Provider.ZHIPU,
             Provider.MINIMAX,
-            Provider.VOLCENGINE_ARK
+            Provider.VOLCENGINE_ARK,
+            Provider.BAIDU,             // ERNIE — Baidu is China-hosted
+            Provider.KLING              // Kling — Kuaishou, China-hosted
     );
 
     private AlicloudProviderAllowlist() { }

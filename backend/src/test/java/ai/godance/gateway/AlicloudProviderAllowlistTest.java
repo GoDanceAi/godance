@@ -20,7 +20,7 @@ class AlicloudProviderAllowlistTest {
     @ParameterizedTest
     @EnumSource(value = Provider.class, names = {
             "DEEPSEEK", "MOONSHOT", "ALIBABA_DASHSCOPE", "ZHIPU",
-            "MINIMAX", "VOLCENGINE_ARK"
+            "MINIMAX", "VOLCENGINE_ARK", "BAIDU", "KLING"
     })
     void isAllowed_givenChineseProvider_returnsTrue(Provider provider) {
         assertThat(AlicloudProviderAllowlist.isAllowed(provider)).isTrue();
@@ -29,7 +29,7 @@ class AlicloudProviderAllowlistTest {
     @ParameterizedTest
     @EnumSource(value = Provider.class, mode = Mode.EXCLUDE, names = {
             "DEEPSEEK", "MOONSHOT", "ALIBABA_DASHSCOPE", "ZHIPU",
-            "MINIMAX", "VOLCENGINE_ARK"
+            "MINIMAX", "VOLCENGINE_ARK", "BAIDU", "KLING"
     })
     void isAllowed_givenWesternOrUnlistedProvider_returnsFalse(Provider provider) {
         assertThat(AlicloudProviderAllowlist.isAllowed(provider))

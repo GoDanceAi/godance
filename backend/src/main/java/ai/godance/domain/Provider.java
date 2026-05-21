@@ -20,6 +20,7 @@ public enum Provider {
     ALIBABA_DASHSCOPE,     // Qwen
     ZHIPU,                 // GLM
     MINIMAX,
+    BAIDU,                 // ERNIE
 
     // Image
     BFL,                   // Black Forest Labs — Flux

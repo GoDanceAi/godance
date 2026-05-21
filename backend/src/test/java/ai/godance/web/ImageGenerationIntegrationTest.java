@@ -5,7 +5,6 @@ import static com.github.tomakehurst.wiremock.client.WireMock.post;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
 import static org.assertj.core.api.Assertions.assertThat;
 
-import java.time.Duration;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
@@ -38,20 +37,33 @@ import ai.godance.repository.UserRepository;
 import ai.godance.service.CreditLedgerService;
 import ai.godance.web.dto.AuthDtos.AuthResponse;
 import ai.godance.web.dto.ImageDtos.AsyncJobAcknowledged;
-import ai.godance.web.dto.ImageDtos.ImageGenerationResponse;
 import ai.godance.web.dto.ImageDtos.JobView;
 
 /**
  * End-to-end image-gen path: signup → seed balance → POST
- * {@code /v1/images/generations} → upstream WireMock OpenAI → upload
- * to Testcontainers MinIO → response carries a presigned URL pointing
- * at MinIO. Also covers the async path: 202 + job_id → poll
- * {@code GET /v1/jobs/{id}} until {@code DONE}.
+ * {@code /v1/images/generations} → upstream WireMock → upload to
+ * Testcontainers MinIO → poll {@code GET /v1/jobs/{id}} until terminal.
+ *
+ * <p>Every image model is async ({@code requiresAsync = true}), so the
+ * endpoint always answers 202 + {@code job_id}. Covers two providers
+ * (OpenAI {@code gpt-image-2} and Volcengine Ark {@code seedream-5.0}),
+ * the refresh of the {@code /v1/models} catalog, and the
+ * debit-on-success / refund-on-failure ledger behavior.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.MOCK)
 @AutoConfigureWebTestClient
 @Testcontainers
 class ImageGenerationIntegrationTest {
+
+    /** A 1×1 transparent PNG — what every upstream stub returns. */
+    private static final byte[] TINY_PNG = {
+            (byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D,
+            0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+            0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, (byte) 0xC4, (byte) 0x89, 0x00, 0x00, 0x00,
+            0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, (byte) 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00,
+            0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, (byte) 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49,
+            0x45, 0x4E, 0x44, (byte) 0xAE, 0x42, 0x60, (byte) 0x82
+    };
 
     @Container
     @ServiceConnection
@@ -62,25 +74,30 @@ class ImageGenerationIntegrationTest {
             .withUserName("test-access").withPassword("test-secret-key-1234");
 
     static WireMockServer openAiMock;
+    static WireMockServer volcMock;
 
     @BeforeAll
     static void startMocks() {
         openAiMock = new WireMockServer(WireMockConfiguration.options().dynamicPort());
         openAiMock.start();
+        volcMock = new WireMockServer(WireMockConfiguration.options().dynamicPort());
+        volcMock.start();
     }
 
     @AfterAll
     static void stopMocks() {
         if (openAiMock != null) openAiMock.stop();
+        if (volcMock != null) volcMock.stop();
     }
 
     @DynamicPropertySource
     static void dynamicProps(DynamicPropertyRegistry r) {
-        r.add("godance.providers.openai.api-base",  () -> openAiMock.baseUrl());
-        r.add("godance.object-storage.endpoint",    MINIO::getS3URL);
-        r.add("godance.object-storage.access-key",  MINIO::getUserName);
-        r.add("godance.object-storage.secret-key",  MINIO::getPassword);
-        r.add("godance.object-storage.bucket",      () -> "godance-test");
+        r.add("godance.providers.openai.api-base",     () -> openAiMock.baseUrl());
+        r.add("godance.providers.volcengine.api-base", () -> volcMock.baseUrl());
+        r.add("godance.object-storage.endpoint",       MINIO::getS3URL);
+        r.add("godance.object-storage.access-key",     MINIO::getUserName);
+        r.add("godance.object-storage.secret-key",     MINIO::getPassword);
+        r.add("godance.object-storage.bucket",         () -> "godance-test");
         r.add("godance.object-storage.path-style-access", () -> "true");
     }
 
@@ -92,6 +109,7 @@ class ImageGenerationIntegrationTest {
     @BeforeEach
     void reset() {
         openAiMock.resetAll();
+        volcMock.resetAll();
     }
 
     private record Signed(UUID id, String bearer) { }
@@ -115,104 +133,129 @@ class ImageGenerationIntegrationTest {
         return new Signed(userId, "Bearer " + resp.accessToken());
     }
 
-    /** Stub OpenAI's image endpoint to return a single 1x1 PNG. */
-    private static void stubOpenAiOneImage() {
-        byte[] tinyPng = new byte[] {
-                (byte)0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D,
-                0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
-                0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, (byte)0xC4, (byte)0x89, 0x00, 0x00, 0x00,
-                0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, (byte)0x9C, 0x63, 0x00, 0x01, 0x00, 0x00,
-                0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, (byte)0xB4, 0x00, 0x00, 0x00, 0x00, 0x49,
-                0x45, 0x4E, 0x44, (byte)0xAE, 0x42, 0x60, (byte)0x82
-        };
-        String b64 = Base64.getEncoder().encodeToString(tinyPng);
-        openAiMock.stubFor(post(urlEqualTo("/v1/images/generations"))
+    /** Stub an OpenAI-shaped {@code b64_json} image endpoint on {@code mock}. */
+    private static void stubOneB64Image(WireMockServer mock, String path) {
+        String b64 = Base64.getEncoder().encodeToString(TINY_PNG);
+        mock.stubFor(post(urlEqualTo(path))
                 .willReturn(aResponse().withStatus(200)
                         .withHeader("content-type", "application/json")
                         .withBody("{\"created\":1700000000,\"data\":[{\"b64_json\":\""
-                                + b64 + "\",\"revised_prompt\":\"A cat (revised)\"}]}")));
+                                + b64 + "\",\"revised_prompt\":\"revised\"}]}")));
     }
 
-    // ===== Sync path ==================================================
-
-    @Test
-    void generate_sync_uploadsToObjectStorage_andReturnsPresignedUrl() {
-        Signed u = signupWithBalance(100_00L);   // $100 seed
-        stubOpenAiOneImage();
-
-        ImageGenerationResponse out = http.post().uri("/v1/images/generations")
-                .header("Authorization", u.bearer())
-                .contentType(MediaType.APPLICATION_JSON)
-                .bodyValue(Map.of(
-                        "model", "gpt-image-1",
-                        "prompt", "A cat sitting on a chair",
-                        "size", "1024x1024",
-                        "n", 1))
-                .exchange()
-                .expectStatus().isOk()
-                .expectBody(ImageGenerationResponse.class).returnResult().getResponseBody();
-
-        assertThat(out.data()).hasSize(1);
-        assertThat(out.data().get(0).url())
-                .as("URL points at the Testcontainers MinIO endpoint")
-                .startsWith(MINIO.getS3URL());
-        assertThat(out.data().get(0).revisedPrompt()).isEqualTo("A cat (revised)");
-        // gpt-image-1: 40 000 µ¢/image × 1.05 (image markup) = 42 000 µ¢ → HALF_UP /10 000 = 4¢
-        assertThat(out.costCents()).isEqualTo(4L);
+    private JobView pollUntilTerminal(UUID jobId, String bearer) throws InterruptedException {
+        JobView view = null;
+        long deadline = System.currentTimeMillis() + 5_000;
+        while (System.currentTimeMillis() < deadline) {
+            view = http.get().uri("/v1/jobs/{id}", jobId)
+                    .header("Authorization", bearer)
+                    .exchange()
+                    .expectStatus().isOk()
+                    .expectBody(JobView.class).returnResult().getResponseBody();
+            if (view != null
+                    && (view.status() == JobStatus.DONE || view.status() == JobStatus.FAILED)) {
+                return view;
+            }
+            Thread.sleep(100);
+        }
+        return view;
     }
 
-    // ===== Async path =================================================
+    /** Ledger writes on the async worker commit slightly after the job row — poll. */
+    private void awaitBalance(UUID userId, long expectedCents) throws InterruptedException {
+        long deadline = System.currentTimeMillis() + 3_000;
+        while (System.currentTimeMillis() < deadline
+                && ledger.authoritativeBalance(userId) != expectedCents) {
+            Thread.sleep(50);
+        }
+        assertThat(ledger.authoritativeBalance(userId)).isEqualTo(expectedCents);
+    }
 
-    @Test
-    void generate_async_returns202_jobReachesDoneAfterProcessing() throws Exception {
-        Signed u = signupWithBalance(100_00L);
-        stubOpenAiOneImage();
-
-        AsyncJobAcknowledged ack = http.post().uri("/v1/images/generations")
-                .header("Authorization", u.bearer())
+    private AsyncJobAcknowledged submitImage(String bearer, Map<String, Object> body) {
+        return http.post().uri("/v1/images/generations")
+                .header("Authorization", bearer)
                 .contentType(MediaType.APPLICATION_JSON)
-                .bodyValue(Map.of(
-                        "model", "gpt-image-1",
-                        "prompt", "A red ball",
-                        "n", 1,
-                        "async", true))
+                .bodyValue(body)
                 .exchange()
                 .expectStatus().isAccepted()
                 .expectBody(AsyncJobAcknowledged.class).returnResult().getResponseBody();
+    }
+
+    // ===== Job lifecycle — OpenAI gpt-image-2 =========================
+
+    @Test
+    void generate_gptImage2_async202_jobReachesDone_storesUrl_andDebits() throws Exception {
+        Signed u = signupWithBalance(100_00L);   // $100 seed
+        stubOneB64Image(openAiMock, "/v1/images/generations");
+
+        // No async flag passed — every image model auto-promotes to async.
+        AsyncJobAcknowledged ack = submitImage(u.bearer(),
+                Map.of("model", "gpt-image-2", "prompt", "A cat on a chair", "size", "1024x1024", "n", 1));
 
         assertThat(ack.jobId()).isNotNull();
         assertThat(ack.status()).isEqualTo("QUEUED");
 
-        // Poll until DONE (or 5 sec).
-        JobView finalView = null;
-        long deadline = System.currentTimeMillis() + 5_000;
-        while (System.currentTimeMillis() < deadline) {
-            finalView = http.get().uri("/v1/jobs/{id}", ack.jobId())
-                    .header("Authorization", u.bearer())
-                    .exchange()
-                    .expectStatus().isOk()
-                    .expectBody(JobView.class).returnResult().getResponseBody();
-            if (finalView != null
-                    && (finalView.status() == JobStatus.DONE || finalView.status() == JobStatus.FAILED)) {
-                break;
-            }
-            Thread.sleep(100);
-        }
-        assertThat(finalView).isNotNull();
-        assertThat(finalView.status()).isEqualTo(JobStatus.DONE);
-        assertThat(finalView.outputUrl()).startsWith(MINIO.getS3URL());
+        JobView done = pollUntilTerminal(ack.jobId(), u.bearer());
+        assertThat(done).isNotNull();
+        assertThat(done.status()).isEqualTo(JobStatus.DONE);
+        assertThat(done.outputUrl()).startsWith(MINIO.getS3URL());
+
+        // gpt-image-2: 40 000 µ¢ × 1.12 (12% image markup) = 44 800 µ¢ → HALF_UP /10 000 = 4¢.
+        assertThat(done.actualCostCents()).isEqualTo(4L);
+        awaitBalance(u.id(), 100_00L - 4L);
+    }
+
+    // ===== Job lifecycle — Volcengine Ark Seedream ====================
+
+    @Test
+    void generate_seedream_async202_jobReachesDone_storesUrl_andDebits() throws Exception {
+        Signed u = signupWithBalance(100_00L);
+        stubOneB64Image(volcMock, "/api/v3/images/generations");
+
+        AsyncJobAcknowledged ack = submitImage(u.bearer(),
+                Map.of("model", "seedream-5.0", "prompt", "A koi pond", "size", "1024x1024", "n", 1));
+
+        JobView done = pollUntilTerminal(ack.jobId(), u.bearer());
+        assertThat(done).isNotNull();
+        assertThat(done.status()).isEqualTo(JobStatus.DONE);
+        assertThat(done.outputUrl()).startsWith(MINIO.getS3URL());
+
+        // seedream-5.0: 35 000 µ¢ × 1.12 = 39 200 µ¢ → HALF_UP /10 000 = 4¢.
+        assertThat(done.actualCostCents()).isEqualTo(4L);
+        awaitBalance(u.id(), 100_00L - 4L);
+    }
+
+    // ===== Refund on upstream failure =================================
+
+    @Test
+    void generate_upstreamFails_jobFailed_andBalanceRefunded() throws Exception {
+        Signed u = signupWithBalance(100_00L);
+        openAiMock.stubFor(post(urlEqualTo("/v1/images/generations"))
+                .willReturn(aResponse().withStatus(500)
+                        .withHeader("content-type", "application/json")
+                        .withBody("{\"error\":{\"message\":\"upstream boom\"}}")));
+
+        AsyncJobAcknowledged ack = submitImage(u.bearer(),
+                Map.of("model", "gpt-image-2", "prompt", "A doomed render", "n", 1));
+
+        JobView failed = pollUntilTerminal(ack.jobId(), u.bearer());
+        assertThat(failed).isNotNull();
+        assertThat(failed.status()).isEqualTo(JobStatus.FAILED);
+
+        // Pre-debit is reversed on failure — balance back to the full seed.
+        awaitBalance(u.id(), 100_00L);
     }
 
     // ===== Failure modes ==============================================
 
     @Test
-    void generate_zeroBalance_returns402() {
+    void generate_zeroBalance_returns402_andDoesNotCallUpstream() {
         Signed u = signupWithBalance(0L);
 
         http.post().uri("/v1/images/generations")
                 .header("Authorization", u.bearer())
                 .contentType(MediaType.APPLICATION_JSON)
-                .bodyValue(Map.of("model", "gpt-image-1", "prompt", "x", "n", 1))
+                .bodyValue(Map.of("model", "gpt-image-2", "prompt", "x", "n", 1))
                 .exchange()
                 .expectStatus().isEqualTo(402);
 
@@ -232,44 +275,51 @@ class ImageGenerationIntegrationTest {
     }
 
     @Test
-    void generate_hqImageModel_autoPromotesToAsync_returns202EvenWithoutAsyncFlag() {
-        Signed u = signupWithBalance(100_00L);
-        stubOpenAiOneImage();
-
-        // gpt-image-1-hd has requiresAsync=true. Even though client didn't
-        // pass `async: true`, the response should be 202 + jobId, NOT 200 + URL.
-        AsyncJobAcknowledged ack = http.post().uri("/v1/images/generations")
-                .header("Authorization", u.bearer())
-                .contentType(MediaType.APPLICATION_JSON)
-                .bodyValue(Map.of(
-                        "model", "gpt-image-1-hd",
-                        "prompt", "A high quality image",
-                        "n", 1))
-                .exchange()
-                .expectStatus().isAccepted()
-                .expectBody(AsyncJobAcknowledged.class).returnResult().getResponseBody();
-
-        assertThat(ack.jobId()).isNotNull();
-        assertThat(ack.status()).isEqualTo("QUEUED");
-    }
-
-    @Test
     void getJob_otherUsersJob_returns404() {
         Signed owner = signupWithBalance(100_00L);
-        stubOpenAiOneImage();
+        stubOneB64Image(openAiMock, "/v1/images/generations");
 
-        AsyncJobAcknowledged ack = http.post().uri("/v1/images/generations")
-                .header("Authorization", owner.bearer())
-                .contentType(MediaType.APPLICATION_JSON)
-                .bodyValue(Map.of("model", "gpt-image-1", "prompt", "x", "async", true))
-                .exchange()
-                .expectStatus().isAccepted()
-                .expectBody(AsyncJobAcknowledged.class).returnResult().getResponseBody();
+        AsyncJobAcknowledged ack = submitImage(owner.bearer(),
+                Map.of("model", "gpt-image-2", "prompt", "x", "n", 1));
 
         Signed thief = signupWithBalance(0L);
         http.get().uri("/v1/jobs/{id}", ack.jobId())
                 .header("Authorization", thief.bearer())
                 .exchange()
                 .expectStatus().isNotFound();
+    }
+
+    // ===== Catalog — GET /v1/models ===================================
+
+    @Test
+    void models_listsImageModels_withPerImagePricing_andRequiresAsync() {
+        ModelsController.ModelListResponse body = http.get().uri("/v1/models")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody(ModelsController.ModelListResponse.class)
+                .returnResult().getResponseBody();
+
+        assertThat(body).isNotNull();
+        List<String> ids = body.data().stream().map(ModelsController.ModelEntry::id).toList();
+        assertThat(ids).contains(
+                "gpt-image-2", "seedream-5.0", "qwen-image-2.0", "qwen-image-2.0-pro",
+                "flux-2-pro", "flux-1.1-pro", "nano-banana", "imagen-4", "sdxl");
+
+        // Every image model carries per-image pricing and is async.
+        body.data().stream()
+                .filter(m -> "IMAGE".equals(m.godance().get("modality")))
+                .forEach(m -> {
+                    assertThat(m.godance()).containsEntry("requires_async", true);
+                    assertThat(m.godance().get("pricing")).isInstanceOf(Map.class);
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> pricing = (Map<String, Object>) m.godance().get("pricing");
+                    assertThat(pricing).containsKey("per_image_microcents");
+                });
+
+        assertThat(body.data()).anySatisfy(m -> {
+            assertThat(m.id()).isEqualTo("gpt-image-2");
+            assertThat(m.ownedBy()).isEqualTo("openai");
+            assertThat(m.godance()).containsEntry("modality", "IMAGE");
+        });
     }
 }

@@ -35,7 +35,7 @@ import com.nimbusds.jose.jwk.source.ImmutableSecret;
         JwtProperties.class,
         StripeProperties.class,
         BillingProperties.class,
-        CoinbaseProperties.class,
+        NowPaymentsProperties.class,
         OpenAIProperties.class,
         AnthropicProperties.class,
         GoogleProperties.class,
@@ -75,7 +75,7 @@ public class SecurityConfig {
         cfg.setAllowedMethods(new java.util.ArrayList<>(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")));
         cfg.setAllowedHeaders(new java.util.ArrayList<>(List.of(
                 "Authorization", "Content-Type", "Accept",
-                "X-Godance-Signature", "Stripe-Signature", "X-CC-Webhook-Signature")));
+                "X-Godance-Signature", "Stripe-Signature", "x-nowpayments-sig")));
         cfg.setExposedHeaders(new java.util.ArrayList<>(List.of("X-Godance-Signature")));
         cfg.setAllowCredentials(true);
         cfg.setMaxAge(Duration.ofHours(1).getSeconds());

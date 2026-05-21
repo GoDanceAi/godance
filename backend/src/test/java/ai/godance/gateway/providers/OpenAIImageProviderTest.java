@@ -42,7 +42,7 @@ class OpenAIImageProviderTest {
     }
 
     @Test
-    void generate_decodesB64Json_intoBytes_andPropagatesRevisedPrompt() {
+    void generate_gptImage2_decodesB64Json_intoBytes_andPropagatesRevisedPrompt() {
         // A 1x1 transparent PNG, base64-encoded.
         byte[] pngBytes = new byte[] {
                 (byte)0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D,
@@ -63,7 +63,7 @@ class OpenAIImageProviderTest {
                                  "data": [{"b64_json": "%s", "revised_prompt": "A revised prompt"}]}
                                 """.formatted(b64))));
 
-        ImageRequest req = new ImageRequest("gpt-image-1", "A cat",
+        ImageRequest req = new ImageRequest("gpt-image-2", "A cat",
                 "1024x1024", 1, null, null);
         List<GeneratedImage> out = provider.generate(req).block(Duration.ofSeconds(5));
 
@@ -72,8 +72,9 @@ class OpenAIImageProviderTest {
         assertThat(out.get(0).mimeType()).isEqualTo("image/png");
         assertThat(out.get(0).revisedPrompt()).isEqualTo("A revised prompt");
 
+        // gpt-image-* return base64 natively — no response_format param is sent.
         wm.verify(postRequestedFor(urlEqualTo("/v1/images/generations"))
-                .withRequestBody(matchingJsonPath("$.response_format", equalTo("b64_json")))
+                .withRequestBody(matchingJsonPath("$.model", equalTo("gpt-image-2")))
                 .withRequestBody(matchingJsonPath("$.prompt", equalTo("A cat"))));
     }
 }

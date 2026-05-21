@@ -69,7 +69,7 @@ class VolcengineArkVideoProviderTest {
                         .withHeader("content-type", "video/mp4")
                         .withBody(videoBytes)));
 
-        VideoRequest req = new VideoRequest("seedance-1.0", "A tiger surfs", "1280x720", 5, 1);
+        VideoRequest req = new VideoRequest("seedance-2.0", "A tiger surfs", "1280x720", 5, 1);
         List<GeneratedVideo> out = provider.generate(req).block(Duration.ofSeconds(5));
 
         assertThat(out).hasSize(1);
@@ -88,7 +88,7 @@ class VolcengineArkVideoProviderTest {
                         .withHeader("content-type", "application/json")
                         .withBody("{\"id\":\"task_bad\",\"status\":\"failed\"}")));
 
-        VideoRequest req = new VideoRequest("seedance-1.0", "x", "1280x720", 5, 1);
+        VideoRequest req = new VideoRequest("seedance-2.0", "x", "1280x720", 5, 1);
         org.assertj.core.api.Assertions.assertThatThrownBy(() ->
                 provider.generate(req).block(Duration.ofSeconds(5)))
                 .hasMessageContaining("failed");

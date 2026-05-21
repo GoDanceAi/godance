@@ -19,9 +19,12 @@ import ai.godance.gateway.ImageProviderAdapter;
 import reactor.core.publisher.Mono;
 
 /**
- * OpenAI {@code /v1/images/generations}. Forces {@code response_format=b64_json}
- * so we get the raw bytes back and can re-host them in our own bucket
- * (so we control URL lifetime; OpenAI's URLs expire fast and CORS varies).
+ * OpenAI {@code /v1/images/generations} for the {@code gpt-image-*}
+ * family ({@code gpt-image-2}). These models return base64 image data
+ * by default — {@code response_format} and {@code style} are dall-e-only
+ * params and are rejected for {@code gpt-image-*} — so we get the raw
+ * bytes back and re-host them in our own bucket (we control URL
+ * lifetime; OpenAI's URLs expire fast and CORS varies).
  */
 @Component
 public class OpenAIImageProvider implements ImageProviderAdapter {
@@ -52,9 +55,7 @@ public class OpenAIImageProvider implements ImageProviderAdapter {
                 request.prompt(),
                 request.n() == null ? 1 : request.n(),
                 request.size(),
-                request.style(),
-                request.quality(),
-                "b64_json");
+                request.quality());
 
         return client.post()
                 .uri("/v1/images/generations")
@@ -81,9 +82,7 @@ public class OpenAIImageProvider implements ImageProviderAdapter {
             String prompt,
             int n,
             String size,
-            String style,
-            String quality,
-            @JsonProperty("response_format") String responseFormat
+            String quality
     ) { }
 
     record OpenAIImageResponse(Long created, List<OpenAIImageData> data) { }

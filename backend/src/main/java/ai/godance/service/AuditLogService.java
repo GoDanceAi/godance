@@ -30,9 +30,9 @@ public class AuditLogService {
     public static final String EVT_BILLING_TOPUP_DUPLICATE   = "billing.topup.duplicate";
     public static final String EVT_BILLING_WEBHOOK_REJECTED  = "billing.webhook.rejected";
     public static final String EVT_BILLING_WEBHOOK_IGNORED   = "billing.webhook.ignored";
-    public static final String EVT_BILLING_COINBASE_INTENT     = "billing.topup.coinbase.intent";
-    public static final String EVT_BILLING_COINBASE_SUCCEEDED  = "billing.topup.coinbase.succeeded";
-    public static final String EVT_BILLING_COINBASE_DUPLICATE  = "billing.topup.coinbase.duplicate";
+    public static final String EVT_BILLING_NOWPAYMENTS_INTENT    = "billing.topup.nowpayments.intent";
+    public static final String EVT_BILLING_NOWPAYMENTS_SUCCEEDED = "billing.topup.nowpayments.succeeded";
+    public static final String EVT_BILLING_NOWPAYMENTS_DUPLICATE = "billing.topup.nowpayments.duplicate";
     public static final String EVT_BILLING_PAYMENT_METHOD_SAVED = "billing.payment_method.saved";
     // Auto-recharge (Session 13)
     public static final String EVT_BILLING_AUTORECHARGE_ENABLED   = "billing.autorecharge.enabled";
