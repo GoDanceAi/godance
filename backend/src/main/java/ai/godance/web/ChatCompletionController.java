@@ -52,10 +52,11 @@ public class ChatCompletionController {
             @Valid @RequestBody ChatCompletionRequest req,
             @AuthenticationPrincipal Jwt jwt) {
         UUID userId = JwtService.userIdFromSubject(jwt.getSubject());
+        UUID apiKeyId = apiKeyId(jwt);
         ChatRequest domain = toDomain(req);
 
         if (Boolean.TRUE.equals(req.stream())) {
-            Flux<ServerSentEvent<String>> stream = chat.executeStreaming(userId, domain)
+            Flux<ServerSentEvent<String>> stream = chat.executeStreaming(userId, apiKeyId, domain)
                     .map(ChatCompletionChunk::from)
                     .map(this::asSse)
                     .concatWith(Mono.just(ServerSentEvent.<String>builder()
@@ -65,7 +66,7 @@ public class ChatCompletionController {
                     .body(stream));
         }
 
-        return Mono.fromCallable(() -> chat.execute(userId, domain))
+        return Mono.fromCallable(() -> chat.execute(userId, apiKeyId, domain))
                 .subscribeOn(Schedulers.boundedElastic())
                 .map(r -> ResponseEntity.ok().<Object>body(ChatCompletionResponse.from(r)));
     }
@@ -76,6 +77,12 @@ public class ChatCompletionController {
         } catch (JsonProcessingException e) {
             throw new IllegalStateException("could not serialize stream chunk", e);
         }
+    }
+
+    /** The API key id when the caller authenticated with an API key; null for a JWT session. */
+    private static UUID apiKeyId(Jwt jwt) {
+        String claim = jwt.getClaimAsString("api_key_id");
+        return claim == null ? null : UUID.fromString(claim);
     }
 
     private static ChatRequest toDomain(ChatCompletionRequest req) {

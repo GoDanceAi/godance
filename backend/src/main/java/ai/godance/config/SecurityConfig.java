@@ -9,9 +9,12 @@ import javax.crypto.spec.SecretKeySpec;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.annotation.Order;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.reactive.EnableWebFluxSecurity;
+import org.springframework.security.config.web.server.SecurityWebFiltersOrder;
 import org.springframework.security.config.web.server.ServerHttpSecurity;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -22,12 +25,19 @@ import org.springframework.security.oauth2.jwt.NimbusReactiveJwtDecoder;
 import org.springframework.security.oauth2.jwt.ReactiveJwtDecoder;
 import org.springframework.security.oauth2.server.resource.web.server.authentication.ServerBearerTokenAuthenticationConverter;
 import org.springframework.security.web.server.SecurityWebFilterChain;
+import org.springframework.security.web.server.authentication.ServerAuthenticationConverter;
+import org.springframework.security.web.server.util.matcher.ServerWebExchangeMatchers;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.reactive.CorsConfigurationSource;
 import org.springframework.web.cors.reactive.CorsWebFilter;
 import org.springframework.web.cors.reactive.UrlBasedCorsConfigurationSource;
 
 import com.nimbusds.jose.jwk.source.ImmutableSecret;
+
+import ai.godance.security.ApiKeyAuthFilter;
+import ai.godance.security.OAuthLoginSuccessHandler;
+import ai.godance.security.SpendingLimitFilter;
+import reactor.core.publisher.Mono;
 
 @Configuration
 @EnableWebFluxSecurity
@@ -102,8 +112,14 @@ public class SecurityConfig {
         return new CorsWebFilter(source);
     }
 
+    /**
+     * Primary API chain — JWT bearer tokens, Godance API keys, and
+     * spending-cap enforcement on the billable endpoints.
+     */
     @Bean
-    SecurityWebFilterChain securityFilterChain(ServerHttpSecurity http) {
+    @Order(2)
+    SecurityWebFilterChain securityFilterChain(ServerHttpSecurity http,
+            ApiKeyAuthFilter apiKeyAuthFilter, SpendingLimitFilter spendingLimitFilter) {
         return http
                 // CORS is handled by the standalone CorsWebFilter bean above.
                 .csrf(ServerHttpSecurity.CsrfSpec::disable)
@@ -128,21 +144,54 @@ public class SecurityConfig {
                         .pathMatchers(HttpMethod.POST, "/v1/billing/webhooks/**").permitAll()
                         // Anything else needs a valid bearer token.
                         .anyExchange().authenticated())
+                // API-key auth runs before the JWT bearer filter; on success it
+                // installs a Jwt-principal so downstream controllers stay agnostic
+                // to whether the caller used a JWT or an API key.
+                .addFilterBefore(apiKeyAuthFilter::filter, SecurityWebFiltersOrder.AUTHENTICATION)
+                // Spending caps are checked after authorization, before the controller.
+                .addFilterAfter(spendingLimitFilter::filter, SecurityWebFiltersOrder.AUTHORIZATION)
                 .oauth2ResourceServer(oauth -> oauth
-                        .bearerTokenConverter(bearerWithQueryParam())
+                        .bearerTokenConverter(resourceServerBearerConverter())
                         .jwt(Customizer.withDefaults()))
                 .build();
     }
 
     /**
-     * Accept the JWT either in the {@code Authorization} header (default) OR
-     * in the {@code ?access_token=...} query param (per RFC 6750 §2.3).
-     * The query-param path exists so browser SSE clients can authenticate —
-     * the {@code EventSource} API can't set custom headers.
+     * OAuth2 social-login chain — isolated from the API chain by a path
+     * matcher so it cannot affect {@code /v1/**} authentication. Handles
+     * the provider redirect dance; {@link OAuthLoginSuccessHandler} mints
+     * the Godance JWT once a provider has authenticated the user.
      */
-    private static ServerBearerTokenAuthenticationConverter bearerWithQueryParam() {
-        ServerBearerTokenAuthenticationConverter conv = new ServerBearerTokenAuthenticationConverter();
-        conv.setAllowUriQueryParameter(true);
-        return conv;
+    @Bean
+    @Order(1)
+    SecurityWebFilterChain oauthLoginSecurityChain(ServerHttpSecurity http,
+            OAuthLoginSuccessHandler oauthLoginSuccessHandler) {
+        return http
+                .securityMatcher(ServerWebExchangeMatchers.pathMatchers(
+                        "/oauth2/authorization/**", "/login/oauth2/code/**"))
+                .csrf(ServerHttpSecurity.CsrfSpec::disable)
+                .authorizeExchange(ex -> ex.anyExchange().permitAll())
+                .oauth2Login(oauth -> oauth.authenticationSuccessHandler(oauthLoginSuccessHandler))
+                .build();
+    }
+
+    /**
+     * Bearer-token converter for the JWT resource server. Accepts the JWT
+     * in the {@code Authorization} header or the {@code ?access_token=}
+     * query param (per RFC 6750 §2.3, for browser SSE clients that can't
+     * set custom headers). Godance API-key tokens ({@code gd_live_...})
+     * are skipped here — {@link ApiKeyAuthFilter} owns them — so the JWT
+     * decoder never tries (and fails) to parse an API key as a JWT.
+     */
+    private static ServerAuthenticationConverter resourceServerBearerConverter() {
+        ServerBearerTokenAuthenticationConverter delegate = new ServerBearerTokenAuthenticationConverter();
+        delegate.setAllowUriQueryParameter(true);
+        return exchange -> {
+            String header = exchange.getRequest().getHeaders().getFirst(HttpHeaders.AUTHORIZATION);
+            if (ApiKeyAuthFilter.isApiKeyToken(header)) {
+                return Mono.empty();
+            }
+            return delegate.convert(exchange);
+        };
     }
 }
