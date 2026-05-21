@@ -1,5 +1,6 @@
 ---
 import Layout from '../layouts/Layout.astro';
+import { loadCatalog } from '../lib/catalog';
 
 const title = 'Model catalog — Godance';
 const description =
@@ -7,37 +8,18 @@ const description =
   'Black Forest Labs, DeepSeek, Moonshot, Alibaba, Zhipu, MiniMax, xAI, Kling, Runway, ' +
   'ElevenLabs, Cartesia, Deepgram, Stability.';
 
-// Catalog mirrors backend ai.godance.gateway.ModelCatalog. Kept synchronised
-// manually for v1; future tooling could fetch from a /v1/models endpoint at build time.
-const text = [
-  { id: 'gpt-4o',                    provider: 'OpenAI',     input: '$2.50/1M', output: '$10.00/1M' },
-  { id: 'gpt-4o-mini',               provider: 'OpenAI',     input: '$0.15/1M', output: '$0.60/1M' },
-  { id: 'gpt-4.1',                   provider: 'OpenAI',     input: '$2.00/1M', output: '$8.00/1M' },
-  { id: 'claude-3-5-sonnet-20241022', provider: 'Anthropic', input: '$3.00/1M', output: '$15.00/1M' },
-  { id: 'claude-3-5-haiku-20241022',  provider: 'Anthropic', input: '$0.80/1M', output: '$4.00/1M' },
-  { id: 'gemini-1.5-pro',            provider: 'Google',     input: '$1.25/1M', output: '$5.00/1M' },
-  { id: 'gemini-1.5-flash',          provider: 'Google',     input: '$0.075/1M', output: '$0.30/1M' },
-];
-
-const image = [
-  { id: 'gpt-image-1',     provider: 'OpenAI',           price: '$0.04 / image', notes: 'Standard 1024²' },
-  { id: 'gpt-image-1-hd',  provider: 'OpenAI',           price: '$0.08 / image', notes: 'HD; auto-async' },
-  { id: 'flux-1.1-pro',    provider: 'Black Forest Labs', price: '$0.04 / image', notes: 'Async via polling' },
-  { id: 'flux-2',          provider: 'Black Forest Labs', price: '$0.05 / image', notes: 'Async via polling' },
-];
-
-const video = [
-  { id: 'sora-2',       provider: 'OpenAI',         price: '$0.15 / second', notes: 'Async only' },
-  { id: 'seedance-1.0', provider: 'Volcengine Ark', price: '$0.08 / second', notes: 'Async only; Alicloud-allowed' },
-];
+// Catalog is generated at build time from the live GET /v1/models endpoint, so
+// this page never drifts from the backend. Falls back to a static snapshot if
+// the API is unreachable during the build.
+const catalog = await loadCatalog();
 
 // Itemized list for AI-agent consumption (LLMs scraping Markdown-shaped data).
 const itemList = {
   '@context': 'https://schema.org',
   '@type': 'ItemList',
   name: 'Godance model catalog',
-  numberOfItems: text.length + image.length + video.length,
-  itemListElement: [...text, ...image, ...video].map((m, i) => ({
+  numberOfItems: catalog.rows.length,
+  itemListElement: catalog.rows.map((m, i) => ({
     '@type': 'ListItem',
     position: i + 1,
     name: m.id,
@@ -53,87 +35,46 @@ const itemList = {
       The full set of models you can call through Godance today, with provider attribution
       and what each one costs. Prices are pass-through plus a flat 5% platform fee — see
       <a href="/pricing" class="underline" style="color: var(--color-primary)">why we charge a single percentage</a>.
-      Catalog verified May 2026; new models arrive as providers ship them.
+      New models arrive as providers ship them.
     </p>
   </section>
 
-  <section class="mx-auto max-w-5xl px-6 pb-12">
-    <h2 class="text-2xl font-bold mb-4 text-fg">Text models</h2>
-    <div class="card overflow-hidden p-0">
-      <table class="w-full text-left text-sm">
-        <thead class="bg-bg-muted text-fg-subtle">
-          <tr>
-            <th class="px-4 py-3 font-semibold">Model ID</th>
-            <th class="px-4 py-3 font-semibold">Provider</th>
-            <th class="px-4 py-3 font-semibold text-right">Input</th>
-            <th class="px-4 py-3 font-semibold text-right">Output</th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-border">
-          {text.map((m) => (
+  {catalog.groups.map((g) => (
+    <section class="mx-auto max-w-5xl px-6 pb-12">
+      <h2 class="text-2xl font-bold mb-1 text-fg">{g.label}</h2>
+      <p class="text-sm text-fg-subtle mb-4">Prices {g.rows[0].unit}.</p>
+      <div class="card overflow-hidden p-0">
+        <table class="w-full text-left text-sm">
+          <thead class="bg-bg-muted text-fg-subtle">
             <tr>
-              <td class="px-4 py-3 font-mono text-fg">{m.id}</td>
-              <td class="px-4 py-3 text-fg-muted">{m.provider}</td>
-              <td class="px-4 py-3 text-right text-fg-muted">{m.input}</td>
-              <td class="px-4 py-3 text-right text-fg-muted">{m.output}</td>
+              <th class="px-4 py-3 font-semibold">Model ID</th>
+              <th class="px-4 py-3 font-semibold">Provider</th>
+              <th class="px-4 py-3 font-semibold text-right">Provider price</th>
+              <th class="px-4 py-3 font-semibold text-right">Godance price</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  </section>
-
-  <section class="mx-auto max-w-5xl px-6 pb-12">
-    <h2 class="text-2xl font-bold mb-4 text-fg">Image models</h2>
-    <div class="card overflow-hidden p-0">
-      <table class="w-full text-left text-sm">
-        <thead class="bg-bg-muted text-fg-subtle">
-          <tr>
-            <th class="px-4 py-3 font-semibold">Model ID</th>
-            <th class="px-4 py-3 font-semibold">Provider</th>
-            <th class="px-4 py-3 font-semibold text-right">Price</th>
-            <th class="px-4 py-3 font-semibold">Notes</th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-border">
-          {image.map((m) => (
-            <tr>
-              <td class="px-4 py-3 font-mono text-fg">{m.id}</td>
-              <td class="px-4 py-3 text-fg-muted">{m.provider}</td>
-              <td class="px-4 py-3 text-right text-fg-muted">{m.price}</td>
-              <td class="px-4 py-3 text-fg-muted">{m.notes}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  </section>
+          </thead>
+          <tbody class="divide-y divide-border">
+            {g.rows.map((m) => (
+              <tr>
+                <td class="px-4 py-3 font-mono text-fg">
+                  {m.id}
+                  {m.requiresAsync && (
+                    <span class="pill pill-violet ml-2 align-middle">async</span>
+                  )}
+                </td>
+                <td class="px-4 py-3 text-fg-muted">{m.provider}</td>
+                <td class="px-4 py-3 text-right text-fg-muted">{m.listPrice}</td>
+                <td class="px-4 py-3 text-right font-medium text-fg">{m.godancePrice}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  ))}
 
   <section class="mx-auto max-w-5xl px-6 pb-20">
-    <h2 class="text-2xl font-bold mb-4 text-fg">Video models</h2>
-    <div class="card overflow-hidden p-0">
-      <table class="w-full text-left text-sm">
-        <thead class="bg-bg-muted text-fg-subtle">
-          <tr>
-            <th class="px-4 py-3 font-semibold">Model ID</th>
-            <th class="px-4 py-3 font-semibold">Provider</th>
-            <th class="px-4 py-3 font-semibold text-right">Price</th>
-            <th class="px-4 py-3 font-semibold">Notes</th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-border">
-          {video.map((m) => (
-            <tr>
-              <td class="px-4 py-3 font-mono text-fg">{m.id}</td>
-              <td class="px-4 py-3 text-fg-muted">{m.provider}</td>
-              <td class="px-4 py-3 text-right text-fg-muted">{m.price}</td>
-              <td class="px-4 py-3 text-fg-muted">{m.notes}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-    <p class="mt-6 text-sm text-fg-subtle">
+    <p class="text-sm text-fg-subtle">
       Need a model that's not here? <a href="mailto:hello@godance.ai" class="underline" style="color: var(--color-primary)">Email us</a> —
       we add providers when there's demand.
     </p>

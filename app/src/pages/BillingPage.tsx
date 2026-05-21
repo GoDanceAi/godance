@@ -8,6 +8,8 @@ interface TopUpResponse {
   amountCents: number;
 }
 
+type PayMethod = 'stripe' | 'usdt';
+
 const PRESETS = [
   { label: '$10',  cents: 10_00  },
   { label: '$25',  cents: 25_00  },
@@ -15,19 +17,44 @@ const PRESETS = [
   { label: '$500', cents: 500_00 },
 ];
 
+// Both rails credit the same balance; the user just picks how they pay.
+const METHODS: {
+  key: PayMethod; title: string; sub: string; endpoint: string; cta: string; redirectName: string;
+}[] = [
+  {
+    key: 'stripe',
+    title: 'Card / ACH / SEPA',
+    sub: 'via Stripe',
+    endpoint: '/v1/billing/topup',
+    cta: 'Continue to Stripe',
+    redirectName: 'Stripe Checkout',
+  },
+  {
+    key: 'usdt',
+    title: 'USDT',
+    sub: 'via NOWPayments',
+    endpoint: '/v1/billing/nowpayments/topup',
+    cta: 'Continue to NOWPayments',
+    redirectName: 'NOWPayments',
+  },
+];
+
 export default function BillingPage() {
   const { user } = useAuth();
   const [amount, setAmount] = useState<number>(25_00);
+  const [method, setMethod] = useState<PayMethod>('stripe');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   if (!user) return null;
 
+  const selected = METHODS.find((m) => m.key === method)!;
+
   const checkout = async () => {
     setError(null);
     setBusy(true);
     try {
-      const resp = await apiFetch<TopUpResponse>('/v1/billing/topup', {
+      const resp = await apiFetch<TopUpResponse>(selected.endpoint, {
         method: 'POST',
         json: { amountCents: amount },
       });
@@ -44,8 +71,9 @@ export default function BillingPage() {
     <div className="mx-auto max-w-2xl px-6 py-8">
       <h1 className="text-2xl font-bold tracking-tight text-fg">Top up</h1>
       <p className="mt-2 text-sm text-fg-muted">
-        Current balance: <strong className="text-fg tabular-nums">{formatCents(user.creditBalanceCents)}</strong>. Credits never
-        expire; pricing is provider list + flat 5%.
+        Current balance: <strong className="text-fg tabular-nums">{formatCents(user.creditBalanceCents)}</strong>. One
+        balance, pay any way you like — card or USDT, same credits. They never expire;
+        pricing is provider list + flat 5%.
       </p>
 
       <div className="mt-8 card space-y-6">
@@ -82,9 +110,27 @@ export default function BillingPage() {
         {/* Payment method */}
         <div>
           <label className="text-sm font-medium text-fg-muted">Payment method</label>
-          <div className="mt-2 p-4 rounded-md border border-brand-600 bg-brand-50">
-            <p className="font-semibold text-sm text-fg">Card / ACH / SEPA</p>
-            <p className="text-xs text-fg-subtle mt-0.5">via Stripe</p>
+          <div className="mt-2 grid grid-cols-2 gap-3">
+            {METHODS.map((m) => {
+              const active = m.key === method;
+              return (
+                <button
+                  key={m.key}
+                  type="button"
+                  onClick={() => setMethod(m.key)}
+                  aria-pressed={active}
+                  className="text-left p-4 rounded-md border transition-colors hover:border-border-strong"
+                  style={{
+                    background: 'var(--color-surface)',
+                    borderColor: active ? 'var(--color-primary)' : 'var(--color-border)',
+                    boxShadow: active ? 'var(--shadow-focus)' : undefined,
+                  }}
+                >
+                  <p className="font-semibold text-sm text-fg">{m.title}</p>
+                  <p className="text-xs text-fg-subtle mt-0.5">{m.sub}</p>
+                </button>
+              );
+            })}
           </div>
         </div>
 
@@ -95,11 +141,11 @@ export default function BillingPage() {
           disabled={busy || amount < 100 || amount > 100_000}
           className="btn btn-primary btn-lg w-full"
         >
-          {busy ? 'Opening checkout…' : 'Continue to Stripe'}
+          {busy ? 'Opening checkout…' : selected.cta}
         </button>
 
         <p className="text-xs text-fg-subtle">
-          You'll be redirected to Stripe Checkout to complete payment. Your
+          You'll be redirected to {selected.redirectName} to complete payment. Your
           balance updates automatically once the webhook confirms.
         </p>
       </div>

@@ -1,7 +1,7 @@
 // Centralized fetch wrapper. Adds Authorization, parses problem+json on errors,
 // and auto-logs-out on 401 by dispatching a custom event the auth context listens for.
 
-const API_BASE: string =
+export const API_BASE: string =
   (import.meta.env.VITE_API_URL as string | undefined) || 'http://localhost:8080';
 
 export const TOKEN_KEY = 'godance.token';
