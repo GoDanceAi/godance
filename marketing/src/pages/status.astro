@@ -47,6 +47,7 @@ const API_BASE = import.meta.env.PUBLIC_API_BASE ?? 'http://localhost:8080';
     requestCount: number;
     errorCount: number;
     rateLimitCount: number;
+    errorRate: number;          // 0..1 fraction — errors + rate-limits / requests
     p50Ms: number | null;
     p95Ms: number | null;
     p99Ms: number | null;
@@ -73,12 +74,14 @@ const API_BASE = import.meta.env.PUBLIC_API_BASE ?? 'http://localhost:8080';
       return v == null ? '—' : `${v} ms`;
     }
 
-    // Error rate over the window, with a colour cue past the 10% de-prefer threshold.
+    // Backend-computed failure rate (errors + rate-limits / requests), so the
+    // figure always agrees with the state pill. Coloured past the 10%
+    // threshold the router uses to de-prefer a model.
     function errorRate(p: ProviderRow): string {
       if (p.requestCount <= 0) return '<span class="text-fg-faint">—</span>';
-      const rate = (p.errorCount / p.requestCount) * 100;
-      const cls = rate > 10 ? 'text-danger font-semibold' : rate > 0 ? 'text-fg' : 'text-fg-muted';
-      return `<span class="${cls}">${rate.toFixed(1)}%</span>`;
+      const cls = p.errorRate > 0.10 ? 'text-danger font-semibold'
+        : p.errorRate > 0 ? 'text-fg' : 'text-fg-muted';
+      return `<span class="${cls}">${(p.errorRate * 100).toFixed(1)}%</span>`;
     }
 
     function render(data: StatusResponse): void {
