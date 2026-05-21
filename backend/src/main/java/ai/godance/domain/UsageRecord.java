@@ -65,6 +65,15 @@ public class UsageRecord {
     @Column(name = "request_id")
     private String requestId;
 
+    /** Upstream round-trip in milliseconds; {@code null} for uninstrumented rows. */
+    @Column(name = "latency_ms")
+    private Integer latencyMs;
+
+    /** Upstream call outcome; {@code null} for uninstrumented rows (treated as OK). */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "outcome")
+    private CallOutcome outcome;
+
     @Column(name = "recorded_at", nullable = false, updatable = false)
     private Instant recordedAt;
 
@@ -114,6 +123,12 @@ public class UsageRecord {
 
     public String getRequestId() { return requestId; }
     public void setRequestId(String requestId) { this.requestId = requestId; }
+
+    public Integer getLatencyMs() { return latencyMs; }
+    public void setLatencyMs(Integer latencyMs) { this.latencyMs = latencyMs; }
+
+    public CallOutcome getOutcome() { return outcome; }
+    public void setOutcome(CallOutcome outcome) { this.outcome = outcome; }
 
     public Instant getRecordedAt() { return recordedAt; }
     public void setRecordedAt(Instant recordedAt) { this.recordedAt = recordedAt; }

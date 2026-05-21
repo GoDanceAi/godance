@@ -30,18 +30,14 @@ spring:
     baseline-on-migrate: true
     locations: classpath:db/migration
   quartz:
+    # Store-agnostic settings. The JDBC job store (dev/prod) is configured in
+    # the profile-specific document at the end of this file; the `test` profile
+    # swaps job-store-type to `memory` — see application-test.yml.
     job-store-type: jdbc
-    jdbc:
-      initialize-schema: never   # Flyway V8 owns the qrtz_* tables (auditable + rollback-safe)
     properties:
       org.quartz.scheduler.instanceName: godance-scheduler
       org.quartz.scheduler.instanceId:   AUTO
       org.quartz.threadPool.threadCount: "4"
-      org.quartz.jobStore.class:               org.springframework.scheduling.quartz.LocalDataSourceJobStore
-      org.quartz.jobStore.driverDelegateClass: org.quartz.impl.jdbcjobstore.PostgreSQLDelegate
-      org.quartz.jobStore.tablePrefix: qrtz_
-      org.quartz.jobStore.isClustered: "false"        # active-passive 2-region deploy; no clustering until S14+
-      org.quartz.jobStore.useProperties: "false"
       org.quartz.jobStore.misfireThreshold: "60000"   # 1 min — auto-recharge can wait that long
   data:
     redis:
@@ -243,3 +239,25 @@ logging:
   level:
     root: INFO
     ai.godance: DEBUG
+
+# ---------------------------------------------------------------------------
+# Quartz JDBC job store — dev/prod only. The JDBC SchedulerThread polls
+# Postgres on a timer; under Testcontainers that poll outlives the database
+# container during teardown. The `test` profile therefore uses the in-memory
+# RAM store (application-test.yml), so these JDBC-only properties must not be
+# bound when `test` is active — RAMJobStore has no setters for them.
+# ---------------------------------------------------------------------------
+---
+spring:
+  config:
+    activate:
+      on-profile: "!test"
+  quartz:
+    jdbc:
+      initialize-schema: never   # Flyway V8 owns the qrtz_* tables (auditable + rollback-safe)
+    properties:
+      org.quartz.jobStore.class:               org.springframework.scheduling.quartz.LocalDataSourceJobStore
+      org.quartz.jobStore.driverDelegateClass: org.quartz.impl.jdbcjobstore.PostgreSQLDelegate
+      org.quartz.jobStore.tablePrefix: qrtz_
+      org.quartz.jobStore.isClustered: "false"        # active-passive 2-region deploy; no clustering until S14+
+      org.quartz.jobStore.useProperties: "false"
