@@ -247,6 +247,43 @@ class AutoRechargeIntegrationTest {
         assertThat(refreshed.getAutoRechargeLastFailureReason()).contains("card_declined");
     }
 
+    /**
+     * Stripe answers 200 (no exception) but the off-session PaymentIntent
+     * never reached {@code succeeded}. BillingService's off-session contract
+     * treats any non-{@code succeeded} status as a hard fail — distinct from
+     * the declined-card path above, which surfaces as a StripeException.
+     */
+    @Test
+    void chargeIfNeeded_paymentIntentNotSucceeded_disablesAutoRechargeAndPersistsReason() {
+        SignedUser u = signup();
+        seedSavedPaymentMethod(u.id());
+        autoRecharge.enable(u.id(), 500, 2000, null);
+        seedBalance(u.id(), 100);
+
+        stripeMock.resetAll();
+        stripeMock.stubFor(post(urlEqualTo("/v1/payment_intents"))
+                .willReturn(aResponse().withStatus(200)
+                        .withHeader("content-type", "application/json")
+                        .withBody("""
+                                {"id":"pi_test_processing",
+                                 "object":"payment_intent",
+                                 "status":"processing",
+                                 "amount":2000,
+                                 "currency":"usd",
+                                 "livemode":false}
+                                """)));
+
+        Outcome outcome = autoRecharge.chargeIfNeeded(u.id());
+
+        assertThat(outcome).isEqualTo(Outcome.HARD_FAIL_DISABLED);
+        User refreshed = users.findById(u.id()).orElseThrow();
+        assertThat(refreshed.isAutoRechargeEnabled()).isFalse();
+        assertThat(refreshed.getAutoRechargeLastFailureAt()).isNotNull();
+        assertThat(refreshed.getAutoRechargeLastFailureReason()).contains("processing");
+        // Hard fail short-circuits before any ledger credit — balance untouched.
+        assertThat(refreshed.getCreditBalanceCents()).isEqualTo(100L);
+    }
+
     // ---------- debit-driven path (via Quartz) -------------------------
 
     @Test

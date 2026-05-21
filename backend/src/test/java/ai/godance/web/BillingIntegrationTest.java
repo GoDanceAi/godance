@@ -117,11 +117,18 @@ class BillingIntegrationTest {
 
     private static String checkoutCompletedEvent(String eventId, String sessionId,
                                                  UUID userId, long amountCents) {
+        // SDK-pinned release name (stripe-java 28.4.0 → "2025-02-24.acacia"),
+        // so EventDataObjectDeserializer.getObject() takes the safe path.
+        return checkoutCompletedEvent(eventId, sessionId, userId, amountCents, "2024-12-18.acacia");
+    }
+
+    private static String checkoutCompletedEvent(String eventId, String sessionId,
+                                                 UUID userId, long amountCents, String apiVersion) {
         return """
             {
               "id": "%s",
               "object": "event",
-              "api_version": "2024-12-18.acacia",
+              "api_version": "%s",
               "created": %d,
               "livemode": false,
               "pending_webhooks": 1,
@@ -142,7 +149,7 @@ class BillingIntegrationTest {
                 }
               }
             }
-            """.formatted(eventId, Instant.now().getEpochSecond(),
+            """.formatted(eventId, apiVersion, Instant.now().getEpochSecond(),
                           sessionId, amountCents, userId, userId);
     }
 
@@ -234,6 +241,42 @@ class BillingIntegrationTest {
 
         assertThat(users.findById(u.id()).orElseThrow().getCreditBalanceCents()).isZero();
         assertThat(ledger.findByIdempotencyKey("evt_wh_ignore")).isNotPresent();
+    }
+
+    /**
+     * API-version skew — the bug the live smoke test caught. A live Stripe
+     * account on a newer API version mints events whose {@code api_version}
+     * release name differs from the SDK-pinned one ({@code dahlia} vs
+     * {@code acacia}), so {@code EventDataObjectDeserializer.getObject()}
+     * returns empty. BillingService must fall through to
+     * {@code deserializeUnsafe()} and still credit the ledger.
+     */
+    @Test
+    void webhook_givenApiVersionSkew_fallsBackToDeserializeUnsafe_andCreditsOnce() {
+        SignedUser u = signupAndAuth();
+        String payload = checkoutCompletedEvent(
+                "evt_wh_skew", "cs_wh_skew", u.id(), 30_00L, "2026-04-22.dahlia");
+
+        http.post().uri("/v1/billing/webhooks/stripe")
+                .header("Stripe-Signature", stripeSignature(payload))
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(payload)
+                .exchange()
+                .expectStatus().isOk();
+
+        assertThat(users.findById(u.id()).orElseThrow().getCreditBalanceCents()).isEqualTo(30_00L);
+        assertThat(ledger.findByIdempotencyKey("evt_wh_skew")).isPresent();
+
+        // Replay the identical skewed event — idempotency on the Stripe event
+        // id must hold on the unsafe-deserialize path too, not just the safe one.
+        http.post().uri("/v1/billing/webhooks/stripe")
+                .header("Stripe-Signature", stripeSignature(payload))
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(payload)
+                .exchange()
+                .expectStatus().isOk();
+
+        assertThat(users.findById(u.id()).orElseThrow().getCreditBalanceCents()).isEqualTo(30_00L);
     }
 
     // ===== Top-up checkout tests ======================================
