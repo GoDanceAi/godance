@@ -16,42 +16,89 @@ interface Message {
 
 interface ModelOption { id: string; label: string; }
 
-// Tiny static fallback — used if /v1/models is unreachable so the picker
-// is never empty. Kept in sync with backend ai.godance.gateway.ModelCatalog
-// text models.
+// Tiny offline fallback — used if /v1/models is unreachable so the picker
+// is never empty. The live catalog replaces this on every successful load.
 const FALLBACK_MODELS: ModelOption[] = [
   { id: 'gpt-4o-mini',                  label: 'gpt-4o-mini (openai)' },
   { id: 'gpt-4o',                       label: 'gpt-4o (openai)' },
-  { id: 'claude-3-5-sonnet-20241022',   label: 'claude-3-5-sonnet (anthropic)' },
+  { id: 'claude-3-5-sonnet-20241022',   label: 'claude-3-5-sonnet-20241022 (anthropic)' },
 ];
+
+type PresetKey = 'smart' | 'fast' | 'cheap' | 'creative';
+
+// Presets are vibes, not model names — a first-time user picks one of these and
+// never has to see which model answered. Each carries an ordered preference
+// list bound to the first match in the live catalog; if none match we fall back
+// to a price heuristic (tier) so a preset always resolves to a real model.
+const PRESETS: {
+  key: PresetKey; label: string; hint: string; prefer: string[]; tier: 'top' | 'low';
+}[] = [
+  { key: 'smart', label: 'Smart', hint: 'Deepest reasoning',
+    prefer: ['claude-3-5-sonnet-20241022', 'gpt-4o', 'gpt-4.1', 'gemini-1.5-pro'], tier: 'top' },
+  { key: 'fast', label: 'Fast', hint: 'Lowest latency',
+    prefer: ['gpt-4o-mini', 'claude-3-5-haiku-20241022', 'gemini-1.5-flash'], tier: 'low' },
+  { key: 'cheap', label: 'Cheap', hint: 'Lowest cost per token',
+    prefer: ['gemini-1.5-flash', 'gpt-4o-mini', 'claude-3-5-haiku-20241022'], tier: 'low' },
+  { key: 'creative', label: 'Creative', hint: 'Most expressive',
+    prefer: ['gpt-4o', 'claude-3-5-sonnet-20241022', 'gemini-1.5-pro'], tier: 'top' },
+];
+
+const FALLBACK_PRESETS: Record<PresetKey, string> = {
+  smart: 'gpt-4o', fast: 'gpt-4o-mini', cheap: 'gpt-4o-mini', creative: 'gpt-4o',
+};
 
 function toOption(m: ModelEntry): ModelOption {
   return { id: m.id, label: `${m.id} (${m.owned_by})` };
 }
 
+function textPrice(m: ModelEntry): number {
+  const p = m.godance.pricing;
+  return (p.input_microcents_per_1k ?? 0) + (p.output_microcents_per_1k ?? 0);
+}
+
+// Bind each preset to a concrete model id from the live text catalog.
+function resolvePresets(textModels: ModelEntry[]): Record<PresetKey, string> {
+  const ids = new Set(textModels.map((m) => m.id));
+  const byPrice = [...textModels].sort((a, b) => textPrice(a) - textPrice(b));
+  const cheapest = byPrice[0]?.id;
+  const priciest = byPrice[byPrice.length - 1]?.id;
+  const out = {} as Record<PresetKey, string>;
+  for (const p of PRESETS) {
+    const hit = p.prefer.find((id) => ids.has(id));
+    out[p.key] = hit ?? (p.tier === 'low' ? cheapest : priciest) ?? FALLBACK_PRESETS[p.key];
+  }
+  return out;
+}
+
 export default function ChatPage() {
   const { refresh } = useAuth();
   const [models, setModels] = useState<ModelOption[]>(FALLBACK_MODELS);
-  const [model, setModel] = useState<string>(FALLBACK_MODELS[1].id);
+  const [presets, setPresets] = useState<Record<PresetKey, string>>(FALLBACK_PRESETS);
+  const [activePreset, setActivePreset] = useState<PresetKey | null>('smart');
+  const [advancedModel, setAdvancedModel] = useState<string>(FALLBACK_MODELS[1].id);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
+  // Effective model: a preset resolves to its bound id; Advanced uses the
+  // explicitly chosen one. Either way the request always carries a real id.
+  const model = activePreset ? (presets[activePreset] || advancedModel) : advancedModel;
+
   useEffect(() => {
     let cancelled = false;
+    // Only TEXT models drive the chat picker — image/video have no chat UI.
     apiFetch<ModelListResponse>('/v1/models', { auth: false })
       .then((res) => {
         if (cancelled) return;
-        // Only show TEXT models in the chat picker — image/video have separate UIs.
-        const opts = res.data
-          .filter((m) => m.godance.modality === 'TEXT')
-          .map(toOption);
-        if (opts.length) {
-          setModels(opts);
-          setModel((cur) => (opts.some((o) => o.id === cur) ? cur : opts[0].id));
-        }
+        const textEntries = res.data.filter((m) => m.godance.modality === 'TEXT');
+        if (!textEntries.length) return;
+        setModels(textEntries.map(toOption));
+        setPresets(resolvePresets(textEntries));
+        setAdvancedModel((cur) =>
+          textEntries.some((m) => m.id === cur) ? cur : textEntries[0].id);
       })
       .catch(() => { /* keep fallback */ });
     return () => { cancelled = true; };
@@ -113,21 +160,63 @@ export default function ChatPage() {
 
   const stop = () => abortRef.current?.abort();
 
+  const pickAdvanced = (id: string) => {
+    setAdvancedModel(id);
+    setActivePreset(null);
+  };
+
   return (
     <div className="mx-auto max-w-3xl px-6 py-8 flex flex-col h-[calc(100vh-8rem)]">
-      <div className="flex items-center justify-between mb-4">
-        <h1 className="text-xl font-semibold text-fg">Chat</h1>
-        <select
-          value={model}
-          onChange={(e) => setModel(e.target.value)}
-          disabled={streaming}
-          className="input text-sm"
-          style={{ width: 'auto' }}
-        >
-          {models.map((m) => (
-            <option key={m.id} value={m.id}>{m.label}</option>
-          ))}
-        </select>
+      <div className="mb-4">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <h1 className="text-xl font-semibold text-fg">Chat</h1>
+          <div className="flex items-center gap-1.5">
+            {PRESETS.map((p) => (
+              <button
+                key={p.key}
+                type="button"
+                title={p.hint}
+                onClick={() => setActivePreset(p.key)}
+                disabled={streaming}
+                className={`btn btn-sm ${activePreset === p.key ? 'btn-primary' : 'btn-secondary'}`}
+              >
+                {p.label}
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={() => setAdvancedOpen((v) => !v)}
+              disabled={streaming}
+              aria-expanded={advancedOpen}
+              className={`btn btn-sm ${activePreset === null ? 'btn-primary' : 'btn-ghost'}`}
+            >
+              Advanced {advancedOpen ? '▴' : '▾'}
+            </button>
+          </div>
+        </div>
+
+        {advancedOpen && (
+          <div className="mt-3 flex items-center justify-end gap-2">
+            <label htmlFor="model-select" className="text-xs text-fg-faint">
+              Pick an exact model
+            </label>
+            <select
+              id="model-select"
+              value={activePreset === null ? advancedModel : ''}
+              onChange={(e) => pickAdvanced(e.target.value)}
+              disabled={streaming}
+              className="input text-sm"
+              style={{ width: 'auto' }}
+            >
+              {activePreset !== null && (
+                <option value="" disabled>Choose a model…</option>
+              )}
+              {models.map((m) => (
+                <option key={m.id} value={m.id}>{m.label}</option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto card p-4 space-y-4">

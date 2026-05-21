@@ -1,10 +1,11 @@
 ---
 import Layout from '../layouts/Layout.astro';
+import { loadCatalog } from '../lib/catalog';
 
 const title = 'Pricing — Godance';
 const description =
   'Pass-through provider pricing plus a flat 5% platform fee. No tiers, no seats, no ' +
-  'subscriptions. Top up with card, ACH, or SEPA and spend across every model.';
+  'subscriptions. Top up with card, ACH, SEPA, or USDT and spend across every model.';
 
 const breadcrumb = {
   '@context': 'https://schema.org',
@@ -15,16 +16,14 @@ const breadcrumb = {
   ],
 };
 
-const rows = [
-  { model: 'gpt-4o-mini',                    provider: 'OpenAI',           modality: 'Text',  list: '$0.15 / $0.60 per 1M',  godance: '$0.16 / $0.63 per 1M' },
-  { model: 'gpt-4o',                         provider: 'OpenAI',           modality: 'Text',  list: '$2.50 / $10.00 per 1M', godance: '$2.63 / $10.50 per 1M' },
-  { model: 'claude-3-5-sonnet-20241022',     provider: 'Anthropic',        modality: 'Text',  list: '$3.00 / $15.00 per 1M', godance: '$3.15 / $15.75 per 1M' },
-  { model: 'gemini-1.5-flash',               provider: 'Google',           modality: 'Text',  list: '$0.075 / $0.30 per 1M', godance: '$0.079 / $0.32 per 1M' },
-  { model: 'gpt-image-1',                    provider: 'OpenAI',           modality: 'Image', list: '$0.04 / image',         godance: '$0.042 / image' },
-  { model: 'flux-1.1-pro',                   provider: 'Black Forest Labs', modality: 'Image', list: '$0.04 / image',         godance: '$0.042 / image' },
-  { model: 'sora-2',                         provider: 'OpenAI',           modality: 'Video', list: '$0.15 / second',        godance: '$0.158 / second' },
-  { model: 'seedance-1.0',                   provider: 'Volcengine Ark',   modality: 'Video', list: '$0.08 / second',        godance: '$0.084 / second' },
-];
+// Rates are generated at build time from the live GET /v1/models endpoint.
+const catalog = await loadCatalog();
+const rows = catalog.groups.flatMap((g) => g.rows);
+
+const MODALITY_LABEL: Record<string, string> = {
+  TEXT: 'Text', IMAGE: 'Image', VIDEO: 'Video',
+  AUDIO_TTS: 'Speech', AUDIO_STT: 'Transcription', EMBEDDING: 'Embedding',
+};
 ---
 
 <Layout {title} {description} canonicalPath="/pricing" jsonLd={[breadcrumb]}>
@@ -51,7 +50,7 @@ const rows = [
           <li class="flex gap-2"><span style="color: var(--color-primary)">✓</span> Every text, image, video, and audio model</li>
           <li class="flex gap-2"><span style="color: var(--color-primary)">✓</span> Streaming chat + signed async webhooks</li>
           <li class="flex gap-2"><span style="color: var(--color-primary)">✓</span> Fallback chains, region-aware routing</li>
-          <li class="flex gap-2"><span style="color: var(--color-primary)">✓</span> 7-day signed URL TTL on generated outputs</li>
+          <li class="flex gap-2"><span style="color: var(--color-primary)">✓</span> Top up with card, ACH, SEPA, or USDT</li>
           <li class="flex gap-2"><span style="color: var(--color-primary)">✓</span> No minimum, no contract, no commitment</li>
         </ul>
       </div>
@@ -74,8 +73,9 @@ const rows = [
 
     <h2 class="text-2xl font-bold mt-16 mb-2 text-fg">What that actually costs</h2>
     <p class="text-fg-muted mb-6">
-      A sample of model rates — provider list price (left) and what you'd pay through Godance
-      (right). Full catalog on <a href="/models" class="underline" style="color: var(--color-primary)">/models</a>.
+      Every model in the catalog — provider list price (left) and what you'd pay through
+      Godance (right). Browse the full catalog on
+      <a href="/models" class="underline" style="color: var(--color-primary)">/models</a>.
     </p>
     <div class="card overflow-hidden p-0">
       <table class="w-full text-left text-sm">
@@ -91,19 +91,24 @@ const rows = [
         <tbody class="divide-y divide-border">
           {rows.map((r) => (
             <tr>
-              <td class="px-4 py-3 font-mono text-fg">{r.model}</td>
+              <td class="px-4 py-3 font-mono text-fg">{r.id}</td>
               <td class="px-4 py-3 text-fg-muted">{r.provider}</td>
-              <td class="px-4 py-3 text-fg-muted">{r.modality}</td>
-              <td class="px-4 py-3 text-right text-fg-muted">{r.list}</td>
-              <td class="px-4 py-3 text-right font-medium text-fg">{r.godance}</td>
+              <td class="px-4 py-3 text-fg-muted">{MODALITY_LABEL[r.modality] ?? r.modality}</td>
+              <td class="px-4 py-3 text-right text-fg-muted">
+                {r.listPrice} <span class="text-fg-faint">{r.unitShort}</span>
+              </td>
+              <td class="px-4 py-3 text-right font-medium text-fg">
+                {r.godancePrice} <span class="text-fg-faint font-normal">{r.unitShort}</span>
+              </td>
             </tr>
           ))}
         </tbody>
       </table>
     </div>
     <p class="mt-4 text-xs text-fg-faint">
-      Rates track providers — when they change theirs, we change ours. Current prices live on
-      <a href="/models" class="underline">/models</a>; this table verified May 2026.
+      Rates track providers — when they change theirs, we change ours. This table is
+      generated from the live <a href="/models" class="underline">/v1/models</a> catalog at
+      each deploy.
     </p>
   </section>
 </Layout>

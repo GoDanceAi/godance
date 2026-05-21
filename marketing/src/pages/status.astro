@@ -3,8 +3,8 @@ import Layout from '../layouts/Layout.astro';
 
 const title = 'Status — Godance';
 const description =
-  'Real-time provider availability for Godance. Per-provider, per-model request counts, ' +
-  'rate-limit hits, and error rates over the trailing hour.';
+  'Real-time provider availability for Godance. Per-provider, per-model latency ' +
+  'percentiles, error rates, and rate-limit signals over the trailing hour.';
 
 // Backend base URL — baked at build time via PUBLIC_API_BASE.
 // Default is the local dev server; CI/CD overrides for staging + prod.
@@ -15,7 +15,7 @@ const API_BASE = import.meta.env.PUBLIC_API_BASE ?? 'http://localhost:8080';
   <section class="mx-auto max-w-5xl px-6 py-16">
     <h1 class="text-4xl font-bold tracking-tight text-fg">Status</h1>
     <p class="mt-4 text-fg-muted max-w-2xl">
-      Live provider availability, request volume, and rate-limit signals — refreshed
+      Live provider availability, latency percentiles, and error rates — refreshed
       every 30 seconds. If something's wrong upstream, you'll see it here before your
       dashboards do.
     </p>
@@ -29,8 +29,11 @@ const API_BASE = import.meta.env.PUBLIC_API_BASE ?? 'http://localhost:8080';
       <p class="text-sm text-fg-subtle">Loading provider status…</p>
     </div>
 
-    <p class="mt-12 text-xs text-fg-faint">
-      Latency percentiles will appear here once gateway-level timing is instrumented.
+    <p class="mt-8 text-xs text-fg-faint">
+      Latency is measured at the gateway for every upstream call. A model is marked
+      <span class="pill pill-amber">degraded</span> when it is rate-limited or its error
+      rate climbs, and <span class="pill pill-rose">down</span> when calls are failing
+      outright — the configured fallback chain takes over automatically.
     </p>
   </section>
 </Layout>
@@ -44,6 +47,7 @@ const API_BASE = import.meta.env.PUBLIC_API_BASE ?? 'http://localhost:8080';
     requestCount: number;
     errorCount: number;
     rateLimitCount: number;
+    errorRate: number;          // 0..1 fraction — errors + rate-limits / requests
     p50Ms: number | null;
     p95Ms: number | null;
     p99Ms: number | null;
@@ -66,6 +70,20 @@ const API_BASE = import.meta.env.PUBLIC_API_BASE ?? 'http://localhost:8080';
         ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
     }
 
+    function ms(v: number | null): string {
+      return v == null ? '—' : `${v} ms`;
+    }
+
+    // Backend-computed failure rate (errors + rate-limits / requests), so the
+    // figure always agrees with the state pill. Coloured past the 10%
+    // threshold the router uses to de-prefer a model.
+    function errorRate(p: ProviderRow): string {
+      if (p.requestCount <= 0) return '<span class="text-fg-faint">—</span>';
+      const cls = p.errorRate > 0.10 ? 'text-danger font-semibold'
+        : p.errorRate > 0 ? 'text-fg' : 'text-fg-muted';
+      return `<span class="${cls}">${(p.errorRate * 100).toFixed(1)}%</span>`;
+    }
+
     function render(data: StatusResponse): void {
       if (!data.providers.length) {
         board!.innerHTML =
@@ -78,8 +96,10 @@ const API_BASE = import.meta.env.PUBLIC_API_BASE ?? 'http://localhost:8080';
             <td class="py-3 pl-4 pr-4 font-medium text-fg">${esc(p.provider.toLowerCase())}</td>
             <td class="py-3 pr-4 font-mono text-fg-muted">${esc(p.model)}</td>
             <td class="py-3 pr-4 tabular-nums text-fg-muted">${p.requestCount}</td>
-            <td class="py-3 pr-4 tabular-nums text-fg-muted">${p.errorCount}</td>
-            <td class="py-3 pr-4 tabular-nums text-fg-muted">${p.rateLimitCount}</td>
+            <td class="py-3 pr-4 tabular-nums">${errorRate(p)}</td>
+            <td class="py-3 pr-4 tabular-nums text-fg-muted">${ms(p.p50Ms)}</td>
+            <td class="py-3 pr-4 tabular-nums text-fg-muted">${ms(p.p95Ms)}</td>
+            <td class="py-3 pr-4 tabular-nums text-fg-muted">${ms(p.p99Ms)}</td>
             <td class="py-3 pr-4"><span class="pill ${STATE_PILL[p.state]}">${esc(p.state)}</span></td>
           </tr>`)
         .join('');
@@ -91,8 +111,10 @@ const API_BASE = import.meta.env.PUBLIC_API_BASE ?? 'http://localhost:8080';
                 <th class="py-2 pl-4 pr-4 font-medium">Provider</th>
                 <th class="py-2 pr-4 font-medium">Model</th>
                 <th class="py-2 pr-4 font-medium">Requests (5m)</th>
-                <th class="py-2 pr-4 font-medium">Errors</th>
-                <th class="py-2 pr-4 font-medium">Rate-limits</th>
+                <th class="py-2 pr-4 font-medium">Error rate</th>
+                <th class="py-2 pr-4 font-medium">p50</th>
+                <th class="py-2 pr-4 font-medium">p95</th>
+                <th class="py-2 pr-4 font-medium">p99</th>
                 <th class="py-2 pr-4 font-medium">State</th>
               </tr>
             </thead>
