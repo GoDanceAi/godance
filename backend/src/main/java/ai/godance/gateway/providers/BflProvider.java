@@ -111,7 +111,7 @@ public class BflProvider implements ImageProviderAdapter {
     private static String modelToEndpoint(String modelName) {
         return switch (modelName) {
             case "flux-1.1-pro" -> "flux-pro-1.1";
-            case "flux-2" -> "flux-2";
+            case "flux-2-pro" -> "flux-2-pro";
             default -> throw new IllegalArgumentException(
                     "BFL adapter doesn't know endpoint for model: " + modelName);
         };

@@ -20,7 +20,9 @@ import ai.godance.gateway.VideoProviderAdapter;
 import reactor.core.publisher.Mono;
 
 /**
- * OpenAI Sora video API. Async submit + poll pattern:
+ * OpenAI Sora video API — serves both {@code sora-2} and
+ * {@code sora-2-pro} (the catalog model name is forwarded verbatim as
+ * the upstream {@code model}). Async submit + poll pattern:
  * <ol>
  *   <li>POST {@code /v1/videos} → returns video {@code id} + status</li>
  *   <li>GET {@code /v1/videos/{id}} polls until {@code completed} / {@code failed}</li>

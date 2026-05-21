@@ -20,10 +20,10 @@ import ai.godance.domain.AuditOutcome;
 import ai.godance.domain.CreditSource;
 import ai.godance.domain.User;
 import ai.godance.repository.UserRepository;
-import ai.godance.service.CoinbaseService.CoinbaseEvent;
-import ai.godance.service.CoinbaseService.CreatedCharge;
-import ai.godance.service.CoinbaseService.InvalidSignatureException;
 import ai.godance.service.CreditLedgerService.TopUpResult;
+import ai.godance.service.CryptoPaymentRail.CryptoInvoice;
+import ai.godance.service.NowPaymentsService.InvalidSignatureException;
+import ai.godance.service.NowPaymentsService.NowPaymentsIpn;
 
 @Service
 public class BillingService {
@@ -32,17 +32,17 @@ public class BillingService {
     private static final String EVENT_CHECKOUT_COMPLETED = "checkout.session.completed";
 
     private final StripeService stripe;
-    private final CoinbaseService coinbase;
+    private final NowPaymentsService nowPayments;
     private final CreditLedgerService ledger;
     private final UserRepository users;
     private final AuditLogService audit;
     private final BillingProperties billing;
 
-    public BillingService(StripeService stripe, CoinbaseService coinbase,
+    public BillingService(StripeService stripe, NowPaymentsService nowPayments,
                           CreditLedgerService ledger, UserRepository users,
                           AuditLogService audit, BillingProperties billing) {
         this.stripe = stripe;
-        this.coinbase = coinbase;
+        this.nowPayments = nowPayments;
         this.ledger = ledger;
         this.users = users;
         this.audit = audit;
@@ -203,11 +203,15 @@ public class BillingService {
                 "checkout.session.completed missing user id (no metadata or client_reference_id)");
     }
 
-    // ===== Coinbase Commerce =========================================
+    // ===== NOWPayments (crypto / USDT) ===============================
 
-    /** Mint a Coinbase Commerce charge for {@code amountCents}. Returns hosted_url. */
+    /**
+     * Mint a NOWPayments hosted invoice for {@code amountCents}. Returns
+     * the hosted-payment URL; the client redirects there. The top-up is
+     * fiat-denominated — the user picks the crypto / network on the page.
+     */
     @Transactional
-    public TopUpIntent startCoinbaseTopUp(UUID userId, long amountCents, String ip) {
+    public TopUpIntent startNowPaymentsTopUp(UUID userId, long amountCents, String ip) {
         if (amountCents < billing.topupMinCents() || amountCents > billing.topupMaxCents()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "amountCents must be between " + billing.topupMinCents()
@@ -216,71 +220,72 @@ public class BillingService {
         User user = users.findById(userId).orElseThrow(() ->
                 new ResponseStatusException(HttpStatus.UNAUTHORIZED, "user not found"));
         try {
-            CreatedCharge charge = coinbase.createCharge(user, amountCents);
-            audit.record(AuditLogService.EVT_BILLING_COINBASE_INTENT, AuditOutcome.SUCCESS,
+            CryptoInvoice invoice = nowPayments.createInvoice(user, amountCents);
+            audit.record(AuditLogService.EVT_BILLING_NOWPAYMENTS_INTENT, AuditOutcome.SUCCESS,
                     userId, ip, Map.of(
                             "amountCents", amountCents,
-                            "chargeId", charge.id(),
-                            "code", charge.code() == null ? "" : charge.code()));
-            return new TopUpIntent(charge.id(), charge.hostedUrl(), amountCents);
+                            "invoiceId", invoice.reference()));
+            return new TopUpIntent(invoice.reference(), invoice.hostedUrl(), amountCents);
         } catch (RuntimeException e) {
-            log.warn("Coinbase charge creation failed for user {}: {}", userId, e.getMessage());
-            audit.record(AuditLogService.EVT_BILLING_COINBASE_INTENT, AuditOutcome.FAILURE,
-                    userId, ip, Map.of("amountCents", amountCents, "error", e.getMessage()));
+            log.warn("NOWPayments invoice creation failed for user {}: {}", userId, e.getMessage());
+            audit.record(AuditLogService.EVT_BILLING_NOWPAYMENTS_INTENT, AuditOutcome.FAILURE,
+                    userId, ip, Map.of("amountCents", amountCents,
+                            "error", String.valueOf(e.getMessage())));
             throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "payment provider unavailable");
         }
     }
 
     /**
-     * Handle a Coinbase Commerce webhook. Only {@code charge:confirmed}
-     * credits the ledger; other event types (pending / failed / delayed
-     * / resolved / created) ack with 200 so Coinbase stops retrying.
+     * Handle a NOWPayments IPN. Only the terminal {@code finished} status
+     * credits the ledger; non-terminal statuses (waiting / confirming /
+     * confirmed / partially_paid / failed / expired) ack with 200 so
+     * NOWPayments stops retrying. The upstream {@code payment_id} is the
+     * ledger idempotency key — a replayed IPN credits exactly once.
      */
     @Transactional
-    public void handleCoinbaseWebhook(String payload, String sigHeader, String ip) {
-        CoinbaseEvent event;
+    public void handleNowPaymentsWebhook(String payload, String sigHeader, String ip) {
+        NowPaymentsIpn ipn;
         try {
-            event = coinbase.verifyAndParse(payload, sigHeader);
+            ipn = nowPayments.verifyAndParse(payload, sigHeader);
         } catch (InvalidSignatureException e) {
             audit.record(AuditLogService.EVT_BILLING_WEBHOOK_REJECTED, AuditOutcome.DENIED,
-                    null, ip, Map.of("provider", "coinbase", "reason", e.getMessage()));
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid coinbase signature");
+                    null, ip, Map.of("provider", "nowpayments", "reason", e.getMessage()));
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid nowpayments signature");
         }
 
-        if (!CoinbaseService.EVENT_CONFIRMED.equals(event.type())) {
+        if (!ipn.isFinished()) {
             audit.record(AuditLogService.EVT_BILLING_WEBHOOK_IGNORED, AuditOutcome.SUCCESS,
                     null, ip, Map.of(
-                            "provider", "coinbase",
-                            "eventType", event.type(),
-                            "eventId", event.id()));
+                            "provider", "nowpayments",
+                            "status", ipn.status(),
+                            "paymentId", ipn.paymentId()));
             return;
         }
 
-        String userIdRaw = event.userIdFromMetadata();
-        if (userIdRaw == null) {
+        String userIdRaw = ipn.orderId();
+        if (userIdRaw == null || userIdRaw.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "coinbase charge:confirmed missing metadata." + CoinbaseService.META_USER_ID);
+                    "nowpayments IPN missing order_id (user id)");
         }
         UUID userId = UUID.fromString(userIdRaw);
-        long cents = event.usdAmountCents();
+        long cents = ipn.fiatAmountCents(billing.currency());
         if (cents <= 0) {
             audit.record(AuditLogService.EVT_BILLING_WEBHOOK_IGNORED, AuditOutcome.SUCCESS,
-                    userId, ip, Map.of("provider", "coinbase",
-                            "eventId", event.id(), "reason", "zero-amount"));
+                    userId, ip, Map.of("provider", "nowpayments",
+                            "paymentId", ipn.paymentId(), "reason", "zero-amount"));
             return;
         }
 
         TopUpResult result = ledger.topUp(
-                userId, cents, CreditSource.COINBASE, event.chargeId(), event.id(),
-                "Coinbase charge " + event.chargeId());
+                userId, cents, CreditSource.NOWPAYMENTS, ipn.paymentId(), ipn.paymentId(),
+                "NOWPayments payment " + ipn.paymentId());
 
         String evtType = result == TopUpResult.APPLIED
-                ? AuditLogService.EVT_BILLING_COINBASE_SUCCEEDED
-                : AuditLogService.EVT_BILLING_COINBASE_DUPLICATE;
+                ? AuditLogService.EVT_BILLING_NOWPAYMENTS_SUCCEEDED
+                : AuditLogService.EVT_BILLING_NOWPAYMENTS_DUPLICATE;
         audit.record(evtType, AuditOutcome.SUCCESS, userId, ip, Map.of(
                 "amountCents", cents,
-                "eventId", event.id(),
-                "chargeId", event.chargeId() == null ? "" : event.chargeId()));
+                "paymentId", ipn.paymentId()));
     }
 
     public record TopUpIntent(String sessionId, String url, long amountCents) { }

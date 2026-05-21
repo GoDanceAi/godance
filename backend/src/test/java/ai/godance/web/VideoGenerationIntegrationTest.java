@@ -153,6 +153,18 @@ class VideoGenerationIntegrationTest {
                         .withBody(tinyMp4)));
     }
 
+    /** Submit succeeds; the upstream poll then reports {@code failed}. */
+    private static void stubSoraFailingRun() {
+        openAiMock.stubFor(post(urlEqualTo("/v1/videos"))
+                .willReturn(aResponse().withStatus(200)
+                        .withHeader("content-type", "application/json")
+                        .withBody("{\"id\":\"vid_fail\",\"status\":\"queued\"}")));
+        openAiMock.stubFor(get(urlPathMatching("/v1/videos/vid_fail"))
+                .willReturn(aResponse().withStatus(200)
+                        .withHeader("content-type", "application/json")
+                        .withBody("{\"id\":\"vid_fail\",\"status\":\"failed\"}")));
+    }
+
     // ===== Tests ======================================================
 
     @Test
@@ -178,8 +190,8 @@ class VideoGenerationIntegrationTest {
         assertThat(finalView).isNotNull();
         assertThat(finalView.status()).isEqualTo(JobStatus.DONE);
         assertThat(finalView.outputUrl()).startsWith(MINIO.getS3URL());
-        // sora-2: 150 000 µ¢/s × 5s = 750 000 µ¢ = 75¢ × 1.05 (video tier) = 79¢ HALF_UP
-        assertThat(finalView.actualCostCents()).isBetween(70L, 90L);
+        // sora-2: 100 000 µ¢/s × 5s = 500 000 µ¢ = 50¢ × 1.12 (markupOverride) = 56¢ HALF_UP
+        assertThat(finalView.actualCostCents()).isBetween(50L, 65L);
     }
 
     @Test
@@ -251,6 +263,30 @@ class VideoGenerationIntegrationTest {
                 .bodyValue(Map.of("model", "gpt-4o", "prompt", "x", "seconds", 5))
                 .exchange()
                 .expectStatus().isBadRequest();
+    }
+
+    @Test
+    void videos_upstreamFails_jobReachesFailed_andPreDebitRefunded() throws Exception {
+        Signed u = signupWithBalance(1000_00L);
+        stubSoraFailingRun();
+
+        AsyncJobAcknowledged ack = http.post().uri("/v1/videos/generations")
+                .header("Authorization", u.bearer())
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of(
+                        "model", "sora-2",
+                        "prompt", "A clip that never finishes",
+                        "seconds", 5))
+                .exchange()
+                .expectStatus().isAccepted()
+                .expectBody(AsyncJobAcknowledged.class).returnResult().getResponseBody();
+
+        JobView finalView = pollJob(u.bearer(), ack.jobId());
+        assertThat(finalView).isNotNull();
+        assertThat(finalView.status()).isEqualTo(JobStatus.FAILED);
+
+        // Upstream failure refunds the pre-debit — balance returns to the full seed.
+        assertThat(ledger.authoritativeBalance(u.id())).isEqualTo(1000_00L);
     }
 
     // ===== Helpers ====================================================

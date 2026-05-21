@@ -27,6 +27,8 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
 import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
 
@@ -35,34 +37,45 @@ import ai.godance.repository.UserRepository;
 import ai.godance.web.dto.AuthDtos.AuthResponse;
 import ai.godance.web.dto.BillingDtos.TopUpResponse;
 
+/**
+ * Integration coverage for the NOWPayments crypto top-up rail: invoice
+ * creation against a WireMock NOWPayments API, and the IPN webhook —
+ * proving (a) a signed {@code finished} IPN credits once, (b) a replay
+ * is deduped, (c) a bad signature is rejected with 400, (d) a
+ * non-terminal status does not credit.
+ */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.MOCK)
 @AutoConfigureWebTestClient
 @Testcontainers
-class BillingCoinbaseIntegrationTest {
+class BillingNowPaymentsIntegrationTest {
 
-    private static final String TEST_WEBHOOK_SECRET = "cb_test_webhook_secret_value_for_integration";
+    private static final String TEST_IPN_SECRET = "np_test_ipn_secret_value_for_integration";
+
+    /** Mirrors NowPaymentsService's canonicalisation — sorted map keys. */
+    private static final ObjectMapper CANON = new ObjectMapper()
+            .configure(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true);
 
     @Container
     @ServiceConnection
     static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16");
 
-    static WireMockServer coinbaseMock;
+    static WireMockServer nowPaymentsMock;
 
     @BeforeAll
     static void startMock() {
-        coinbaseMock = new WireMockServer(WireMockConfiguration.options().dynamicPort());
-        coinbaseMock.start();
+        nowPaymentsMock = new WireMockServer(WireMockConfiguration.options().dynamicPort());
+        nowPaymentsMock.start();
     }
 
     @AfterAll
     static void stopMock() {
-        if (coinbaseMock != null) coinbaseMock.stop();
+        if (nowPaymentsMock != null) nowPaymentsMock.stop();
     }
 
     @DynamicPropertySource
-    static void coinbaseProps(DynamicPropertyRegistry r) {
-        r.add("godance.coinbase.api-base",       () -> coinbaseMock.baseUrl());
-        r.add("godance.coinbase.webhook-secret", () -> TEST_WEBHOOK_SECRET);
+    static void nowPaymentsProps(DynamicPropertyRegistry r) {
+        r.add("godance.nowpayments.api-base",   () -> nowPaymentsMock.baseUrl());
+        r.add("godance.nowpayments.ipn-secret", () -> TEST_IPN_SECRET);
     }
 
     @Autowired WebTestClient http;
@@ -71,7 +84,7 @@ class BillingCoinbaseIntegrationTest {
 
     @BeforeEach
     void reset() {
-        coinbaseMock.resetAll();
+        nowPaymentsMock.resetAll();
     }
 
     // ===== Helpers ====================================================
@@ -79,13 +92,13 @@ class BillingCoinbaseIntegrationTest {
     private record SignedUser(UUID id, String bearer) { }
 
     private SignedUser signupAndAuth() {
-        String email = "cb-" + UUID.randomUUID() + "@godance.test";
+        String email = "np-" + UUID.randomUUID() + "@godance.test";
         AuthResponse resp = http.post().uri("/v1/auth/signup")
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(Map.of(
                         "email", email,
                         "password", "correct-horse-battery-staple",
-                        "fullName", "Coinbase Tester"))
+                        "fullName", "NOWPayments Tester"))
                 .exchange()
                 .expectStatus().isCreated()
                 .expectBody(AuthResponse.class).returnResult().getResponseBody();
@@ -93,11 +106,13 @@ class BillingCoinbaseIntegrationTest {
         return new SignedUser(userId, "Bearer " + resp.accessToken());
     }
 
-    private static String coinbaseSignature(String payload) {
+    /** HMAC-SHA512 hex over the sorted-JSON canonical form — the scheme NOWPayments uses. */
+    private static String nowPaymentsSignature(String payload) {
         try {
-            Mac mac = Mac.getInstance("HmacSHA256");
-            mac.init(new SecretKeySpec(TEST_WEBHOOK_SECRET.getBytes(), "HmacSHA256"));
-            byte[] h = mac.doFinal(payload.getBytes());
+            String canonical = CANON.writeValueAsString(CANON.readValue(payload, Object.class));
+            Mac mac = Mac.getInstance("HmacSHA512");
+            mac.init(new SecretKeySpec(TEST_IPN_SECRET.getBytes(), "HmacSHA512"));
+            byte[] h = mac.doFinal(canonical.getBytes());
             StringBuilder sb = new StringBuilder(h.length * 2);
             for (byte b : h) sb.append(String.format("%02x", b));
             return sb.toString();
@@ -106,86 +121,58 @@ class BillingCoinbaseIntegrationTest {
         }
     }
 
-    private static String chargeConfirmedEvent(String eventId, String chargeId,
-                                               UUID userId, String amountUsd) {
+    private static String ipnEvent(String paymentId, String status, UUID userId, String priceAmount) {
         return """
             {
-              "id": "%s",
-              "scheduled_for": "2025-01-01T00:00:00Z",
-              "event": {
-                "id": "%s",
-                "resource": "event",
-                "type": "charge:confirmed",
-                "api_version": "2018-03-22",
-                "created_at": "2025-01-01T00:00:00Z",
-                "data": {
-                  "id": "%s",
-                  "code": "ABC12345",
-                  "resource": "charge",
-                  "pricing": {
-                    "local": {"amount": "%s", "currency": "USD"}
-                  },
-                  "metadata": {"godance_user_id": "%s"},
-                  "timeline": []
-                }
-              }
+              "payment_id": %s,
+              "payment_status": "%s",
+              "pay_address": "TXkV21abc000example000address000000000",
+              "price_amount": %s,
+              "price_currency": "usd",
+              "pay_amount": 24.9,
+              "pay_currency": "usdttrc20",
+              "order_id": "%s",
+              "order_description": "Godance credit top-up"
             }
-            """.formatted(eventId, eventId, chargeId, amountUsd, userId);
-    }
-
-    private static String chargePendingEvent(String eventId, UUID userId) {
-        return """
-            {
-              "id": "%s",
-              "event": {
-                "id": "%s",
-                "type": "charge:pending",
-                "data": {
-                  "id": "ch_pending",
-                  "metadata": {"godance_user_id": "%s"},
-                  "pricing": {"local": {"amount": "1.00", "currency": "USD"}}
-                }
-              }
-            }
-            """.formatted(eventId, eventId, userId);
+            """.formatted(paymentId, status, priceAmount, userId);
     }
 
     // ===== Webhook tests ==============================================
 
     @Test
-    void webhook_givenValidSignedConfirmed_creditsLedgerAndBalance() {
+    void webhook_givenValidSignedFinished_creditsLedgerAndBalance() {
         SignedUser u = signupAndAuth();
-        String payload = chargeConfirmedEvent("evt_cb_apply", "ch_cb_apply", u.id(), "25.00");
+        String payload = ipnEvent("5500000001", "finished", u.id(), "25");
 
-        http.post().uri("/v1/billing/webhooks/coinbase")
-                .header("X-CC-Webhook-Signature", coinbaseSignature(payload))
+        http.post().uri("/v1/billing/webhooks/nowpayments")
+                .header("x-nowpayments-sig", nowPaymentsSignature(payload))
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(payload)
                 .exchange()
                 .expectStatus().isOk();
 
         assertThat(users.findById(u.id()).orElseThrow().getCreditBalanceCents()).isEqualTo(25_00L);
-        assertThat(ledger.findByIdempotencyKey("evt_cb_apply")).isPresent();
+        assertThat(ledger.findByIdempotencyKey("5500000001")).isPresent();
     }
 
     @Test
     void webhook_replayedSameEvent_doesNotDoubleCredit() {
         SignedUser u = signupAndAuth();
-        String payload = chargeConfirmedEvent("evt_cb_dup", "ch_cb_dup", u.id(), "10.00");
-        String sig = coinbaseSignature(payload);
+        String payload = ipnEvent("5500000002", "finished", u.id(), "10");
+        String sig = nowPaymentsSignature(payload);
 
-        // First delivery
-        http.post().uri("/v1/billing/webhooks/coinbase")
-                .header("X-CC-Webhook-Signature", sig)
+        // First delivery.
+        http.post().uri("/v1/billing/webhooks/nowpayments")
+                .header("x-nowpayments-sig", sig)
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(payload)
                 .exchange()
                 .expectStatus().isOk();
 
-        // Replay — same body, same signature (Coinbase HMAC has no timestamp,
-        // so retries always carry the identical signature byte-for-byte).
-        http.post().uri("/v1/billing/webhooks/coinbase")
-                .header("X-CC-Webhook-Signature", sig)
+        // Replay — identical body + signature. NOWPayments re-delivers an IPN
+        // until it gets a 2xx, so retries carry the same payment_id.
+        http.post().uri("/v1/billing/webhooks/nowpayments")
+                .header("x-nowpayments-sig", sig)
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(payload)
                 .exchange()
@@ -197,81 +184,66 @@ class BillingCoinbaseIntegrationTest {
     @Test
     void webhook_givenBadSignature_returns400_doesNotMutateBalance() {
         SignedUser u = signupAndAuth();
-        String payload = chargeConfirmedEvent("evt_cb_bad", "ch_cb_bad", u.id(), "5.00");
+        String payload = ipnEvent("5500000003", "finished", u.id(), "5");
 
-        http.post().uri("/v1/billing/webhooks/coinbase")
-                .header("X-CC-Webhook-Signature", "deadbeef00not_a_real_hex_signature")
+        http.post().uri("/v1/billing/webhooks/nowpayments")
+                .header("x-nowpayments-sig", "deadbeef00not_a_real_hex_signature")
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(payload)
                 .exchange()
                 .expectStatus().isBadRequest();
 
         assertThat(users.findById(u.id()).orElseThrow().getCreditBalanceCents()).isZero();
+        assertThat(ledger.findByIdempotencyKey("5500000003")).isNotPresent();
     }
 
     @Test
-    void webhook_givenChargePending_returns200_doesNotCredit() {
+    void webhook_givenNonTerminalStatus_returns200_doesNotCredit() {
         SignedUser u = signupAndAuth();
-        String payload = chargePendingEvent("evt_cb_pending", u.id());
+        String payload = ipnEvent("5500000004", "waiting", u.id(), "25");
 
-        http.post().uri("/v1/billing/webhooks/coinbase")
-                .header("X-CC-Webhook-Signature", coinbaseSignature(payload))
+        http.post().uri("/v1/billing/webhooks/nowpayments")
+                .header("x-nowpayments-sig", nowPaymentsSignature(payload))
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(payload)
                 .exchange()
                 .expectStatus().isOk();
 
         assertThat(users.findById(u.id()).orElseThrow().getCreditBalanceCents()).isZero();
-        assertThat(ledger.findByIdempotencyKey("evt_cb_pending")).isNotPresent();
+        assertThat(ledger.findByIdempotencyKey("5500000004")).isNotPresent();
     }
 
     @Test
-    void webhook_givenNonUsdCurrency_returns500_doesNotCredit() {
+    void webhook_givenPartiallyPaidStatus_returns200_doesNotCredit() {
         SignedUser u = signupAndAuth();
-        String payload = """
-            {
-              "id": "evt_cb_eur",
-              "event": {
-                "id": "evt_cb_eur",
-                "type": "charge:confirmed",
-                "data": {
-                  "id": "ch_eur",
-                  "pricing": {"local": {"amount": "25.00", "currency": "EUR"}},
-                  "metadata": {"godance_user_id": "%s"}
-                }
-              }
-            }
-            """.formatted(u.id());
+        String payload = ipnEvent("5500000005", "partially_paid", u.id(), "25");
 
-        // IllegalArgumentException from usdAmountCents() surfaces as 500.
-        // Coinbase will retry — that's correct behavior; the misconfigured
-        // charge shouldn't have been created in the first place.
-        http.post().uri("/v1/billing/webhooks/coinbase")
-                .header("X-CC-Webhook-Signature", coinbaseSignature(payload))
+        http.post().uri("/v1/billing/webhooks/nowpayments")
+                .header("x-nowpayments-sig", nowPaymentsSignature(payload))
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(payload)
                 .exchange()
-                .expectStatus().is5xxServerError();
+                .expectStatus().isOk();
 
         assertThat(users.findById(u.id()).orElseThrow().getCreditBalanceCents()).isZero();
     }
 
-    // ===== Charge create tests ========================================
+    // ===== Invoice create tests =======================================
 
     @Test
     void topup_authenticated_returnsHostedUrl() {
         SignedUser u = signupAndAuth();
 
-        coinbaseMock.stubFor(post(urlEqualTo("/charges"))
-                .willReturn(aResponse().withStatus(201)
+        nowPaymentsMock.stubFor(post(urlEqualTo("/v1/invoice"))
+                .willReturn(aResponse().withStatus(200)
                         .withHeader("content-type", "application/json")
                         .withBody("""
-                                {"data":{"id":"ch_test_xyz","code":"ABCDEFGH",
-                                 "hosted_url":"https://commerce.coinbase.com/charges/ABCDEFGH",
-                                 "resource":"charge"}}
-                                """)));
+                                {"id":4901234567,"order_id":"%s","price_amount":25,
+                                 "price_currency":"usd","invoice_status":"waiting",
+                                 "invoice_url":"https://nowpayments.io/payment/?iid=4901234567"}
+                                """.formatted(u.id()))));
 
-        TopUpResponse out = http.post().uri("/v1/billing/coinbase/topup")
+        TopUpResponse out = http.post().uri("/v1/billing/nowpayments/topup")
                 .header("Authorization", u.bearer())
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(Map.of("amountCents", 25_00L))
@@ -279,8 +251,8 @@ class BillingCoinbaseIntegrationTest {
                 .expectStatus().isCreated()
                 .expectBody(TopUpResponse.class).returnResult().getResponseBody();
 
-        assertThat(out.sessionId()).isEqualTo("ch_test_xyz");
-        assertThat(out.checkoutUrl()).isEqualTo("https://commerce.coinbase.com/charges/ABCDEFGH");
+        assertThat(out.sessionId()).isEqualTo("4901234567");
+        assertThat(out.checkoutUrl()).isEqualTo("https://nowpayments.io/payment/?iid=4901234567");
         assertThat(out.amountCents()).isEqualTo(25_00L);
     }
 
@@ -288,7 +260,7 @@ class BillingCoinbaseIntegrationTest {
     void topup_amountBelowFloor_returns400() {
         SignedUser u = signupAndAuth();
 
-        http.post().uri("/v1/billing/coinbase/topup")
+        http.post().uri("/v1/billing/nowpayments/topup")
                 .header("Authorization", u.bearer())
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(Map.of("amountCents", 50L))
@@ -298,7 +270,7 @@ class BillingCoinbaseIntegrationTest {
 
     @Test
     void topup_unauthenticated_returns401() {
-        http.post().uri("/v1/billing/coinbase/topup")
+        http.post().uri("/v1/billing/nowpayments/topup")
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(Map.of("amountCents", 10_00L))
                 .exchange()
@@ -306,15 +278,15 @@ class BillingCoinbaseIntegrationTest {
     }
 
     @Test
-    void topup_upstreamCoinbase500_returns502() {
+    void topup_upstreamNowPayments500_returns502() {
         SignedUser u = signupAndAuth();
 
-        coinbaseMock.stubFor(post(urlEqualTo("/charges"))
+        nowPaymentsMock.stubFor(post(urlEqualTo("/v1/invoice"))
                 .willReturn(aResponse().withStatus(500)
                         .withHeader("content-type", "application/json")
-                        .withBody("{\"error\":{\"type\":\"internal_server_error\"}}")));
+                        .withBody("{\"message\":\"internal error\"}")));
 
-        http.post().uri("/v1/billing/coinbase/topup")
+        http.post().uri("/v1/billing/nowpayments/topup")
                 .header("Authorization", u.bearer())
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(Map.of("amountCents", 10_00L))

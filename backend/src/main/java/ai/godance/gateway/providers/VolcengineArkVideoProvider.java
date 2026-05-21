@@ -21,7 +21,8 @@ import ai.godance.gateway.VideoProviderAdapter;
 import reactor.core.publisher.Mono;
 
 /**
- * Volcengine Ark — async video task pattern (mirrors BFL conceptually):
+ * Volcengine Ark Seedance video — currently {@code seedance-2.0}.
+ * Async video task pattern (mirrors BFL conceptually):
  * <ol>
  *   <li>POST {@code /api/v3/contents/generations/tasks} → {@code {id}}</li>
  *   <li>GET {@code /api/v3/contents/generations/tasks/{id}} polls until

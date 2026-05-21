@@ -67,11 +67,14 @@ godance:
     success-url:    ${STRIPE_SUCCESS_URL}
     cancel-url:     ${STRIPE_CANCEL_URL}
     api-base:       ${STRIPE_API_BASE:}         # blank → Stripe SDK default (api.stripe.com)
-  coinbase:
-    api-key:        ${COINBASE_API_KEY}              # REQUIRED
-    webhook-secret: ${COINBASE_WEBHOOK_SECRET}       # REQUIRED
-    api-base:       ${COINBASE_API_BASE:https://api.commerce.coinbase.com}
-    api-version:    ${COINBASE_API_VERSION:2018-03-22}
+  nowpayments:
+    api-key:     ${NOWPAYMENTS_API_KEY}              # REQUIRED
+    ipn-secret:  ${NOWPAYMENTS_IPN_SECRET}           # REQUIRED
+    api-base:    ${NOWPAYMENTS_API_BASE:https://api.nowpayments.io}
+    success-url: ${NOWPAYMENTS_SUCCESS_URL}          # REQUIRED
+    cancel-url:  ${NOWPAYMENTS_CANCEL_URL}           # REQUIRED
+  binancepay:
+    enabled:     ${BINANCE_PAY_ENABLED:false}        # v1.1 rail — flagged off until merchant KYC clears
   billing:
     topup-min-cents: ${TOPUP_MIN_CENTS:100}
     topup-max-cents: ${TOPUP_MAX_CENTS:100000}
@@ -103,12 +106,83 @@ godance:
       api-base:      ${VOLCENGINE_API_BASE:https://ark.cn-beijing.volces.com}
       poll-interval: ${VOLCENGINE_POLL_INTERVAL:5s}
       poll-timeout:  ${VOLCENGINE_POLL_TIMEOUT:600s}
+    # Text catalog providers. api-key defaults to blank — a blank key is
+    # tolerated at startup and surfaces as a 401 on first use, so operators
+    # only set keys for the providers they actually enable.
+    deepseek:
+      api-key:  ${DEEPSEEK_API_KEY:}
+      api-base: ${DEEPSEEK_API_BASE:https://api.deepseek.com}
+      timeout:  ${DEEPSEEK_TIMEOUT:60s}
+    moonshot:
+      api-key:  ${MOONSHOT_API_KEY:}
+      api-base: ${MOONSHOT_API_BASE:https://api.moonshot.ai}
+      timeout:  ${MOONSHOT_TIMEOUT:60s}
+    alibaba:
+      api-key:  ${ALIBABA_API_KEY:}
+      api-base: ${ALIBABA_API_BASE:https://dashscope-intl.aliyuncs.com/compatible-mode}
+      timeout:  ${ALIBABA_TIMEOUT:60s}
+    zhipu:
+      api-key:  ${ZHIPU_API_KEY:}
+      api-base: ${ZHIPU_API_BASE:https://open.bigmodel.cn/api/paas/v4}
+      timeout:  ${ZHIPU_TIMEOUT:60s}
+    minimax:
+      api-key:  ${MINIMAX_API_KEY:}
+      api-base: ${MINIMAX_API_BASE:https://api.minimax.io}
+      timeout:  ${MINIMAX_TIMEOUT:60s}
+    xai:
+      api-key:  ${XAI_API_KEY:}
+      api-base: ${XAI_API_BASE:https://api.x.ai}
+      timeout:  ${XAI_TIMEOUT:60s}
+    baidu:
+      api-key:  ${BAIDU_API_KEY:}
+      api-base: ${BAIDU_API_BASE:https://qianfan.baidubce.com/v2}
+      timeout:  ${BAIDU_TIMEOUT:60s}
+    stability:
+      api-key:  ${STABILITY_API_KEY:}
+      api-base: ${STABILITY_API_BASE:https://api.stability.ai}
+      timeout:  ${STABILITY_TIMEOUT:90s}
+    kling:
+      api-key:       ${KLING_API_KEY:}
+      api-base:      ${KLING_API_BASE:https://api-singapore.klingai.com}
+      poll-interval: ${KLING_POLL_INTERVAL:5s}
+      poll-timeout:  ${KLING_POLL_TIMEOUT:600s}
+    runway:
+      api-key:       ${RUNWAY_API_KEY:}
+      api-base:      ${RUNWAY_API_BASE:https://api.dev.runwayml.com}
+      poll-interval: ${RUNWAY_POLL_INTERVAL:5s}
+      poll-timeout:  ${RUNWAY_POLL_TIMEOUT:600s}
   gateway:
     fallback-chains:
       gpt-4o:                       [gpt-4o-mini]
       gpt-4.1:                      [gpt-4o]
       claude-3-5-sonnet-20241022:   [claude-3-5-haiku-20241022, gpt-4o]
       gemini-1.5-pro:               [gemini-1.5-flash, gpt-4o-mini]
+      gpt-5.5:                      [gpt-5.4, claude-sonnet-4-6]
+      gpt-5.4:                      [claude-sonnet-4-6, gpt-4o]
+      claude-opus-4-7:              [claude-sonnet-4-6, gpt-5.5]
+      claude-sonnet-4-6:            [claude-haiku-4-5, gpt-5.4]
+      gemini-3.1-pro:               [claude-sonnet-4-6, gpt-5.4]
+      grok-4:                       [gpt-5.4, claude-sonnet-4-6]
+      gpt-5.4-nano:                 [gemini-3.1-flash-lite, gpt-4o-mini]
+      gemini-3.1-flash-lite:        [gpt-5.4-nano, gpt-4o-mini]
+      claude-haiku-4-5:             [gpt-5.4-nano, gemini-3.1-flash-lite]
+      deepseek-v4-pro:              [deepseek-v4-flash, doubao-1.6-pro]
+      deepseek-v4-flash:            [kimi-k2.6, qwen-3.6]
+      doubao-1.6-pro:               [deepseek-v4-pro, qwen-3.6]
+      kimi-k2.6:                    [deepseek-v4-flash, glm-4.7-flash]
+      qwen-3.6:                     [deepseek-v4-flash, glm-4.7-flash]
+      qwen-3.6-coder:               [qwen-3.6, deepseek-v4-pro]
+      glm-4.7-flash:                [deepseek-v4-flash, qwen-3.6]
+      minimax-m2.7:                 [deepseek-v4-flash, qwen-3.6]
+      ernie-5.1:                    [deepseek-v4-pro, qwen-3.6]
+      veo-3.1:                      [veo-3.1-fast, sora-2]
+      veo-3.1-fast:                 [sora-2, runway-gen4]
+      sora-2:                       [runway-gen4, veo-3.1-fast]
+      sora-2-pro:                   [veo-3.1, sora-2]
+      runway-gen4:                  [sora-2, veo-3.1-fast]
+      kling-3.0:                    [seedance-2.0, minimax-hailuo-2.3]
+      seedance-2.0:                 [minimax-hailuo-2.3, kling-3.0]
+      minimax-hailuo-2.3:           [seedance-2.0, kling-3.0]
 
 logging:
   level:

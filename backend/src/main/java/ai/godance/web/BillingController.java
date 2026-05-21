@@ -69,29 +69,29 @@ public class BillingController {
                 .then(Mono.just(ResponseEntity.<Void>ok().build()));
     }
 
-    /** Coinbase Commerce equivalent of {@link #topup}. Returns the hosted-checkout URL. */
-    @PostMapping("/coinbase/topup")
-    public Mono<ResponseEntity<TopUpResponse>> coinbaseTopup(
+    /** NOWPayments crypto (USDT) equivalent of {@link #topup}. Returns the hosted-payment URL. */
+    @PostMapping("/nowpayments/topup")
+    public Mono<ResponseEntity<TopUpResponse>> nowPaymentsTopup(
             @Valid @RequestBody TopUpRequest req,
             @AuthenticationPrincipal Jwt jwt,
             ServerWebExchange exchange) {
         UUID userId = JwtService.userIdFromSubject(jwt.getSubject());
-        return Mono.fromCallable(() -> billing.startCoinbaseTopUp(userId, req.amountCents(), clientIp(exchange)))
+        return Mono.fromCallable(() -> billing.startNowPaymentsTopUp(userId, req.amountCents(), clientIp(exchange)))
                 .subscribeOn(Schedulers.boundedElastic())
                 .map(intent -> ResponseEntity.status(HttpStatus.CREATED).body(toResponse(intent)));
     }
 
     /**
-     * Coinbase Commerce webhook receiver. Same raw-body invariant as
-     * Stripe — signature is HMAC-SHA256 of the raw payload. 200 on
+     * NOWPayments IPN receiver. Same raw-body invariant as Stripe — the
+     * signature is HMAC-SHA512 over the (sorted-JSON) payload. 200 on
      * accept/dedup; 400 on bad signature.
      */
-    @PostMapping("/webhooks/coinbase")
-    public Mono<ResponseEntity<Void>> coinbaseWebhook(
+    @PostMapping("/webhooks/nowpayments")
+    public Mono<ResponseEntity<Void>> nowPaymentsWebhook(
             @RequestBody String payload,
-            @RequestHeader("X-CC-Webhook-Signature") String signature,
+            @RequestHeader("x-nowpayments-sig") String signature,
             ServerWebExchange exchange) {
-        return Mono.fromRunnable(() -> billing.handleCoinbaseWebhook(payload, signature, clientIp(exchange)))
+        return Mono.fromRunnable(() -> billing.handleNowPaymentsWebhook(payload, signature, clientIp(exchange)))
                 .subscribeOn(Schedulers.boundedElastic())
                 .then(Mono.just(ResponseEntity.<Void>ok().build()));
     }
