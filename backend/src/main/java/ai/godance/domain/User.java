@@ -49,6 +49,14 @@ public class User {
     @Column(name = "monthly_credit_cap_cents")
     private Long monthlyCreditCapCents;
 
+    /** Last time the 80% soft-cap warning fired for the daily window. */
+    @Column(name = "daily_cap_warned_at")
+    private Instant dailyCapWarnedAt;
+
+    /** Last time the 80% soft-cap warning fired for the monthly window. */
+    @Column(name = "monthly_cap_warned_at")
+    private Instant monthlyCapWarnedAt;
+
     @Column(name = "last_login_at")
     private Instant lastLoginAt;
 
@@ -143,6 +151,12 @@ public class User {
 
     public Long getMonthlyCreditCapCents() { return monthlyCreditCapCents; }
     public void setMonthlyCreditCapCents(Long monthlyCreditCapCents) { this.monthlyCreditCapCents = monthlyCreditCapCents; }
+
+    public Instant getDailyCapWarnedAt() { return dailyCapWarnedAt; }
+    public void setDailyCapWarnedAt(Instant dailyCapWarnedAt) { this.dailyCapWarnedAt = dailyCapWarnedAt; }
+
+    public Instant getMonthlyCapWarnedAt() { return monthlyCapWarnedAt; }
+    public void setMonthlyCapWarnedAt(Instant monthlyCapWarnedAt) { this.monthlyCapWarnedAt = monthlyCapWarnedAt; }
 
     public Instant getLastLoginAt() { return lastLoginAt; }
     public void setLastLoginAt(Instant lastLoginAt) { this.lastLoginAt = lastLoginAt; }

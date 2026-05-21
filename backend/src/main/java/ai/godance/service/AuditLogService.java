@@ -23,6 +23,7 @@ public class AuditLogService {
     public static final String EVT_AUTH_LOGIN_OK      = "auth.login.success";
     public static final String EVT_AUTH_LOGIN_FAIL    = "auth.login.failure";
     public static final String EVT_AUTH_VERIFY        = "auth.verify";
+    public static final String EVT_AUTH_OAUTH_LOGIN   = "auth.oauth.login";
     public static final String EVT_API_KEY_CREATED    = "apikey.created";
     public static final String EVT_API_KEY_DELETED    = "apikey.deleted";
     public static final String EVT_BILLING_TOPUP_INTENT      = "billing.topup.intent";

@@ -61,6 +61,22 @@ godance:
     secret: ${JWT_SIGNING_KEY}           # REQUIRED — fail-fast if unset (no fallback)
     expiry-minutes: ${JWT_EXPIRY_MINUTES:60}
     issuer: ${JWT_ISSUER:https://godance.ai}
+  oauth:
+    # Social sign-in. Placeholder defaults keep the context bootable when an
+    # operator has not enabled OAuth; supplying the real values via env turns
+    # the corresponding provider's login on.
+    post-login-redirect-uri: ${OAUTH_POST_LOGIN_REDIRECT_URI:https://app.godance.ai/oauth/callback}
+    google:
+      client-id:     ${GOOGLE_OAUTH_CLIENT_ID:oauth-not-configured}
+      client-secret: ${GOOGLE_OAUTH_CLIENT_SECRET:oauth-not-configured}
+    apple:
+      client-id:   ${APPLE_OAUTH_CLIENT_ID:oauth-not-configured}
+      team-id:     ${APPLE_OAUTH_TEAM_ID:oauth-not-configured}
+      key-id:      ${APPLE_OAUTH_KEY_ID:oauth-not-configured}
+      private-key: ${APPLE_OAUTH_PRIVATE_KEY:}
+    x:
+      client-id:     ${X_OAUTH_CLIENT_ID:oauth-not-configured}
+      client-secret: ${X_OAUTH_CLIENT_SECRET:oauth-not-configured}
   stripe:
     secret-key:     ${STRIPE_SECRET_KEY}        # REQUIRED
     webhook-secret: ${STRIPE_WEBHOOK_SECRET}    # REQUIRED

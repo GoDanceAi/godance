@@ -1,0 +1,140 @@
+package ai.godance.service;
+
+import java.time.Instant;
+import java.util.Map;
+import java.util.Optional;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
+
+import ai.godance.domain.AuditOutcome;
+import ai.godance.domain.OAuthIdentity;
+import ai.godance.domain.OAuthProvider;
+import ai.godance.domain.User;
+import ai.godance.domain.UserRole;
+import ai.godance.repository.OAuthIdentityRepository;
+import ai.godance.repository.UserRepository;
+import ai.godance.security.JwtService;
+import ai.godance.security.JwtService.IssuedToken;
+import ai.godance.web.dto.AuthDtos.AuthResponse;
+
+/**
+ * Resolves a verified OAuth provider identity into a Godance session.
+ *
+ * <p>Sits behind the Spring Security {@code oauth2Login()} success
+ * handler but is deliberately decoupled from it — given a
+ * {@code (provider, subject, email)} triple it does the link-or-create
+ * and mints the <em>same</em> JWT the email+password flow issues. That
+ * makes the core behaviour unit-testable without driving a full OAuth
+ * redirect.
+ *
+ * <p>Resolution order:
+ * <ol>
+ *   <li>Known {@code (provider, subject)} → that user.</li>
+ *   <li>Else a user with the provider-verified email → link a new
+ *       identity to them.</li>
+ *   <li>Else create a fresh OAuth-only user (no password) and link.</li>
+ * </ol>
+ */
+@Service
+public class OAuthLoginService {
+
+    private static final Logger log = LoggerFactory.getLogger(OAuthLoginService.class);
+
+    private final UserRepository users;
+    private final OAuthIdentityRepository identities;
+    private final JwtService jwt;
+    private final AuditLogService audit;
+
+    public OAuthLoginService(UserRepository users, OAuthIdentityRepository identities,
+                             JwtService jwt, AuditLogService audit) {
+        this.users = users;
+        this.identities = identities;
+        this.jwt = jwt;
+        this.audit = audit;
+    }
+
+    /**
+     * Complete an OAuth sign-in. {@code email} / {@code fullName} may be
+     * null (e.g. X.com does not return an email). Returns the bearer
+     * token the caller hands back to the client.
+     */
+    @Transactional
+    public AuthResponse completeLogin(OAuthProvider provider, String subject,
+                                      String email, String fullName) {
+        if (subject == null || subject.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "oauth provider returned no subject identifier");
+        }
+        String normalizedEmail = (email == null || email.isBlank())
+                ? null : email.trim().toLowerCase();
+
+        Optional<OAuthIdentity> known = identities.findByProviderAndSubject(provider, subject);
+        User user;
+        if (known.isPresent()) {
+            user = users.findById(known.get().getUserId()).orElseThrow(() ->
+                    new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
+                            "oauth identity references a missing user"));
+        } else {
+            user = (normalizedEmail != null)
+                    ? users.findByEmail(normalizedEmail).orElse(null)
+                    : null;
+            if (user == null) {
+                user = createOAuthUser(provider, subject, normalizedEmail, fullName);
+            } else if (!user.isEmailVerified()) {
+                // The provider asserts ownership of this email — trust it.
+                user.setEmailVerified(true);
+            }
+            OAuthIdentity identity = new OAuthIdentity();
+            identity.setUserId(user.getId());
+            identity.setProvider(provider);
+            identity.setSubject(subject);
+            identities.save(identity);
+        }
+
+        if (!user.isActive()) {
+            audit.record(AuditLogService.EVT_AUTH_OAUTH_LOGIN, AuditOutcome.DENIED,
+                    user.getId(), null, Map.of("provider", provider.name(), "reason", "inactive"));
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "account disabled");
+        }
+
+        user.setLastLoginAt(Instant.now());
+        users.save(user);
+
+        audit.record(AuditLogService.EVT_AUTH_OAUTH_LOGIN, AuditOutcome.SUCCESS,
+                user.getId(), null, Map.of("provider", provider.name()));
+
+        IssuedToken issued = jwt.issueFor(user);
+        return AuthResponse.bearer(issued.token(), issued.expiresAt());
+    }
+
+    private User createOAuthUser(OAuthProvider provider, String subject,
+                                 String email, String fullName) {
+        User u = new User();
+        // No provider email (X.com) → a stable synthetic address keeps the
+        // NOT NULL + UNIQUE email column satisfied; the user simply has no
+        // password-login path.
+        u.setEmail(email != null
+                ? email
+                : provider.name().toLowerCase() + "-" + subject + "@oauth.godance.local");
+        u.setFullName(fullName != null && !fullName.isBlank()
+                ? fullName.trim() : defaultName(u.getEmail()));
+        u.setPasswordHash(null);
+        u.setRole(UserRole.USER);
+        u.setActive(true);
+        u.setEmailVerified(email != null);
+        users.save(u);
+        log.info("Created OAuth-only user {} via {}", u.getId(), provider);
+        return u;
+    }
+
+    private static String defaultName(String email) {
+        int at = email.indexOf('@');
+        String local = at > 0 ? email.substring(0, at) : email;
+        return local.isBlank() ? "Godance User" : local;
+    }
+}

@@ -46,6 +46,23 @@ public class ApiKey {
     @Column(name = "monthly_credit_cap_cents")
     private Long monthlyCreditCapCents;
 
+    /**
+     * Optional per-key CIDR allowlist (e.g. {@code ["203.0.113.0/24"]}).
+     * Null or empty = any client IP allowed. Enforced in the API-key auth
+     * filter; off-list clients are rejected with 403.
+     */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "ip_allowlist", columnDefinition = "jsonb")
+    private List<String> ipAllowlist;
+
+    /** Last time the 80% soft-cap warning fired for the daily window. */
+    @Column(name = "daily_cap_warned_at")
+    private Instant dailyCapWarnedAt;
+
+    /** Last time the 80% soft-cap warning fired for the monthly window. */
+    @Column(name = "monthly_cap_warned_at")
+    private Instant monthlyCapWarnedAt;
+
     @Column(name = "is_active", nullable = false)
     private boolean active = true;
 
@@ -86,6 +103,15 @@ public class ApiKey {
 
     public Long getMonthlyCreditCapCents() { return monthlyCreditCapCents; }
     public void setMonthlyCreditCapCents(Long monthlyCreditCapCents) { this.monthlyCreditCapCents = monthlyCreditCapCents; }
+
+    public List<String> getIpAllowlist() { return ipAllowlist; }
+    public void setIpAllowlist(List<String> ipAllowlist) { this.ipAllowlist = ipAllowlist; }
+
+    public Instant getDailyCapWarnedAt() { return dailyCapWarnedAt; }
+    public void setDailyCapWarnedAt(Instant dailyCapWarnedAt) { this.dailyCapWarnedAt = dailyCapWarnedAt; }
+
+    public Instant getMonthlyCapWarnedAt() { return monthlyCapWarnedAt; }
+    public void setMonthlyCapWarnedAt(Instant monthlyCapWarnedAt) { this.monthlyCapWarnedAt = monthlyCapWarnedAt; }
 
     public boolean isActive() { return active; }
     public void setActive(boolean active) { this.active = active; }

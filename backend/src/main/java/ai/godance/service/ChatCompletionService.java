@@ -74,7 +74,7 @@ public class ChatCompletionService {
         this.gatewayProps = gatewayProps;
     }
 
-    public ChatResponse execute(UUID userId, ChatRequest request) {
+    public ChatResponse execute(UUID userId, UUID apiKeyId, ChatRequest request) {
         String requestId = "req_" + UUID.randomUUID().toString().replace("-", "").substring(0, 24);
 
         ModelInfo primary = catalog.find(request.model()).orElseThrow(() ->
@@ -128,7 +128,7 @@ public class ChatCompletionService {
                 long actualCents = calculator.actualCents(model,
                         response.usage().promptTokens(), response.usage().completionTokens());
                 ledger.reconcile(userId, estimateCents, actualCents, requestId);
-                usage.save(buildUsageRecord(userId, model, response, actualCents,
+                usage.save(buildUsageRecord(userId, apiKeyId, model, response, actualCents,
                         requestId, isFallback));
                 return response;
             } catch (RuntimeException upstreamErr) {
@@ -176,7 +176,7 @@ public class ChatCompletionService {
                 req.temperature(), req.stream());
     }
 
-    private UsageRecord buildUsageRecord(UUID userId, ModelInfo model,
+    private UsageRecord buildUsageRecord(UUID userId, UUID apiKeyId, ModelInfo model,
                                          ChatResponse response, long actualCents,
                                          String requestId, boolean fallbackUsed) {
         long providerCostMicrocents =
@@ -186,7 +186,7 @@ public class ChatCompletionService {
 
         UsageRecord r = new UsageRecord();
         r.setUserId(userId);
-        r.setApiKeyId(null);                       // JWT-based call; API-key path uses ApiKeyService later
+        r.setApiKeyId(apiKeyId);                   // non-null when the request used an API key
         r.setModality(model.modality());
         r.setModelName(model.modelName());
         r.setProvider(model.provider());
@@ -215,7 +215,7 @@ public class ChatCompletionService {
      * final chunk. Client disconnect or upstream error triggers a full
      * refund.
      */
-    public Flux<ChatChunk> executeStreaming(UUID userId, ChatRequest request) {
+    public Flux<ChatChunk> executeStreaming(UUID userId, UUID apiKeyId, ChatRequest request) {
         String requestId = "req_" + UUID.randomUUID().toString().replace("-", "").substring(0, 24);
 
         ModelInfo model = catalog.find(request.model()).orElseThrow(() ->
@@ -246,7 +246,7 @@ public class ChatCompletionService {
                     if (chunk.usage() != null) finalUsage.set(chunk.usage());
                 })
                 .doFinally(signal -> dispatchPostStream(
-                        signal, userId, model, estimateCents, requestId, finalUsage.get()));
+                        signal, userId, apiKeyId, model, estimateCents, requestId, finalUsage.get()));
     }
 
     /**
@@ -255,7 +255,7 @@ public class ChatCompletionService {
      * stays clean. We tolerate one-off scheduler latency here; the
      * client has already received the final chunk by this point.
      */
-    private void dispatchPostStream(SignalType signal, UUID userId, ModelInfo model,
+    private void dispatchPostStream(SignalType signal, UUID userId, UUID apiKeyId, ModelInfo model,
                                     long estimateCents, String requestId, Usage usage) {
         Mono.fromRunnable(() -> {
             try {
@@ -264,14 +264,14 @@ public class ChatCompletionService {
                             usage.promptTokens(), usage.completionTokens());
                     ledger.reconcile(userId, estimateCents, actualCents, requestId);
                     this.usage.save(buildStreamedUsageRecord(
-                            userId, model, usage, actualCents, requestId));
+                            userId, apiKeyId, model, usage, actualCents, requestId));
                 } else if (signal == SignalType.ON_COMPLETE) {
                     // Stream completed but provider never emitted a usage block.
                     // Keep the pre-debit as the recorded cost; write a UsageRecord
                     // with zero token counts so the audit trail isn't blank.
                     log.warn("Stream {} completed without usage block; keeping pre-debit", requestId);
                     this.usage.save(buildStreamedUsageRecord(
-                            userId, model, new Usage(0, 0, 0), estimateCents, requestId));
+                            userId, apiKeyId, model, new Usage(0, 0, 0), estimateCents, requestId));
                 } else {
                     // ON_ERROR or CANCEL — full refund. Client either disconnected
                     // or upstream failed; they shouldn't be charged for partial bytes.
@@ -285,7 +285,7 @@ public class ChatCompletionService {
         }).subscribeOn(Schedulers.boundedElastic()).subscribe();
     }
 
-    private UsageRecord buildStreamedUsageRecord(UUID userId, ModelInfo model, Usage u,
+    private UsageRecord buildStreamedUsageRecord(UUID userId, UUID apiKeyId, ModelInfo model, Usage u,
                                                  long actualCents, String requestId) {
         long providerCostMicrocents =
                 model.inputMicrocentsPer1k()  * u.promptTokens()     / 1000
@@ -294,7 +294,7 @@ public class ChatCompletionService {
 
         UsageRecord r = new UsageRecord();
         r.setUserId(userId);
-        r.setApiKeyId(null);
+        r.setApiKeyId(apiKeyId);
         r.setModality(model.modality());
         r.setModelName(model.modelName());
         r.setProvider(model.provider());
