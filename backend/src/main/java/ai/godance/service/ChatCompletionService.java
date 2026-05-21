@@ -2,7 +2,10 @@ package ai.godance.service;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -10,9 +13,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 import org.springframework.web.server.ResponseStatusException;
 
 import ai.godance.config.GatewayProperties;
+import ai.godance.domain.CallOutcome;
 import ai.godance.domain.Region;
 import ai.godance.domain.UsageRecord;
 import ai.godance.gateway.ChatDtos.ChatChunk;
@@ -62,19 +67,22 @@ public class ChatCompletionService {
     private final CreditLedgerService ledger;
     private final UsageRecordRepository usage;
     private final GatewayProperties gatewayProps;
+    private final ModelHealthService modelHealth;
 
     public ChatCompletionService(ModelCatalog catalog, CostCalculator calculator,
                                  ProviderGateway gateway, CreditLedgerService ledger,
-                                 UsageRecordRepository usage, GatewayProperties gatewayProps) {
+                                 UsageRecordRepository usage, GatewayProperties gatewayProps,
+                                 ModelHealthService modelHealth) {
         this.catalog = catalog;
         this.calculator = calculator;
         this.gateway = gateway;
         this.ledger = ledger;
         this.usage = usage;
         this.gatewayProps = gatewayProps;
+        this.modelHealth = modelHealth;
     }
 
-    public ChatResponse execute(UUID userId, ChatRequest request) {
+    public ChatResponse execute(UUID userId, UUID apiKeyId, ChatRequest request) {
         String requestId = "req_" + UUID.randomUUID().toString().replace("-", "").substring(0, 24);
 
         ModelInfo primary = catalog.find(request.model()).orElseThrow(() ->
@@ -93,11 +101,12 @@ public class ChatCompletionService {
         List<String> attemptModels = new ArrayList<>();
         attemptModels.add(request.model());
         attemptModels.addAll(gatewayProps.fallbacksFor(request.model()));
+        reorderByHealth(attemptModels);
 
         RuntimeException lastError = null;
         for (int i = 0; i < attemptModels.size(); i++) {
             String modelName = attemptModels.get(i);
-            boolean isFallback = i > 0;
+            boolean isFallback = !modelName.equals(request.model());
 
             ModelInfo model = catalog.find(modelName).orElse(null);
             if (model == null) {
@@ -111,6 +120,7 @@ public class ChatCompletionService {
                 adapter = gateway.dispatch(model);
             } catch (ResponseStatusException denied) {
                 // Allowlist denied this option in the current region — try next.
+                // Not an upstream call, so no UsageRecord / health signal.
                 log.info("Dispatch rejected for '{}' ({}); trying next attempt",
                         modelName, denied.getReason());
                 lastError = denied;
@@ -118,22 +128,27 @@ public class ChatCompletionService {
             }
 
             ChatRequest forAttempt = withModel(request, model.modelName());
+            long startNanos = System.nanoTime();
             try {
                 ChatResponse response = adapter.chat(normalize(forAttempt, model))
                         .block(UPSTREAM_BLOCK_TIMEOUT);
                 if (response == null) {
                     throw new IllegalStateException("upstream returned null response");
                 }
+                int latencyMs = elapsedMs(startNanos);
 
                 long actualCents = calculator.actualCents(model,
                         response.usage().promptTokens(), response.usage().completionTokens());
                 ledger.reconcile(userId, estimateCents, actualCents, requestId);
-                usage.save(buildUsageRecord(userId, model, response, actualCents,
-                        requestId, isFallback));
+                usage.save(buildUsageRecord(userId, apiKeyId, model, response, actualCents,
+                        requestId, isFallback, latencyMs, CallOutcome.OK));
                 return response;
             } catch (RuntimeException upstreamErr) {
-                log.warn("Attempt {} ({}) failed for request {}: {}",
-                        i, modelName, requestId, upstreamErr.getMessage());
+                int latencyMs = elapsedMs(startNanos);
+                CallOutcome outcome = classifyOutcome(upstreamErr);
+                log.warn("Attempt {} ({}) failed for request {} [{}, {}ms]: {}",
+                        i, modelName, requestId, outcome, latencyMs, upstreamErr.getMessage());
+                recordFailure(userId, apiKeyId, model, requestId, isFallback, latencyMs, outcome);
                 lastError = upstreamErr;
             }
         }
@@ -176,9 +191,10 @@ public class ChatCompletionService {
                 req.temperature(), req.stream());
     }
 
-    private UsageRecord buildUsageRecord(UUID userId, ModelInfo model,
+    private UsageRecord buildUsageRecord(UUID userId, UUID apiKeyId, ModelInfo model,
                                          ChatResponse response, long actualCents,
-                                         String requestId, boolean fallbackUsed) {
+                                         String requestId, boolean fallbackUsed,
+                                         int latencyMs, CallOutcome outcome) {
         long providerCostMicrocents =
                 model.inputMicrocentsPer1k()  * response.usage().promptTokens()     / 1000
               + model.outputMicrocentsPer1k() * response.usage().completionTokens() / 1000;
@@ -186,7 +202,7 @@ public class ChatCompletionService {
 
         UsageRecord r = new UsageRecord();
         r.setUserId(userId);
-        r.setApiKeyId(null);                       // JWT-based call; API-key path uses ApiKeyService later
+        r.setApiKeyId(apiKeyId);                   // non-null when the request used an API key
         r.setModality(model.modality());
         r.setModelName(model.modelName());
         r.setProvider(model.provider());
@@ -198,11 +214,81 @@ public class ChatCompletionService {
         r.setCacheHit(false);
         r.setFallbackUsed(fallbackUsed);
         r.setRequestId(requestId);
+        r.setLatencyMs(latencyMs);
+        r.setOutcome(outcome);
         return r;
     }
 
     private static Region asDomainRegion(Region r) {
         return r == null ? Region.LOCAL : r;
+    }
+
+    // ===== Observability =============================================
+
+    /**
+     * Stable-sort the attempt list so models currently flagged as degraded
+     * (failure rate over the de-prefer threshold, see {@link ModelHealthService})
+     * are tried last. A degraded model is de-preferred, never dropped — if
+     * every healthy fallback also fails, the loop still falls through to it.
+     * No-op when nothing (or everything) is degraded.
+     */
+    private void reorderByHealth(List<String> attemptModels) {
+        if (attemptModels.size() < 2) return;
+        Set<String> degraded = new HashSet<>();
+        for (String m : attemptModels) {
+            ModelInfo mi = catalog.find(m).orElse(null);
+            if (mi != null && modelHealth.isModelDegraded(mi.provider(), mi.modelName())) {
+                degraded.add(m);
+            }
+        }
+        if (degraded.isEmpty() || degraded.size() == attemptModels.size()) return;
+        attemptModels.sort(Comparator.comparingInt(m -> degraded.contains(m) ? 1 : 0));
+        log.info("Outage-aware routing: de-preferred {} → attempt order {}",
+                degraded, attemptModels);
+    }
+
+    /** Write a zero-cost {@link UsageRecord} for a failed upstream attempt. */
+    private void recordFailure(UUID userId, UUID apiKeyId, ModelInfo model, String requestId,
+                               boolean fallbackUsed, int latencyMs, CallOutcome outcome) {
+        try {
+            UsageRecord r = new UsageRecord();
+            r.setUserId(userId);
+            r.setApiKeyId(apiKeyId);            // non-null when the request used an API key
+            r.setModality(model.modality());
+            r.setModelName(model.modelName());
+            r.setProvider(model.provider());
+            r.setInputTokens(0);
+            r.setOutputTokens(0);
+            r.setCostCents(0);                 // the user is refunded; the failed call is free
+            r.setProviderCostCents(0L);
+            r.setRegion(asDomainRegion(gateway.region()));
+            r.setCacheHit(false);
+            r.setFallbackUsed(fallbackUsed);
+            r.setRequestId(requestId);
+            r.setLatencyMs(latencyMs);
+            r.setOutcome(outcome);
+            usage.save(r);
+        } catch (RuntimeException e) {
+            // Health bookkeeping must never mask the real upstream failure.
+            log.warn("Could not persist failure UsageRecord for request {}: {}",
+                    requestId, e.getMessage());
+        }
+    }
+
+    /** RATE_LIMITED on an upstream HTTP 429, ERROR for every other failure. */
+    private static CallOutcome classifyOutcome(Throwable err) {
+        for (Throwable t = err; t != null; t = t.getCause()) {
+            if (t instanceof WebClientResponseException w
+                    && w.getStatusCode().value() == 429) {
+                return CallOutcome.RATE_LIMITED;
+            }
+        }
+        return CallOutcome.ERROR;
+    }
+
+    private static int elapsedMs(long startNanos) {
+        long ms = (System.nanoTime() - startNanos) / 1_000_000L;
+        return (int) Math.min(Integer.MAX_VALUE, Math.max(0L, ms));
     }
 
     // ===== Streaming =================================================
@@ -215,7 +301,7 @@ public class ChatCompletionService {
      * final chunk. Client disconnect or upstream error triggers a full
      * refund.
      */
-    public Flux<ChatChunk> executeStreaming(UUID userId, ChatRequest request) {
+    public Flux<ChatChunk> executeStreaming(UUID userId, UUID apiKeyId, ChatRequest request) {
         String requestId = "req_" + UUID.randomUUID().toString().replace("-", "").substring(0, 24);
 
         ModelInfo model = catalog.find(request.model()).orElseThrow(() ->
@@ -240,13 +326,15 @@ public class ChatCompletionService {
         }
 
         AtomicReference<Usage> finalUsage = new AtomicReference<>();
+        long startNanos = System.nanoTime();
 
         return adapter.chatStream(normalize(request, model))
                 .doOnNext(chunk -> {
                     if (chunk.usage() != null) finalUsage.set(chunk.usage());
                 })
                 .doFinally(signal -> dispatchPostStream(
-                        signal, userId, model, estimateCents, requestId, finalUsage.get()));
+                        signal, userId, apiKeyId, model, estimateCents, requestId,
+                        finalUsage.get(), startNanos));
     }
 
     /**
@@ -255,26 +343,36 @@ public class ChatCompletionService {
      * stays clean. We tolerate one-off scheduler latency here; the
      * client has already received the final chunk by this point.
      */
-    private void dispatchPostStream(SignalType signal, UUID userId, ModelInfo model,
-                                    long estimateCents, String requestId, Usage usage) {
+    private void dispatchPostStream(SignalType signal, UUID userId, UUID apiKeyId, ModelInfo model,
+                                    long estimateCents, String requestId, Usage usage,
+                                    long startNanos) {
         Mono.fromRunnable(() -> {
+            int latencyMs = elapsedMs(startNanos);
             try {
                 if (signal == SignalType.ON_COMPLETE && usage != null) {
                     long actualCents = calculator.actualCents(model,
                             usage.promptTokens(), usage.completionTokens());
                     ledger.reconcile(userId, estimateCents, actualCents, requestId);
                     this.usage.save(buildStreamedUsageRecord(
-                            userId, model, usage, actualCents, requestId));
+                            userId, apiKeyId, model, usage, actualCents, requestId,
+                            latencyMs, CallOutcome.OK));
                 } else if (signal == SignalType.ON_COMPLETE) {
                     // Stream completed but provider never emitted a usage block.
                     // Keep the pre-debit as the recorded cost; write a UsageRecord
                     // with zero token counts so the audit trail isn't blank.
                     log.warn("Stream {} completed without usage block; keeping pre-debit", requestId);
                     this.usage.save(buildStreamedUsageRecord(
-                            userId, model, new Usage(0, 0, 0), estimateCents, requestId));
+                            userId, apiKeyId, model, new Usage(0, 0, 0), estimateCents, requestId,
+                            latencyMs, CallOutcome.OK));
+                } else if (signal == SignalType.ON_ERROR) {
+                    // Upstream failed mid-stream — full refund, plus a failure
+                    // UsageRecord so the outage shows up in provider health.
+                    ledger.refundEstimate(userId, estimateCents, requestId,
+                            "stream signal " + signal);
+                    recordFailure(userId, apiKeyId, model, requestId, false, latencyMs, CallOutcome.ERROR);
                 } else {
-                    // ON_ERROR or CANCEL — full refund. Client either disconnected
-                    // or upstream failed; they shouldn't be charged for partial bytes.
+                    // CANCEL — client disconnected. Full refund; not a provider
+                    // fault, so no health signal.
                     ledger.refundEstimate(userId, estimateCents, requestId,
                             "stream signal " + signal);
                 }
@@ -285,8 +383,9 @@ public class ChatCompletionService {
         }).subscribeOn(Schedulers.boundedElastic()).subscribe();
     }
 
-    private UsageRecord buildStreamedUsageRecord(UUID userId, ModelInfo model, Usage u,
-                                                 long actualCents, String requestId) {
+    private UsageRecord buildStreamedUsageRecord(UUID userId, UUID apiKeyId, ModelInfo model, Usage u,
+                                                 long actualCents, String requestId,
+                                                 int latencyMs, CallOutcome outcome) {
         long providerCostMicrocents =
                 model.inputMicrocentsPer1k()  * u.promptTokens()     / 1000
               + model.outputMicrocentsPer1k() * u.completionTokens() / 1000;
@@ -294,7 +393,7 @@ public class ChatCompletionService {
 
         UsageRecord r = new UsageRecord();
         r.setUserId(userId);
-        r.setApiKeyId(null);
+        r.setApiKeyId(apiKeyId);
         r.setModality(model.modality());
         r.setModelName(model.modelName());
         r.setProvider(model.provider());
@@ -306,6 +405,8 @@ public class ChatCompletionService {
         r.setCacheHit(false);
         r.setFallbackUsed(false);
         r.setRequestId(requestId);
+        r.setLatencyMs(latencyMs);
+        r.setOutcome(outcome);
         return r;
     }
 }

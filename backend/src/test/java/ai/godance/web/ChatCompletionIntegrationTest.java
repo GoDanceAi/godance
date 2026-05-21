@@ -29,6 +29,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
 
+import ai.godance.domain.CallOutcome;
 import ai.godance.domain.CreditSource;
 import ai.godance.repository.UsageRecordRepository;
 import ai.godance.repository.UserRepository;
@@ -149,8 +150,11 @@ class ChatCompletionIntegrationTest {
         long balance = users.findById(u.id()).orElseThrow().getCreditBalanceCents();
         assertThat(balance).isEqualTo(100_00L - 1L);
 
-        assertThat(usage.findByUserIdAndRecordedAtGreaterThanEqual(u.id(),
-                java.time.Instant.now().minusSeconds(60))).hasSize(1);
+        var records = usage.findByUserIdAndRecordedAtGreaterThanEqual(u.id(),
+                java.time.Instant.now().minusSeconds(60));
+        assertThat(records).hasSize(1);
+        assertThat(records.get(0).getOutcome()).isEqualTo(CallOutcome.OK);
+        assertThat(records.get(0).getLatencyMs()).isNotNull();
     }
 
     // ===== Failure modes ==============================================
@@ -314,12 +318,25 @@ class ChatCompletionIntegrationTest {
 
         assertThat(out.choices().get(0).message().content()).isEqualTo("Hello!");
 
-        // UsageRecord should have fallbackUsed=true and modelName=gpt-4o-mini
+        // Two UsageRecords: an ERROR row for the failed gpt-4o attempt and an
+        // OK row for the gpt-4o-mini fallback that actually served the request.
         var records = usage.findByUserIdAndRecordedAtGreaterThanEqual(u.id(),
                 java.time.Instant.now().minusSeconds(60));
-        assertThat(records).hasSize(1);
-        assertThat(records.get(0).isFallbackUsed()).isTrue();
-        assertThat(records.get(0).getModelName()).isEqualTo("gpt-4o-mini");
+        assertThat(records).hasSize(2);
+
+        var served = records.stream()
+                .filter(r -> r.getModelName().equals("gpt-4o-mini")).toList();
+        assertThat(served).singleElement().satisfies(r -> {
+            assertThat(r.isFallbackUsed()).isTrue();
+            assertThat(r.getOutcome()).isEqualTo(CallOutcome.OK);
+        });
+
+        var failed = records.stream()
+                .filter(r -> r.getModelName().equals("gpt-4o")).toList();
+        assertThat(failed).singleElement().satisfies(r -> {
+            assertThat(r.getOutcome()).isEqualTo(CallOutcome.ERROR);
+            assertThat(r.isFallbackUsed()).isFalse();   // gpt-4o is the requested model
+        });
     }
 
     @Test

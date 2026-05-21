@@ -30,18 +30,14 @@ spring:
     baseline-on-migrate: true
     locations: classpath:db/migration
   quartz:
+    # Store-agnostic settings. The JDBC job store (dev/prod) is configured in
+    # the profile-specific document at the end of this file; the `test` profile
+    # swaps job-store-type to `memory` — see application-test.yml.
     job-store-type: jdbc
-    jdbc:
-      initialize-schema: never   # Flyway V8 owns the qrtz_* tables (auditable + rollback-safe)
     properties:
       org.quartz.scheduler.instanceName: godance-scheduler
       org.quartz.scheduler.instanceId:   AUTO
       org.quartz.threadPool.threadCount: "4"
-      org.quartz.jobStore.class:               org.springframework.scheduling.quartz.LocalDataSourceJobStore
-      org.quartz.jobStore.driverDelegateClass: org.quartz.impl.jdbcjobstore.PostgreSQLDelegate
-      org.quartz.jobStore.tablePrefix: qrtz_
-      org.quartz.jobStore.isClustered: "false"        # active-passive 2-region deploy; no clustering until S14+
-      org.quartz.jobStore.useProperties: "false"
       org.quartz.jobStore.misfireThreshold: "60000"   # 1 min — auto-recharge can wait that long
   data:
     redis:
@@ -89,6 +85,25 @@ godance:
     secret: ${JWT_SIGNING_KEY:dev-only-do-not-use-in-prod-godance-jwt-signing-key-must-be-32-bytes}
     expiry-minutes: ${JWT_EXPIRY_MINUTES:60}
     issuer: ${JWT_ISSUER:https://godance.ai}   # must be URI per RFC 7519 `iss` claim
+  oauth:
+    # Social sign-in (Google / Apple / X) alongside email+password. The dev
+    # defaults below are placeholders — they let the context boot but do not
+    # enable a working login. Operators set the real credentials via env.
+    # SPA callback the minted JWT is handed to (in the URL fragment).
+    post-login-redirect-uri: ${OAUTH_POST_LOGIN_REDIRECT_URI:http://localhost:5173/oauth/callback}
+    google:
+      client-id:     ${GOOGLE_OAUTH_CLIENT_ID:dev-google-client-id}
+      client-secret: ${GOOGLE_OAUTH_CLIENT_SECRET:dev-google-client-secret}
+    apple:
+      # Apple's OAuth client_secret is a generated ES256 JWT — supply the
+      # Services ID, Team ID, Key ID and the .p8 private-key contents.
+      client-id:   ${APPLE_OAUTH_CLIENT_ID:dev.godance.signin}
+      team-id:     ${APPLE_OAUTH_TEAM_ID:DEV0TEAM00}
+      key-id:      ${APPLE_OAUTH_KEY_ID:DEV0KEY000}
+      private-key: ${APPLE_OAUTH_PRIVATE_KEY:}
+    x:
+      client-id:     ${X_OAUTH_CLIENT_ID:dev-x-client-id}
+      client-secret: ${X_OAUTH_CLIENT_SECRET:dev-x-client-secret}
   stripe:
     secret-key:     ${STRIPE_SECRET_KEY:sk_test_dev_dummy_key_do_not_use_for_real_calls}
     webhook-secret: ${STRIPE_WEBHOOK_SECRET:whsec_dev_dummy_webhook_secret_do_not_use_for_real_calls}
@@ -224,3 +239,25 @@ logging:
   level:
     root: INFO
     ai.godance: DEBUG
+
+# ---------------------------------------------------------------------------
+# Quartz JDBC job store — dev/prod only. The JDBC SchedulerThread polls
+# Postgres on a timer; under Testcontainers that poll outlives the database
+# container during teardown. The `test` profile therefore uses the in-memory
+# RAM store (application-test.yml), so these JDBC-only properties must not be
+# bound when `test` is active — RAMJobStore has no setters for them.
+# ---------------------------------------------------------------------------
+---
+spring:
+  config:
+    activate:
+      on-profile: "!test"
+  quartz:
+    jdbc:
+      initialize-schema: never   # Flyway V8 owns the qrtz_* tables (auditable + rollback-safe)
+    properties:
+      org.quartz.jobStore.class:               org.springframework.scheduling.quartz.LocalDataSourceJobStore
+      org.quartz.jobStore.driverDelegateClass: org.quartz.impl.jdbcjobstore.PostgreSQLDelegate
+      org.quartz.jobStore.tablePrefix: qrtz_
+      org.quartz.jobStore.isClustered: "false"        # active-passive 2-region deploy; no clustering until S14+
+      org.quartz.jobStore.useProperties: "false"

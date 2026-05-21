@@ -5,6 +5,7 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
@@ -13,6 +14,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import ai.godance.domain.CallOutcome;
 import ai.godance.domain.Provider;
 import ai.godance.domain.ProviderHealth;
 import ai.godance.domain.UsageRecord;
@@ -21,13 +23,15 @@ import ai.godance.repository.UsageRecordRepository;
 
 /**
  * Folds {@link UsageRecord} rows into per-{@code (provider, model, 5-min window)}
- * {@link ProviderHealth} rows. Drives {@code GET /v1/status}.
+ * {@link ProviderHealth} rows. Drives {@code GET /v1/status} and the
+ * outage-aware router via {@link ModelHealthService}.
  *
- * <p>What's tracked today: {@code request_count}. Errors and latency are not
- * yet captured on {@code UsageRecord}, so {@code error_count} stays 0 and the
- * latency percentiles stay {@code null}. Both columns already exist in the
- * schema — when the gateways emit timing + outcome we wire it through here
- * without a migration.
+ * <p>Each window row carries {@code request_count}, {@code error_count} and
+ * {@code rate_limit_count} (from {@code UsageRecord.outcome}) plus p50/p95/p99
+ * latency percentiles (from {@code UsageRecord.latency_ms}, V10). A record with
+ * a {@code null} outcome — written before instrumentation — counts as a
+ * successful request; a record with a {@code null} latency is omitted from the
+ * percentile computation.
  */
 @Service
 public class ProviderHealthAggregator {
@@ -73,19 +77,49 @@ public class ProviderHealthAggregator {
                 .toList();
         if (records.isEmpty()) return;
 
-        Map<Key, Long> counts = records.stream().collect(Collectors.groupingBy(
-                r -> new Key(r.getProvider(), r.getModelName()), Collectors.counting()));
+        Map<Key, List<UsageRecord>> byKey = records.stream().collect(Collectors.groupingBy(
+                r -> new Key(r.getProvider(), r.getModelName())));
 
-        for (Map.Entry<Key, Long> e : counts.entrySet()) {
+        for (Map.Entry<Key, List<UsageRecord>> e : byKey.entrySet()) {
             Key k = e.getKey();
+            List<UsageRecord> group = e.getValue();
             ProviderHealth row = health.findByProviderAndModelAndWindowStartAndWindowEnd(
                             k.provider(), k.model(), windowStart, windowEnd)
                     .orElseGet(() -> newRow(k, windowStart, windowEnd));
-            row.setRequestCount(e.getValue());
+
+            row.setRequestCount(group.size());
+            row.setErrorCount(countOutcome(group, CallOutcome.ERROR));
+            row.setRateLimitCount(countOutcome(group, CallOutcome.RATE_LIMITED));
+
+            int[] latencies = group.stream()
+                    .map(UsageRecord::getLatencyMs)
+                    .filter(Objects::nonNull)
+                    .mapToInt(Integer::intValue)
+                    .sorted()
+                    .toArray();
+            row.setP50Ms(percentile(latencies, 50));
+            row.setP95Ms(percentile(latencies, 95));
+            row.setP99Ms(percentile(latencies, 99));
+
             health.save(row);
         }
         log.debug("provider-health: folded {} records into {} rows for window {} .. {}",
-                records.size(), counts.size(), windowStart, windowEnd);
+                records.size(), byKey.size(), windowStart, windowEnd);
+    }
+
+    private static long countOutcome(List<UsageRecord> group, CallOutcome outcome) {
+        return group.stream().filter(r -> r.getOutcome() == outcome).count();
+    }
+
+    /**
+     * Nearest-rank percentile over an ascending-sorted array; {@code null}
+     * when no latencies were captured for the window.
+     */
+    static Integer percentile(int[] sortedAsc, int p) {
+        if (sortedAsc.length == 0) return null;
+        int rank = (int) Math.ceil(p / 100.0 * sortedAsc.length);
+        int idx = Math.min(sortedAsc.length - 1, Math.max(0, rank - 1));
+        return sortedAsc[idx];
     }
 
     private static ProviderHealth newRow(Key k, Instant start, Instant end) {
