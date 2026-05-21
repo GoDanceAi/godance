@@ -1,0 +1,29 @@
+# ===========================================================================
+# Test profile. Activated for the whole Surefire run via the
+# `spring.profiles.active=test` system property (see pom.xml).
+#
+# The only override is the Quartz job store. In dev/prod Quartz uses the JDBC
+# store (LocalDataSourceJobStore), whose SchedulerThread polls Postgres on a
+# timer. Under Testcontainers that poll outlives the database container during
+# teardown, which floods the logs with
+#   "terminating connection due to unexpected postmaster exit"
+# and keeps the Surefire fork alive past the 30s self-kill threshold.
+#
+# The in-memory RAM store touches no database, so the scheduler still fires
+# jobs — the AutoRecharge integration test relies on debit-driven Quartz
+# firing — but teardown is clean and fast. The JDBC-only raw Quartz properties
+# live in a `!test` document in application.yml, so they are not bound here
+# (RAMJobStore would reject them).
+# ===========================================================================
+spring:
+  quartz:
+    job-store-type: memory
+
+# The provider-health fold runs on a Spring @Scheduled timer. Park its first
+# run far past any test run so it never fires against a Testcontainers
+# database mid-teardown — that fold would block the scheduler thread for the
+# full 30s Hikari connection timeout and trip Surefire's fork self-kill. Tests
+# drive ProviderHealthAggregator.fold(...) directly, so nothing is lost.
+godance:
+  scheduling:
+    providers-health-initial-delay: PT24H
