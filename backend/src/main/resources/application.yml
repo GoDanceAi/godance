@@ -118,6 +118,57 @@ godance:
     cancel-url:  ${NOWPAYMENTS_CANCEL_URL:http://localhost:8080/billing/cancel}
   binancepay:
     enabled:     ${BINANCE_PAY_ENABLED:false}    # v1.1 rail — flagged off until merchant KYC clears
+  admin:
+    # Operator allowlist for /v1/admin/** endpoints. Single-tenant, so we
+    # piggyback on the JWT subject (email) — no is_admin column on users.
+    # Comma-separated in env; empty default = fail-closed.
+    emails: ${GODANCE_ADMIN_EMAILS:}
+  pricing:
+    # Daily catalog drift detection + staging. Region-gated to
+    # DIGITALOCEAN inside the cron job (Alicloud must not double-fire).
+    refresh-cron:         ${PRICING_REFRESH_CRON:0 0 4 * * ?}     # 04:00 UTC daily; one hour after auto-recharge
+    noise-threshold-pct:  ${PRICING_NOISE_THRESHOLD_PCT:1.0}
+    min-microcents:       ${PRICING_MIN_MICROCENTS:1}
+    max-multiplier:       ${PRICING_MAX_MULTIPLIER:10.0}
+    llm-fallback-model-id: ${PRICING_LLM_FALLBACK_MODEL:gemini-3.1-flash-lite}
+    llm-fallback-max-pages-per-run: ${PRICING_LLM_FALLBACK_MAX_PAGES:20}
+    llm-fallback-fetch-timeout:     ${PRICING_LLM_FALLBACK_FETCH_TIMEOUT:15s}
+    page-allowlist-regex: []
+    feeds:
+      openrouter-url: ${PRICING_OPENROUTER_URL:https://openrouter.ai/api/v1/models}
+      litellm-url:    ${PRICING_LITELLM_URL:https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json}
+    alias-map:
+      # Upstream id → Godance model_name. Curated for the feed entries our
+      # catalog actually cares about; unknown ids fall back to bare-id +
+      # family-stem inference in ModelAliasResolver.
+      openrouter:
+        "anthropic/claude-opus-4-7":       claude-opus-4-7
+        "anthropic/claude-sonnet-4-6":     claude-sonnet-4-6
+        "anthropic/claude-haiku-4-5":      claude-haiku-4-5
+        "openai/gpt-5.5":                  gpt-5.5
+        "openai/gpt-5.4":                  gpt-5.4
+        "openai/gpt-5.4-nano":             gpt-5.4-nano
+        "openai/gpt-4o":                   gpt-4o
+        "openai/gpt-4o-mini":              gpt-4o-mini
+        "openai/gpt-4.1":                  gpt-4.1
+        "google/gemini-3.1-pro":           gemini-3.1-pro
+        "google/gemini-3.1-flash-lite":    gemini-3.1-flash-lite
+        "google/gemini-1.5-pro":           gemini-1.5-pro
+        "google/gemini-1.5-flash":         gemini-1.5-flash
+        "deepseek/deepseek-v4-pro":        deepseek-v4-pro
+        "deepseek/deepseek-v4-flash":      deepseek-v4-flash
+        "xai/grok-4":                      grok-4
+        "qwen/qwen-3.6":                   qwen-3.6
+        "qwen/qwen-3.6-coder":             qwen-3.6-coder
+        "moonshotai/kimi-k2.6":            kimi-k2.6
+        "zhipuai/glm-4.7-flash":           glm-4.7-flash
+        "minimax/minimax-m2.7":            minimax-m2.7
+      litellm:
+        claude-opus-4-7-20251220:          claude-opus-4-7
+        deepseek-v4-pro:                   deepseek-v4-pro
+        "1024-x-1024/seedream-5.0":        seedream-5.0
+        "1024-x-1024/qwen-image-2.0-pro":  qwen-image-2.0-pro
+        veo-3.1-fast:                      veo-3.1-fast
   billing:
     topup-min-cents: ${TOPUP_MIN_CENTS:100}    # $1.00 floor
     topup-max-cents: ${TOPUP_MAX_CENTS:100000} # $1,000 ceiling per top-up

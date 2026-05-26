@@ -99,26 +99,51 @@ public class ModelAliasResolver {
     }
 
     /**
-     * Strip the longest trailing hyphen-segment of the bare id; if any
-     * catalog model of the same provider {@code startsWith(prefix + "-")},
-     * it's a new family member. Iterates progressively shorter prefixes
-     * to handle multi-segment versions like {@code 4-7} → {@code 4} →
-     * (empty stop).
+     * Family-stem equality after dropping trailing version segments.
+     * <ul>
+     *   <li>{@code claude-opus-4-8} → stem {@code claude-opus}; matches an
+     *       existing same-provider {@code claude-opus-4-7} → NEW_VERSION.</li>
+     *   <li>{@code grok-mythos-5-0} → stem {@code grok-mythos}; does NOT
+     *       match {@code grok-4} (stem {@code grok}) → NEW_MODEL.</li>
+     *   <li>{@code claude-mythos-5.0} → stem {@code claude-mythos}; if no
+     *       catalog model shares that stem, NEW_MODEL even though
+     *       Anthropic is a known provider.</li>
+     * </ul>
+     * Provider-scoped: a hypothetical {@code xai/gpt-5} would not be
+     * classified as a NEW_VERSION of OpenAI's GPT family.
      */
     private boolean familyStemMatchesAny(String bareId, Provider provider) {
-        String prefix = bareId;
-        while (true) {
-            int lastDash = prefix.lastIndexOf('-');
-            if (lastDash <= 0) return false;
-            prefix = prefix.substring(0, lastDash);
-            String prefixDash = prefix + "-";
-            for (ModelCatalogEntry e : catalogSnapshot) {
-                if (provider != null && e.getProvider() != provider) continue;
-                if (e.getModelName().startsWith(prefixDash) && !e.getModelName().equals(bareId)) {
-                    return true;
-                }
+        String candidateStem = familyStem(bareId);
+        if (candidateStem.isEmpty()) return false;
+        for (ModelCatalogEntry e : catalogSnapshot) {
+            if (provider != null && e.getProvider() != provider) continue;
+            if (e.getModelName().equals(bareId)) continue;
+            if (candidateStem.equals(familyStem(e.getModelName()))) {
+                return true;
             }
         }
+        return false;
+    }
+
+    /**
+     * Drop trailing hyphen-segments that are purely numeric or numeric
+     * with a single decimal point. Examples: {@code claude-opus-4-7 →
+     * claude-opus}; {@code gpt-5.5 → gpt}; {@code gpt-5.4-nano →
+     * gpt-5.4-nano} (the trailing "nano" is non-numeric so we stop).
+     */
+    static String familyStem(String bareId) {
+        String[] parts = bareId.split("-");
+        int end = parts.length;
+        while (end > 0 && parts[end - 1].matches("\\d+(\\.\\d+)?")) {
+            end--;
+        }
+        if (end == 0) return "";
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < end; i++) {
+            if (i > 0) sb.append('-');
+            sb.append(parts[i]);
+        }
+        return sb.toString();
     }
 
     /** OpenRouter ids are {@code vendor/name}. Bare ids have no slash. */

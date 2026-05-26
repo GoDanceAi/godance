@@ -27,3 +27,9 @@ spring:
 godance:
   scheduling:
     providers-health-initial-delay: PT24H
+  pricing:
+    # Quartz cron must remain syntactically valid (the scheduler parses it
+    # eagerly at JobDetail registration). 2099 sentinel is fine; combined
+    # with the DIGITALOCEAN region gate inside PricingRefreshCronJob, the
+    # job never executes under the test profile (`godance.region=local`).
+    refresh-cron: "0 0 0 1 1 ? 2099"
