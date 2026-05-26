@@ -5,13 +5,16 @@ import java.util.List;
 import ai.godance.gateway.ModelCatalog.ModelInfo;
 
 /**
- * Supplies a slice of the model catalog. Each modality (text, image,
- * video) ships its own {@code @Component} implementation under
- * {@link ai.godance.gateway.catalog}; {@link ModelCatalog} autowires
- * every contributor and merges their models into one registry.
+ * Historical contributor interface — kept as the source-of-record for the
+ * V11 catalog seed so the SQL {@code INSERT}s are reviewable side-by-side
+ * with the original code values at commit e10be63.
  *
- * <p>This keeps modality catalogs independently editable — adding a
- * provider in one modality never touches another's file.
+ * <p><b>No longer a runtime read path.</b> {@link ModelCatalog} now loads
+ * from the {@code model_catalog} table; the three implementations under
+ * {@link ai.godance.gateway.catalog} are plain classes (not {@code
+ * @Component} beans) referenced only by their unit tests and by V11's
+ * comment header. Plan is to delete them entirely once the V11 seed has
+ * one production cycle behind it.
  */
 public interface CatalogContributor {
 

@@ -2,14 +2,15 @@ package ai.godance.gateway.catalog;
 
 import java.util.List;
 
-import org.springframework.stereotype.Component;
-
 import ai.godance.domain.Provider;
 import ai.godance.gateway.CatalogContributor;
 import ai.godance.gateway.ModelCatalog.ModelInfo;
 
 /**
- * Image models offered through {@code /v1/images/generations}.
+ * Image models offered through {@code /v1/images/generations}. <b>Frozen
+ * seed source</b> for the V11 catalog migration — no longer a Spring
+ * bean and no longer a runtime read path; see
+ * {@link CatalogContributor}.
  *
  * <p>Per-image pricing is microcents — {@code (USD per image) × 1_000_000}
  * (so $0.04/image → {@code 40_000}). Prices are provider list rates;
@@ -23,7 +24,6 @@ import ai.godance.gateway.ModelCatalog.ModelInfo;
  * {@code GET /v1/jobs/{id}} or a webhook. Markup is the image tier
  * (10–15%); a flat 12% {@code markupOverride} is applied per model.
  */
-@Component
 public class ImageCatalog implements CatalogContributor {
 
     /** Image resale markup — 12%, mid of the 10–15% image tier band. */

@@ -5,10 +5,16 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
+import ai.godance.domain.CatalogStatus;
 import ai.godance.domain.Modality;
+import ai.godance.domain.ModelCatalogEntry;
 import ai.godance.domain.Provider;
+import ai.godance.repository.ModelCatalogEntryRepository;
+import jakarta.annotation.PostConstruct;
 
 /**
  * Catalog of supported models with pricing + provider routing.
@@ -16,17 +22,23 @@ import ai.godance.domain.Provider;
  * = $0.000001) — chosen so OpenAI's "$0.15 per 1M tokens" maps cleanly
  * to a small integer ({@code 150}) without floating-point drift.
  *
- * <p>Models are not hardcoded here: each modality contributes its slice
- * via a {@link CatalogContributor} bean (see {@link
- * ai.godance.gateway.catalog}). This catalog autowires every contributor
- * and merges them, so adding a provider never edits this file.
+ * <p>The runtime source of truth is the {@code model_catalog} table
+ * (seeded by V11 from the prior {@code CatalogContributor} beans at
+ * e10be63). On boot — and again whenever {@link #refresh()} is called
+ * after an approval write — every {@link CatalogStatus#ACTIVE ACTIVE}
+ * row is hydrated into a {@code volatile} in-memory map for lock-free
+ * reads on the hot path.
  *
- * <p>Markup defaults to the per-modality tier in {@link
- * ai.godance.config.BillingProperties}; an explicit {@code markupOverride}
- * on a {@link ModelInfo} wins when set.
+ * <p>{@code DISCOVERED} / {@code STAGED} / {@code DEPRECATED} rows are
+ * deliberately excluded from {@link #find(String)} so the rest of the
+ * gateway treats them as not-yet-billable. Markup defaults to the
+ * per-modality tier in {@link ai.godance.config.BillingProperties}; an
+ * explicit {@code markupOverride} on a {@link ModelInfo} wins when set.
  */
 @Component
 public class ModelCatalog {
+
+    private static final Logger log = LoggerFactory.getLogger(ModelCatalog.class);
 
     public record ModelInfo(
             String modelName,
@@ -71,24 +83,46 @@ public class ModelCatalog {
         }
     }
 
-    private final Map<String, ModelInfo> catalog = new HashMap<>();
+    private final ModelCatalogEntryRepository entries;
+    /**
+     * Catalog snapshot — replaced wholesale on every {@link #refresh()}.
+     * {@code volatile} so reader threads see the latest reference without
+     * locking; the map itself is immutable post-publish, so no per-entry
+     * synchronization is needed either.
+     */
+    private volatile Map<String, ModelInfo> catalog = Map.of();
 
-    public ModelCatalog(List<CatalogContributor> contributors) {
-        for (CatalogContributor contributor : contributors) {
-            for (ModelInfo model : contributor.models()) {
-                register(model);
-            }
-        }
+    public ModelCatalog(ModelCatalogEntryRepository entries) {
+        this.entries = entries;
     }
 
-    /** Fail fast at startup if two contributors claim the same model name. */
-    private void register(ModelInfo m) {
-        ModelInfo prior = catalog.put(m.modelName(), m);
-        if (prior != null) {
-            throw new IllegalStateException(
-                    "duplicate catalog entry for model '" + m.modelName()
-                            + "': " + prior.provider() + " vs " + m.provider());
+    @PostConstruct
+    void load() {
+        refresh();
+    }
+
+    /**
+     * Rebuilds the in-memory map from {@link CatalogStatus#ACTIVE ACTIVE}
+     * rows. Called at boot and after every admin approval write. Cheap
+     * enough at our model-count scale that a full reload beats incremental
+     * patch logic.
+     */
+    public void refresh() {
+        List<ModelCatalogEntry> active = entries.findByStatus(CatalogStatus.ACTIVE);
+        Map<String, ModelInfo> next = new HashMap<>(active.size() * 2);
+        for (ModelCatalogEntry e : active) {
+            ModelInfo info = toModelInfo(e);
+            ModelInfo prior = next.put(info.modelName(), info);
+            if (prior != null) {
+                // model_catalog.model_name is UNIQUE, so this would be a
+                // schema/seed bug — fail fast rather than silently shadow.
+                throw new IllegalStateException(
+                        "duplicate catalog entry for model '" + info.modelName()
+                                + "': " + prior.provider() + " vs " + info.provider());
+            }
         }
+        this.catalog = Map.copyOf(next);
+        log.info("ModelCatalog refreshed: {} ACTIVE models", catalog.size());
     }
 
     public Optional<ModelInfo> find(String modelName) {
@@ -96,9 +130,23 @@ public class ModelCatalog {
     }
 
     /** Read-only snapshot of every registered model, sorted by name. */
-    public java.util.List<ModelInfo> all() {
+    public List<ModelInfo> all() {
         return catalog.values().stream()
                 .sorted(java.util.Comparator.comparing(ModelInfo::modelName))
                 .toList();
+    }
+
+    private static ModelInfo toModelInfo(ModelCatalogEntry e) {
+        return new ModelInfo(
+                e.getModelName(),
+                e.getProvider(),
+                e.getModality(),
+                e.getInputMicrocentsPer1k(),
+                e.getOutputMicrocentsPer1k(),
+                e.getDefaultMaxOutputTokens(),
+                e.getMarkupOverride(),
+                e.getPerImageMicrocents(),
+                e.getPerSecondMicrocents(),
+                e.isRequiresAsync());
     }
 }

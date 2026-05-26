@@ -2,15 +2,16 @@ package ai.godance.gateway.catalog;
 
 import java.util.List;
 
-import org.springframework.stereotype.Component;
-
 import ai.godance.domain.Modality;
 import ai.godance.domain.Provider;
 import ai.godance.gateway.CatalogContributor;
 import ai.godance.gateway.ModelCatalog.ModelInfo;
 
 /**
- * Text models offered through {@code /v1/chat/completions}.
+ * Text models offered through {@code /v1/chat/completions}. <b>Frozen
+ * seed source</b> for the V11 catalog migration — no longer a Spring
+ * bean and no longer a runtime read path; see
+ * {@link CatalogContributor}.
  *
  * <p>Pricing is microcents per 1000 tokens — {@code (USD per 1M tokens)
  * × 1000}. All entries use the default 5% text markup tier
@@ -22,7 +23,6 @@ import ai.godance.gateway.ModelCatalog.ModelInfo;
  * {@code Godance-Model-Catalog-Research-2026-05.md}) and must be
  * confirmed on the provider dashboard before they drive resale pricing.
  */
-@Component
 public class TextCatalog implements CatalogContributor {
 
     @Override
