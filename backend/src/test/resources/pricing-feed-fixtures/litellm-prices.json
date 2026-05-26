@@ -1,0 +1,48 @@
+{
+  "_comment": "Trimmed BerriAI/litellm/model_prices_and_context_window.json — real shape, six entries deliberately chosen to exercise text + image + video parsers and the mode-discriminator skip. Full feed has ~2739 entries.",
+  "claude-opus-4-7-20251220": {
+    "litellm_provider": "anthropic",
+    "mode": "chat",
+    "max_input_tokens": 200000,
+    "max_output_tokens": 32000,
+    "input_cost_per_token": 0.000005,
+    "output_cost_per_token": 0.000025,
+    "supports_function_calling": true,
+    "supports_vision": true,
+    "source": "https://docs.anthropic.com/claude/docs/models-overview"
+  },
+  "deepseek-v4-pro": {
+    "litellm_provider": "deepseek",
+    "mode": "chat",
+    "max_input_tokens": 128000,
+    "max_output_tokens": 8192,
+    "input_cost_per_token": 0.000002,
+    "output_cost_per_token": 0.0000035,
+    "source": "https://api-docs.deepseek.com/quick_start/pricing"
+  },
+  "1024-x-1024/seedream-5.0": {
+    "litellm_provider": "volcengine",
+    "mode": "image_generation",
+    "output_cost_per_image": 0.035,
+    "source": "https://www.volcengine.com/docs/82379"
+  },
+  "1024-x-1024/qwen-image-2.0-pro": {
+    "litellm_provider": "alibaba",
+    "mode": "image_generation",
+    "output_cost_per_image": 0.075,
+    "source": "https://help.aliyun.com/zh/dashscope"
+  },
+  "veo-3.1-fast": {
+    "litellm_provider": "google",
+    "mode": "video_generation",
+    "output_cost_per_second": 0.15,
+    "source": "https://cloud.google.com/vertex-ai/generative-ai/pricing"
+  },
+  "text-embedding-3-small": {
+    "litellm_provider": "openai",
+    "mode": "embedding",
+    "input_cost_per_token": 0.00000002,
+    "output_cost_per_token": 0,
+    "source": "https://openai.com/api/pricing/"
+  }
+}
