@@ -200,9 +200,9 @@ class ImageGenerationIntegrationTest {
         assertThat(done.status()).isEqualTo(JobStatus.DONE);
         assertThat(done.outputUrl()).startsWith(MINIO.getS3URL());
 
-        // gpt-image-2: 40 000 µ¢ × 1.12 (12% image markup) = 44 800 µ¢ → HALF_UP /10 000 = 4¢.
-        assertThat(done.actualCostCents()).isEqualTo(4L);
-        awaitBalance(u.id(), 100_00L - 4L);
+        // gpt-image-2: 53 000 µ¢ × 1.12 (12% image markup) = 59 360 µ¢ → HALF_UP /10 000 = 6¢.
+        assertThat(done.actualCostCents()).isEqualTo(6L);
+        awaitBalance(u.id(), 100_00L - 6L);
     }
 
     // ===== Job lifecycle — Volcengine Ark Seedream ====================

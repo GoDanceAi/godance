@@ -1,7 +1,10 @@
 package ai.godance.gateway.providers;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
+import static com.github.tomakehurst.wiremock.client.WireMock.equalTo;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
+import static com.github.tomakehurst.wiremock.client.WireMock.matchingJsonPath;
+import static com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.post;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlPathMatching;
@@ -72,5 +75,33 @@ class SoraVideoProviderTest {
         assertThat(out).hasSize(1);
         assertThat(out.get(0).bytes()).isEqualTo(videoBytes);
         assertThat(out.get(0).mimeType()).isEqualTo("video/mp4");
+    }
+
+    @Test
+    void generate_givenSoraProHdAlias_sendsSoraProAt1024pHd() {
+        byte[] videoBytes = new byte[] { 'M', 'P', '4', 9 };
+
+        wm.stubFor(post(urlEqualTo("/v1/videos"))
+                .willReturn(aResponse().withStatus(200)
+                        .withHeader("content-type", "application/json")
+                        .withBody("{\"id\":\"vid_hd\",\"status\":\"queued\"}")));
+        wm.stubFor(get(urlPathMatching("/v1/videos/vid_hd"))
+                .willReturn(aResponse().withStatus(200)
+                        .withHeader("content-type", "application/json")
+                        .withBody("{\"id\":\"vid_hd\",\"status\":\"completed\"}")));
+        wm.stubFor(get(urlEqualTo("/v1/videos/vid_hd/content"))
+                .willReturn(aResponse().withStatus(200)
+                        .withHeader("content-type", "video/mp4")
+                        .withBody(videoBytes)));
+
+        // "sora-2-pro-hd" is a Godance catalog alias with no explicit size set.
+        VideoRequest req = new VideoRequest("sora-2-pro-hd", "A test clip", null, 5, 1);
+        List<GeneratedVideo> out = provider.generate(req).block(Duration.ofMinutes(2));
+
+        assertThat(out).hasSize(1);
+        // Upstream must receive the real model id ("sora-2-pro") and HD resolution.
+        wm.verify(postRequestedFor(urlEqualTo("/v1/videos"))
+                .withRequestBody(matchingJsonPath("$.model", equalTo("sora-2-pro")))
+                .withRequestBody(matchingJsonPath("$.size", equalTo("1792x1024"))));
     }
 }

@@ -117,6 +117,50 @@ class Session12EndpointsIntegrationTest {
         });
     }
 
+    @Test
+    void models_includesNewImageAndVideoEntries_withVerifiedPricing() {
+        ModelsController.ModelListResponse body = http.get().uri("/v1/models")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody(ModelsController.ModelListResponse.class)
+                .returnResult().getResponseBody();
+
+        // gpt-image-1.5 — separate image entry at 40,000 microcents/img
+        assertThat(body.data()).anySatisfy(m -> {
+            assertThat(m.id()).isEqualTo("gpt-image-1.5");
+            assertThat(m.godance()).containsEntry("modality", "IMAGE");
+            assertThat(perImageMicrocents(m)).isEqualTo(40_000L);
+        });
+        // gpt-image-2 — re-priced to 53,000 microcents/img
+        assertThat(body.data()).anySatisfy(m -> {
+            assertThat(m.id()).isEqualTo("gpt-image-2");
+            assertThat(perImageMicrocents(m)).isEqualTo(53_000L);
+        });
+        // sora-2-pro-hd — separate video entry at 500,000 microcents/s (1024p HD)
+        assertThat(body.data()).anySatisfy(m -> {
+            assertThat(m.id()).isEqualTo("sora-2-pro-hd");
+            assertThat(m.godance()).containsEntry("modality", "VIDEO");
+            assertThat(perSecondMicrocents(m)).isEqualTo(500_000L);
+        });
+        // sora-2-pro — unchanged at 300,000 microcents/s (720p)
+        assertThat(body.data()).anySatisfy(m -> {
+            assertThat(m.id()).isEqualTo("sora-2-pro");
+            assertThat(perSecondMicrocents(m)).isEqualTo(300_000L);
+        });
+    }
+
+    @SuppressWarnings("unchecked")
+    private static long perImageMicrocents(ModelsController.ModelEntry m) {
+        Map<String, Object> pricing = (Map<String, Object>) m.godance().get("pricing");
+        return ((Number) pricing.get("per_image_microcents")).longValue();
+    }
+
+    @SuppressWarnings("unchecked")
+    private static long perSecondMicrocents(ModelsController.ModelEntry m) {
+        Map<String, Object> pricing = (Map<String, Object>) m.godance().get("pricing");
+        return ((Number) pricing.get("per_second_microcents")).longValue();
+    }
+
     // ---------- /v1/status (public) -----------------------------------
 
     @Test

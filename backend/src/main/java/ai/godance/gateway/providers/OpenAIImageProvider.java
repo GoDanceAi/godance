@@ -20,7 +20,9 @@ import reactor.core.publisher.Mono;
 
 /**
  * OpenAI {@code /v1/images/generations} for the {@code gpt-image-*}
- * family ({@code gpt-image-2}). These models return base64 image data
+ * family ({@code gpt-image-2}, {@code gpt-image-1.5}) — the catalog model
+ * name is forwarded verbatim as the upstream {@code model}. These models
+ * return base64 image data
  * by default — {@code response_format} and {@code style} are dall-e-only
  * params and are rejected for {@code gpt-image-*} — so we get the raw
  * bytes back and re-host them in our own bucket (we control URL

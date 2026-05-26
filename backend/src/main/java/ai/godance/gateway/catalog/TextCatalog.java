@@ -54,9 +54,9 @@ public class TextCatalog implements CatalogContributor {
                 text("claude-haiku-4-5",            Provider.ANTHROPIC,      1_000L,  5_000L,  4096),
                 text("deepseek-v4-flash",           Provider.DEEPSEEK,       140L,    280L,    4096),
                 text("kimi-k2.6",                   Provider.MOONSHOT,       950L,    4_000L,  4096),  // UNVERIFIED — not from Moonshot's own page
-                text("qwen-3.6",                    Provider.ALIBABA_DASHSCOPE, 400L, 1_200L,  4096),  // UNVERIFIED — confirm on Model Studio
-                text("qwen-3.6-coder",              Provider.ALIBABA_DASHSCOPE, 600L, 2_400L,  4096),  // UNVERIFIED — confirm on Model Studio
-                text("glm-4.7-flash",               Provider.ZHIPU,          100L,    600L,    4096),  // UNVERIFIED — confirm on bigmodel.cn
+                text("qwen-3.6",                    Provider.ALIBABA_DASHSCOPE, 325L, 1_950L,  4096),  // verified 2026-05-21 (OpenRouter)
+                text("qwen-3.6-coder",              Provider.ALIBABA_DASHSCOPE, 650L, 3_250L,  4096),  // verified 2026-05-21 (OpenRouter)
+                text("glm-4.7-flash",               Provider.ZHIPU,          60L,     400L,    4096),  // verified 2026-05-21 (z.ai paid tier)
                 text("minimax-m2.7",                Provider.MINIMAX,        300L,    1_200L,  4096)); // UNVERIFIED — confirm on minimax.io
     }
 

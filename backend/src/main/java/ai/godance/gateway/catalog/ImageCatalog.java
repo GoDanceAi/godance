@@ -35,7 +35,8 @@ public class ImageCatalog implements CatalogContributor {
                 // ===== OpenAI =====
                 // gpt-image-2 is token-billed (~$0.01–$0.20/img by quality);
                 // priced for the standard-quality 1024² tier.
-                img("gpt-image-2",        Provider.OPENAI,            40_000L),
+                img("gpt-image-2",        Provider.OPENAI,            53_000L),  // ~$0.053/img (standard 1024²); verified 2026-05-21
+                img("gpt-image-1.5",      Provider.OPENAI,            40_000L),  // ~$0.04/img (standard tier); verified 2026-05-21
 
                 // ===== ByteDance / Volcengine Ark — Seedream =====
                 img("seedream-5.0",       Provider.VOLCENGINE_ARK,    35_000L),  // ~$0.035/img

@@ -33,15 +33,16 @@ public class VideoCatalog implements CatalogContributor {
                 // Volcengine Ark Seedance — China-hosted. ~$0.26 per 720p 5s
                 // clip w/ audio → ~$0.052/s. Seedance 2.0 API availability is
                 // UNVERIFIED in the research doc; confirm before launch.
-                ModelInfo.video("seedance-2.0",       Provider.VOLCENGINE_ARK,  52_000L, 15.0),
+                ModelInfo.video("seedance-2.0",       Provider.VOLCENGINE_ARK, 140_000L, 15.0),  // ~$0.14/s standard; API live 2026-04; verified 2026-05-21
 
                 // OpenAI Sora 2 — $0.10/s (720p); Sora 2 Pro — ~$0.30/s (720p).
                 ModelInfo.video("sora-2",             Provider.OPENAI,         100_000L, 12.0),
-                ModelInfo.video("sora-2-pro",         Provider.OPENAI,         300_000L, 10.0),
+                ModelInfo.video("sora-2-pro",         Provider.OPENAI,         300_000L, 10.0),  // 720p
+                ModelInfo.video("sora-2-pro-hd",      Provider.OPENAI,         500_000L, 10.0),  // 1024p HD ~$0.50/s; verified 2026-05-21
 
                 // Google Veo 3.1 — $0.40/s incl. audio; Veo 3.1 Fast — ~$0.10/s (720p).
                 ModelInfo.video("veo-3.1",            Provider.GOOGLE_VERTEX,  400_000L, 10.0),
-                ModelInfo.video("veo-3.1-fast",       Provider.GOOGLE_VERTEX,  100_000L, 12.0),
+                ModelInfo.video("veo-3.1-fast",       Provider.GOOGLE_VERTEX,  150_000L, 12.0),  // ~$0.15/s incl. audio; verified 2026-05-21
 
                 // Kling 3.0 (Kuaishou) — China-hosted. ~$0.084/s (Std tier);
                 // official credit→USD rate UNVERIFIED.

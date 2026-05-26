@@ -20,9 +20,11 @@ import ai.godance.gateway.VideoProviderAdapter;
 import reactor.core.publisher.Mono;
 
 /**
- * OpenAI Sora video API — serves both {@code sora-2} and
- * {@code sora-2-pro} (the catalog model name is forwarded verbatim as
- * the upstream {@code model}). Async submit + poll pattern:
+ * OpenAI Sora video API — serves {@code sora-2}, {@code sora-2-pro}, and
+ * {@code sora-2-pro-hd} (a Godance catalog alias mapped to {@code sora-2-pro}
+ * at 1024p HD — the $0.50/s tier). Catalog model names are forwarded as the
+ * upstream {@code model}; the HD alias is remapped first. Async submit + poll
+ * pattern:
  * <ol>
  *   <li>POST {@code /v1/videos} → returns video {@code id} + status</li>
  *   <li>GET {@code /v1/videos/{id}} polls until {@code completed} / {@code failed}</li>
@@ -59,11 +61,18 @@ public class SoraVideoProvider implements VideoProviderAdapter {
 
     @Override
     public Mono<List<GeneratedVideo>> generate(VideoRequest request) {
+        // "sora-2-pro-hd" is a Godance catalog alias for Sora 2 Pro at 1024p HD
+        // (the $0.50/s tier). There is no distinct upstream model id, so map it to
+        // "sora-2-pro" and default to the HD size when the caller didn't set one.
+        boolean hd = "sora-2-pro-hd".equals(request.model());
+        String upstreamModel = hd ? "sora-2-pro" : request.model();
+        String defaultSize = hd ? "1792x1024" : "1280x720";
+
         SoraSubmit body = new SoraSubmit(
-                request.model(),
+                upstreamModel,
                 request.prompt(),
                 request.durationSeconds() == null ? 10 : request.durationSeconds(),
-                request.size() == null ? "1280x720" : request.size());
+                request.size() == null ? defaultSize : request.size());
 
         return client.post()
                 .uri("/v1/videos")
