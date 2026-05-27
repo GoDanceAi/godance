@@ -53,7 +53,9 @@ import reactor.core.publisher.Mono;
         ObjectStorageProperties.class,
         BflProperties.class,
         VolcengineProperties.class,
-        SecurityProperties.class})
+        SecurityProperties.class,
+        PricingProperties.class,
+        AdminProperties.class})
 public class SecurityConfig {
 
     @Bean
@@ -119,7 +121,8 @@ public class SecurityConfig {
     @Bean
     @Order(2)
     SecurityWebFilterChain securityFilterChain(ServerHttpSecurity http,
-            ApiKeyAuthFilter apiKeyAuthFilter, SpendingLimitFilter spendingLimitFilter) {
+            ApiKeyAuthFilter apiKeyAuthFilter, SpendingLimitFilter spendingLimitFilter,
+            ai.godance.security.AdminAuthorizationFilter adminAuthorizationFilter) {
         return http
                 // CORS is handled by the standalone CorsWebFilter bean above.
                 .csrf(ServerHttpSecurity.CsrfSpec::disable)
@@ -148,6 +151,10 @@ public class SecurityConfig {
                 // installs a Jwt-principal so downstream controllers stay agnostic
                 // to whether the caller used a JWT or an API key.
                 .addFilterBefore(apiKeyAuthFilter::filter, SecurityWebFiltersOrder.AUTHENTICATION)
+                // Admin allowlist guard on /v1/admin/** — fails closed; runs before
+                // the spending-cap filter so a non-admin caller is rejected without
+                // any DB lookups.
+                .addFilterAfter(adminAuthorizationFilter::filter, SecurityWebFiltersOrder.AUTHORIZATION)
                 // Spending caps are checked after authorization, before the controller.
                 .addFilterAfter(spendingLimitFilter::filter, SecurityWebFiltersOrder.AUTHORIZATION)
                 .oauth2ResourceServer(oauth -> oauth

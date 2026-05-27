@@ -2,14 +2,15 @@ package ai.godance.gateway.catalog;
 
 import java.util.List;
 
-import org.springframework.stereotype.Component;
-
 import ai.godance.domain.Provider;
 import ai.godance.gateway.CatalogContributor;
 import ai.godance.gateway.ModelCatalog.ModelInfo;
 
 /**
- * Curated launch catalog for {@code /v1/videos/generations}.
+ * Curated launch catalog for {@code /v1/videos/generations}. <b>Frozen
+ * seed source</b> for the V11 catalog migration — no longer a Spring
+ * bean and no longer a runtime read path; see
+ * {@link CatalogContributor}.
  *
  * <p>Every video model is async ({@code requiresAsync = true}) and
  * priced per second of output — {@code perSecondMicrocents =
@@ -24,7 +25,6 @@ import ai.godance.gateway.ModelCatalog.ModelInfo;
  * equivalent. Numbers flagged UNVERIFIED in that doc must be confirmed
  * on the provider dashboard before they drive live resale pricing.
  */
-@Component
 public class VideoCatalog implements CatalogContributor {
 
     @Override

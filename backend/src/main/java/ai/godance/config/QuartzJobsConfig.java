@@ -10,6 +10,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import ai.godance.service.AutoRechargeCronJob;
+import ai.godance.service.pricing.PricingRefreshCronJob;
 
 /**
  * Quartz {@link JobDetail} + {@link Trigger} beans for static, system-wide
@@ -43,6 +44,33 @@ public class QuartzJobsConfig {
         return TriggerBuilder.newTrigger()
                 .forJob(autoRechargeCronJobDetail)
                 .withIdentity("autoRechargeCronTrigger")
+                .withSchedule(CronScheduleBuilder.cronSchedule(cron)
+                        .inTimeZone(java.util.TimeZone.getTimeZone("UTC"))
+                        .withMisfireHandlingInstructionDoNothing())
+                .build();
+    }
+
+    @Bean
+    JobDetail pricingRefreshCronJobDetail() {
+        return JobBuilder.newJob(PricingRefreshCronJob.class)
+                .withIdentity("pricingRefreshCronJob")
+                .storeDurably()
+                .build();
+    }
+
+    /**
+     * Default 04:00 UTC daily — one hour after auto-recharge so the two
+     * cron windows don't collide. Region gating happens inside
+     * {@link PricingRefreshCronJob#execute}: outside DIGITALOCEAN the
+     * trigger still fires but the job is a no-op.
+     */
+    @Bean
+    Trigger pricingRefreshCronTrigger(
+            JobDetail pricingRefreshCronJobDetail,
+            @Value("${godance.pricing.refresh-cron:0 0 4 * * ?}") String cron) {
+        return TriggerBuilder.newTrigger()
+                .forJob(pricingRefreshCronJobDetail)
+                .withIdentity("pricingRefreshCronTrigger")
                 .withSchedule(CronScheduleBuilder.cronSchedule(cron)
                         .inTimeZone(java.util.TimeZone.getTimeZone("UTC"))
                         .withMisfireHandlingInstructionDoNothing())
