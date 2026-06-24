@@ -31,6 +31,8 @@ import ai.godance.gateway.ModelCatalog.ModelInfo;
 import ai.godance.gateway.ProviderAdapter;
 import ai.godance.gateway.ProviderGateway;
 import ai.godance.repository.UsageRecordRepository;
+import ai.godance.routing.ResolvedRoute;
+import ai.godance.routing.RouteResolver;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.SignalType;
@@ -68,11 +70,12 @@ public class ChatCompletionService {
     private final UsageRecordRepository usage;
     private final GatewayProperties gatewayProps;
     private final ModelHealthService modelHealth;
+    private final RouteResolver routeResolver;
 
     public ChatCompletionService(ModelCatalog catalog, CostCalculator calculator,
                                  ProviderGateway gateway, CreditLedgerService ledger,
                                  UsageRecordRepository usage, GatewayProperties gatewayProps,
-                                 ModelHealthService modelHealth) {
+                                 ModelHealthService modelHealth, RouteResolver routeResolver) {
         this.catalog = catalog;
         this.calculator = calculator;
         this.gateway = gateway;
@@ -80,16 +83,27 @@ public class ChatCompletionService {
         this.usage = usage;
         this.gatewayProps = gatewayProps;
         this.modelHealth = modelHealth;
+        this.routeResolver = routeResolver;
     }
 
     public ChatResponse execute(UUID userId, UUID apiKeyId, ChatRequest request) {
         String requestId = "req_" + UUID.randomUUID().toString().replace("-", "").substring(0, 24);
 
-        ModelInfo primary = catalog.find(request.model()).orElseThrow(() ->
+        int estimatedInputTokens = estimateInputTokens(request.messages());
+
+        // Resolve routing first: a virtual id (godance-auto/...) becomes an
+        // ordered list of concrete candidates; a direct model call is an
+        // unchanged passthrough of [model] + fallbacksFor(model).
+        ResolvedRoute route = routeResolver.resolve(request, estimatedInputTokens, gateway.region());
+        List<String> attemptModels = new ArrayList<>(route.orderedCandidates());
+        logRoutingDecision(requestId, route, attemptModels);
+
+        // Estimate + pre-debit against the FIRST concrete candidate — the
+        // virtual id itself is not in the catalog and would 404 the old way.
+        ModelInfo primary = catalog.find(attemptModels.get(0)).orElseThrow(() ->
                 new ResponseStatusException(HttpStatus.NOT_FOUND,
                         "unknown model: " + request.model()));
 
-        int estimatedInputTokens = estimateInputTokens(request.messages());
         long estimateCents = Math.max(1L,
                 calculator.estimateInputCents(primary, estimatedInputTokens));
 
@@ -98,9 +112,6 @@ public class ChatCompletionService {
                     "insufficient credit; top up via /v1/billing/topup");
         }
 
-        List<String> attemptModels = new ArrayList<>();
-        attemptModels.add(request.model());
-        attemptModels.addAll(gatewayProps.fallbacksFor(request.model()));
         reorderByHealth(attemptModels);
 
         RuntimeException lastError = null;
@@ -226,6 +237,21 @@ public class ChatCompletionService {
     // ===== Observability =============================================
 
     /**
+     * Margin-attribution audit line for routed (virtual) calls. Keyed by
+     * {@code requestId} so it joins to the {@link UsageRecord} written for
+     * whichever concrete model actually served — that join yields the
+     * spread between what the caller paid for the virtual id and the served
+     * model's {@code providerCostCents} (Phase 1 exit gate; the dedicated
+     * routed_policy/routed_rule columns are Phase 2). No-op for direct calls.
+     */
+    private void logRoutingDecision(String requestId, ResolvedRoute route, List<String> attemptModels) {
+        if (route.fromVirtual()) {
+            log.info("Routing decision: requestId={} virtualId={} rule={} candidates={}",
+                    requestId, route.policyId(), route.matchedRule(), attemptModels);
+        }
+    }
+
+    /**
      * Stable-sort the attempt list so models currently flagged as degraded
      * (failure rate over the de-prefer threshold, see {@link ModelHealthService})
      * are tried last. A degraded model is de-preferred, never dropped — if
@@ -304,11 +330,19 @@ public class ChatCompletionService {
     public Flux<ChatChunk> executeStreaming(UUID userId, UUID apiKeyId, ChatRequest request) {
         String requestId = "req_" + UUID.randomUUID().toString().replace("-", "").substring(0, 24);
 
-        ModelInfo model = catalog.find(request.model()).orElseThrow(() ->
+        int estimatedInputTokens = estimateInputTokens(request.messages());
+
+        // Resolve routing first (same as execute()). Streaming has no attempt
+        // loop, so we dispatch the first concrete candidate; a region-forbidden
+        // primary surfaces as the dispatch error rather than falling through.
+        ResolvedRoute route = routeResolver.resolve(request, estimatedInputTokens, gateway.region());
+        List<String> attemptModels = route.orderedCandidates();
+        logRoutingDecision(requestId, route, attemptModels);
+
+        ModelInfo model = catalog.find(attemptModels.get(0)).orElseThrow(() ->
                 new ResponseStatusException(HttpStatus.NOT_FOUND,
                         "unknown model: " + request.model()));
 
-        int estimatedInputTokens = estimateInputTokens(request.messages());
         long estimateCents = Math.max(1L,
                 calculator.estimateInputCents(model, estimatedInputTokens));
 
@@ -328,7 +362,10 @@ public class ChatCompletionService {
         AtomicReference<Usage> finalUsage = new AtomicReference<>();
         long startNanos = System.nanoTime();
 
-        return adapter.chatStream(normalize(request, model))
+        // Rewrite the upstream request to the concrete model name so providers
+        // never see the virtual id. No-op for a direct call (model unchanged).
+        ChatRequest forStream = withModel(request, model.modelName());
+        return adapter.chatStream(normalize(forStream, model))
                 .doOnNext(chunk -> {
                     if (chunk.usage() != null) finalUsage.set(chunk.usage());
                 })
