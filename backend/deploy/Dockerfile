@@ -21,6 +21,14 @@ COPY pom.xml ./
 RUN mvn -B -q dependency:go-offline
 
 COPY src/ ./src/
+
+# Stamp the git SHA into the jar. The build context is backend/ (no .git),
+# so Spring's GitProperties can't discover it — CI passes the SHA in as a
+# build arg and we write the git.properties Spring Boot looks for.
+# Manual builds without the arg keep the "unknown" default (same as today).
+ARG GIT_SHA=unknown
+RUN printf 'git.commit.id.abbrev=%s\n' "$GIT_SHA" > src/main/resources/git.properties
+
 RUN mvn -B -q -DskipTests package \
     && cp target/*.jar /workspace/app.jar
 

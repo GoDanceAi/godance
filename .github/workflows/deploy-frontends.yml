@@ -1,0 +1,104 @@
+# Frontend CI/CD — build the SPA + marketing site and deploy to Cloudflare
+# Pages on every push to main that touches them.
+#
+# This closes the "merged but never deployed" gap: the backend has had
+# auto-deploy since Session 15 while the frontends relied on someone
+# remembering to run wrangler — which is how prod went 6 weeks stale
+# (May 21 merges undeployed until July).
+#
+# Required repo secrets (Settings → Secrets and variables → Actions):
+#   CLOUDFLARE_API_TOKEN   — API token with the "Cloudflare Pages — Edit"
+#                            permission (My Profile → API Tokens)
+#   CLOUDFLARE_ACCOUNT_ID  — dash.cloudflare.com → right sidebar of any
+#                            zone, or the URL after /accounts/
+#
+# Until those secrets exist the deploy steps fail harmlessly; the build
+# steps still validate every push.
+#
+# Both sites deploy on any trigger of this workflow (a no-change redeploy
+# is cheap and idempotent) — simpler and safer than per-site path filters.
+
+name: Frontend CI/CD
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'app/**'
+      - 'marketing/**'
+      - '.github/workflows/deploy-frontends.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: frontend-cicd
+  cancel-in-progress: false
+
+jobs:
+  deploy-app:
+    name: app.godance.ai (SPA)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - name: Build
+        working-directory: app
+        env:
+          VITE_API_URL: https://api.godance.ai
+        run: |
+          npm ci
+          npm run build
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: app
+          command: pages deploy dist --project-name godance-app --branch main
+
+  deploy-marketing:
+    name: godance.ai (marketing)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: marketing/package-lock.json
+      - name: Build
+        working-directory: marketing
+        env:
+          SITE_URL: https://godance.ai
+          PUBLIC_API_BASE: https://api.godance.ai
+        run: |
+          npm ci
+          npm run build
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: marketing
+          command: pages deploy dist --project-name godance-marketing --branch main
+
+  # Post-deploy smoke: the two features whose absence went unnoticed for
+  # six weeks. Fails the run loudly if the deployed bundle regresses.
+  smoke:
+    needs: [deploy-app, deploy-marketing]
+    runs-on: ubuntu-latest
+    steps:
+      - name: SPA bundle contains USDT rail + save-card
+        run: |
+          HTML=$(curl -fsS https://app.godance.ai)
+          BUNDLE=$(echo "$HTML" | grep -oE 'src="/assets/[^"]+\.js"' | head -1 | cut -d'"' -f2)
+          echo "bundle: $BUNDLE"
+          JS=$(curl -fsS "https://app.godance.ai$BUNDLE")
+          echo "$JS" | grep -qi "usdt"      || { echo "USDT missing from deployed bundle" >&2; exit 1; }
+          echo "$JS" | grep -qi "save_card" || { echo "save_card missing from deployed bundle" >&2; exit 1; }
+      - name: Marketing mentions USDT
+        run: |
+          curl -fsS https://godance.ai | grep -qi "usdt" || { echo "USDT copy missing from marketing" >&2; exit 1; }
