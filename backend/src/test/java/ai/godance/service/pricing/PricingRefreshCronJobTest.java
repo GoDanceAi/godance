@@ -63,7 +63,7 @@ class PricingRefreshCronJobTest {
     static class CountingRefreshService extends PricingRefreshService {
         int runs = 0;
         CountingRefreshService() {
-            super(null, null, null, null, null, null, null, null);
+            super(null, null, null, null, null, null, null, null, null, null);
         }
         @Override
         public Digest runOnce() {
