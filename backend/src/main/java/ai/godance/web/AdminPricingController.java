@@ -8,8 +8,10 @@ import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -18,8 +20,10 @@ import org.springframework.web.server.ResponseStatusException;
 import ai.godance.domain.ModelChangeProposal;
 import ai.godance.domain.ProposalStatus;
 import ai.godance.repository.ModelChangeProposalRepository;
+import ai.godance.service.admin.AdminCatalogService;
 import ai.godance.service.pricing.ProposalApprovalService;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 /**
  * Operator-only API for the pricing staging lane. Reachable only via
@@ -36,11 +40,14 @@ public class AdminPricingController {
 
     private final ModelChangeProposalRepository proposals;
     private final ProposalApprovalService approval;
+    private final AdminCatalogService catalog;
 
     public AdminPricingController(ModelChangeProposalRepository proposals,
-                                  ProposalApprovalService approval) {
+                                  ProposalApprovalService approval,
+                                  AdminCatalogService catalog) {
         this.proposals = proposals;
         this.approval = approval;
+        this.catalog = catalog;
     }
 
     @GetMapping("/proposals")
@@ -60,6 +67,36 @@ public class AdminPricingController {
     public Mono<ProposalView> reject(@PathVariable("id") Long id, @AuthenticationPrincipal Jwt jwt) {
         return Mono.fromCallable(() -> approval.reject(id, reviewerFromJwt(jwt))).map(AdminPricingController::toView);
     }
+
+    // ===== Catalog management (admin console, round 5) =================
+
+    @GetMapping("/models")
+    public Mono<CatalogListResponse> listModels() {
+        return Mono.fromCallable(() -> new CatalogListResponse(catalog.listModels()))
+                .subscribeOn(Schedulers.boundedElastic());
+    }
+
+    @PatchMapping("/models/{id}")
+    public Mono<AdminCatalogService.CatalogModelView> updateModel(
+            @PathVariable("id") Long id,
+            @RequestBody ModelUpdateRequest body,
+            @AuthenticationPrincipal Jwt jwt) {
+        return Mono.fromCallable(() ->
+                        catalog.updateModel(id, body.enabled(), body.markupPercent(), reviewerFromJwt(jwt)))
+                .subscribeOn(Schedulers.boundedElastic());
+    }
+
+    @GetMapping("/models/{id}/history")
+    public Mono<PriceHistoryResponse> priceHistory(@PathVariable("id") Long id) {
+        return Mono.fromCallable(() -> new PriceHistoryResponse(catalog.priceHistory(id)))
+                .subscribeOn(Schedulers.boundedElastic());
+    }
+
+    public record CatalogListResponse(List<AdminCatalogService.CatalogModelView> models) { }
+
+    public record ModelUpdateRequest(Boolean enabled, Double markupPercent) { }
+
+    public record PriceHistoryResponse(List<AdminCatalogService.PriceHistoryView> history) { }
 
     private static String reviewerFromJwt(Jwt jwt) {
         if (jwt == null) return null;

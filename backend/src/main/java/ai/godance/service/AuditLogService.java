@@ -40,6 +40,9 @@ public class AuditLogService {
     public static final String EVT_BILLING_AUTORECHARGE_DISABLED  = "billing.autorecharge.disabled";
     public static final String EVT_BILLING_AUTORECHARGE_FIRED     = "billing.autorecharge.fired";
     public static final String EVT_BILLING_AUTORECHARGE_FAILED    = "billing.autorecharge.failed";
+    // Admin console (round 5)
+    public static final String EVT_ADMIN_CREDIT_ADJUSTED = "admin.credit.adjusted";
+    public static final String EVT_ADMIN_CATALOG_UPDATED = "admin.catalog.updated";
 
     private final AuditLogEntryRepository repo;
 
