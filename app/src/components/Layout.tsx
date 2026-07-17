@@ -1,12 +1,14 @@
 import { Link, NavLink, useNavigate } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import { useAuth, formatCents } from '../lib/auth';
+import { useAdmin } from '../lib/admin';
 import { LogoLockup, ThemeToggle } from './Brand';
 
 interface Props { children: ReactNode }
 
 export default function Layout({ children }: Props) {
   const { user, logout } = useAuth();
+  const { isAdmin } = useAdmin();
   const navigate = useNavigate();
 
   const handleLogout = () => {
@@ -32,6 +34,7 @@ export default function Layout({ children }: Props) {
               <NavLink to="/keys" className={linkClass}>API keys</NavLink>
               <NavLink to="/billing" className={linkClass}>Billing</NavLink>
               <NavLink to="/settings" className={linkClass}>Settings</NavLink>
+              {isAdmin && <NavLink to="/admin" className={linkClass}>Admin</NavLink>}
             </nav>
           )}
 

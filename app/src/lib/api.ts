@@ -195,3 +195,132 @@ export interface ModelListResponse {
   object: 'list';
   data: ModelEntry[];
 }
+
+// ===== /v1/admin/** (admin console — mirror backend admin DTOs) =====
+
+export interface AdminMeResponse {
+  email: string;
+}
+
+export interface AdminProposal {
+  id: number;
+  type: 'PRICE_CHANGE' | 'NEW_MODEL' | string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'ANOMALY';
+  modelName: string;
+  provider: string | null;
+  modality: string | null;
+  payload: Record<string, unknown>;
+  source: string | null;
+  sourceUrl: string | null;
+  detectedAt: string;
+  reviewedBy: string | null;
+  reviewedAt: string | null;
+}
+
+export interface AdminProposalListResponse {
+  proposals: AdminProposal[];
+}
+
+export interface AdminCatalogModel {
+  id: number;
+  modelName: string;
+  provider: string | null;
+  modality: string | null;
+  status: 'ACTIVE' | 'STAGED' | 'DISCOVERED' | 'DEPRECATED';
+  enabled: boolean;
+  inputMicrocentsPer1k: number;
+  outputMicrocentsPer1k: number;
+  perImageMicrocents: number;
+  perSecondMicrocents: number;
+  markupOverride: number | null;
+  effectiveMarkupPercent: number;
+  requiresAsync: boolean;
+  costSource: string | null;
+  lastVerifiedAt: string | null;
+  updatedAt: string;
+}
+
+export interface AdminCatalogListResponse {
+  models: AdminCatalogModel[];
+}
+
+export interface AdminPriceHistoryEntry {
+  id: number;
+  field: string | null;
+  oldValue: number | null;
+  newValue: number | null;
+  source: string | null;
+  sourceUrl: string | null;
+  observedAt: string;
+}
+
+export interface AdminPriceHistoryResponse {
+  history: AdminPriceHistoryEntry[];
+}
+
+export interface AdminUserView {
+  id: string;
+  email: string;
+  fullName: string;
+  role: 'USER' | 'ADMIN';
+  active: boolean;
+  creditBalanceCents: number;
+  dailyCreditCapCents: number | null;
+  monthlyCreditCapCents: number | null;
+  apiKeyCount: number;
+  createdAt: string;
+}
+
+export interface AdminUserSearchResponse {
+  users: AdminUserView[];
+}
+
+export interface AdminLedgerEntry {
+  id: string;
+  deltaCents: number;
+  source: string;
+  sourceRef: string | null;
+  note: string | null;
+  occurredAt: string;
+}
+
+export interface AdminLedgerPage {
+  entries: AdminLedgerEntry[];
+  page: number;
+  totalPages: number;
+  totalEntries: number;
+}
+
+export interface AdminAdjustResult {
+  user: AdminUserView;
+  entry: AdminLedgerEntry;
+}
+
+export interface AdminDailyPoint {
+  date: string;
+  revenueCents: number;
+  costCents: number;
+  requests: number;
+}
+
+export interface AdminTopModel {
+  modelName: string;
+  revenueCents: number;
+  costCents: number;
+  requests: number;
+}
+
+export interface AdminTopUser {
+  userId: string;
+  email: string;
+  revenueCents: number;
+  requests: number;
+}
+
+export interface AdminUsageSummary {
+  from: string;
+  to: string;
+  days: AdminDailyPoint[];
+  topModels: AdminTopModel[];
+  topUsers: AdminTopUser[];
+}
