@@ -29,4 +29,72 @@ public interface UsageRecordRepository extends JpaRepository<UsageRecord, UUID> 
     @Query("SELECT COALESCE(SUM(u.costCents), 0) FROM UsageRecord u "
          + "WHERE u.apiKeyId = :apiKeyId AND u.recordedAt >= :since")
     long sumCostCentsForApiKeySince(@Param("apiKeyId") UUID apiKeyId, @Param("since") Instant since);
+
+    // ===== Admin overview aggregates (one query per series — no N+1) =====
+    // Native SQL for date_trunc; aliases are quoted so Postgres preserves
+    // the camelCase that Spring Data's projection matching expects.
+
+    /** One row per calendar day (UTC) in [from, to): revenue vs provider cost. */
+    interface DailyUsageRow {
+        java.time.LocalDate getDay();
+        long getRevenueCents();
+        long getCostCents();
+        long getRequests();
+    }
+
+    @Query(value = """
+            SELECT CAST(date_trunc('day', recorded_at AT TIME ZONE 'UTC') AS date) AS "day",
+                   COALESCE(SUM(cost_cents), 0)                    AS "revenueCents",
+                   COALESCE(SUM(COALESCE(provider_cost_cents, 0)), 0) AS "costCents",
+                   COUNT(*)                                        AS "requests"
+            FROM usage_records
+            WHERE recorded_at >= :from AND recorded_at < :to
+            GROUP BY 1 ORDER BY 1
+            """, nativeQuery = true)
+    List<DailyUsageRow> aggregateDailyUsage(@Param("from") Instant from, @Param("to") Instant to);
+
+    /** Top models by charged revenue in [from, to). */
+    interface TopModelRow {
+        String getModelName();
+        long getRevenueCents();
+        long getCostCents();
+        long getRequests();
+    }
+
+    @Query(value = """
+            SELECT model_name                                      AS "modelName",
+                   COALESCE(SUM(cost_cents), 0)                    AS "revenueCents",
+                   COALESCE(SUM(COALESCE(provider_cost_cents, 0)), 0) AS "costCents",
+                   COUNT(*)                                        AS "requests"
+            FROM usage_records
+            WHERE recorded_at >= :from AND recorded_at < :to
+            GROUP BY model_name
+            ORDER BY 2 DESC
+            LIMIT :limit
+            """, nativeQuery = true)
+    List<TopModelRow> topModelsBySpend(@Param("from") Instant from, @Param("to") Instant to,
+                                       @Param("limit") int limit);
+
+    /** Top users by charged revenue in [from, to). */
+    interface TopUserRow {
+        UUID getUserId();
+        String getEmail();
+        long getRevenueCents();
+        long getRequests();
+    }
+
+    @Query(value = """
+            SELECT u.user_id                    AS "userId",
+                   us.email                     AS "email",
+                   COALESCE(SUM(u.cost_cents), 0) AS "revenueCents",
+                   COUNT(*)                     AS "requests"
+            FROM usage_records u
+            JOIN users us ON us.id = u.user_id
+            WHERE u.recorded_at >= :from AND u.recorded_at < :to
+            GROUP BY 1, 2
+            ORDER BY 3 DESC
+            LIMIT :limit
+            """, nativeQuery = true)
+    List<TopUserRow> topUsersBySpend(@Param("from") Instant from, @Param("to") Instant to,
+                                     @Param("limit") int limit);
 }
