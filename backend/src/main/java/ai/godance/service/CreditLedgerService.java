@@ -118,6 +118,44 @@ public class CreditLedgerService {
         return ledger.sumDeltaForUser(userId);
     }
 
+    /**
+     * Manual operator credit/debit from the admin console. Signed delta —
+     * positive credits, negative debits. A negative adjustment may push the
+     * balance below zero (support clawback of a mistaken credit); it does
+     * NOT trigger auto-recharge — surprising a user with a card charge from
+     * a support action would be worse than a temporarily negative balance.
+     *
+     * <p>Same idempotency contract as {@link #topUp}: a replay of the same
+     * {@code idempotencyKey} returns the original entry without applying
+     * the delta twice. The caller (admin console) writes the audit event.
+     */
+    @Transactional
+    public CreditLedger adminAdjust(UUID userId, long deltaCents, String idempotencyKey,
+                                    String note, String adjustedBy) {
+        if (deltaCents == 0) {
+            throw new IllegalArgumentException("adminAdjust delta must be non-zero");
+        }
+        var existing = ledger.findByIdempotencyKey(idempotencyKey);
+        if (existing.isPresent()) {
+            return existing.get();
+        }
+        CreditLedger entry = new CreditLedger();
+        entry.setUserId(userId);
+        entry.setDeltaCents(deltaCents);
+        entry.setSource(CreditSource.ADMIN_ADJUSTMENT);
+        entry.setSourceRef(adjustedBy);
+        entry.setIdempotencyKey(idempotencyKey);
+        entry.setNote(note);
+        try {
+            ledger.save(entry);
+        } catch (DataIntegrityViolationException dup) {
+            log.info("adminAdjust idempotency race for key={}, returning original", idempotencyKey);
+            return ledger.findByIdempotencyKey(idempotencyKey).orElseThrow();
+        }
+        users.incrementBalance(userId, deltaCents);
+        return entry;
+    }
+
     // ===== Gateway pre-debit / reconcile flow ========================
 
     /**
