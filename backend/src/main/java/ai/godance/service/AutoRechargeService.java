@@ -20,6 +20,7 @@ import ai.godance.domain.CreditSource;
 import ai.godance.domain.User;
 import ai.godance.repository.UserRepository;
 import ai.godance.service.CreditLedgerService.TopUpResult;
+import ai.godance.service.mail.MailService;
 
 /**
  * Manages the off-session auto-recharge loop:
@@ -50,15 +51,17 @@ public class AutoRechargeService {
     private final StripeService stripe;
     private final AuditLogService audit;
     private final BillingProperties billing;
+    private final MailService mail;
 
     public AutoRechargeService(UserRepository users, CreditLedgerService ledger,
                                StripeService stripe, AuditLogService audit,
-                               BillingProperties billing) {
+                               BillingProperties billing, MailService mail) {
         this.users = users;
         this.ledger = ledger;
         this.stripe = stripe;
         this.audit = audit;
         this.billing = billing;
+        this.mail = mail;
     }
 
     @Transactional(readOnly = true)
@@ -172,6 +175,8 @@ public class AutoRechargeService {
         users.save(u);
         audit.record(AuditLogService.EVT_BILLING_AUTORECHARGE_FAILED, AuditOutcome.FAILURE,
                 u.getId(), null, Map.of("reason", reason));
+        // Mail failures are swallowed inside MailService — never propagated here.
+        mail.sendAutoRechargeFailed(u, reason);
         return Outcome.HARD_FAIL_DISABLED;
     }
 

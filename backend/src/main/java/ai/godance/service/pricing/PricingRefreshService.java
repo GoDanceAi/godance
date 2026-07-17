@@ -18,7 +18,9 @@ import ai.godance.domain.PriceField;
 import ai.godance.domain.ProposalStatus;
 import ai.godance.domain.ProposalType;
 import ai.godance.repository.ModelCatalogEntryRepository;
+import ai.godance.repository.ModelChangeProposalRepository;
 import ai.godance.service.AuditLogService;
+import ai.godance.service.mail.MailService;
 
 /**
  * Orchestrates one daily refresh pass: pulls OpenRouter + LiteLLM +
@@ -42,27 +44,33 @@ public class PricingRefreshService {
     private final LiteLLMFeedClient liteLlm;
     private final LlmFallbackExtractor llmFallback;
     private final ModelCatalogEntryRepository catalog;
+    private final ModelChangeProposalRepository proposals;
     private final ProposalWriter writer;
     private final SanityGuard sanityGuard;
     private final AuditLogService audit;
     private final PricingProperties props;
+    private final MailService mail;
 
     public PricingRefreshService(OpenRouterFeedClient openRouter,
                                  LiteLLMFeedClient liteLlm,
                                  LlmFallbackExtractor llmFallback,
                                  ModelCatalogEntryRepository catalog,
+                                 ModelChangeProposalRepository proposals,
                                  ProposalWriter writer,
                                  SanityGuard sanityGuard,
                                  AuditLogService audit,
-                                 PricingProperties props) {
+                                 PricingProperties props,
+                                 MailService mail) {
         this.openRouter = openRouter;
         this.liteLlm = liteLlm;
         this.llmFallback = llmFallback;
         this.catalog = catalog;
+        this.proposals = proposals;
         this.writer = writer;
         this.sanityGuard = sanityGuard;
         this.audit = audit;
         this.props = props;
+        this.mail = mail;
     }
 
     /** Single entry point — drives the whole pass synchronously, returns a digest. */
@@ -92,6 +100,11 @@ public class PricingRefreshService {
             }
         }
         emitDigestAudit(digest);
+        // ONE digest email per run listing everything pending (not just this
+        // run's writes) — skipped inside MailService when nothing is pending
+        // or the admin allowlist is empty; failures never propagate.
+        mail.sendPricingProposalsDigest(
+                proposals.findByStatusOrderByDetectedAtDesc(ProposalStatus.PENDING));
         return digest;
     }
 

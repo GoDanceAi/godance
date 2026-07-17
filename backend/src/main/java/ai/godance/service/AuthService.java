@@ -7,8 +7,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -21,6 +19,7 @@ import ai.godance.domain.UserRole;
 import ai.godance.repository.UserRepository;
 import ai.godance.security.JwtService;
 import ai.godance.security.JwtService.IssuedToken;
+import ai.godance.service.mail.MailService;
 import ai.godance.web.dto.AuthDtos.AuthResponse;
 import ai.godance.web.dto.AuthDtos.LoginRequest;
 import ai.godance.web.dto.AuthDtos.SignupRequest;
@@ -28,20 +27,21 @@ import ai.godance.web.dto.AuthDtos.SignupRequest;
 @Service
 public class AuthService {
 
-    private static final Logger log = LoggerFactory.getLogger(AuthService.class);
     private static final SecureRandom RNG = new SecureRandom();
 
     private final UserRepository users;
     private final PasswordEncoder passwords;
     private final JwtService jwt;
     private final AuditLogService audit;
+    private final MailService mail;
 
     public AuthService(UserRepository users, PasswordEncoder passwords,
-                       JwtService jwt, AuditLogService audit) {
+                       JwtService jwt, AuditLogService audit, MailService mail) {
         this.users = users;
         this.passwords = passwords;
         this.jwt = jwt;
         this.audit = audit;
+        this.mail = mail;
     }
 
     @Transactional
@@ -64,9 +64,8 @@ public class AuthService {
         u.setEmailVerificationSentAt(Instant.now());
         users.save(u);
 
-        // Email send stub — real provider integration deferred.
-        log.info("[email-stub] Verification URL for {}: /v1/auth/verify?token={}",
-                u.getEmail(), u.getEmailVerificationToken());
+        // Mail failures are swallowed inside MailService — a failed send must not fail signup.
+        mail.sendVerificationEmail(u);
 
         audit.record(AuditLogService.EVT_AUTH_SIGNUP, AuditOutcome.SUCCESS,
                 u.getId(), ipAddress, Map.of("email", email));
