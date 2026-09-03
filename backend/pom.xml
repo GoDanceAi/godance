@@ -29,6 +29,19 @@
         <stripe-java.version>28.4.0</stripe-java.version>
         <aws-sdk.version>2.30.7</aws-sdk.version>
         <git-commit-id-plugin.version>9.0.1</git-commit-id-plugin.version>
+
+        <!-- CVE overrides on top of the Spring Boot 3.4.13 BOM (3.4 is past OSS
+             end-of-life, so the BOM itself no longer moves). Same-line patch
+             bumps unless noted; drop each one once a Spring Boot line that
+             manages a fixed version is adopted. See docs/dependency-triage-2026-09.md. -->
+        <netty.version>4.1.137.Final</netty.version>
+        <jackson-bom.version>2.18.10</jackson-bom.version>
+        <spring-framework.version>6.2.19</spring-framework.version>
+        <logback.version>1.5.38</logback.version>
+        <postgresql.version>42.7.13</postgresql.version>
+        <log4j2.version>2.25.5</log4j2.version>
+        <!-- cross-minor (1.14 -> 1.15): the 1.14 line has no fix for CVE-2026-40984. -->
+        <micrometer.version>1.15.12</micrometer.version>
     </properties>
 
     <dependencyManagement>
@@ -131,6 +144,15 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-quartz</artifactId>
+            <exclusions>
+                <!-- Quartz declares this for its own c3p0 pool, which the Spring
+                     Boot BOM already excludes; nothing left on the classpath
+                     references it. CVE-2026-27727 / CVE-2026-55153. -->
+                <exclusion>
+                    <groupId>com.mchange</groupId>
+                    <artifactId>mchange-commons-java</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
 
         <!-- Object storage (S3-compatible: MinIO local / DO Spaces / Alicloud OSS) -->
