@@ -23,14 +23,20 @@ public class HealthController {
     private final ObjectProvider<BuildProperties> buildProperties;
     private final ObjectProvider<GitProperties> gitProperties;
     private final String region;
+    private final String gitShaEnv;
 
     public HealthController(
             ObjectProvider<BuildProperties> buildProperties,
             ObjectProvider<GitProperties> gitProperties,
-            @Value("${godance.region:local}") String region) {
+            @Value("${godance.region:local}") String region,
+            // Baked into the container image from the CI build arg (see
+            // deploy/Dockerfile). Authoritative in prod because the Docker
+            // build has no .git for the maven git-commit-id plugin to read.
+            @Value("${GODANCE_GIT_SHA:}") String gitShaEnv) {
         this.buildProperties = buildProperties;
         this.gitProperties = gitProperties;
         this.region = region;
+        this.gitShaEnv = gitShaEnv;
     }
 
     @GetMapping("/healthz")
@@ -50,9 +56,22 @@ public class HealthController {
     }
 
     private String gitShaOrUnknown() {
+        // 1) Prefer the env baked in at image build (prod path — deterministic
+        //    in a .git-less Docker build).
+        if (gitShaEnv != null && !gitShaEnv.isBlank() && !"unknown".equals(gitShaEnv)) {
+            return shorten(gitShaEnv.strip());
+        }
+        // 2) Fall back to GitProperties (local dev / `mvn` runs with a real .git).
         GitProperties gp = gitProperties.getIfAvailable();
-        if (gp == null) return "unknown";
-        String sha = gp.getShortCommitId();
-        return (sha == null || sha.isBlank()) ? "unknown" : sha;
+        if (gp != null) {
+            String sha = gp.getShortCommitId();
+            if (sha != null && !sha.isBlank()) return sha;
+        }
+        return "unknown";
+    }
+
+    /** Display a full 40-char commit id as its 7-char short form. */
+    private static String shorten(String sha) {
+        return sha.length() > 7 ? sha.substring(0, 7) : sha;
     }
 }
