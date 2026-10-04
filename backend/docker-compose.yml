@@ -33,7 +33,10 @@ services:
       retries: 10
 
   minio:
-    image: minio/minio:latest
+    # Our GHCR mirror of the last public minio/minio:latest — MinIO withdrew
+    # its public images from Docker Hub/Quay in 2025. Pulling needs a GHCR
+    # login (docker login ghcr.io with a GitHub token that has read:packages).
+    image: ghcr.io/godanceai/minio:mirror-2026-10-04
     container_name: godance-minio
     command: server /data --console-address ":9001"
     environment:
