@@ -196,6 +196,29 @@ export interface ModelListResponse {
   data: ModelEntry[];
 }
 
+// ===== /v1/images, /v1/videos, /v1/jobs =====
+
+export interface AsyncJobAcknowledged {
+  job_id: string;
+  status: 'QUEUED';
+  poll_url: string;
+}
+
+export interface GenerationJob {
+  id: string;
+  status: 'QUEUED' | 'RUNNING' | 'DONE' | 'FAILED';
+  modality: 'IMAGE' | 'VIDEO';
+  provider: string;
+  model: string;
+  estimatedCostCents: number | null;
+  actualCostCents: number | null;
+  outputUrl: string | null;
+  errorMessage: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+}
+
 // ===== /v1/admin/** (admin console — mirror backend admin DTOs) =====
 
 export interface AdminMeResponse {

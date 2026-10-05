@@ -45,6 +45,11 @@ export default function DashboardPage() {
       <h2 className="mt-12 text-lg font-semibold text-fg">Get going</h2>
       <div className="mt-4 grid sm:grid-cols-2 gap-4">
         <DashboardCard
+          to="/generate"
+          title="Generate media"
+          body="Create images or videos across the live model catalog from one workspace."
+        />
+        <DashboardCard
           to="/chat"
           title="Start a chat"
           body="Try any of 7 text models — GPT, Claude, Gemini — with one prompt box."
