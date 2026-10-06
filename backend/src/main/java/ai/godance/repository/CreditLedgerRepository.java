@@ -24,4 +24,9 @@ public interface CreditLedgerRepository extends JpaRepository<CreditLedger, UUID
     /** Paged ledger history for the admin user-detail drawer, newest first. */
     org.springframework.data.domain.Page<CreditLedger> findByUserIdOrderByOccurredAtDesc(
             UUID userId, org.springframework.data.domain.Pageable pageable);
+
+    @Query("SELECT COUNT(c) FROM CreditLedger c WHERE c.userId = :userId AND c.sourceRef = :sourceRef AND c.occurredAt >= :since")
+    long countByUserIdAndSourceRefSince(@Param("userId") UUID userId,
+                                        @Param("sourceRef") String sourceRef,
+                                        @Param("since") java.time.Instant since);
 }

@@ -10,6 +10,7 @@ import OAuthCallbackPage from './pages/OAuthCallbackPage';
 import DashboardPage from './pages/DashboardPage';
 import ChatPage from './pages/ChatPage';
 import GeneratePage from './pages/GeneratePage';
+import GalleryPage from './pages/GalleryPage';
 import ApiKeysPage from './pages/ApiKeysPage';
 import BillingPage from './pages/BillingPage';
 import SettingsPage from './pages/SettingsPage';
@@ -36,6 +37,7 @@ export default function App() {
           <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
           <Route path="/chat"      element={<ProtectedRoute><ChatPage /></ProtectedRoute>} />
           <Route path="/generate"  element={<ProtectedRoute><GeneratePage /></ProtectedRoute>} />
+          <Route path="/gallery"   element={<ProtectedRoute><GalleryPage /></ProtectedRoute>} />
           <Route path="/keys"      element={<ProtectedRoute><ApiKeysPage /></ProtectedRoute>} />
           <Route path="/billing"   element={<ProtectedRoute><BillingPage /></ProtectedRoute>} />
           <Route path="/settings"  element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />

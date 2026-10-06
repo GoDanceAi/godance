@@ -31,7 +31,8 @@ export default function Layout({ children }: Props) {
             <nav className="hidden md:flex items-center gap-1">
               <NavLink to="/dashboard" className={linkClass}>Dashboard</NavLink>
               <NavLink to="/chat" className={linkClass}>Chat</NavLink>
-              <NavLink to="/generate" className={linkClass}>Generate</NavLink>
+              <NavLink to="/generate" className={linkClass}>Studio</NavLink>
+              <NavLink to="/gallery" className={linkClass}>Gallery</NavLink>
               <NavLink to="/keys" className={linkClass}>API keys</NavLink>
               <NavLink to="/billing" className={linkClass}>Billing</NavLink>
               <NavLink to="/settings" className={linkClass}>Settings</NavLink>

@@ -19,16 +19,30 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+const DEV_MOCK_USER: MeResponse | null = import.meta.env.DEV
+  ? {
+      id: 'usr_dev_mock',
+      email: 'dev@godance.ai',
+      fullName: 'Dev User',
+      role: 'USER',
+      emailVerified: true,
+      creditBalanceCents: 5000,
+      dailyCreditCapCents: null,
+      monthlyCreditCapCents: null,
+      createdAt: new Date().toISOString(),
+    }
+  : null;
+
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<MeResponse | null>(null);
-  const [loading, setLoading] = useState<boolean>(!!localStorage.getItem(TOKEN_KEY));
+  const [user, setUser] = useState<MeResponse | null>(DEV_MOCK_USER);
+  const [loading, setLoading] = useState<boolean>(!import.meta.env.DEV && !!localStorage.getItem(TOKEN_KEY));
 
   const refresh = useCallback(async () => {
     try {
       const me = await apiFetch<MeResponse>('/v1/auth/me');
       setUser(me);
     } catch {
-      setUser(null);
+      setUser(DEV_MOCK_USER);
     } finally {
       setLoading(false);
     }

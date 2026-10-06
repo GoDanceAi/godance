@@ -347,3 +347,66 @@ export interface AdminUsageSummary {
   topModels: AdminTopModel[];
   topUsers: AdminTopUser[];
 }
+
+// ===== /v1/gallery & /v1/rewards/share =====
+
+export interface GalleryItemDto {
+  id: string;
+  title: string;
+  prompt: string;
+  negativePrompt: string | null;
+  authorName: string;
+  modality: 'IMAGE' | 'VIDEO';
+  model: string;
+  provider: string;
+  aspectRatio: string;
+  duration: string | null;
+  seed: number | null;
+  outputUrl: string;
+  thumbnailUrl: string;
+  likesCount: number;
+  remixCount: number;
+  isOfficial: boolean;
+  category: string;
+  tags: string[] | null;
+  forkedFromTitle: string | null;
+  createdAt: string;
+}
+
+export interface GalleryListResponse {
+  items: GalleryItemDto[];
+  page: number;
+  totalPages: number;
+  totalElements: number;
+}
+
+export interface LikeResponse {
+  id: string;
+  likesCount: number;
+}
+
+export interface ShareRewardResponse {
+  success: boolean;
+  rewardCents: number;
+  claimsToday: number;
+  maxDailyClaims: number;
+  newBalanceCents: number;
+}
+
+export interface PublishGalleryPayload {
+  jobId?: string;
+  title: string;
+  prompt: string;
+  negativePrompt?: string;
+  modality: 'IMAGE' | 'VIDEO';
+  model: string;
+  provider: string;
+  aspectRatio?: string;
+  duration?: string;
+  seed?: number;
+  outputUrl: string;
+  thumbnailUrl?: string;
+  category?: string;
+  tags?: string[];
+  forkedFromTitle?: string;
+}

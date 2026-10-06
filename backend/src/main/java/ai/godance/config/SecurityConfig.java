@@ -139,9 +139,9 @@ public class SecurityConfig {
                         // Pre-auth surface.
                         .pathMatchers(HttpMethod.POST, "/v1/auth/signup", "/v1/auth/login").permitAll()
                         .pathMatchers(HttpMethod.GET, "/v1/auth/verify").permitAll()
-                        // Public read-only: model catalog (model picker) and
-                        // provider status board (marketing /status page).
-                        .pathMatchers(HttpMethod.GET, "/v1/models", "/v1/status").permitAll()
+                        // Public read-only: model catalog, status board, and community gallery.
+                        .pathMatchers(HttpMethod.GET, "/v1/models", "/v1/status", "/v1/gallery").permitAll()
+                        .pathMatchers(HttpMethod.POST, "/v1/gallery/*/like").permitAll()
                         // Stripe (and any future) provider webhooks — authenticated by
                         // signature, not by JWT. Handler MUST reject bad signatures.
                         .pathMatchers(HttpMethod.POST, "/v1/billing/webhooks/**").permitAll()
