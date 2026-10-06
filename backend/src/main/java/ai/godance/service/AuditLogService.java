@@ -43,6 +43,11 @@ public class AuditLogService {
     // Admin console (round 5)
     public static final String EVT_ADMIN_CREDIT_ADJUSTED = "admin.credit.adjusted";
     public static final String EVT_ADMIN_CATALOG_UPDATED = "admin.catalog.updated";
+    public static final String EVT_ADMIN_USER_STATUS_UPDATED = "admin.user.status.updated";
+    public static final String EVT_ADMIN_USER_CAPS_UPDATED = "admin.user.caps.updated";
+    public static final String EVT_ADMIN_API_KEY_REVOKED = "admin.apikey.revoked";
+    public static final String EVT_ADMIN_PAYMENT_RECONCILED = "admin.payment.reconciled";
+    public static final String EVT_ADMIN_PAYMENT_REFUNDED = "admin.payment.refunded";
 
     private final AuditLogEntryRepository repo;
 

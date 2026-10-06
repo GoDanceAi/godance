@@ -24,4 +24,15 @@ public interface CreditLedgerRepository extends JpaRepository<CreditLedger, UUID
     /** Paged ledger history for the admin user-detail drawer, newest first. */
     org.springframework.data.domain.Page<CreditLedger> findByUserIdOrderByOccurredAtDesc(
             UUID userId, org.springframework.data.domain.Pageable pageable);
+
+    /** Global paged ledger history for the admin payments view, newest first. */
+    org.springframework.data.domain.Page<CreditLedger> findAllByOrderByOccurredAtDesc(
+            org.springframework.data.domain.Pageable pageable);
+
+    org.springframework.data.domain.Page<CreditLedger> findBySourceOrderByOccurredAtDesc(
+            ai.godance.domain.CreditSource source, org.springframework.data.domain.Pageable pageable);
+
+    org.springframework.data.domain.Page<CreditLedger> findBySourceInOrderByOccurredAtDesc(
+            java.util.Collection<ai.godance.domain.CreditSource> sources, org.springframework.data.domain.Pageable pageable);
 }
+

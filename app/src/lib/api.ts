@@ -324,3 +324,124 @@ export interface AdminUsageSummary {
   topModels: AdminTopModel[];
   topUsers: AdminTopUser[];
 }
+
+export interface AdminUserUsageRecord {
+  id: string;
+  modality: 'TEXT' | 'IMAGE' | 'VIDEO' | 'AUDIO_TTS' | 'AUDIO_STT' | 'EMBEDDING' | string;
+  modelName: string;
+  provider: string;
+  inputTokens: number;
+  outputTokens: number;
+  costCents: number;
+  region: string;
+  cacheHit: boolean;
+  fallbackUsed: boolean;
+  requestId: string | null;
+  recordedAt: string;
+}
+
+export interface AdminUserUsageResponse {
+  records: AdminUserUsageRecord[];
+  page: number;
+  totalPages: number;
+  totalRecords: number;
+}
+
+export interface AdminApiKey {
+  id: string;
+  name: string;
+  keyPrefix: string;
+  active: boolean;
+  lastUsedAt: string | null;
+  expiresAt: string | null;
+  createdAt: string;
+}
+
+export interface AdminJob {
+  id: string;
+  userId: string;
+  modality: 'IMAGE' | 'VIDEO' | string;
+  provider: string;
+  model: string;
+  promptSnippet: string;
+  status: 'QUEUED' | 'RUNNING' | 'DONE' | 'FAILED' | string;
+  outputUrl: string | null;
+  estimatedCostCents: number | null;
+  actualCostCents: number | null;
+  errorMessage: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+}
+
+export interface AdminJobPageResponse {
+  jobs: AdminJob[];
+  page: number;
+  totalPages: number;
+  totalJobs: number;
+}
+
+export interface AdminAuditLogEntry {
+  id: string;
+  userId: string | null;
+  eventType: string;
+  eventDetail: Record<string, unknown> | null;
+  ipAddress: string | null;
+  outcome: 'SUCCESS' | 'DENIED' | 'FAILURE' | string;
+  createdAt: string;
+}
+
+export interface AdminAuditLogPageResponse {
+  logs: AdminAuditLogEntry[];
+  page: number;
+  totalPages: number;
+  totalLogs: number;
+}
+
+export interface AdminProviderStatus {
+  provider: string;
+  model: string;
+  state: 'ok' | 'degraded' | 'down' | string;
+  latencyP50Ms: number | null;
+  latencyP95Ms: number | null;
+  latencyP99Ms: number | null;
+  errorRate: number;
+  requestCount: number;
+  errorCount: number;
+  rateLimitCount: number;
+  windowStart: string;
+  windowEnd: string;
+}
+
+export interface AdminSystemStatusResponse {
+  generatedAt: string;
+  providers: AdminProviderStatus[];
+}
+
+export interface AdminPaymentTransaction {
+  id: string;
+  userId: string;
+  userEmail: string;
+  deltaCents: number;
+  source: string;
+  sourceRef: string | null;
+  idempotencyKey: string;
+  note: string | null;
+  occurredAt: string;
+}
+
+export interface AdminPaymentPageResponse {
+  transactions: AdminPaymentTransaction[];
+  page: number;
+  totalPages: number;
+  totalTransactions: number;
+}
+
+export interface AdminWebhookHealthResponse {
+  totalRejected: number;
+  totalIgnored: number;
+  totalAutoRechargeFailed: number;
+  totalDuplicate: number;
+  recentExceptions: AdminAuditLogEntry[];
+}
+

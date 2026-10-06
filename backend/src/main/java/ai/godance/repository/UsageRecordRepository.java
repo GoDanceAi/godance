@@ -17,6 +17,10 @@ public interface UsageRecordRepository extends JpaRepository<UsageRecord, UUID> 
     List<UsageRecord> findByUserIdOrderByRecordedAtDesc(
             UUID userId, org.springframework.data.domain.Pageable pageable);
 
+    /** Paginated usage with total count for admin console. */
+    org.springframework.data.domain.Page<UsageRecord> findPageByUserIdOrderByRecordedAtDesc(
+            UUID userId, org.springframework.data.domain.Pageable pageable);
+
     /** All usage in a window, for the aggregation job. */
     List<UsageRecord> findByRecordedAtGreaterThanEqual(Instant since);
 

@@ -22,4 +22,14 @@ public interface AuditLogEntryRepository extends Repository<AuditLogEntry, UUID>
     Optional<AuditLogEntry> findById(UUID id);
 
     List<AuditLogEntry> findByEventType(String eventType);
+
+    org.springframework.data.domain.Page<AuditLogEntry> findAllByOrderByCreatedAtDesc(
+            org.springframework.data.domain.Pageable pageable);
+
+    org.springframework.data.domain.Page<AuditLogEntry> findByEventTypeOrderByCreatedAtDesc(
+            String eventType, org.springframework.data.domain.Pageable pageable);
+
+    org.springframework.data.domain.Page<AuditLogEntry> findByEventTypeInOrderByCreatedAtDesc(
+            java.util.Collection<String> eventTypes, org.springframework.data.domain.Pageable pageable);
 }
+

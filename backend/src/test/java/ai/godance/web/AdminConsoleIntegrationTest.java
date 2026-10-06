@@ -23,13 +23,18 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import ai.godance.domain.ApiKey;
 import ai.godance.domain.CallOutcome;
+import ai.godance.domain.GenerationJob;
+import ai.godance.domain.JobStatus;
 import ai.godance.domain.Modality;
 import ai.godance.domain.Provider;
 import ai.godance.domain.Region;
 import ai.godance.domain.UsageRecord;
+import ai.godance.repository.ApiKeyRepository;
 import ai.godance.repository.AuditLogEntryRepository;
 import ai.godance.repository.CreditLedgerRepository;
+import ai.godance.repository.GenerationJobRepository;
 import ai.godance.repository.UsageRecordRepository;
 import ai.godance.repository.UserRepository;
 import ai.godance.service.AuditLogService;
@@ -62,6 +67,10 @@ class AdminConsoleIntegrationTest {
     @Autowired CreditLedgerRepository ledger;
     @Autowired UsageRecordRepository usageRecords;
     @Autowired AuditLogEntryRepository audit;
+    @Autowired ApiKeyRepository apiKeys;
+    @Autowired GenerationJobRepository generationJobs;
+    @org.springframework.boot.test.mock.mockito.MockBean
+    ai.godance.storage.ObjectStorageClient objectStorageClient;
 
     private String adminBearer;
     private String userBearer;
@@ -70,6 +79,7 @@ class AdminConsoleIntegrationTest {
 
     @BeforeEach
     void seedAccounts() {
+        usageRecords.deleteAll();
         adminBearer = signUpOrLogIn("admin@godance.test");
         userEmail = "user-" + UUID.randomUUID() + "@godance.test";
         userBearer = signUpOrLogIn(userEmail);
@@ -331,6 +341,361 @@ class AdminConsoleIntegrationTest {
     void usageSummary_givenNonAdminCaller_returns403() {
         http.get().uri("/v1/admin/usage/summary")
                 .header("Authorization", userBearer)
+                .exchange()
+                .expectStatus().isForbidden();
+    }
+
+    // ===== /v1/admin/users/{id}/usage ====================================
+
+    @Test
+    void userUsage_givenAdminCaller_returnsPagedUsage() {
+        seedUsage(userId, "gpt-4o", 50, 15, Instant.now());
+        seedUsage(userId, "claude-3-5-sonnet", 80, 25, Instant.now().minusSeconds(60));
+
+        http.get().uri("/v1/admin/users/" + userId + "/usage?page=0&size=10")
+                .header("Authorization", adminBearer)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.records.length()").isEqualTo(2)
+                .jsonPath("$.totalRecords").isEqualTo(2)
+                .jsonPath("$.records[0].modelName").isEqualTo("gpt-4o");
+    }
+
+    @Test
+    void userUsage_givenNonAdmin_returns403() {
+        http.get().uri("/v1/admin/users/" + userId + "/usage")
+                .header("Authorization", userBearer)
+                .exchange()
+                .expectStatus().isForbidden();
+    }
+
+    // ===== /v1/admin/users/{id}/status ===================================
+
+    @Test
+    void updateUserStatus_freezesAndReactivatesUser() {
+        http.patch().uri("/v1/admin/users/" + userId + "/status")
+                .header("Authorization", adminBearer)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("active", false, "reason", "Suspicious activity"))
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.active").isEqualTo(false);
+
+        assertThat(users.findById(userId).orElseThrow().isActive()).isFalse();
+
+        // Audit entry recorded
+        assertThat(audit.findByEventType(AuditLogService.EVT_ADMIN_USER_STATUS_UPDATED))
+                .isNotEmpty();
+
+        // Reactivate
+        http.patch().uri("/v1/admin/users/" + userId + "/status")
+                .header("Authorization", adminBearer)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("active", true, "reason", "Appeal granted"))
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.active").isEqualTo(true);
+
+        assertThat(users.findById(userId).orElseThrow().isActive()).isTrue();
+    }
+
+    @Test
+    void updateUserStatus_givenNonAdmin_returns403() {
+        http.patch().uri("/v1/admin/users/" + userId + "/status")
+                .header("Authorization", userBearer)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("active", false))
+                .exchange()
+                .expectStatus().isForbidden();
+    }
+
+    // ===== /v1/admin/users/{id}/caps =====================================
+
+    @Test
+    void updateUserCaps_updatesLimits() {
+        http.patch().uri("/v1/admin/users/" + userId + "/caps")
+                .header("Authorization", adminBearer)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("dailyCreditCapCents", 5000L, "monthlyCreditCapCents", 20000L, "reason", "VIP Tier upgrade"))
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.dailyCreditCapCents").isEqualTo(5000)
+                .jsonPath("$.monthlyCreditCapCents").isEqualTo(20000);
+
+        var updated = users.findById(userId).orElseThrow();
+        assertThat(updated.getDailyCreditCapCents()).isEqualTo(5000L);
+        assertThat(updated.getMonthlyCreditCapCents()).isEqualTo(20000L);
+
+        assertThat(audit.findByEventType(AuditLogService.EVT_ADMIN_USER_CAPS_UPDATED))
+                .isNotEmpty();
+    }
+
+    @Test
+    void updateUserCaps_givenNonAdmin_returns403() {
+        http.patch().uri("/v1/admin/users/" + userId + "/caps")
+                .header("Authorization", userBearer)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("dailyCreditCapCents", 5000L))
+                .exchange()
+                .expectStatus().isForbidden();
+    }
+
+    // ===== /v1/admin/users/{id}/keys & DELETE /v1/admin/keys/{id} ========
+
+    @Test
+    void userKeys_listsAndRevokesKey() {
+        ApiKey k = new ApiKey();
+        k.setUserId(userId);
+        k.setName("Test Key");
+        k.setKeyHash("hash-" + UUID.randomUUID());
+        k.setKeyPrefix("sk-test");
+        k.setActive(true);
+        ApiKey saved = apiKeys.save(k);
+
+        // List keys
+        http.get().uri("/v1/admin/users/" + userId + "/keys")
+                .header("Authorization", adminBearer)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.length()").isEqualTo(1)
+                .jsonPath("$[0].name").isEqualTo("Test Key")
+                .jsonPath("$[0].active").isEqualTo(true);
+
+        // Revoke key
+        http.delete().uri("/v1/admin/keys/" + saved.getId() + "?reason=Compromised")
+                .header("Authorization", adminBearer)
+                .exchange()
+                .expectStatus().isNoContent();
+
+        ApiKey revoked = apiKeys.findById(saved.getId()).orElseThrow();
+        assertThat(revoked.isActive()).isFalse();
+
+        assertThat(audit.findByEventType(AuditLogService.EVT_ADMIN_API_KEY_REVOKED))
+                .isNotEmpty();
+    }
+
+    @Test
+    void userKeys_givenNonAdmin_returns403() {
+        http.get().uri("/v1/admin/users/" + userId + "/keys")
+                .header("Authorization", userBearer)
+                .exchange()
+                .expectStatus().isForbidden();
+
+        http.delete().uri("/v1/admin/keys/" + UUID.randomUUID())
+                .header("Authorization", userBearer)
+                .exchange()
+                .expectStatus().isForbidden();
+    }
+
+    // ===== /v1/admin/jobs ================================================
+
+    @Test
+    void jobs_listsAndFiltersJobs() {
+        GenerationJob j1 = new GenerationJob();
+        j1.setUserId(userId);
+        j1.setModality(Modality.VIDEO);
+        j1.setProvider(Provider.RUNWAY);
+        j1.setModel("gen-3-alpha");
+        j1.setPrompt(Map.of("prompt", "a cinematic shot of a drone over mountains"));
+        j1.setStatus(JobStatus.DONE);
+        j1.setActualCostCents(120L);
+        generationJobs.save(j1);
+
+        GenerationJob j2 = new GenerationJob();
+        j2.setUserId(userId);
+        j2.setModality(Modality.IMAGE);
+        j2.setProvider(Provider.BFL);
+        j2.setModel("flux-pro");
+        j2.setPrompt(Map.of("prompt", "a sunset"));
+        j2.setStatus(JobStatus.FAILED);
+        j2.setErrorMessage("Provider timed out");
+        generationJobs.save(j2);
+
+        // List all
+        http.get().uri("/v1/admin/jobs?page=0&size=10")
+                .header("Authorization", adminBearer)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.jobs.length()").isNumber()
+                .jsonPath("$.totalJobs").isNumber();
+
+        // Filter by status=FAILED
+        http.get().uri("/v1/admin/jobs?status=FAILED")
+                .header("Authorization", adminBearer)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.jobs[0].status").isEqualTo("FAILED")
+                .jsonPath("$.jobs[0].errorMessage").isEqualTo("Provider timed out");
+
+        // Filter by modality=VIDEO
+        http.get().uri("/v1/admin/jobs?modality=VIDEO")
+                .header("Authorization", adminBearer)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.jobs[0].modality").isEqualTo("VIDEO")
+                .jsonPath("$.jobs[0].model").isEqualTo("gen-3-alpha");
+    }
+
+    @Test
+    void jobs_givenNonAdmin_returns403() {
+        http.get().uri("/v1/admin/jobs")
+                .header("Authorization", userBearer)
+                .exchange()
+                .expectStatus().isForbidden();
+    }
+
+    // ===== /v1/admin/audit-logs ==========================================
+
+    @Test
+    void auditLogs_listsAndFiltersLogs() {
+        // Trigger an admin action to produce an audit log
+        http.patch().uri("/v1/admin/users/" + userId + "/status")
+                .header("Authorization", adminBearer)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("active", false, "reason", "Test audit trail"))
+                .exchange()
+                .expectStatus().isOk();
+
+        http.get().uri("/v1/admin/audit-logs?page=0&size=10")
+                .header("Authorization", adminBearer)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.logs.length()").isNumber()
+                .jsonPath("$.totalLogs").isNumber();
+
+        http.get().uri("/v1/admin/audit-logs?eventType=" + AuditLogService.EVT_ADMIN_USER_STATUS_UPDATED)
+                .header("Authorization", adminBearer)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.logs[0].eventType").isEqualTo(AuditLogService.EVT_ADMIN_USER_STATUS_UPDATED);
+    }
+
+    @Test
+    void auditLogs_givenNonAdmin_returns403() {
+        http.get().uri("/v1/admin/audit-logs")
+                .header("Authorization", userBearer)
+                .exchange()
+                .expectStatus().isForbidden();
+    }
+
+    // ===== /v1/admin/payments ============================================
+
+    @Test
+    void listPayments_returnsPagedTransactions() {
+        http.get().uri("/v1/admin/payments")
+                .header("Authorization", adminBearer)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.transactions").isArray()
+                .jsonPath("$.page").isEqualTo(0);
+    }
+
+    @Test
+    void reconcilePayment_creditsUserAndAudits() {
+        String testRef = "cs_test_" + UUID.randomUUID();
+        long balanceBefore = ledger.sumDeltaForUser(userId);
+
+        http.post().uri("/v1/admin/payments/reconcile")
+                .header("Authorization", adminBearer)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of(
+                        "userId", userId.toString(),
+                        "amountCents", 2500,
+                        "paymentRef", testRef,
+                        "note", "Offline bank transfer reconciled"
+                ))
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.deltaCents").isEqualTo(2500)
+                .jsonPath("$.source").isEqualTo("STRIPE")
+                .jsonPath("$.sourceRef").isEqualTo(testRef)
+                .jsonPath("$.userEmail").isNotEmpty();
+
+        assertThat(ledger.sumDeltaForUser(userId)).isEqualTo(balanceBefore + 2500);
+        assertThat(audit.findByEventType(AuditLogService.EVT_ADMIN_PAYMENT_RECONCILED)).isNotEmpty();
+
+        // Duplicate test: re-posting same ref should 409
+        http.post().uri("/v1/admin/payments/reconcile")
+                .header("Authorization", adminBearer)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of(
+                        "userId", userId.toString(),
+                        "amountCents", 2500,
+                        "paymentRef", testRef,
+                        "note", "Duplicate attempt"
+                ))
+                .exchange()
+                .expectStatus().isEqualTo(409);
+    }
+
+    @Test
+    void refundPayment_debitsUserAndAudits() {
+        String refundRef = "ref_test_" + UUID.randomUUID();
+        long balanceBefore = ledger.sumDeltaForUser(userId);
+
+        http.post().uri("/v1/admin/payments/refund")
+                .header("Authorization", adminBearer)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of(
+                        "userId", userId.toString(),
+                        "amountCents", 1000,
+                        "paymentRef", refundRef,
+                        "reason", "Customer requested cancellation"
+                ))
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.deltaCents").isEqualTo(-1000)
+                .jsonPath("$.source").isEqualTo("REFUND")
+                .jsonPath("$.note").isEqualTo("Customer requested cancellation");
+
+        assertThat(ledger.sumDeltaForUser(userId)).isEqualTo(balanceBefore - 1000);
+        assertThat(audit.findByEventType(AuditLogService.EVT_ADMIN_PAYMENT_REFUNDED)).isNotEmpty();
+    }
+
+    @Test
+    void webhookHealth_aggregatesMetricsAndExceptions() {
+        // Record a webhook rejection audit log
+        ai.godance.domain.AuditLogEntry entry = new ai.godance.domain.AuditLogEntry();
+        entry.setEventType(AuditLogService.EVT_BILLING_WEBHOOK_REJECTED);
+        entry.setOutcome(ai.godance.domain.AuditOutcome.FAILURE);
+        entry.setIpAddress("127.0.0.1");
+        entry.setEventDetail(Map.of("reason", "Invalid signature header"));
+        audit.save(entry);
+
+        http.get().uri("/v1/admin/payments/webhook-health")
+                .header("Authorization", adminBearer)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.recentExceptions").isArray()
+                .jsonPath("$.totalRejected").isNumber();
+    }
+
+
+    @Test
+    void payments_givenNonAdmin_returns403() {
+        http.get().uri("/v1/admin/payments")
+                .header("Authorization", userBearer)
+                .exchange()
+                .expectStatus().isForbidden();
+
+        http.post().uri("/v1/admin/payments/reconcile")
+                .header("Authorization", userBearer)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("userId", userId.toString(), "amountCents", 1000, "paymentRef", "cs_123"))
                 .exchange()
                 .expectStatus().isForbidden();
     }

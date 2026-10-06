@@ -10,6 +10,11 @@ export default function ProtectedRoute({ children }: { children: ReactNode }) {
   const { user, loading } = useAuth();
   const location = useLocation();
 
+  // In local development, allow direct preview of admin routes without logging in
+  if (import.meta.env.DEV && location.pathname.startsWith('/admin')) {
+    return <>{children}</>;
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[40vh] text-fg-faint text-sm">

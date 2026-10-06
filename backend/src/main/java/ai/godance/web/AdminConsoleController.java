@@ -8,12 +8,15 @@ import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -90,6 +93,100 @@ public class AdminConsoleController {
                 .subscribeOn(Schedulers.boundedElastic());
     }
 
+    @GetMapping("/users/{id}/usage")
+    public Mono<AdminConsoleService.UserUsagePageResponse> userUsage(
+            @PathVariable("id") UUID id,
+            @RequestParam(value = "page", defaultValue = "0") int page,
+            @RequestParam(value = "size", defaultValue = "20") int size) {
+        return Mono.fromCallable(() -> console.userUsage(id, page, size))
+                .subscribeOn(Schedulers.boundedElastic());
+    }
+
+    @PatchMapping("/users/{id}/status")
+    public Mono<AdminConsoleService.UserView> updateUserStatus(
+            @PathVariable("id") UUID id,
+            @RequestBody UserStatusUpdateRequest body,
+            @AuthenticationPrincipal Jwt jwt) {
+        return Mono.fromCallable(() -> console.updateUserStatus(id, body.active(), body.reason(), emailFromJwt(jwt)))
+                .subscribeOn(Schedulers.boundedElastic());
+    }
+
+    @PatchMapping("/users/{id}/caps")
+    public Mono<AdminConsoleService.UserView> updateUserCaps(
+            @PathVariable("id") UUID id,
+            @RequestBody UserCapsUpdateRequest body,
+            @AuthenticationPrincipal Jwt jwt) {
+        return Mono.fromCallable(() -> console.updateUserCaps(
+                        id, body.dailyCreditCapCents(), body.monthlyCreditCapCents(), emailFromJwt(jwt)))
+                .subscribeOn(Schedulers.boundedElastic());
+    }
+
+    @GetMapping("/users/{id}/keys")
+    public Mono<List<AdminConsoleService.AdminApiKeyView>> userKeys(@PathVariable("id") UUID id) {
+        return Mono.fromCallable(() -> console.userKeys(id))
+                .subscribeOn(Schedulers.boundedElastic());
+    }
+
+    @DeleteMapping("/keys/{id}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public Mono<Void> revokeKey(@PathVariable("id") UUID keyId, @AuthenticationPrincipal Jwt jwt) {
+        return Mono.fromRunnable(() -> console.revokeKey(keyId, emailFromJwt(jwt)))
+                .subscribeOn(Schedulers.boundedElastic())
+                .then();
+    }
+
+    @GetMapping("/jobs")
+    public Mono<AdminConsoleService.AdminJobPageResponse> listJobs(
+            @RequestParam(value = "status", required = false) String status,
+            @RequestParam(value = "modality", required = false) String modality,
+            @RequestParam(value = "page", defaultValue = "0") int page,
+            @RequestParam(value = "size", defaultValue = "20") int size) {
+        return Mono.fromCallable(() -> console.listJobs(status, modality, page, size))
+                .subscribeOn(Schedulers.boundedElastic());
+    }
+
+    @GetMapping("/audit-logs")
+    public Mono<AdminConsoleService.AdminAuditLogPageResponse> listAuditLogs(
+            @RequestParam(value = "eventType", required = false) String eventType,
+            @RequestParam(value = "page", defaultValue = "0") int page,
+            @RequestParam(value = "size", defaultValue = "20") int size) {
+        return Mono.fromCallable(() -> console.listAuditLogs(eventType, page, size))
+                .subscribeOn(Schedulers.boundedElastic());
+    }
+
+    @GetMapping("/payments")
+    public Mono<AdminConsoleService.AdminPaymentPageResponse> listPayments(
+            @RequestParam(value = "source", required = false) String source,
+            @RequestParam(value = "page", defaultValue = "0") int page,
+            @RequestParam(value = "size", defaultValue = "20") int size) {
+        return Mono.fromCallable(() -> console.listPayments(source, page, size))
+                .subscribeOn(Schedulers.boundedElastic());
+    }
+
+    @PostMapping("/payments/reconcile")
+    public Mono<AdminConsoleService.AdminPaymentTransactionView> reconcilePayment(
+            @RequestBody ReconcilePaymentRequest body,
+            @AuthenticationPrincipal Jwt jwt) {
+        return Mono.fromCallable(() -> console.reconcilePayment(
+                        body.userId(), body.amountCents(), body.paymentRef(), body.note(), emailFromJwt(jwt)))
+                .subscribeOn(Schedulers.boundedElastic());
+    }
+
+    @PostMapping("/payments/refund")
+    public Mono<AdminConsoleService.AdminPaymentTransactionView> refundPayment(
+            @RequestBody RefundPaymentRequest body,
+            @AuthenticationPrincipal Jwt jwt) {
+        return Mono.fromCallable(() -> console.refundPayment(
+                        body.userId(), body.amountCents(), body.paymentRef(), body.reason(), emailFromJwt(jwt)))
+                .subscribeOn(Schedulers.boundedElastic());
+    }
+
+    @GetMapping("/payments/webhook-health")
+    public Mono<AdminConsoleService.AdminWebhookHealthResponse> webhookHealth() {
+        return Mono.fromCallable(console::webhookHealth)
+                .subscribeOn(Schedulers.boundedElastic());
+    }
+
     private static LocalDate parseDate(String raw, LocalDate fallback) {
         if (raw == null || raw.isBlank()) return fallback;
         try {
@@ -111,4 +208,13 @@ public class AdminConsoleController {
     public record UserSearchResponse(List<AdminConsoleService.UserView> users) { }
 
     public record CreditAdjustRequest(long amountCents, String note, String idempotencyKey) { }
+
+    public record UserStatusUpdateRequest(boolean active, String reason) { }
+
+    public record UserCapsUpdateRequest(Long dailyCreditCapCents, Long monthlyCreditCapCents) { }
+
+    public record ReconcilePaymentRequest(UUID userId, long amountCents, String paymentRef, String note) { }
+
+    public record RefundPaymentRequest(UUID userId, long amountCents, String paymentRef, String reason) { }
 }
+

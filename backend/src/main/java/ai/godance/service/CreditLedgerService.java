@@ -156,6 +156,37 @@ public class CreditLedgerService {
         return entry;
     }
 
+    /**
+     * Admin refund / clawback. Creates a negative REFUND ledger entry and
+     * decrements the user balance.
+     */
+    @Transactional
+    public CreditLedger adminRefund(UUID userId, long amountCents, String idempotencyKey,
+                                    String reason, String refundBy) {
+        if (amountCents <= 0) {
+            throw new IllegalArgumentException("adminRefund amount must be positive");
+        }
+        var existing = ledger.findByIdempotencyKey(idempotencyKey);
+        if (existing.isPresent()) {
+            return existing.get();
+        }
+        CreditLedger entry = new CreditLedger();
+        entry.setUserId(userId);
+        entry.setDeltaCents(-amountCents);
+        entry.setSource(CreditSource.REFUND);
+        entry.setSourceRef(refundBy);
+        entry.setIdempotencyKey(idempotencyKey);
+        entry.setNote(reason);
+        try {
+            ledger.save(entry);
+        } catch (DataIntegrityViolationException dup) {
+            log.info("adminRefund idempotency race for key={}, returning original", idempotencyKey);
+            return ledger.findByIdempotencyKey(idempotencyKey).orElseThrow();
+        }
+        users.incrementBalance(userId, -amountCents);
+        return entry;
+    }
+
     // ===== Gateway pre-debit / reconcile flow ========================
 
     /**
