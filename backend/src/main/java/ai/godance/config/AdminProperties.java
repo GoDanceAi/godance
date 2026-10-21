@@ -9,11 +9,12 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
  * Operator-only access control. Single-tenant by design: there is no
- * {@code is_admin} column on {@code users}; instead, the JWT
- * {@code email} claim (minted by {@link ai.godance.security.JwtService})
- * is matched case-insensitively against this allowlist by
- * {@link ai.godance.security.AdminAuthorizationFilter} on every
- * {@code /v1/admin/**} request.
+ * {@code is_admin} column on {@code users}; instead, on every
+ * {@code /v1/admin/**} request
+ * {@link ai.godance.security.AdminAuthorizationFilter} loads the caller's
+ * account and matches its current, verified email case-insensitively
+ * against this allowlist. An allowlisted address grants nothing until
+ * its account has verified it.
  *
  * <p>The allowlist lives in {@code application.yml} under
  * {@code godance.admin.emails} and is filled from the

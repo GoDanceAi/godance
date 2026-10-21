@@ -22,10 +22,12 @@ import ai.godance.domain.CatalogStatus;
 import ai.godance.domain.ModelCatalogEntry;
 import ai.godance.domain.ModelPriceHistory;
 import ai.godance.domain.PriceField;
+import ai.godance.domain.User;
 import ai.godance.gateway.ModelCatalog;
 import ai.godance.repository.AuditLogEntryRepository;
 import ai.godance.repository.ModelCatalogEntryRepository;
 import ai.godance.repository.ModelPriceHistoryRepository;
+import ai.godance.repository.UserRepository;
 import ai.godance.service.AuditLogService;
 import ai.godance.web.dto.AuthDtos.AuthResponse;
 
@@ -55,6 +57,7 @@ class AdminCatalogIntegrationTest {
     @Autowired ModelPriceHistoryRepository historyRepo;
     @Autowired ModelCatalog modelCatalog;
     @Autowired AuditLogEntryRepository audit;
+    @Autowired UserRepository users;
 
     private String adminBearer;
     private String userBearer;
@@ -62,6 +65,7 @@ class AdminCatalogIntegrationTest {
     @BeforeEach
     void seedAccounts() {
         adminBearer = signUpOrLogIn("admin@godance.test");
+        markEmailVerified("admin@godance.test");
         userBearer = signUpOrLogIn("user-" + java.util.UUID.randomUUID() + "@godance.test");
     }
 
@@ -257,5 +261,16 @@ class AdminCatalogIntegrationTest {
                 .expectStatus().isOk()
                 .expectBody(AuthResponse.class).returnResult().getResponseBody();
         return "Bearer " + resp.accessToken();
+    }
+
+    /**
+     * Admin access needs the account's email verified. Password signup
+     * leaves it unverified, so mark it directly instead of following the
+     * emailed link.
+     */
+    private void markEmailVerified(String email) {
+        User u = users.findByEmail(email).orElseThrow();
+        u.setEmailVerified(true);
+        users.save(u);
     }
 }
