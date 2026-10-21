@@ -429,6 +429,47 @@ Verification:
   only in key order inside `godance: {...}`. That object is a `Map.of`, whose
   iteration order the JDK randomises on every JVM start, so it changes on any
   restart, on either version.
+- **Chat completion contract.** This used the WireMock OpenAI stubs from
+  `ChatCompletionIntegrationTest`. Eleven raw responses were captured from
+  `main` @ 98f5a2b (3.5.16) and from this branch merged with it (4.1.1):
+  signup, login and a failed login, `/v1/auth/me`, a non-stream chat
+  completion, a streamed (SSE) chat completion, a chat completion sending
+  `"temperature": null, "max_tokens": null`, `/v1/models`,
+  `/actuator/health`, the chat 401 and a signup 400.
+  - **Both chat completion bodies are byte-identical with no masking at all.**
+    For the stream, that covers the `data:` framing, every chunk's JSON and the
+    final `data: [DONE]`.
+  - The null-parameters request returns 200 on both versions and is identical,
+    so the Jackson 2 defaults still accept nulls in primitive fields.
+  - Signup, login, `/v1/auth/me` and the 401 are identical after masking JWTs,
+    UUIDs and timestamps.
+  - The four that differ are the known ones. Problem details drop
+    `"type":"about:blank"` (the failed login and the signup 400), the health
+    response gains `groups`, and `/v1/models` has the `Map.of` key order. This
+    run's 3.5.16 order also differed from the earlier 3.5.16 capture.
+- **Rollback 4.1.1 → 3.5.16.** Jars of both builds ran in the dev profile
+  (JDBC Quartz store) against one compose Postgres: first 3.5.16, then 4.1.1,
+  then 3.5.16 again. Before each boot, `autoRechargeCronTrigger`'s
+  `next_fire_time` was set to 50 seconds ahead. On every boot:
+  - the trigger fired on time (`AutoRechargeCronJob: no candidates`) and its
+    next fire returned to 03:00;
+  - Flyway reported "No migration necessary", including Flyway 11.7 reading
+    the history after Flyway 12.4 had run;
+  - `/actuator/health` was `UP` and nothing was logged at ERROR.
+
+  The serialized `job_data` holds only Quartz and JDK classes (`JobDataMap`,
+  `StringKeyDirtyFlagMap`, `HashMap`), not Spring ones, so it does not depend
+  on the Spring version. Rolling the image back needs no database step.
+- **Redis handshake** (`redis-cli CLIENT LIST`). 3.5.16 shows
+  `lib-name=Lettuce lib-ver=6.6.0.RELEASE`; 4.1.1 shows
+  `lib-name=Lettuce(spring-data-redis_v4.1.1) lib-ver=7.5.2.RELEASE`.
+- **Prod-profile properties.** 4.1.1 booted with `spring.profiles.active=prod`
+  and `spring-boot-properties-migrator`, using placeholder secrets and the
+  compose services. It reported no renamed or removed keys. As a control, a
+  planted `spring.dao.exceptiontranslation.enabled` was flagged, with its
+  replacement `spring.persistence.exceptiontranslation.enabled`.
+- **Production.** Deployed with #18 (`1c58734`) on 2026-10-21 at 13:30 UTC.
+  The deploy health check passed, and `/healthz` reports that SHA.
 
 Behaviour changes that come with Boot 4 and Framework 7 and were kept:
 - Problem details no longer include `"type":"about:blank"`. RFC 9457 §3.1.1
