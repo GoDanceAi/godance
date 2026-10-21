@@ -110,16 +110,19 @@ public class StripeService {
 
     /**
      * Re-fetch a completed Checkout Session with its {@code payment_intent}
-     * expanded so we can read the saved {@code payment_method} id. Returns
-     * null if the session has no payment method (e.g., zero-amount session).
+     * expanded so we can read the {@code payment_method} id and whether the
+     * intent set it up for off-session use. Returns null if the session has
+     * no payment method (e.g., zero-amount session).
      */
-    public String retrievePaymentMethodId(String sessionId) throws StripeException {
+    public CheckoutPaymentMethod retrieveCheckoutPaymentMethod(String sessionId) throws StripeException {
         SessionRetrieveParams params = SessionRetrieveParams.builder()
                 .addExpand("payment_intent")
                 .build();
         Session full = Session.retrieve(sessionId, params, null);
         PaymentIntent pi = full.getPaymentIntentObject();
-        return pi == null ? null : pi.getPaymentMethod();
+        if (pi == null || pi.getPaymentMethod() == null) return null;
+        return new CheckoutPaymentMethod(pi.getPaymentMethod(),
+                "off_session".equals(pi.getSetupFutureUsage()));
     }
 
     /**
@@ -156,4 +159,13 @@ public class StripeService {
     public Event verifyAndParse(String payload, String sigHeader) throws SignatureVerificationException {
         return Webhook.constructEvent(payload, sigHeader, stripe.webhookSecret());
     }
+
+    /**
+     * The payment method a Checkout Session's payment used.
+     * {@code savedForOffSession}: its PaymentIntent had
+     * {@code setup_future_usage=off_session} (a {@code save_card=true}
+     * top-up), so Stripe attached the method to the customer for
+     * off-session charges.
+     */
+    public record CheckoutPaymentMethod(String id, boolean savedForOffSession) { }
 }

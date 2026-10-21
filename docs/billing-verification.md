@@ -276,7 +276,25 @@ Expect `auto_recharge_enabled = f`, a populated `last_failure_at`, a
 `last_failure_reason` naming the decline (e.g. `card_declined: ...`), an
 audit row `billing.autorecharge.failed | FAILURE`, and **no** credit ledger
 row for the failed attempt. The user must re-enable auto-recharge (which
-means running a fresh interactive top-up with a working card first).
+means running a fresh interactive top-up with a working card first, 2e).
+
+A plain decline like this one leaves the card on file, since it may clear
+on its own. After a decline Stripe reports as `expired_card`, `lost_card`,
+`stolen_card` or `pickup_card`, the card can never be charged again, so it
+is dropped as well: `stripe_payment_method_id` is null, a
+`billing.payment_method.removed | SUCCESS` audit row names the codes, and
+2b answers 409 until 2e saves a new card. Stripe's test cards for those
+codes decline the first payment too, so they can't be saved;
+`AutoRechargeRecoveryIntegrationTest` covers this path instead.
+
+### 2e. Recover with a new card — [operator]
+
+After 2d, repeat 2a with `4242 4242 4242 4242` and `saveCard` true. The
+new card replaces the declined one: `stripe_payment_method_id` changes to
+the new `pm_…` and another `billing.payment_method.saved` row is written.
+Re-enable (2b) and drive a charge (2c): the balance jumps by `topup_cents`,
+and the off-session PaymentIntent in the Stripe Dashboard is on the new
+card. A top-up without `saveCard` never changes the saved card.
 
 ## 3. NOWPayments IPN — crypto top-up credit
 

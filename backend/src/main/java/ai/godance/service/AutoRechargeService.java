@@ -2,6 +2,7 @@ package ai.godance.service;
 
 import java.time.Instant;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import org.slf4j.Logger;
@@ -11,6 +12,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import com.stripe.exception.CardException;
 import com.stripe.exception.StripeException;
 import com.stripe.model.PaymentIntent;
 
@@ -38,13 +40,25 @@ import ai.godance.service.mail.MailService;
  *       PaymentIntent with {@code confirm=true, off_session=true}. On
  *       success → credit ledger via {@code topUp}. On any hard failure
  *       (card declined, SCA required, expired card) → disable auto-recharge
- *       + audit-log so the user has to re-engage.</li>
+ *       + audit-log so the user has to re-engage. A card that can never be
+ *       charged again (expired, lost, stolen) is also dropped, so the user
+ *       can't re-enable on it.</li>
  * </ol>
  */
 @Service
 public class AutoRechargeService {
 
     private static final Logger log = LoggerFactory.getLogger(AutoRechargeService.class);
+
+    /**
+     * Stripe error and decline codes after which the card can never be
+     * charged again: it has expired, or the issuer has cancelled it. Any
+     * other failure (insufficient_funds, generic_decline,
+     * authentication_required, ...) may clear without a new card, so the
+     * card stays on file.
+     */
+    private static final Set<String> UNRECOVERABLE_CARD_CODES = Set.of(
+            "expired_card", "lost_card", "stolen_card", "pickup_card");
 
     private final UserRepository users;
     private final CreditLedgerService ledger;
@@ -163,8 +177,34 @@ public class AutoRechargeService {
                             "ledger", result.name()));
             return Outcome.CHARGED;
         } catch (StripeException e) {
+            String declineCode = e instanceof CardException card ? card.getDeclineCode() : null;
+            if (isUnrecoverableCardCode(e.getCode()) || isUnrecoverableCardCode(declineCode)) {
+                dropUnrecoverableCard(u, e.getCode(), declineCode);
+            }
             return hardFail(u, e.getCode() == null ? e.getMessage() : e.getCode() + ": " + e.getMessage());
         }
+    }
+
+    private static boolean isUnrecoverableCardCode(String code) {
+        return code != null && UNRECOVERABLE_CARD_CODES.contains(code);
+    }
+
+    /**
+     * Forget a saved card Stripe says can never be charged again, so
+     * {@link #enable} answers 409 until a {@code save_card=true} top-up
+     * saves a new one. {@link #hardFail} persists the change. The failure
+     * reason the user sees keeps Stripe's generic wording: Stripe advises
+     * against telling them a card was reported lost or stolen.
+     */
+    private void dropUnrecoverableCard(User u, String code, String declineCode) {
+        String pmId = u.getStripePaymentMethodId();
+        log.info("dropping saved card {} for user {}: {} / {}", pmId, u.getId(), code, declineCode);
+        u.setStripePaymentMethodId(null);
+        audit.record(AuditLogService.EVT_BILLING_PAYMENT_METHOD_REMOVED, AuditOutcome.SUCCESS,
+                u.getId(), null, Map.of(
+                        "paymentMethodId", pmId,
+                        "code", String.valueOf(code),
+                        "declineCode", String.valueOf(declineCode)));
     }
 
     private Outcome hardFail(User u, String reason) {

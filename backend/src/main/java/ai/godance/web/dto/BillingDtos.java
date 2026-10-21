@@ -11,8 +11,9 @@ public final class BillingDtos {
 
     /**
      * One-shot top-up. {@code saveCard=true} captures the card for off-session
-     * future use (required before the user can enable auto-recharge); defaults
-     * to false so the existing one-tap top-up flow is unchanged.
+     * future use (required before the user can enable auto-recharge),
+     * replacing any card saved before; defaults to false so the existing
+     * one-tap top-up flow is unchanged.
      */
     public record TopUpRequest(
             @Positive long amountCents,
