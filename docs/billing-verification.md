@@ -203,6 +203,16 @@ psql "$DATABASE_URL" -tAc \
 Both columns must be non-null. A `billing.payment_method.saved` audit row
 is also written.
 
+Only cards are saved. Auto-recharge credits as soon as its off-session
+charge succeeds, and a bank debit only settles days later. Pay the session
+with a Stripe test bank account (ACH Direct Debit or SEPA Debit) instead and
+the top-up still credits, but `stripe_payment_method_id` stays null, a
+`billing.payment_method.rejected | DENIED` audit row names the
+`paymentMethodType`, and 2b answers 409. A bank debit saved before this
+check is dropped, with the same audit row, the next time the user enables
+auto-recharge (409) or auto-recharge fires (disabled, user emailed). The
+user's next card top-up with `saveCard` saves the card.
+
 ### 2b. Enable auto-recharge
 
 ```sh

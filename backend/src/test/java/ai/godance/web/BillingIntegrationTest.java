@@ -198,18 +198,20 @@ class BillingIntegrationTest {
 
     /**
      * The session re-fetch {@code capturePaymentMethodIfPresent} makes
-     * (payment_intent expanded), for a {@code save_card=true} top-up.
+     * (payment_intent.payment_method expanded, so the type is readable), for
+     * a {@code save_card=true} top-up.
      */
-    private static void stubPaymentMethodLookup(String sessionId, String paymentMethodId) {
+    private static void stubPaymentMethodLookup(String sessionId, String paymentMethodId, String type) {
         stripeMock.stubFor(get(urlPathEqualTo("/v1/checkout/sessions/" + sessionId))
                 .willReturn(aResponse().withStatus(200)
                         .withHeader("content-type", "application/json")
                         .withBody("""
                                 {"id":"%s","object":"checkout.session","livemode":false,
-                                 "payment_intent":{"id":"pi_%s","object":"payment_intent",
-                                                   "payment_method":"%s",
-                                                   "setup_future_usage":"off_session","livemode":false}}
-                                """.formatted(sessionId, sessionId, paymentMethodId))));
+                                 "payment_intent":{"id":"pi_%s","object":"payment_intent","livemode":false,
+                                                   "payment_method":{"id":"%s","object":"payment_method",
+                                                                     "type":"%s","livemode":false},
+                                                   "setup_future_usage":"off_session"}}
+                                """.formatted(sessionId, sessionId, paymentMethodId, type))));
     }
 
     private static boolean paymentMethodLookedUp(String sessionId) {
@@ -362,7 +364,7 @@ class BillingIntegrationTest {
     @Test
     void webhook_givenCardSessionPaid_creditsOnce_andSavesPaymentMethod() {
         SignedUser u = signupAndAuth();
-        stubPaymentMethodLookup("cs_card_paid", "pm_card_paid");
+        stubPaymentMethodLookup("cs_card_paid", "pm_card_paid", "card");
         String payload = checkoutSessionEvent(
                 EVT_COMPLETED, "evt_card_paid", "cs_card_paid", u.id(), 20_00L, "paid");
 
@@ -381,7 +383,7 @@ class BillingIntegrationTest {
     @Test
     void webhook_givenAchSessionCompletedUnpaid_doesNotCredit_orSavePaymentMethod() {
         SignedUser u = signupAndAuth();
-        stubPaymentMethodLookup("cs_ach_pending", "pm_ach_pending");
+        stubPaymentMethodLookup("cs_ach_pending", "pm_ach_pending", "us_bank_account");
 
         deliver(checkoutSessionEvent(
                 EVT_COMPLETED, "evt_ach_pending", "cs_ach_pending", u.id(), 40_00L, "unpaid"));
@@ -395,9 +397,9 @@ class BillingIntegrationTest {
     }
 
     @Test
-    void webhook_givenAchCompletedUnpaidThenAsyncSucceeded_creditsOnce_andSavesPaymentMethod() {
+    void webhook_givenAchCompletedUnpaidThenAsyncSucceeded_creditsOnce_butDoesNotSavePaymentMethod() {
         SignedUser u = signupAndAuth();
-        stubPaymentMethodLookup("cs_ach_ok", "pm_ach_ok");
+        stubPaymentMethodLookup("cs_ach_ok", "pm_ach_ok", "us_bank_account");
         String completed = checkoutSessionEvent(
                 EVT_COMPLETED, "evt_ach_ok_completed", "cs_ach_ok", u.id(), 40_00L, "unpaid");
         String succeeded = checkoutSessionEvent(
@@ -416,8 +418,8 @@ class BillingIntegrationTest {
             assertThat(row.getSourceRef()).isEqualTo("cs_ach_ok");
             assertThat(row.getIdempotencyKey()).isEqualTo("evt_ach_ok_async");
         });
-        assertThat(users.findById(u.id()).orElseThrow().getStripePaymentMethodId())
-                .isEqualTo("pm_ach_ok");
+        // Credited, but a bank debit is never saved for auto-recharge.
+        assertThat(users.findById(u.id()).orElseThrow().getStripePaymentMethodId()).isNull();
     }
 
     /** Stripe doesn't guarantee delivery order; the session snapshot in each event decides. */
@@ -438,7 +440,7 @@ class BillingIntegrationTest {
     void webhook_givenAchAsyncPaymentFailed_neverCredits_andNotifiesUser(CapturedOutput output) {
         SignedUser u = signupAndAuth();
         String email = users.findById(u.id()).orElseThrow().getEmail();
-        stubPaymentMethodLookup("cs_ach_fail", "pm_ach_fail");
+        stubPaymentMethodLookup("cs_ach_fail", "pm_ach_fail", "us_bank_account");
         String failed = checkoutSessionEvent(
                 EVT_ASYNC_FAILED, "evt_ach_fail_async", "cs_ach_fail", u.id(), 40_00L, "unpaid");
 

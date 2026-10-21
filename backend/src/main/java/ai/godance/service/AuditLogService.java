@@ -4,6 +4,8 @@ import java.util.Map;
 import java.util.UUID;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 import ai.godance.domain.AuditLogEntry;
 import ai.godance.domain.AuditOutcome;
@@ -39,6 +41,8 @@ public class AuditLogService {
     public static final String EVT_BILLING_NOWPAYMENTS_SUCCEEDED = "billing.topup.nowpayments.succeeded";
     public static final String EVT_BILLING_NOWPAYMENTS_DUPLICATE = "billing.topup.nowpayments.duplicate";
     public static final String EVT_BILLING_PAYMENT_METHOD_SAVED = "billing.payment_method.saved";
+    /** A payment method refused for auto-recharge (not saved, or dropped from the user): not a card. */
+    public static final String EVT_BILLING_PAYMENT_METHOD_REJECTED = "billing.payment_method.rejected";
     // Auto-recharge (Session 13)
     public static final String EVT_BILLING_AUTORECHARGE_ENABLED   = "billing.autorecharge.enabled";
     public static final String EVT_BILLING_AUTORECHARGE_DISABLED  = "billing.autorecharge.disabled";
@@ -65,5 +69,17 @@ public class AuditLogService {
         entry.setIpAddress(ipAddress);
         entry.setEventDetail(detail);
         repo.save(entry);
+    }
+
+    /**
+     * {@link #record} in its own transaction, so the row commits even when
+     * the caller's transaction rolls back. For a denial thrown after the
+     * caller has written state that must not commit; when nothing has been
+     * written yet, mark the caller {@code noRollbackFor} instead.
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void recordInNewTransaction(String eventType, AuditOutcome outcome, UUID userId,
+                                       String ipAddress, Map<String, Object> detail) {
+        record(eventType, outcome, userId, ipAddress, detail);
     }
 }

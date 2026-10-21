@@ -280,6 +280,13 @@ public class BillingService {
      * the PaymentIntent has {@code setup_future_usage=off_session}. Such a
      * session replaces the saved method, so a user whose card was declined
      * saves a new one with a top-up, as the auto-recharge-failed email says.
+     *
+     * <p>Only cards are saved. Auto-recharge charges off-session and credits
+     * as soon as the charge succeeds; a bank debit (ACH Direct Debit
+     * {@code us_bank_account}, SEPA Debit {@code sepa_debit}) only reaches
+     * {@code processing} and settles days later, so auto-recharge would take
+     * the money without crediting it. Skipping the save leaves the top-up
+     * itself untouched.
      */
     private void capturePaymentMethodIfPresent(UUID userId, String sessionId, String ip) {
         try {
@@ -287,6 +294,15 @@ public class BillingService {
             if (user == null) return;
             StripeService.CheckoutPaymentMethod pm = stripe.retrieveCheckoutPaymentMethod(sessionId);
             if (pm == null || !pm.savedForOffSession()) return;
+            if (!pm.isCard()) {
+                log.info("not saving {} payment method {} from session {}: auto-recharge charges cards only",
+                        pm.type(), pm.id(), sessionId);
+                audit.record(AuditLogService.EVT_BILLING_PAYMENT_METHOD_REJECTED,
+                        AuditOutcome.DENIED, userId, ip,
+                        Map.of("sessionId", sessionId, "paymentMethodId", pm.id(),
+                                "paymentMethodType", String.valueOf(pm.type())));
+                return;
+            }
             user.setStripePaymentMethodId(pm.id());
             users.save(user);
             audit.record(AuditLogService.EVT_BILLING_PAYMENT_METHOD_SAVED,

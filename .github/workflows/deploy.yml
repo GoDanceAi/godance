@@ -99,7 +99,20 @@ jobs:
             cd /opt/godance
             git pull --ff-only
             cd backend
-            docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env.prod pull backend
+            # The droplet's connection to GHCR's blob storage occasionally
+            # times out mid-pull. Retry with backoff (10/20/30/40s) before
+            # failing; the running container is untouched until `up`.
+            for attempt in 1 2 3 4 5; do
+              if docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env.prod pull backend; then
+                break
+              fi
+              if [ "$attempt" -eq 5 ]; then
+                echo "image pull failed after $attempt attempts" >&2
+                exit 1
+              fi
+              echo "image pull failed (attempt $attempt/5); retrying in $((attempt * 10))s" >&2
+              sleep $((attempt * 10))
+            done
             docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env.prod up -d --no-build backend
             docker logout ghcr.io
             docker image prune -f

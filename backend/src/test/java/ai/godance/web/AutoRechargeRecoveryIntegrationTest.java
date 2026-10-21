@@ -7,6 +7,7 @@ import static com.github.tomakehurst.wiremock.client.WireMock.post;
 import static com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
+import static com.github.tomakehurst.wiremock.client.WireMock.urlPathMatching;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.net.URLDecoder;
@@ -100,6 +101,11 @@ class AutoRechargeRecoveryIntegrationTest {
     @BeforeEach
     void resetStubs() {
         stripeMock.resetAll();
+        // The saved-method type lookup enable() and chargeIfNeeded() make: every card here is one.
+        stripeMock.stubFor(get(urlPathMatching("/v1/payment_methods/.+"))
+                .willReturn(json(200, """
+                        {"id":"pm_test_card","object":"payment_method","type":"card","livemode":false}
+                        """)));
     }
 
     // ---------- helpers ------------------------------------------------
@@ -156,7 +162,8 @@ class AutoRechargeRecoveryIntegrationTest {
                 .willReturn(json(200, """
                         {"id":"%s","object":"checkout.session","livemode":false,
                          "payment_intent":{"id":"pi_%s","object":"payment_intent","livemode":false,
-                                           "payment_method":"%s",
+                                           "payment_method":{"id":"%s","object":"payment_method",
+                                                             "type":"card","livemode":false},
                                            "setup_future_usage":%s}}
                         """.formatted(sessionId, sessionId, paymentMethodId,
                                       saveCard ? "\"off_session\"" : "null"))));
