@@ -198,7 +198,8 @@ class BillingIntegrationTest {
 
     /**
      * The session re-fetch {@code capturePaymentMethodIfPresent} makes
-     * (payment_intent.payment_method expanded, so the type is readable).
+     * (payment_intent.payment_method expanded, so the type is readable), for
+     * a {@code save_card=true} top-up.
      */
     private static void stubPaymentMethodLookup(String sessionId, String paymentMethodId, String type) {
         stripeMock.stubFor(get(urlPathEqualTo("/v1/checkout/sessions/" + sessionId))
@@ -208,7 +209,8 @@ class BillingIntegrationTest {
                                 {"id":"%s","object":"checkout.session","livemode":false,
                                  "payment_intent":{"id":"pi_%s","object":"payment_intent","livemode":false,
                                                    "payment_method":{"id":"%s","object":"payment_method",
-                                                                     "type":"%s","livemode":false}}}
+                                                                     "type":"%s","livemode":false},
+                                                   "setup_future_usage":"off_session"}}
                                 """.formatted(sessionId, sessionId, paymentMethodId, type))));
     }
 
