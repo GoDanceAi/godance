@@ -1,5 +1,5 @@
 -- =====================================================================
--- Godance V12 — password reset + JWT revocation.
+-- Godance V13 — password reset + JWT revocation.
 --
 -- password_reset_token_hash  SHA-256 (hex) of the single pending reset
 --                            token. The plaintext only goes out in the
