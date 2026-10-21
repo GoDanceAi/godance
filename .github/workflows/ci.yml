@@ -6,8 +6,8 @@
 #
 #   backend    — mvn -B verify against MinIO + Redis (the shared
 #                backing-services action, identical to deploy.yml's test job)
-#   app        — npm ci && npm run build
-#   marketing  — npm ci && npm run build
+#   app        — npm ci && npm run lint && npm run build
+#   marketing  — npm ci && npm run lint && npm run build
 #
 # No secrets: the only credential is the default, read-only GITHUB_TOKEN,
 # so PRs from forks run exactly like PRs from branches in this repo.
@@ -57,14 +57,19 @@ jobs:
           node-version: '22'
           cache: npm
           cache-dependency-path: app/package-lock.json
+      - name: Install
+        working-directory: app
+        run: npm ci
+      # tsc -b over both tsconfig projects (src/ and vite.config.ts).
+      - name: Lint
+        working-directory: app
+        run: npm run lint
       # Same env as the deploy build, so CI builds what would ship.
       - name: Build
         working-directory: app
         env:
           VITE_API_URL: https://api.godance.ai
-        run: |
-          npm ci
-          npm run build
+        run: npm run build
 
   marketing:
     name: marketing (build)
@@ -76,11 +81,17 @@ jobs:
           node-version: '22'
           cache: npm
           cache-dependency-path: marketing/package-lock.json
+      - name: Install
+        working-directory: marketing
+        run: npm ci
+      # astro check typechecks the .astro and .ts files; astro build
+      # does not.
+      - name: Lint
+        working-directory: marketing
+        run: npm run lint
       - name: Build
         working-directory: marketing
         env:
           SITE_URL: https://godance.ai
           PUBLIC_API_BASE: https://api.godance.ai
-        run: |
-          npm ci
-          npm run build
+        run: npm run build
