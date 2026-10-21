@@ -261,7 +261,9 @@ curl -s -X POST "$API/v1/billing/nowpayments/topup" \
 ```
 
 Open the returned `checkoutUrl` (a NOWPayments hosted invoice) and complete
-the payment in the **NOWPayments sandbox**. When the payment reaches the
+the payment in the **NOWPayments sandbox** — in BTC or ETH where offered, so
+the IPN carries an amount below 0.001 (the case most likely to break
+signature canonicalisation). When the payment reaches the
 terminal `finished` status, NOWPayments POSTs an IPN to
 `$API/v1/billing/webhooks/nowpayments`.
 
@@ -290,8 +292,11 @@ write `billing.webhook.ignored` — they must not credit.
 
 NOWPayments re-delivers an IPN until it gets a 2xx. To verify dedup without
 a second real payment, replay the exact `finished` IPN body. The signature
-is HMAC-SHA512 over the key-sorted (recursively) compact JSON, using
-`NOWPAYMENTS_IPN_SECRET` — header `x-nowpayments-sig`.
+is HMAC-SHA512 over the key-sorted (recursively) body as JavaScript's
+`JSON.stringify` prints it, using `NOWPAYMENTS_IPN_SECRET` — header
+`x-nowpayments-sig`. Sign it the way NOWPayments' Node.js SDK does (below),
+not with Python's `json.dumps`: Python prints `0.00005` as `5e-05` and
+escapes non-ASCII, so a BTC/ETH-sized amount would fail verification.
 
 Capture the original IPN JSON (from the droplet access log or the
 NOWPayments dashboard IPN history) into `ipn.json`, then on the droplet
@@ -299,14 +304,18 @@ where the secret is available as an env var:
 
 ```sh
 # Canonicalise + sign with the IPN secret (never paste the secret literally):
-SIG=$(python3 - "$NOWPAYMENTS_IPN_SECRET" < ipn.json <<'PY'
-import sys, json, hmac, hashlib
-secret = sys.argv[1].encode()
-obj = json.load(sys.stdin)
-canonical = json.dumps(obj, sort_keys=True, separators=(',', ':'))
-print(hmac.new(secret, canonical.encode(), hashlib.sha512).hexdigest())
-PY
-)
+SIG=$(docker run --rm -i -e NOWPAYMENTS_IPN_SECRET node:22-alpine node -e '
+const crypto = require("crypto");
+const sortObject = (o) => Array.isArray(o) ? o.map(sortObject)
+  : o && typeof o === "object"
+    ? Object.keys(o).sort().reduce((r, k) => { r[k] = sortObject(o[k]); return r; }, {})
+    : o;
+let body = "";
+process.stdin.on("data", (c) => { body += c; }).on("end", () => console.log(crypto
+  .createHmac("sha512", process.env.NOWPAYMENTS_IPN_SECRET.trim())
+  .update(JSON.stringify(sortObject(JSON.parse(body))))
+  .digest("hex")));
+' < ipn.json)
 
 curl -s -o /dev/null -w '%{http_code}\n' -X POST \
   "$API/v1/billing/webhooks/nowpayments" \
