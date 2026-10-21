@@ -128,6 +128,7 @@ export interface MeResponse {
   id: string;
   email: string;
   hasEmail: boolean;         // false: `email` is a placeholder (X sign-in shares no address)
+  pendingEmail: string | null; // address being added to such an account, until verified
   fullName: string;
   role: 'USER' | 'ADMIN';
   emailVerified: boolean;

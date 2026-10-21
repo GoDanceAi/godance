@@ -16,6 +16,7 @@ import org.springframework.web.server.ServerWebExchange;
 
 import ai.godance.security.JwtService;
 import ai.godance.service.AuthService;
+import ai.godance.web.dto.AuthDtos.AddEmailRequest;
 import ai.godance.web.dto.AuthDtos.AuthResponse;
 import ai.godance.web.dto.AuthDtos.LoginRequest;
 import ai.godance.web.dto.AuthDtos.MeResponse;
@@ -63,6 +64,15 @@ public class AuthController {
             ServerWebExchange exchange) {
         UUID userId = JwtService.userIdFromSubject(jwt.getSubject());
         return Mono.fromRunnable(() -> auth.resendVerificationEmail(userId, clientIp(exchange)))
+                .subscribeOn(Schedulers.boundedElastic())
+                .then(Mono.just(ResponseEntity.noContent().build()));
+    }
+
+    @PostMapping("/email")
+    public Mono<ResponseEntity<Void>> addEmail(@AuthenticationPrincipal Jwt jwt,
+            @Valid @RequestBody AddEmailRequest req, ServerWebExchange exchange) {
+        UUID userId = JwtService.userIdFromSubject(jwt.getSubject());
+        return Mono.fromRunnable(() -> auth.addEmail(userId, req.email(), clientIp(exchange)))
                 .subscribeOn(Schedulers.boundedElastic())
                 .then(Mono.just(ResponseEntity.noContent().build()));
     }

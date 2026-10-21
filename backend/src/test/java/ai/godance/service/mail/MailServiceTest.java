@@ -73,6 +73,15 @@ class MailServiceTest {
     }
 
     @Test
+    void sendVerificationEmail_givenAddressBeingAdded_expectsMailToThatAddress() {
+        mail.sendVerificationEmail(user("x-42@oauth.godance.local"), "added@godance.test");
+
+        String text = captureText(List.of("added@godance.test"), "Verify");
+        assertThat(text.lines().findFirst().orElseThrow())
+                .isEqualTo("Verification URL for added@godance.test: /verify-email?token=tok-123");
+    }
+
+    @Test
     void sendSpendWarning_givenUserCap_expectsStubVerbatimFirstLine() {
         UUID id = UUID.randomUUID();
         mail.sendSpendWarning("a@godance.test", "user " + id, "daily", 8_500, 10_000);

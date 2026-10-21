@@ -34,15 +34,22 @@ public final class AuthDtos {
         }
     }
 
+    /** A real address for an account that only has a placeholder (an X.com sign-in). */
+    public record AddEmailRequest(
+            @Email @NotBlank @Size(max = 320) String email
+    ) { }
+
     /**
      * {@code hasEmail} is false when {@code email} is only a placeholder
      * (an X.com sign-in, which shares no address), so clients don't show
-     * it or offer to verify it.
+     * it or offer to verify it. {@code pendingEmail} is an address such a
+     * user has asked to add and not yet verified, or null.
      */
     public record MeResponse(
             UUID id,
             String email,
             boolean hasEmail,
+            String pendingEmail,
             String fullName,
             UserRole role,
             boolean emailVerified,
@@ -56,6 +63,7 @@ public final class AuthDtos {
                     u.getId(),
                     u.getEmail(),
                     !u.hasSyntheticEmail(),
+                    u.getPendingEmail(),
                     u.getFullName(),
                     u.getRole(),
                     u.isEmailVerified(),

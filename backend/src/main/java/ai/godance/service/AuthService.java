@@ -110,6 +110,9 @@ public class AuthService {
      * holds the account. Without it, the owner of an address could verify
      * an account someone else registered with it, and OAuth sign-in would
      * then link into that account (see {@code OAuthLoginService}).
+     *
+     * <p>For an address being added (see {@link #addEmail}), this is the
+     * point where it replaces the placeholder.
      */
     @Transactional
     public void verifyEmail(UUID userId, String token, String ipAddress) {
@@ -120,6 +123,12 @@ public class AuthService {
                     "This verification link is for a different account. "
                             + "Sign in to that account and open the link again.");
         }
+        if (u.getPendingEmail() != null) {
+            // Someone may have signed up with it since it was requested.
+            requireUnusedEmail(u.getPendingEmail());
+            u.setEmail(u.getPendingEmail());
+            u.setPendingEmail(null);
+        }
         u.setEmailVerified(true);
         u.setEmailVerificationToken(null);
         users.save(u);
@@ -128,8 +137,9 @@ public class AuthService {
     }
 
     /**
-     * Send the signed-in user's verification email again. The current
-     * token is kept, so a link from an earlier email still works.
+     * Send the signed-in user's verification email again, to the address
+     * being added if there is one. The current token is kept, so a link
+     * from an earlier email still works.
      */
     @Transactional
     public void resendVerificationEmail(UUID userId, String ipAddress) {
@@ -138,17 +148,13 @@ public class AuthService {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
                     "Your email address is already verified.");
         }
-        if (u.hasSyntheticEmail()) {
+        String to = u.getPendingEmail() != null ? u.getPendingEmail() : u.getEmail();
+        if (to.endsWith(User.SYNTHETIC_EMAIL_SUFFIX)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
                     "This account has no email address to verify.");
         }
         Instant now = Instant.now();
-        Instant lastSent = u.getEmailVerificationSentAt();
-        if (lastSent != null && lastSent.plus(RESEND_COOLDOWN).isAfter(now)) {
-            throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS,
-                    "A verification email was sent less than a minute ago. "
-                            + "Check your inbox, or try again shortly.");
-        }
+        requireCooldownPassed(u, now);
         if (u.getEmailVerificationToken() == null) {
             u.setEmailVerificationToken(randomToken());
         }
@@ -156,10 +162,64 @@ public class AuthService {
         users.save(u);
 
         // Mail failures are swallowed inside MailService, as on signup.
-        mail.sendVerificationEmail(u);
+        mail.sendVerificationEmail(u, to);
 
         audit.record(AuditLogService.EVT_AUTH_VERIFY_RESEND, AuditOutcome.SUCCESS,
                 u.getId(), ipAddress, null);
+    }
+
+    /**
+     * Start adding a real email to an account that only has a placeholder
+     * (an X.com sign-in). The address waits in {@code pendingEmail} and
+     * replaces the placeholder only when verified from this account's
+     * session (see {@link #verifyEmail}). Until then it is not the
+     * account's email, so it neither blocks the address's owner from
+     * signing up nor lets their OAuth sign-in link into this account.
+     */
+    @Transactional
+    public void addEmail(UUID userId, String email, String ipAddress) {
+        User u = loadById(userId);
+        if (!u.hasSyntheticEmail()) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "This account already has an email address.");
+        }
+        String normalized = email.trim().toLowerCase();
+        if (normalized.endsWith(User.SYNTHETIC_EMAIL_SUFFIX)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Enter an email address you can receive mail at.");
+        }
+        requireUnusedEmail(normalized);
+        Instant now = Instant.now();
+        requireCooldownPassed(u, now);
+
+        u.setPendingEmail(normalized);
+        // A new token per address, so a link sent to an earlier address
+        // cannot confirm this one.
+        u.setEmailVerificationToken(randomToken());
+        u.setEmailVerificationSentAt(now);
+        users.save(u);
+
+        mail.sendVerificationEmail(u, normalized);
+
+        audit.record(AuditLogService.EVT_AUTH_EMAIL_ADD, AuditOutcome.SUCCESS,
+                u.getId(), ipAddress, Map.of("email", normalized));
+    }
+
+    private void requireUnusedEmail(String email) {
+        if (users.existsByEmail(email)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "That email address is already used by another Godance account.");
+        }
+    }
+
+    /** One verification email a minute per account, whatever triggers it. */
+    private static void requireCooldownPassed(User u, Instant now) {
+        Instant lastSent = u.getEmailVerificationSentAt();
+        if (lastSent != null && lastSent.plus(RESEND_COOLDOWN).isAfter(now)) {
+            throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS,
+                    "A verification email was sent less than a minute ago. "
+                            + "Check your inbox, or try again shortly.");
+        }
     }
 
     @Transactional(readOnly = true)

@@ -41,10 +41,18 @@ public class MailService {
         this.admin = admin;
     }
 
-    /** verify-email — sent on signup, and again when the user asks for a resend. */
+    /** verify-email — sent on signup, to the account's email. */
     public void sendVerificationEmail(User user) {
+        sendVerificationEmail(user, user.getEmail());
+    }
+
+    /**
+     * verify-email to {@code toEmail}: the account's email on a resend, or
+     * the address being added to an X.com sign-in's placeholder account.
+     */
+    public void sendVerificationEmail(User user, String toEmail) {
         try {
-            String stubLine = "Verification URL for " + user.getEmail()
+            String stubLine = "Verification URL for " + toEmail
                     + ": /verify-email?token=" + user.getEmailVerificationToken();
             String text = stubLine + "\n\n"
                     + "Hi " + user.getFullName() + ",\n\n"
@@ -56,7 +64,7 @@ public class MailService {
                     + " link in the Godance app, signed in to this account:</p>"
                     + "<p><code>/verify-email?token=" + escape(user.getEmailVerificationToken()) + "</code></p>"
                     + "<p>If you didn't create a Godance account, you can ignore this email.</p>";
-            sender.send(List.of(user.getEmail()), "Verify your Godance email", text, html);
+            sender.send(List.of(toEmail), "Verify your Godance email", text, html);
         } catch (Exception e) {
             log.error("verify-email build/send failed for {}: {}", user.getId(), e.getMessage());
         }

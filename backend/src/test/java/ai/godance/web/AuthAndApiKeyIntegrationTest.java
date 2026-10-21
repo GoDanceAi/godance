@@ -20,7 +20,9 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
+import ai.godance.domain.OAuthProvider;
 import ai.godance.repository.UserRepository;
+import ai.godance.service.OAuthLoginService;
 import ai.godance.web.dto.ApiKeyDtos.ApiKeySummary;
 import ai.godance.web.dto.ApiKeyDtos.CreateApiKeyResponse;
 import ai.godance.web.dto.AuthDtos.AuthResponse;
@@ -42,6 +44,7 @@ class AuthAndApiKeyIntegrationTest {
 
     @Autowired WebTestClient http;
     @Autowired UserRepository users;
+    @Autowired OAuthLoginService oauthLogin;
 
     private static String uniqueEmail(String tag) {
         return tag + "-" + UUID.randomUUID() + "@godance.test";
@@ -277,6 +280,87 @@ class AuthAndApiKeyIntegrationTest {
                 .header("Authorization", bearer)
                 .exchange()
                 .expectStatus().isBadRequest();
+    }
+
+    // ---------- /v1/auth/email (X sign-ins add an address) -------------
+
+    /** Signs in with X, which shares no email, and returns the bearer header. */
+    private String xSignIn() {
+        return "Bearer " + oauthLogin.completeLogin(
+                OAuthProvider.X, "x-" + UUID.randomUUID(), null, false, "X User").accessToken();
+    }
+
+    private MeResponse me(String bearer) {
+        return http.get().uri("/v1/auth/me")
+                .header("Authorization", bearer)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody(MeResponse.class).returnResult().getResponseBody();
+    }
+
+    private WebTestClient.ResponseSpec addEmail(String bearer, String email) {
+        return http.post().uri("/v1/auth/email")
+                .header("Authorization", bearer)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("email", email))
+                .exchange();
+    }
+
+    @Test
+    void addEmail_givenXSignIn_thenVerify_replacesPlaceholderWithVerifiedAddress() {
+        String bearer = xSignIn();
+        String added = uniqueEmail("x-added");
+
+        addEmail(bearer, added).expectStatus().isNoContent();
+
+        MeResponse pending = me(bearer);
+        assertThat(pending.hasEmail()).isFalse();
+        assertThat(pending.pendingEmail()).isEqualTo(added);
+        assertThat(users.findByEmail(added)).isEmpty();   // not the account's email yet
+
+        String token = users.findById(pending.id()).orElseThrow().getEmailVerificationToken();
+        http.get().uri("/v1/auth/verify?token={t}", token)
+                .header("Authorization", bearer)
+                .exchange()
+                .expectStatus().isNoContent();
+
+        MeResponse done = me(bearer);
+        assertThat(done.email()).isEqualTo(added);
+        assertThat(done.hasEmail()).isTrue();
+        assertThat(done.emailVerified()).isTrue();
+        assertThat(done.pendingEmail()).isNull();
+    }
+
+    @Test
+    void addEmail_givenUnverifiedPendingAddress_doesNotLetItsOwnersOAuthSignInLinkIn() {
+        String xBearer = xSignIn();
+        String victim = uniqueEmail("x-victim");
+        addEmail(xBearer, victim).expectStatus().isNoContent();
+
+        AuthResponse google = oauthLogin.completeLogin(
+                OAuthProvider.GOOGLE, "google-" + UUID.randomUUID(), victim, true, "Victim");
+
+        assertThat(me("Bearer " + google.accessToken()).id()).isNotEqualTo(me(xBearer).id());
+    }
+
+    @Test
+    void addEmail_givenPasswordAccount_returns409() {
+        String bearer = "Bearer " + signup(uniqueEmail("add-pw")).accessToken();
+
+        addEmail(bearer, uniqueEmail("add-other")).expectStatus().isEqualTo(HttpStatus.CONFLICT);
+    }
+
+    @Test
+    void addEmail_givenAddressOfAnotherAccount_returns409() {
+        String taken = uniqueEmail("add-taken");
+        signup(taken);
+
+        addEmail(xSignIn(), taken).expectStatus().isEqualTo(HttpStatus.CONFLICT);
+    }
+
+    @Test
+    void addEmail_givenMalformedAddress_returns400() {
+        addEmail(xSignIn(), "not-an-email").expectStatus().isBadRequest();
     }
 
     // ---------- /v1/keys ----------------------------------------------

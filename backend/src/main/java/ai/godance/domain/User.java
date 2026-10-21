@@ -75,6 +75,10 @@ public class User {
     @Column(name = "email_verification_sent_at")
     private Instant emailVerificationSentAt;
 
+    /** Address being added to a placeholder account; becomes {@code email} once verified. */
+    @Column(name = "pending_email")
+    private String pendingEmail;
+
     @Column(name = "stripe_customer_id", unique = true)
     private String stripeCustomerId;
 
@@ -180,6 +184,9 @@ public class User {
 
     public Instant getEmailVerificationSentAt() { return emailVerificationSentAt; }
     public void setEmailVerificationSentAt(Instant emailVerificationSentAt) { this.emailVerificationSentAt = emailVerificationSentAt; }
+
+    public String getPendingEmail() { return pendingEmail; }
+    public void setPendingEmail(String pendingEmail) { this.pendingEmail = pendingEmail; }
 
     public String getStripeCustomerId() { return stripeCustomerId; }
     public void setStripeCustomerId(String stripeCustomerId) { this.stripeCustomerId = stripeCustomerId; }
