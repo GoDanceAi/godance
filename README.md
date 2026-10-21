@@ -1,9 +1,10 @@
 # Godance
 
-> Multimodal AI aggregator: text, image, video, and audio behind one
-> OpenAI-compatible API. Stripe + Coinbase Commerce billing. Single
-> credit ledger. Drop-in for any OpenAI SDK — point `base_url` at
-> `https://api.godance.ai/v1` and it works.
+> Multimodal AI aggregator: text, image, and video behind one
+> OpenAI-compatible API. Stripe card billing + NOWPayments (USDT)
+> top-ups. Single credit ledger. Drop-in for OpenAI SDK chat calls —
+> point `base_url` at `https://api.godance.ai/v1`; image and video
+> run as async jobs.
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
@@ -11,7 +12,7 @@
 
 ```
 godance/
-├── backend/     Java 21 · Spring Boot 3.4 (WebFlux) · PostgreSQL · Redis · Flyway
+├── backend/     Java 21 · Spring Boot 3.5 (WebFlux) · PostgreSQL · Redis · Flyway
 │               OpenAI-compatible REST API, credit ledger, provider gateway with
 │               regional allowlist enforcement, embedded Quartz scheduler.
 │
@@ -28,10 +29,15 @@ Each subdirectory has its own README with a quickstart.
 ## Design philosophy
 
 - **OpenAI-compatible HTTP contract.** Existing OpenAI SDKs work with no
-  code changes — just swap `base_url`. Routes:
+  code changes — just swap `base_url`. Routes served today:
   `/v1/chat/completions`, `/v1/images/generations`,
-  `/v1/videos/generations`, `/v1/audio/speech`,
-  `/v1/audio/transcriptions`, `/v1/embeddings`, `/v1/models`.
+  `/v1/videos/generations`, `/v1/models` (plus `/v1/jobs/{id}` to
+  poll async generations). Image and video generation take OpenAI's
+  request shape but run as async jobs (`202` + `job_id`), so those
+  calls poll `/v1/jobs/{id}` or use a webhook instead of getting the
+  result inline. `/v1/audio/speech`,
+  `/v1/audio/transcriptions` and `/v1/embeddings` are planned but not
+  yet implemented.
 - **Regional provider allowlist is code, not config.** The provider
   gateway enforces a hardcoded allowlist per region. Some upstream
   providers (Anthropic, OpenAI, Google Vertex, BFL Flux) cannot be
@@ -45,17 +51,18 @@ Each subdirectory has its own README with a quickstart.
   Pricing internally uses microcents (1 ¢ = 10,000 µ¢) for
   per-1k-token arithmetic that would otherwise round to zero on cheap
   models. Conversion to display strings only at the boundary.
-- **Idempotent webhooks.** Stripe and Coinbase webhooks dedupe on
-  the upstream event id, surfacing duplicate deliveries as success
+- **Idempotent webhooks.** Stripe and NOWPayments webhooks dedupe on
+  the upstream id, surfacing duplicate deliveries as success
   without double-crediting.
 - **Reactive end-to-end.** WebFlux + Netty. SSE streaming for chat
   completions. Async generation jobs for image / video.
 
 ## Status
 
-This is the v0.1 codebase from initial implementation. Not yet
-deployed to production. The full session-by-session build history is
-visible in the git log.
+Live in production at `https://api.godance.ai`; `GET /healthz`
+reports the running version. CI auto-deploys `main`: backend changes
+to the API, `app/` and `marketing/` changes to Cloudflare Pages. The
+full session-by-session build history is visible in the git log.
 
 ## License
 
@@ -66,6 +73,11 @@ appreciated, not required.
 
 Issues and pull requests welcome. For substantial changes, open a
 discussion first so we can align on direction before code review.
+
+Every pull request runs CI (`.github/workflows/ci.yml`): the backend test
+suite (`mvn -B verify`) and production builds of `app/` and
+`marketing/`. To run the backend suite locally you need only Docker, Java
+21 and Maven; see [`backend/README.md`](backend/README.md#build--test).
 
 The regional allowlist (`backend/.../AlicloudProviderAllowlist`) and the
 billing / ledger code are the load-bearing safety surfaces — changes

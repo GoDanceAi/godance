@@ -1,9 +1,9 @@
 ---
 import Layout from '../layouts/Layout.astro';
 
-const title = 'Godance — every AI model, one API, drop-in OpenAI compatible';
+const title = 'Godance — every AI model, one OpenAI-compatible API';
 const description =
-  'OpenAI, Anthropic, Sora, Claude, Flux, Gemini, Volcengine Ark — text, image, video, audio behind one ' +
+  'OpenAI, Anthropic, Sora, Claude, Flux, Gemini, Volcengine Ark — text, image, and video behind one ' +
   'OpenAI-compatible REST API. Swap base_url, ship. Pay with card, ACH, SEPA, or USDT.';
 
 const orgSchema = {
@@ -24,8 +24,9 @@ const productSchema = {
   operatingSystem: 'Web, REST',
   offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
   description:
-    'OpenAI-compatible REST API for text, image, video, and audio generation across 16+ upstream providers, ' +
-    'with built-in fallback chains, signed webhooks, and a 5% flat platform fee.',
+    'OpenAI-compatible REST API for text, image, and video generation across 15+ upstream providers, ' +
+    'with built-in fallback chains, signed webhooks, and a published platform fee ' +
+    '(5% on text, 12% on images, 10–15% on video).',
 };
 
 const pythonSnippet = `from openai import OpenAI
@@ -45,15 +46,15 @@ r = client.chat.completions.create(
 const faqs = [
   {
     q: 'Will my existing OpenAI SDK code work?',
-    a: 'Yes — swap base_url to https://api.godance.ai/v1 and use a Godance API key. /v1/chat/completions (streaming + non-streaming), /v1/images/generations, /v1/audio/speech, /v1/audio/transcriptions, /v1/embeddings, and /v1/models all match OpenAI\'s contract.',
+    a: 'For chat, yes — swap base_url to https://api.godance.ai/v1 and use a Godance API key. /v1/chat/completions (streaming + non-streaming) and /v1/models match OpenAI\'s contract. /v1/images/generations takes OpenAI\'s request shape but runs async: it returns 202 with a job_id, and you fetch the result from GET /v1/jobs/{id} or receive it at a webhook_url. Video generation works the same way.',
   },
   {
     q: 'Which providers and models do you support?',
-    a: 'OpenAI (GPT, Sora, gpt-image), Anthropic (Claude), Google Vertex (Gemini, Imagen, Veo), Black Forest Labs (Flux), Volcengine Ark (Doubao, Seedream, Seedance), DeepSeek, Moonshot (Kimi), Alibaba (Qwen), Zhipu (GLM), MiniMax, xAI (Grok), Kling, Runway, ElevenLabs, Cartesia, Deepgram, and Stability. New providers ship as needed — email us.',
+    a: 'OpenAI (GPT, Sora, gpt-image), Anthropic (Claude), Google Vertex (Gemini, Imagen, Veo), Black Forest Labs (Flux), Volcengine Ark (Doubao, Seedream, Seedance), DeepSeek, Moonshot (Kimi), Alibaba (Qwen), Zhipu (GLM), MiniMax, Baidu (ERNIE), xAI (Grok), Kling, Runway, and Stability. New providers ship as needed — email us.',
   },
   {
     q: 'What does it actually cost?',
-    a: 'Provider list price plus a flat 5% platform fee — same percentage across text, image, video. No tiers, no seats, no minimums. Top up the credit ledger; spend it across every model.',
+    a: 'Provider list price plus a platform fee: 5% on text, 12% on images, and 10–15% on video depending on the model. Every model\'s fee is listed at godance.ai/models. No tiers, no seats, no minimums. Top up the credit ledger; spend it across every model.',
   },
   {
     q: 'What happens when a provider goes down?',
@@ -78,8 +79,8 @@ const faqSchema = {
 // Provider list anchors trust in the hero. Order: alphabetical inside category.
 const providerNames = [
   'OpenAI', 'Anthropic', 'Google Vertex', 'Sora', 'Black Forest Labs',
-  'Volcengine Ark', 'DeepSeek', 'Moonshot', 'Qwen', 'MiniMax',
-  'xAI', 'Kling', 'Runway', 'ElevenLabs', 'Cartesia', 'Deepgram',
+  'Volcengine Ark', 'DeepSeek', 'Moonshot', 'Qwen', 'Zhipu', 'MiniMax', 'Baidu',
+  'xAI', 'Kling', 'Runway', 'Stability',
 ];
 ---
 
@@ -88,16 +89,16 @@ const providerNames = [
   <!-- ===== Hero ===== -->
   <section class="mx-auto max-w-5xl px-6 pt-24 pb-12 text-center">
     <p class="text-sm font-semibold tracking-wider uppercase" style="color: var(--color-primary)">
-      One API. Every model. Text, image, video, audio.
+      One API. Every model. Text, image, video.
     </p>
     <h1 class="mt-5 text-5xl md:text-6xl font-bold tracking-tight text-fg">
       Build with every AI model.<br class="hidden md:block" />
       Skip the integration tax.
     </h1>
     <p class="mt-6 text-lg md:text-xl text-fg-muted max-w-2xl mx-auto">
-      Godance is a drop-in OpenAI-compatible API that routes to 16+ providers — OpenAI,
-      Anthropic, Sora, Claude, Flux, Gemini, Volcengine Ark, and more. One credit ledger,
-      one billing line, one SDK.
+      Godance is an OpenAI-compatible API that routes to 15+ providers — OpenAI,
+      Anthropic, Sora, Claude, Flux, Gemini, Volcengine Ark, and more. Drop-in for chat;
+      image and video run as async jobs. One credit ledger, one billing line, one SDK.
     </p>
     <div class="mt-10 flex items-center justify-center gap-3 flex-wrap">
       <a href="https://app.godance.ai/signup" class="btn btn-primary btn-lg">
@@ -109,7 +110,7 @@ const providerNames = [
       </a>
     </div>
     <p class="mt-6 text-sm text-fg-subtle">
-      Pass-through pricing + 5% flat. Card, ACH, SEPA, or USDT. No subscription.
+      Pass-through pricing + a published platform fee. Card, ACH, SEPA, or USDT. No subscription.
     </p>
   </section>
 
@@ -150,11 +151,13 @@ const providerNames = [
           </p>
         </div>
         <div>
-          <h3 class="text-lg font-semibold text-fg">Truly drop-in for OpenAI clients</h3>
+          <h3 class="text-lg font-semibold text-fg">Drop-in for OpenAI chat clients</h3>
           <p class="mt-2 text-fg-muted leading-relaxed">
             Point the OpenAI SDK at <code class="code-chip">api.godance.ai/v1</code>
-            and you're done. Same endpoints, same JSON, same error codes, same streaming format.
-            Migrating production is a one-line diff.
+            and chat just works: same endpoints, same JSON, same streaming format. Migrating
+            chat is a one-line diff. Image and video take OpenAI's request shape but return a
+            <code class="code-chip">job_id</code> to poll. Errors come back as RFC 7807
+            problem details.
           </p>
         </div>
         <div>
@@ -204,9 +207,9 @@ const providerNames = [
           Change one URL. Start calling Claude, Gemini, or any other model the next request.
         </p>
         <p class="mt-4 text-sm text-fg-subtle">
-          Same idiom for <code class="code-chip">/v1/images/generations</code>,
-          <code class="code-chip">/v1/audio/speech</code>,
-          <code class="code-chip">/v1/embeddings</code>, and the rest.
+          Same idiom for <code class="code-chip">/v1/models</code>. Image and video
+          generation take the same request shape but run as async jobs — poll
+          <code class="code-chip">/v1/jobs/&#123;id&#125;</code> or get a webhook.
         </p>
       </div>
       <pre class="code-block"><code set:html={pythonSnippet} /></pre>
@@ -234,7 +237,7 @@ const providerNames = [
   <section style="background: var(--color-primary)">
     <div class="mx-auto max-w-4xl px-6 py-20 text-center">
       <h2 class="text-3xl md:text-4xl font-bold tracking-tight text-white">
-        Sixteen providers. One bill. Ten minutes to first call.
+        15+ providers. One bill. Ten minutes to first call.
       </h2>
       <p class="mt-4 text-lg" style="color: rgba(255,255,255,0.85)">
         Free to sign up. Free to read the docs. Pay only for what you generate.

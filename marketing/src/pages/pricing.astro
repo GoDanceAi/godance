@@ -4,8 +4,9 @@ import { loadCatalog } from '../lib/catalog';
 
 const title = 'Pricing — Godance';
 const description =
-  'Pass-through provider pricing plus a flat 5% platform fee. No tiers, no seats, no ' +
-  'subscriptions. Top up with card, ACH, SEPA, or USDT and spend across every model.';
+  'Pass-through provider pricing plus a platform fee: 5% on text, 12% on images, 10–15% on ' +
+  'video. No tiers, no seats, no subscriptions. Top up with card, ACH, SEPA, or USDT and ' +
+  'spend across every model.';
 
 const breadcrumb = {
   '@context': 'https://schema.org',
@@ -29,12 +30,13 @@ const MODALITY_LABEL: Record<string, string> = {
 <Layout {title} {description} canonicalPath="/pricing" jsonLd={[breadcrumb]}>
   <section class="mx-auto max-w-4xl px-6 pt-20 pb-12 text-center">
     <h1 class="text-4xl md:text-5xl font-bold tracking-tight text-fg">
-      One number. Pinned to the floor.
+      Provider price, plus a published fee.
     </h1>
     <p class="mt-6 text-lg text-fg-muted">
-      Pay the provider's list price plus a flat <strong class="text-fg">5% platform fee</strong>.
-      Same percentage on text, image, and video. No tiers, no seats, no subscriptions, no
-      minimums — top up once, spend across every model.
+      Pay the provider's list price plus a platform fee: <strong class="text-fg">5% on text</strong>,
+      <strong class="text-fg">12% on images</strong>, and <strong class="text-fg">10–15% on video</strong>,
+      depending on the model. Every model's fee is listed below. No tiers, no seats, no
+      subscriptions, no minimums — top up once, spend across every model.
     </p>
   </section>
 
@@ -43,11 +45,11 @@ const MODALITY_LABEL: Record<string, string> = {
       <div class="card">
         <h2 class="text-xl font-semibold text-fg">Pay-as-you-go</h2>
         <p class="text-3xl font-bold mt-3 text-fg">
-          Provider price <span class="text-fg-subtle text-base font-medium">+ 5%</span>
+          Provider price <span class="text-fg-subtle text-base font-medium">+ 5–15%</span>
         </p>
-        <p class="mt-2 text-sm text-fg-faint">For everyone, by default.</p>
+        <p class="mt-2 text-sm text-fg-faint">5% text · 12% image · 10–15% video. For everyone, by default.</p>
         <ul class="mt-6 space-y-2 text-fg-muted">
-          <li class="flex gap-2"><span style="color: var(--color-primary)">✓</span> Every text, image, video, and audio model</li>
+          <li class="flex gap-2"><span style="color: var(--color-primary)">✓</span> Every text, image, and video model</li>
           <li class="flex gap-2"><span style="color: var(--color-primary)">✓</span> Streaming chat + signed async webhooks</li>
           <li class="flex gap-2"><span style="color: var(--color-primary)">✓</span> Fallback chains, region-aware routing</li>
           <li class="flex gap-2"><span style="color: var(--color-primary)">✓</span> Top up with card, ACH, SEPA, or USDT</li>
@@ -73,8 +75,8 @@ const MODALITY_LABEL: Record<string, string> = {
 
     <h2 class="text-2xl font-bold mt-16 mb-2 text-fg">What that actually costs</h2>
     <p class="text-fg-muted mb-6">
-      Every model in the catalog — provider list price (left) and what you'd pay through
-      Godance (right). Browse the full catalog on
+      Every model in the catalog — provider list price, the platform fee on that model, and
+      what you'd pay through Godance. Browse the full catalog on
       <a href="/models" class="underline" style="color: var(--color-primary)">/models</a>.
     </p>
     <div class="card overflow-hidden p-0">
@@ -85,6 +87,7 @@ const MODALITY_LABEL: Record<string, string> = {
             <th class="px-4 py-3 font-semibold">Provider</th>
             <th class="px-4 py-3 font-semibold">Modality</th>
             <th class="px-4 py-3 font-semibold text-right">Provider price</th>
+            <th class="px-4 py-3 font-semibold text-right">Fee</th>
             <th class="px-4 py-3 font-semibold text-right">Godance price</th>
           </tr>
         </thead>
@@ -97,6 +100,7 @@ const MODALITY_LABEL: Record<string, string> = {
               <td class="px-4 py-3 text-right text-fg-muted">
                 {r.listPrice} <span class="text-fg-faint">{r.unitShort}</span>
               </td>
+              <td class="px-4 py-3 text-right text-fg-muted">{r.fee}</td>
               <td class="px-4 py-3 text-right font-medium text-fg">
                 {r.godancePrice} <span class="text-fg-faint font-normal">{r.unitShort}</span>
               </td>

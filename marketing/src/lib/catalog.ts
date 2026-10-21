@@ -5,9 +5,6 @@
 
 const API_BASE: string = import.meta.env.PUBLIC_API_BASE ?? 'http://localhost:8080';
 
-// Flat platform fee — mirrors the backend default markup tier.
-const MARKUP = 1.05;
-
 export type Modality = 'TEXT' | 'IMAGE' | 'VIDEO' | 'AUDIO_TTS' | 'AUDIO_STT' | 'EMBEDDING';
 
 interface ModelPricing {
@@ -19,7 +16,13 @@ interface ModelPricing {
 interface ModelEntry {
   id: string;
   owned_by: string;
-  godance: { modality: Modality; requires_async: boolean; pricing: ModelPricing };
+  // virtual: routing presets (godance-fast/auto/quality), which have no pricing.
+  // markup_percent: the per-model platform fee billed on top of pricing.
+  // Absent on backends that predate it.
+  godance: {
+    modality: Modality; requires_async: boolean; pricing: ModelPricing;
+    markup_percent?: number; virtual?: boolean;
+  };
 }
 interface ModelListResponse { object: 'list'; data: ModelEntry[] }
 
@@ -31,7 +34,8 @@ export interface CatalogRow {
   unit: string;          // long form, e.g. "per 1M tokens (input / output)"
   unitShort: string;     // table suffix, e.g. "per 1M"
   listPrice: string;     // provider list price
-  godancePrice: string;  // list price + 5%
+  fee: string;           // platform fee for this model, e.g. "12%"
+  godancePrice: string;  // list price + fee
 }
 
 export interface CatalogGroup {
@@ -64,16 +68,22 @@ function fmtUsd(n: number): string {
 function rowFrom(m: ModelEntry): CatalogRow {
   const p = m.godance?.pricing ?? {};
   const modality = m.godance.modality;
+  // Use the fee the backend bills at. If it isn't published (older backend),
+  // show "—" rather than guess: NaN formats as "—".
+  const pct = m.godance.markup_percent;
+  const known = typeof pct === 'number' && isFinite(pct);
+  const markup = known ? 1 + pct / 100 : NaN;
+  const fee = known ? `${+pct.toFixed(2)}%` : '—';
   let unit = '', unitShort = '', listPrice = '', godancePrice = '';
 
   if (modality === 'IMAGE') {
     const usd = (p.per_image_microcents ?? 0) / 1_000_000;
     unit = 'per image'; unitShort = 'per image';
-    listPrice = fmtUsd(usd); godancePrice = fmtUsd(usd * MARKUP);
+    listPrice = fmtUsd(usd); godancePrice = fmtUsd(usd * markup);
   } else if (modality === 'VIDEO') {
     const usd = (p.per_second_microcents ?? 0) / 1_000_000;
     unit = 'per second'; unitShort = 'per second';
-    listPrice = fmtUsd(usd); godancePrice = fmtUsd(usd * MARKUP);
+    listPrice = fmtUsd(usd); godancePrice = fmtUsd(usd * markup);
   } else {
     // TEXT / EMBEDDING / AUDIO — priced per-1M units via the microcents-per-1k fields.
     const inUsd = (p.input_microcents_per_1k ?? 0) / 1000;
@@ -82,11 +92,11 @@ function rowFrom(m: ModelEntry): CatalogRow {
     if (outUsd > 0) {
       unit = 'per 1M tokens (input / output)';
       listPrice = `${fmtUsd(inUsd)} / ${fmtUsd(outUsd)}`;
-      godancePrice = `${fmtUsd(inUsd * MARKUP)} / ${fmtUsd(outUsd * MARKUP)}`;
+      godancePrice = `${fmtUsd(inUsd * markup)} / ${fmtUsd(outUsd * markup)}`;
     } else {
       unit = 'per 1M tokens';
       listPrice = fmtUsd(inUsd);
-      godancePrice = fmtUsd(inUsd * MARKUP);
+      godancePrice = fmtUsd(inUsd * markup);
     }
   }
 
@@ -95,7 +105,7 @@ function rowFrom(m: ModelEntry): CatalogRow {
     provider: m.owned_by,
     modality,
     requiresAsync: !!m.godance.requires_async,
-    unit, unitShort, listPrice, godancePrice,
+    unit, unitShort, listPrice, fee, godancePrice,
   };
 }
 
@@ -110,7 +120,12 @@ async function fetchModels(): Promise<ModelEntry[] | null> {
     clearTimeout(timer);
     if (!res.ok) return null;
     const body = (await res.json()) as ModelListResponse;
-    return Array.isArray(body?.data) && body.data.length ? body.data : null;
+    // List concrete models only. A routing preset bills at whichever model
+    // serves it, so it would show up here with blank prices.
+    const models = Array.isArray(body?.data)
+      ? body.data.filter((m) => m.godance?.virtual !== true)
+      : [];
+    return models.length ? models : null;
   } catch {
     return null;
   }
@@ -135,21 +150,23 @@ export async function loadCatalog(): Promise<Catalog> {
 }
 
 // Static snapshot — only used when /v1/models is unreachable at build time.
+// List prices only: the per-model fee isn't known offline, so the fee and
+// Godance price render as "—".
 const FALLBACK_ROWS: CatalogRow[] = [
-  ['gpt-4o', 'openai', 'TEXT', false, '$2.50 / $10', '$2.63 / $10.5'],
-  ['gpt-4o-mini', 'openai', 'TEXT', false, '$0.15 / $0.6', '$0.158 / $0.63'],
-  ['gpt-4.1', 'openai', 'TEXT', false, '$2 / $8', '$2.1 / $8.4'],
-  ['claude-3-5-sonnet-20241022', 'anthropic', 'TEXT', false, '$3 / $15', '$3.15 / $15.75'],
-  ['claude-3-5-haiku-20241022', 'anthropic', 'TEXT', false, '$0.8 / $4', '$0.84 / $4.2'],
-  ['gemini-1.5-pro', 'google', 'TEXT', false, '$1.25 / $5', '$1.313 / $5.25'],
-  ['gemini-1.5-flash', 'google', 'TEXT', false, '$0.075 / $0.3', '$0.0788 / $0.315'],
-  ['gpt-image-1', 'openai', 'IMAGE', false, '$0.04', '$0.042'],
-  ['gpt-image-1-hd', 'openai', 'IMAGE', true, '$0.08', '$0.084'],
-  ['flux-1.1-pro', 'bfl', 'IMAGE', true, '$0.04', '$0.042'],
-  ['flux-2', 'bfl', 'IMAGE', true, '$0.05', '$0.0525'],
-  ['sora-2', 'openai', 'VIDEO', true, '$0.15', '$0.158'],
-  ['seedance-1.0', 'volcengine', 'VIDEO', true, '$0.08', '$0.084'],
-].map(([id, provider, modality, async_, listPrice, godancePrice]) => {
+  ['gpt-4o', 'openai', 'TEXT', false, '$2.50 / $10'],
+  ['gpt-4o-mini', 'openai', 'TEXT', false, '$0.15 / $0.6'],
+  ['gpt-4.1', 'openai', 'TEXT', false, '$2 / $8'],
+  ['claude-3-5-sonnet-20241022', 'anthropic', 'TEXT', false, '$3 / $15'],
+  ['claude-3-5-haiku-20241022', 'anthropic', 'TEXT', false, '$0.8 / $4'],
+  ['gemini-1.5-pro', 'google', 'TEXT', false, '$1.25 / $5'],
+  ['gemini-1.5-flash', 'google', 'TEXT', false, '$0.075 / $0.3'],
+  ['gpt-image-1', 'openai', 'IMAGE', false, '$0.04'],
+  ['gpt-image-1-hd', 'openai', 'IMAGE', true, '$0.08'],
+  ['flux-1.1-pro', 'bfl', 'IMAGE', true, '$0.04'],
+  ['flux-2', 'bfl', 'IMAGE', true, '$0.05'],
+  ['sora-2', 'openai', 'VIDEO', true, '$0.15'],
+  ['seedance-1.0', 'volcengine', 'VIDEO', true, '$0.08'],
+].map(([id, provider, modality, async_, listPrice]) => {
   const m = modality as Modality;
   const unitShort = m === 'IMAGE' ? 'per image' : m === 'VIDEO' ? 'per second' : 'per 1M';
   const unit = m === 'IMAGE' ? 'per image'
@@ -162,6 +179,7 @@ const FALLBACK_ROWS: CatalogRow[] = [
     requiresAsync: async_ as boolean,
     unit, unitShort,
     listPrice: listPrice as string,
-    godancePrice: godancePrice as string,
+    fee: '—',
+    godancePrice: '—',
   };
 });

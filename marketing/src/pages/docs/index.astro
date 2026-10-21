@@ -9,7 +9,7 @@ const description =
 // Endpoint reference — each entry links to its section further down this page.
 const endpoints = [
   { id: 'chat-completions', label: 'POST /v1/chat/completions', summary: 'streaming + non-streaming' },
-  { id: 'images', label: 'POST /v1/images/generations', summary: 'async: 202 + job_id, then poll or webhook' },
+  { id: 'images', label: 'POST /v1/images/generations', summary: 'async: returns a job_id to poll, or pass webhook_url' },
   { id: 'videos', label: 'POST /v1/videos/generations', summary: 'async-only, signed webhook' },
   { id: 'jobs', label: 'GET /v1/jobs/{id}', summary: 'async job status' },
   { id: 'keys', label: 'CRUD /v1/keys', summary: 'API key management' },
@@ -60,9 +60,10 @@ def verify(payload, header, secret):
   <section class="mx-auto max-w-3xl px-6 py-16">
     <h1 class="text-4xl font-bold tracking-tight text-fg">Docs</h1>
     <p class="mt-4 text-fg-muted">
-      Godance is a drop-in OpenAI-compatible REST API. If you've shipped against the OpenAI
-      SDK, chat completions work unchanged — same request JSON, same streaming format. Image
-      and video generation take OpenAI-shaped requests and run as async jobs; see
+      Godance is an OpenAI-compatible REST API. If you've shipped against the OpenAI SDK,
+      you already know the request shape of every endpoint below, and chat is drop-in: same
+      JSON, same streaming format. Image and video generation run as async jobs, and errors
+      come back as RFC 7807 problem details; see
       <a href="#openai-compat" class="underline" style="color: var(--color-primary)">OpenAI SDK compatibility</a>.
     </p>
 
@@ -289,9 +290,9 @@ def verify(payload, header, secret):
     <ul class="mt-4 space-y-2 text-fg-muted">
       <li>
         <strong class="text-fg">Works unchanged:</strong> chat completions, streaming and
-        non-streaming, and <code class="code-chip">GET /v1/models</code>. Model entries carry an
-        extra <code class="code-chip">godance</code> object (modality, pricing) that OpenAI
-        clients ignore.
+        non-streaming, and <code class="code-chip">GET /v1/models</code>. Catalog entries carry an
+        extra <code class="code-chip">godance</code> object (modality, list price, platform fee)
+        that OpenAI clients ignore.
       </li>
       <li>
         <strong class="text-fg">Same request, different response:</strong> image and video
