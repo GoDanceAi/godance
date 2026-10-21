@@ -33,7 +33,7 @@ side has CORS open in dev via Spring Security defaults for the
 ```bash
 npm run build         # tsc -b && vite build → ./dist/
 npm run preview       # serve ./dist on http://localhost:4173
-npm run lint          # tsc --noEmit
+npm run lint          # tsc -b: typecheck src/ and vite.config.ts, no emit
 ```
 
 ## Deploy to Cloudflare Pages
