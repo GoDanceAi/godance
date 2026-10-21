@@ -51,10 +51,8 @@ public class AuthRateLimits {
      * answers 202, the same as for every other request.
      */
     public Mono<Boolean> forgotPassword(String clientIp, String email) {
-        return limiter.check("forgot-ip", clientIp, props.forgotPerIp())
-                .then(limiter.check("forgot-email", normalize(email), props.forgotPerEmail()))
-                .thenReturn(true)
-                .onErrorReturn(RateLimitExceededException.class, false);
+        return allowed(limiter.check("forgot-ip", clientIp, props.forgotPerIp())
+                .then(limiter.check("forgot-email", normalize(email), props.forgotPerEmail())));
     }
 
     /** Per client IP, then per signed-in account. Fails with a 429 over either limit. */
@@ -62,6 +60,22 @@ public class AuthRateLimits {
         return limiter.check("resend-ip", clientIp, props.resendPerIp())
                 .then(limiter.check("resend-account", userId == null ? null : userId.toString(),
                         props.resendPerAccount()));
+    }
+
+    /**
+     * Per client IP, then per normalized email, counted whether or not an
+     * account holds the address. Never fails, like {@link #forgotPassword}:
+     * the release-link endpoint answers 202 either way and just skips the
+     * email once a limit is reached.
+     */
+    public Mono<Boolean> releaseLink(String clientIp, String email) {
+        return allowed(limiter.check("release-link-ip", clientIp, props.releaseLinkPerIp())
+                .then(limiter.check("release-link-email", normalize(email), props.releaseLinkPerEmail())));
+    }
+
+    /** {@code true} if every check passed, {@code false} instead of a 429. */
+    private static Mono<Boolean> allowed(Mono<Void> checks) {
+        return checks.thenReturn(true).onErrorReturn(RateLimitExceededException.class, false);
     }
 
     /** Same normalization as {@code AuthService}, so "A@x.io " and "a@x.io" share a counter. */

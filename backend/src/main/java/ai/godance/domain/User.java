@@ -89,6 +89,10 @@ public class User {
     @Column(name = "session_version", nullable = false)
     private int sessionVersion = 0;
 
+    /** Address being added to a placeholder account; becomes {@code email} once verified. */
+    @Column(name = "pending_email")
+    private String pendingEmail;
+
     @Column(name = "stripe_customer_id", unique = true)
     private String stripeCustomerId;
 
@@ -203,6 +207,9 @@ public class User {
 
     public int getSessionVersion() { return sessionVersion; }
     public void setSessionVersion(int sessionVersion) { this.sessionVersion = sessionVersion; }
+
+    public String getPendingEmail() { return pendingEmail; }
+    public void setPendingEmail(String pendingEmail) { this.pendingEmail = pendingEmail; }
 
     public String getStripeCustomerId() { return stripeCustomerId; }
     public void setStripeCustomerId(String stripeCustomerId) { this.stripeCustomerId = stripeCustomerId; }

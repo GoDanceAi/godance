@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -24,9 +25,11 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import ai.godance.domain.AuditOutcome;
+import ai.godance.domain.OAuthProvider;
 import ai.godance.repository.AuditLogEntryRepository;
 import ai.godance.repository.UserRepository;
 import ai.godance.service.AuditLogService;
+import ai.godance.service.OAuthLoginService;
 import ai.godance.service.mail.LoggingEmailSender;
 import ai.godance.web.dto.ApiKeyDtos.ApiKeySummary;
 import ch.qos.logback.classic.Logger;
@@ -52,11 +55,15 @@ class AuthAndApiKeyIntegrationTest {
 
     @Autowired WebTestClient http;
     @Autowired UserRepository users;
+    @Autowired OAuthLoginService oauthLogin;
     @Autowired AuditLogEntryRepository audits;
 
     private static String uniqueEmail(String tag) {
         return tag + "-" + UUID.randomUUID() + "@godance.test";
     }
+
+    /** The password every {@link #signup} account gets. */
+    private static final String PASSWORD = "correct-horse-battery-staple";
 
     private static Map<String, Object> signupBody(String email) {
         return Map.of(
@@ -442,6 +449,217 @@ class AuthAndApiKeyIntegrationTest {
                 .bodyValue(Map.of("token", token, "newPassword", "a-second-attempt-password"))
                 .exchange()
                 .expectStatus().isBadRequest();
+    }
+
+    // ---------- /v1/auth/email (X sign-ins add an address) -------------
+
+    /** Signs in with X, which shares no email, and returns the bearer header. */
+    private String xSignIn() {
+        return "Bearer " + oauthLogin.completeLogin(
+                OAuthProvider.X, "x-" + UUID.randomUUID(), null, false, "X User").accessToken();
+    }
+
+    private MeResponse me(String bearer) {
+        return http.get().uri("/v1/auth/me")
+                .header("Authorization", bearer)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody(MeResponse.class).returnResult().getResponseBody();
+    }
+
+    private WebTestClient.ResponseSpec changeEmail(String bearer, String email, String currentPassword) {
+        Map<String, Object> body = new HashMap<>();
+        body.put("email", email);
+        if (currentPassword != null) body.put("currentPassword", currentPassword);
+        return http.post().uri("/v1/auth/email")
+                .header("Authorization", bearer)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(body)
+                .exchange();
+    }
+
+    private void verifyPendingEmail(String bearer) {
+        String token = users.findById(me(bearer).id()).orElseThrow().getEmailVerificationToken();
+        http.get().uri("/v1/auth/verify?token={t}", token)
+                .header("Authorization", bearer)
+                .exchange()
+                .expectStatus().isNoContent();
+    }
+
+    @Test
+    void changeEmail_givenXSignIn_thenVerify_replacesPlaceholderWithVerifiedAddress() {
+        String bearer = xSignIn();
+        String added = uniqueEmail("x-added");
+
+        changeEmail(bearer, added, null).expectStatus().isNoContent();
+
+        MeResponse pending = me(bearer);
+        assertThat(pending.hasEmail()).isFalse();
+        assertThat(pending.pendingEmail()).isEqualTo(added);
+        assertThat(users.findByEmail(added)).isEmpty();   // not the account's email yet
+
+        verifyPendingEmail(bearer);
+
+        MeResponse done = me(bearer);
+        assertThat(done.email()).isEqualTo(added);
+        assertThat(done.hasEmail()).isTrue();
+        assertThat(done.emailVerified()).isTrue();
+        assertThat(done.pendingEmail()).isNull();
+    }
+
+    @Test
+    void changeEmail_givenUnverifiedPendingAddress_doesNotLetItsOwnersOAuthSignInLinkIn() {
+        String xBearer = xSignIn();
+        String victim = uniqueEmail("x-victim");
+        changeEmail(xBearer, victim, null).expectStatus().isNoContent();
+
+        AuthResponse google = oauthLogin.completeLogin(
+                OAuthProvider.GOOGLE, "google-" + UUID.randomUUID(), victim, true, "Victim");
+
+        assertThat(me("Bearer " + google.accessToken()).id()).isNotEqualTo(me(xBearer).id());
+    }
+
+    @Test
+    void changeEmail_givenPasswordAccountAndCorrectPassword_thenVerify_switchesAddress() {
+        String old = uniqueEmail("change-old");
+        String bearer = "Bearer " + signup(old).accessToken();
+        // Signup just sent a verification email; step past the one-minute cooldown.
+        var user = users.findByEmail(old).orElseThrow();
+        user.setEmailVerificationSentAt(Instant.now().minus(Duration.ofMinutes(5)));
+        users.save(user);
+        String fresh = uniqueEmail("change-new");
+
+        changeEmail(bearer, fresh, PASSWORD).expectStatus().isNoContent();
+        assertThat(me(bearer).email()).isEqualTo(old);
+        assertThat(me(bearer).pendingEmail()).isEqualTo(fresh);
+
+        verifyPendingEmail(bearer);
+
+        MeResponse done = me(bearer);
+        assertThat(done.email()).isEqualTo(fresh);
+        assertThat(done.emailVerified()).isTrue();
+        assertThat(users.findByEmail(old)).isEmpty();
+    }
+
+    @Test
+    void changeEmail_givenWrongPassword_returns403AndLeavesNothingPending() {
+        String bearer = "Bearer " + signup(uniqueEmail("change-badpw")).accessToken();
+
+        changeEmail(bearer, uniqueEmail("change-target"), "not-the-password")
+                .expectStatus().isForbidden();
+
+        assertThat(me(bearer).pendingEmail()).isNull();
+    }
+
+    @Test
+    void changeEmail_givenApiKey_returns403() {
+        String bearer = "Bearer " + signup(uniqueEmail("change-apikey")).accessToken();
+        CreateApiKeyResponse key = http.post().uri("/v1/keys")
+                .header("Authorization", bearer)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("name", "change-email", "scopes", List.of("chat.completions")))
+                .exchange()
+                .expectStatus().isCreated()
+                .expectBody(CreateApiKeyResponse.class).returnResult().getResponseBody();
+
+        changeEmail("Bearer " + key.plaintext(), uniqueEmail("change-target"), PASSWORD)
+                .expectStatus().isForbidden();
+
+        assertThat(me(bearer).pendingEmail()).isNull();
+    }
+
+    @Test
+    void changeEmail_givenAddressOfAnotherAccount_returns409() {
+        String taken = uniqueEmail("add-taken");
+        signup(taken);
+
+        changeEmail(xSignIn(), taken, null).expectStatus().isEqualTo(HttpStatus.CONFLICT);
+    }
+
+    @Test
+    void changeEmail_givenMalformedAddress_returns400() {
+        changeEmail(xSignIn(), "not-an-email", null).expectStatus().isBadRequest();
+    }
+
+    // ---------- /v1/auth/email/release (squatted addresses) -----------
+
+    @Test
+    void releaseEmail_givenSquattedAddress_freesItForItsOwnersSignup() {
+        // Someone signs up with the owner's address and a password of their own.
+        String owned = uniqueEmail("release-owned");
+        signup(owned);
+        UUID squatterId = users.findByEmail(owned).orElseThrow().getId();
+        String token = users.findByEmail(owned).orElseThrow().getEmailVerificationToken();
+
+        http.post().uri("/v1/auth/signup")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(signupBody(owned))
+                .exchange()
+                .expectStatus().isEqualTo(HttpStatus.CONFLICT);
+
+        // The owner opens the link from the verification email; no session.
+        http.post().uri("/v1/auth/email/release")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("token", token))
+                .exchange()
+                .expectStatus().isNoContent();
+
+        assertThat(users.findById(squatterId).orElseThrow().hasSyntheticEmail()).isTrue();
+        AuthResponse owner = signup(owned);
+        assertThat(me("Bearer " + owner.accessToken()).id()).isNotEqualTo(squatterId);
+    }
+
+    @Test
+    void releaseEmail_givenSquattedAddress_letsItsOwnersGoogleSignInCreateTheirAccount() {
+        String owned = uniqueEmail("release-google");
+        signup(owned);
+        String token = users.findByEmail(owned).orElseThrow().getEmailVerificationToken();
+
+        http.post().uri("/v1/auth/email/release")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("token", token))
+                .exchange()
+                .expectStatus().isNoContent();
+
+        AuthResponse google = oauthLogin.completeLogin(
+                OAuthProvider.GOOGLE, "google-" + UUID.randomUUID(), owned, true, "Owner");
+        assertThat(me("Bearer " + google.accessToken()).email()).isEqualTo(owned);
+    }
+
+    @Test
+    void releaseEmail_givenBadToken_returns400() {
+        http.post().uri("/v1/auth/email/release")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("token", "this-token-does-not-exist"))
+                .exchange()
+                .expectStatus().isBadRequest();
+    }
+
+    @Test
+    void sendReleaseLink_givenSquattedAddressPastCooldown_returns202AndRefreshesTheSendTime() {
+        String owned = uniqueEmail("release-link");
+        signup(owned);
+        var squatter = users.findByEmail(owned).orElseThrow();
+        Instant longAgo = Instant.now().minus(Duration.ofMinutes(5));
+        squatter.setEmailVerificationSentAt(longAgo);
+        users.save(squatter);
+
+        http.post().uri("/v1/auth/email/release-link")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("email", owned))
+                .exchange()
+                .expectStatus().isAccepted();
+
+        assertThat(users.findByEmail(owned).orElseThrow().getEmailVerificationSentAt()).isAfter(longAgo);
+    }
+
+    @Test
+    void sendReleaseLink_givenUnknownAddress_returnsTheSame202() {
+        http.post().uri("/v1/auth/email/release-link")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("email", uniqueEmail("release-nobody")))
+                .exchange()
+                .expectStatus().isAccepted();
     }
 
     // ---------- /v1/keys ----------------------------------------------

@@ -92,7 +92,8 @@ class MailServiceTest {
                 .contains("works for 24 hours")
                 .contains("Didn't sign up?")
                 .contains("the link does\nnothing unless it is opened signed in to that account")
-                .contains("reset the password at https://app.godance.test/forgot-password");
+                .contains("open the link and release the address from\nthat account")
+                .contains("forgot your password? Reset it at https://app.godance.test/forgot-password");
     }
 
     @Test
@@ -101,7 +102,30 @@ class MailServiceTest {
 
         assertThat(captureHtml())
                 .contains("<a href=\"https://app.godance.test/verify-email?token=tok-123\">")
-                .contains("<a href=\"https://app.godance.test/forgot-password\">");
+                .contains("<a href=\"https://app.godance.test/forgot-password\">")
+                .contains("release the address");
+    }
+
+    @Test
+    void sendVerificationEmail_givenAddressBeingAdded_expectsMailToThatAddress() {
+        mail.sendVerificationEmail(user("x-42@oauth.godance.local"), "added@godance.test");
+
+        String text = captureText(List.of("added@godance.test"), "Verify");
+        assertThat(text.lines().findFirst().orElseThrow())
+                .isEqualTo("Verification URL for added@godance.test: "
+                        + "https://app.godance.test/verify-email?token=tok-123");
+    }
+
+    @Test
+    void sendEmailChangedNotice_givenPreviousAddress_expectsMailThereNamingBothAddresses() {
+        User u = user("new@godance.test");
+
+        mail.sendEmailChangedNotice("old@godance.test", u);
+
+        String text = captureText(List.of("old@godance.test"), "email address was changed");
+        assertThat(text.lines().findFirst().orElseThrow())
+                .isEqualTo("Email changed for old@godance.test: now new@godance.test");
+        assertThat(text).contains("hello@godance.ai");
     }
 
     @Test

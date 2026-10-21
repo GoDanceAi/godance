@@ -43,15 +43,40 @@ public final class AuthDtos {
         }
     }
 
+    /** The token from a verification email, to free that address from its account. */
+    public record ReleaseEmailRequest(
+            @NotBlank @Size(max = 64) String token
+    ) { }
+
+    /** An address to send a fresh verification (and release) link to. */
+    public record ReleaseLinkRequest(
+            @Email @NotBlank @Size(max = 320) String email
+    ) { }
+
+    /**
+     * A new email for the signed-in account: a first real address for an
+     * X.com placeholder account, or a change. {@code currentPassword} is
+     * required when the account has a password.
+     */
+    public record ChangeEmailRequest(
+            @Email @NotBlank @Size(max = 320) String email,
+            @Size(max = 128) String currentPassword
+    ) { }
+
     /**
      * {@code hasEmail} is false when {@code email} is only a placeholder
      * (an X.com sign-in, which shares no address), so clients don't show
-     * it or offer to verify it.
+     * it or offer to verify it. {@code pendingEmail} is an address the
+     * user has asked to add or change to and not yet verified, or null.
+     * {@code hasPassword} tells clients whether a change of email will
+     * ask for the current password.
      */
     public record MeResponse(
             UUID id,
             String email,
             boolean hasEmail,
+            String pendingEmail,
+            boolean hasPassword,
             String fullName,
             UserRole role,
             boolean emailVerified,
@@ -65,6 +90,8 @@ public final class AuthDtos {
                     u.getId(),
                     u.getEmail(),
                     !u.hasSyntheticEmail(),
+                    u.getPendingEmail(),
+                    u.getPasswordHash() != null,
                     u.getFullName(),
                     u.getRole(),
                     u.isEmailVerified(),

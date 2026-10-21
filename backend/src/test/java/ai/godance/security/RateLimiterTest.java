@@ -55,7 +55,7 @@ class RateLimiterTest {
     private static RateLimitProperties props(boolean enabled) {
         Limit unused = new Limit(1, Duration.ofMinutes(1));
         return new RateLimitProperties(enabled, unused, unused, unused, unused,
-                unused, unused, unused, unused);
+                unused, unused, unused, unused, unused, unused);
     }
 
     private void redisCounts(Flux<Long> reply) {

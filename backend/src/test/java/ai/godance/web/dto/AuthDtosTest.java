@@ -32,6 +32,15 @@ class AuthDtosTest {
 
         assertThat(me.hasEmail()).isTrue();
         assertThat(me.email()).isEqualTo("someone@godance.test");
+        assertThat(me.hasPassword()).isFalse();
+    }
+
+    @Test
+    void meResponseFrom_givenPasswordAccount_expectsHasPasswordTrue() {
+        User u = user("someone@godance.test");
+        u.setPasswordHash("$2a$12$placeholderplaceholderplaceholderplaceholderplaceh");
+
+        assertThat(MeResponse.from(u).hasPassword()).isTrue();
     }
 
     @Test
@@ -39,5 +48,17 @@ class AuthDtosTest {
         MeResponse me = MeResponse.from(user("x-42" + User.SYNTHETIC_EMAIL_SUFFIX));
 
         assertThat(me.hasEmail()).isFalse();
+        assertThat(me.pendingEmail()).isNull();
+    }
+
+    @Test
+    void meResponseFrom_givenAddressBeingAdded_expectsPendingEmailAndStillNoEmail() {
+        User u = user("x-42" + User.SYNTHETIC_EMAIL_SUFFIX);
+        u.setPendingEmail("added@godance.test");
+
+        MeResponse me = MeResponse.from(u);
+
+        assertThat(me.hasEmail()).isFalse();
+        assertThat(me.pendingEmail()).isEqualTo("added@godance.test");
     }
 }

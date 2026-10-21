@@ -42,6 +42,10 @@ import reactor.core.scheduler.Schedulers;
 public class ApiKeyAuthFilter {
 
     private static final Logger log = LoggerFactory.getLogger(ApiKeyAuthFilter.class);
+
+    /** Claim on the installed principal naming the key; absent on a signed-in session's JWT. */
+    public static final String API_KEY_ID_CLAIM = "api_key_id";
+
     private static final String API_KEY_PREFIX = "gd_live_";
     private static final String BEARER = "Bearer ";
 
@@ -143,7 +147,7 @@ public class ApiKeyAuthFilter {
                 .expiresAt(now.plusSeconds(60))
                 .subject(key.getUserId().toString())
                 .claim("scope", "USER")
-                .claim("api_key_id", key.getId().toString())
+                .claim(API_KEY_ID_CLAIM, key.getId().toString())
                 .build();
         return new JwtAuthenticationToken(principal,
                 List.of(new SimpleGrantedAuthority("SCOPE_USER")),

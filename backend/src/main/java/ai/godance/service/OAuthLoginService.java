@@ -131,7 +131,9 @@ public class OAuthLoginService {
                             "An account with this email address already exists and its email "
                                     + "is not verified. Sign in with your password and verify "
                                     + "your email (or reset the password if you don't know it), "
-                                    + "then sign in with " + displayName(provider) + ".");
+                                    + "then sign in with " + displayName(provider) + ". "
+                                    + "If you didn't create that account, you can release the "
+                                    + "address from the sign-up page.");
                 }
                 // The provider has verified ownership of this email — trust it.
                 user.setEmailVerified(true);

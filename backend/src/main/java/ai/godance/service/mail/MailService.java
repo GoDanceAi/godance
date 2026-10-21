@@ -46,16 +46,25 @@ public class MailService {
     }
 
     /**
-     * verify-email — sent on signup, and again when the user asks for a
-     * resend. The link only verifies when opened signed in to the account,
-     * so someone who never signed up can ignore it, or reset the password
-     * to take the address back.
+     * verify-email — sent on signup, to the account's email. The link only
+     * verifies when opened signed in to the account. Someone who never
+     * signed up can ignore it, or open it and release the address from
+     * that account; someone who did but forgot the password can reset it.
      */
     public void sendVerificationEmail(User user) {
+        sendVerificationEmail(user, user.getEmail());
+    }
+
+    /**
+     * verify-email to {@code toEmail}: the account's email on a resend, or
+     * the address the account is changing to (or adding, for an X.com
+     * sign-in's placeholder account).
+     */
+    public void sendVerificationEmail(User user, String toEmail) {
         try {
             String link = props.appBaseUrl() + "/verify-email?token=" + user.getEmailVerificationToken();
             String reset = props.appBaseUrl() + "/forgot-password";
-            String stubLine = "Verification URL for " + user.getEmail() + ": " + link;
+            String stubLine = "Verification URL for " + toEmail + ": " + link;
             String text = stubLine + "\n\n"
                     + "Hi " + user.getFullName() + ",\n\n"
                     + "Welcome to Godance. Please confirm this email address by opening the\n"
@@ -64,7 +73,9 @@ public class MailService {
                     + "Didn't sign up? Someone may have entered your address by mistake. You\n"
                     + "can ignore this email: the account stays unverified, and the link does\n"
                     + "nothing unless it is opened signed in to that account. To use Godance\n"
-                    + "with this address yourself, reset the password at " + reset + "\n";
+                    + "with this address yourself, open the link and release the address from\n"
+                    + "that account; nothing in it is shared with you.\n\n"
+                    + "Signed up but forgot your password? Reset it at " + reset + "\n";
             String html = "<p>Hi " + escape(user.getFullName()) + ",</p>"
                     + "<p>Welcome to Godance. Please confirm this email address by opening "
                     + "<a href=\"" + escape(link) + "\">this link</a> in the Godance app, signed "
@@ -72,9 +83,11 @@ public class MailService {
                     + "<p><b>Didn't sign up?</b> Someone may have entered your address by mistake. "
                     + "You can ignore this email: the account stays unverified, and the link does "
                     + "nothing unless it is opened signed in to that account. To use Godance with "
-                    + "this address yourself, <a href=\"" + escape(reset) + "\">reset the "
-                    + "password</a>.</p>";
-            sender.send(List.of(user.getEmail()), "Verify your Godance email", text, html);
+                    + "this address yourself, open the link and release the address from that "
+                    + "account; nothing in it is shared with you.</p>"
+                    + "<p>Signed up but forgot your password? <a href=\"" + escape(reset) + "\">Reset "
+                    + "it</a>.</p>";
+            sender.send(List.of(toEmail), "Verify your Godance email", text, html);
         } catch (Exception e) {
             log.error("verify-email build/send failed for {}: {}", user.getId(), e.getMessage());
         }
@@ -139,6 +152,29 @@ public class MailService {
                     "Godance: 80% of your " + period + " spending cap used", text, html);
         } catch (Exception e) {
             log.error("spend-warning build/send failed for {}: {}", capSubject, e.getMessage());
+        }
+    }
+
+    /**
+     * email-changed — to the account's previous (verified) address once a
+     * change to {@code user}'s current email has been verified, so a change
+     * the owner didn't make doesn't go unnoticed.
+     */
+    public void sendEmailChangedNotice(String previousEmail, User user) {
+        try {
+            String stubLine = "Email changed for " + previousEmail + ": now " + user.getEmail();
+            String text = stubLine + "\n\n"
+                    + "Hi " + user.getFullName() + ",\n\n"
+                    + "The email address on your Godance account was changed from\n"
+                    + previousEmail + " to " + user.getEmail() + ".\n\n"
+                    + "If you didn't make this change, email hello@godance.ai right away.\n";
+            String html = "<p>Hi " + escape(user.getFullName()) + ",</p>"
+                    + "<p>The email address on your Godance account was changed from <b>"
+                    + escape(previousEmail) + "</b> to <b>" + escape(user.getEmail()) + "</b>.</p>"
+                    + "<p>If you didn't make this change, email hello@godance.ai right away.</p>";
+            sender.send(List.of(previousEmail), "Your Godance email address was changed", text, html);
+        } catch (Exception e) {
+            log.error("email-changed build/send failed for {}: {}", user.getId(), e.getMessage());
         }
     }
 

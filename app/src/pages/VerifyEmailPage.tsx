@@ -21,6 +21,7 @@ export default function VerifyEmailPage() {
 
   const [status, setStatus] = useState<Status>(token ? 'verifying' : 'error');
   const [error, setError] = useState<string | null>(token ? null : 'Missing verification token');
+  const [errorStatus, setErrorStatus] = useState<number | null>(null);
 
   useEffect(() => {
     if (!token || !signedIn || attempted.current) return;
@@ -35,6 +36,7 @@ export default function VerifyEmailPage() {
       } catch (err) {
         setStatus('error');
         setError(err instanceof ApiError ? err.detail || err.message : 'Verification failed');
+        setErrorStatus(err instanceof ApiError ? err.status : null);
       }
     })();
   }, [token, signedIn, refresh]);
@@ -47,9 +49,6 @@ export default function VerifyEmailPage() {
           Sign in to the account you created with this email address. We'll finish verifying it
           right after.
         </p>
-        <p className="mt-3 text-sm text-fg-muted">
-          Didn't create a Godance account? You can close this page. Nothing changes.
-        </p>
         <Link
           to="/login"
           state={{ from: location.pathname + location.search }}
@@ -57,6 +56,7 @@ export default function VerifyEmailPage() {
         >
           Sign in
         </Link>
+        <ReleaseAddress token={token} />
       </div>
     );
   }
@@ -86,6 +86,76 @@ export default function VerifyEmailPage() {
           >
             Back to dashboard
           </Link>
+          {/* 403: the link belongs to another account, maybe one made with this person's address. */}
+          {token && errorStatus === 403 && <ReleaseAddress token={token} />}
+        </>
+      )}
+    </div>
+  );
+}
+
+type ReleaseStatus = 'idle' | 'confirming' | 'releasing' | 'released' | 'error';
+
+/**
+ * For whoever reads this inbox but didn't create the account the link is
+ * for: frees the address from that account (which never verified it) so
+ * they can sign up or sign in with it themselves. The account isn't deleted.
+ */
+function ReleaseAddress({ token }: { token: string }) {
+  const [status, setStatus] = useState<ReleaseStatus>('idle');
+  const [error, setError] = useState<string | null>(null);
+
+  const release = async () => {
+    setStatus('releasing');
+    setError(null);
+    try {
+      await apiFetch('/v1/auth/email/release', { method: 'POST', json: { token }, auth: false });
+      setStatus('released');
+    } catch (err) {
+      setStatus('error');
+      setError(err instanceof ApiError ? err.detail || err.message : 'Could not release the address');
+    }
+  };
+
+  if (status === 'released') {
+    return (
+      <div className="mt-8 border-t border-border pt-6 text-sm text-fg-muted">
+        <p role="status" className="font-medium text-fg">Address released.</p>
+        <p className="mt-1">You can sign up with it now, or sign in with Google or Apple.</p>
+        <Link to="/signup" className="btn btn-sm btn-secondary mt-4">
+          Create an account
+        </Link>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-8 border-t border-border pt-6 text-sm text-fg-muted">
+      <p>Didn't create a Godance account with this address?</p>
+      {status === 'idle' ? (
+        <button type="button" onClick={() => setStatus('confirming')} className="btn btn-sm btn-ghost mt-3">
+          Release this address
+        </button>
+      ) : (
+        <>
+          <p className="mt-2">
+            This removes your address from that account, so you can use it for your own. The
+            account itself isn't deleted.
+          </p>
+          <div className="mt-3 flex flex-wrap items-center justify-center gap-3">
+            <button
+              type="button"
+              onClick={() => void release()}
+              disabled={status === 'releasing'}
+              className="btn btn-sm btn-secondary"
+            >
+              {status === 'releasing' ? 'Releasing…' : 'Release it'}
+            </button>
+            <button type="button" onClick={() => setStatus('idle')} className="btn btn-sm btn-ghost">
+              Cancel
+            </button>
+          </div>
+          {error && <p role="alert" className="mt-3 text-danger">{error}</p>}
         </>
       )}
     </div>

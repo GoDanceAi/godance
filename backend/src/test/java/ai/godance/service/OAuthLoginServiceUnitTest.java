@@ -134,8 +134,9 @@ class OAuthLoginServiceUnitTest {
                     assertThat(e.getReason())
                             .contains("Sign in with your password and verify your email")
                             .contains("reset the password if you don't know it")
-                            .endsWith("then sign in with "
-                                    + (provider == OAuthProvider.GOOGLE ? "Google" : "Apple") + ".");
+                            .contains("then sign in with "
+                                    + (provider == OAuthProvider.GOOGLE ? "Google" : "Apple") + ".")
+                            .contains("release the address");
                 });
 
         verify(identities, never()).save(any());

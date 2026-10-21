@@ -49,7 +49,9 @@ import ch.qos.logback.core.read.ListAppender;
         "godance.rate-limit.forgot-per-ip.requests=4",
         "godance.rate-limit.forgot-per-email.requests=2",
         "godance.rate-limit.resend-per-ip.requests=4",
-        "godance.rate-limit.resend-per-account.requests=2"})
+        "godance.rate-limit.resend-per-account.requests=2",
+        "godance.rate-limit.release-link-per-ip.requests=4",
+        "godance.rate-limit.release-link-per-email.requests=2"})
 @AutoConfigureWebTestClient
 @Testcontainers
 class AuthRateLimitIntegrationTest {
@@ -116,6 +118,14 @@ class AuthRateLimitIntegrationTest {
                 .exchange();
     }
 
+    private ResponseSpec releaseLink(String clientIp, String email) {
+        return http.post().uri("/v1/auth/email/release-link")
+                .header("X-Forwarded-For", clientIp)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("email", email))
+                .exchange();
+    }
+
     /** Push the last verification email past AuthService's one-minute resend cooldown. */
     private void backdateVerificationEmail(String email) {
         var user = users.findByEmail(email).orElseThrow();
@@ -145,6 +155,24 @@ class AuthRateLimitIntegrationTest {
                 .map(ILoggingEvent::getFormattedMessage)
                 // The INFO stub line only; the DEBUG line repeats it inside the full body.
                 .filter(m -> m.startsWith("[email-stub] Password reset URL for " + email + ":"))
+                .count();
+    }
+
+    /** Verification emails the [email-stub] sender logs for {@code email} while {@code requests} run. */
+    private static long verificationEmailsSent(String email, Runnable requests) {
+        Logger stubLog = (Logger) LoggerFactory.getLogger(LoggingEmailSender.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        stubLog.addAppender(appender);
+        try {
+            requests.run();
+        } finally {
+            stubLog.detachAppender(appender);
+        }
+        return appender.list.stream()
+                .map(ILoggingEvent::getFormattedMessage)
+                // The INFO stub line only; the DEBUG line repeats it inside the full body.
+                .filter(m -> m.startsWith("[email-stub] Verification URL for " + email + ":"))
                 .count();
     }
 
@@ -276,6 +304,45 @@ class AuthRateLimitIntegrationTest {
 
         // Other clients are unaffected, and the refused request did not count against the email.
         assertThat(resetEmailsSent(email, () -> forgot(randomClientIp(), email).expectStatus().isAccepted()))
+                .isEqualTo(1);
+    }
+
+    // ---------- /v1/auth/email/release-link ---------------------------
+
+    @Test
+    void releaseLink_givenTooManyForOneEmail_expects202ButNoMoreEmails() {
+        String email = uniqueEmail("rl-release-email");
+        signup(randomClientIp(), email).expectStatus().isCreated();
+
+        long sent = verificationEmailsSent(email, () -> {
+            backdateVerificationEmail(email);
+            releaseLink(randomClientIp(), email).expectStatus().isAccepted();
+            backdateVerificationEmail(email);
+            releaseLink(randomClientIp(), email.toUpperCase(Locale.ROOT)).expectStatus().isAccepted();
+            backdateVerificationEmail(email);
+            // Past AuthService's cooldown, but over the per-email limit.
+            releaseLink(randomClientIp(), email).expectStatus().isAccepted().expectBody().isEmpty();
+        });
+
+        assertThat(sent).isEqualTo(2);
+    }
+
+    @Test
+    void releaseLink_givenTooManyFromOneIp_expects202ButNoEmail() {
+        String ip = randomClientIp();
+        String email = uniqueEmail("rl-release-ip");
+        signup(randomClientIp(), email).expectStatus().isCreated();
+        backdateVerificationEmail(email);
+        for (int i = 0; i < 4; i++) {
+            releaseLink(ip, uniqueEmail("rl-release-spray")).expectStatus().isAccepted();
+        }
+
+        assertThat(verificationEmailsSent(email, () -> releaseLink(ip, email).expectStatus().isAccepted()))
+                .isZero();
+
+        // Other clients are unaffected, and the refused request did not count against the address.
+        assertThat(verificationEmailsSent(email,
+                () -> releaseLink(randomClientIp(), email).expectStatus().isAccepted()))
                 .isEqualTo(1);
     }
 }
