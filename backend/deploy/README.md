@@ -58,7 +58,7 @@ Things that need real values up-front:
 | `DATABASE_PASSWORD` | `openssl rand -base64 24` |
 | `OBJECT_STORAGE_*` | DigitalOcean → Spaces → create bucket + key |
 | `STRIPE_SECRET_KEY` | Stripe dashboard → Developers → API keys |
-| `STRIPE_WEBHOOK_SECRET` | Stripe dashboard → Webhooks → add endpoint `https://api.godance.ai/v1/billing/webhooks/stripe` → copy signing secret |
+| `STRIPE_WEBHOOK_SECRET` | Stripe dashboard → Webhooks → add endpoint `https://api.godance.ai/v1/billing/webhooks/stripe` subscribed to `checkout.session.completed`, `checkout.session.async_payment_succeeded` and `checkout.session.async_payment_failed` → copy signing secret |
 | `OPENAI_API_KEY` | platform.openai.com → API keys |
 | `ANTHROPIC_API_KEY` | console.anthropic.com → API keys (optional) |
 | `GOOGLE_API_KEY` | aistudio.google.com → API keys (optional) |
