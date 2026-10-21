@@ -4,7 +4,9 @@ import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import static com.github.tomakehurst.wiremock.client.WireMock.post;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -154,5 +156,72 @@ class RoutingRegionFallthroughIntegrationTest {
             assertThat(r.getModelName()).isEqualTo("deepseek-v4-pro");
             assertThat(r.isFallbackUsed()).isTrue();
         });
+    }
+
+    // ===== Streaming ==================================================
+
+    @Test
+    void chatCompletions_virtualQuality_streaming_forbiddenTopCandidate_fallsThroughToAllowedModel() {
+        Signed u = signupWithBalance(100_00L);
+
+        upstreamMock.stubFor(post(urlEqualTo("/v1/chat/completions"))
+                .willReturn(aResponse().withStatus(200)
+                        .withHeader("content-type", "text/event-stream")
+                        .withBody(String.join("",
+                                "data: {\"id\":\"chatcmpl-region-s\",\"object\":\"chat.completion.chunk\",",
+                                "\"created\":1700000000,\"model\":\"deepseek-v4-pro\",",
+                                "\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Ni hao!\"},\"finish_reason\":null}]}\n\n",
+                                "data: {\"id\":\"chatcmpl-region-s\",\"object\":\"chat.completion.chunk\",",
+                                "\"created\":1700000000,\"model\":\"deepseek-v4-pro\",",
+                                "\"choices\":[],\"usage\":{\"prompt_tokens\":20,\"completion_tokens\":10,\"total_tokens\":30}}\n\n",
+                                "data: [DONE]\n\n"))));
+
+        List<String> events = http.post().uri("/v1/chat/completions")
+                .header("Authorization", u.bearer())
+                .accept(MediaType.TEXT_EVENT_STREAM)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("model", "godance-quality",
+                        "messages", List.of(Map.of("role", "user", "content", "Hello")),
+                        "stream", true))
+                .exchange()
+                .expectStatus().isOk()
+                .returnResult(String.class).getResponseBody()
+                .collectList().block(Duration.ofSeconds(10));
+
+        assertThat(events).anySatisfy(e -> assertThat(e).contains("\"content\":\"Ni hao!\""));
+        assertThat(events).anySatisfy(e -> assertThat(e).contains("[DONE]"));
+
+        // gpt-5.5 / claude-opus-4-7 were denied at dispatch(): one upstream call only.
+        assertThat(upstreamMock.getAllServeEvents()).hasSize(1);
+
+        await().atMost(Duration.ofSeconds(10)).untilAsserted(() ->
+                assertThat(usage.findByUserIdAndRecordedAtGreaterThanEqual(u.id(),
+                        java.time.Instant.now().minusSeconds(60)))
+                        .singleElement().satisfies(r -> {
+                            assertThat(r.getModelName()).isEqualTo("deepseek-v4-pro");
+                            assertThat(r.isFallbackUsed()).isTrue();
+                        }));
+    }
+
+    @Test
+    void chatCompletions_streaming_directOpenAiModel_returns503_noUpstreamCall() {
+        Signed u = signupWithBalance(100_00L);
+
+        // gpt-4o and its fallback gpt-4o-mini are both OpenAI: the fall-through
+        // loop must exhaust on dispatch() denials without one upstream call.
+        http.post().uri("/v1/chat/completions")
+                .header("Authorization", u.bearer())
+                .accept(MediaType.TEXT_EVENT_STREAM)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("model", "gpt-4o",
+                        "messages", List.of(Map.of("role", "user", "content", "Hello")),
+                        "stream", true))
+                .exchange()
+                .expectStatus().isEqualTo(503);
+
+        assertThat(upstreamMock.getAllServeEvents()).isEmpty();
+        await().atMost(Duration.ofSeconds(10)).untilAsserted(() ->
+                assertThat(users.findById(u.id()).orElseThrow().getCreditBalanceCents())
+                        .isEqualTo(100_00L));
     }
 }

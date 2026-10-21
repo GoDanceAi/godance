@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+import ai.godance.gateway.CostCalculator;
 import ai.godance.gateway.ModelCatalog;
 import ai.godance.gateway.ModelCatalog.ModelInfo;
 import ai.godance.routing.RoutingPolicy;
@@ -27,7 +28,9 @@ import reactor.core.publisher.Mono;
  * }</pre>
  *
  * <p>Godance extends each entry with {@code godance: {modality, pricing}}
- * — pure OpenAI clients ignore unknown fields.
+ * — pure OpenAI clients ignore unknown fields. {@code pricing} is the
+ * provider list price; {@code markup_percent} is the platform fee billed on
+ * top of it, resolved by {@link CostCalculator} exactly as at charge time.
  *
  * <p>Virtual routing ids ({@code godance-fast/auto/quality}) are appended
  * after the concrete catalog as purely additive entries (owned_by
@@ -44,10 +47,13 @@ public class ModelsController {
 
     private final ModelCatalog catalog;
     private final RoutingPolicyRegistry routing;
+    private final CostCalculator costs;
 
-    public ModelsController(ModelCatalog catalog, RoutingPolicyRegistry routing) {
+    public ModelsController(ModelCatalog catalog, RoutingPolicyRegistry routing,
+                            CostCalculator costs) {
         this.catalog = catalog;
         this.routing = routing;
+        this.costs = costs;
     }
 
     @GetMapping("/models")
@@ -65,7 +71,7 @@ public class ModelsController {
         return new ModelEntry(p.id(), "model", "godance", godance);
     }
 
-    private static ModelEntry toEntry(ModelInfo m) {
+    private ModelEntry toEntry(ModelInfo m) {
         Map<String, Object> pricing = switch (m.modality()) {
             case TEXT, EMBEDDING, AUDIO_STT, AUDIO_TTS -> Map.of(
                     "input_microcents_per_1k",  m.inputMicrocentsPer1k(),
@@ -76,7 +82,8 @@ public class ModelsController {
         Map<String, Object> godance = Map.of(
                 "modality",        m.modality().name(),
                 "requires_async",  m.requiresAsync(),
-                "pricing",         pricing);
+                "pricing",         pricing,
+                "markup_percent",  costs.markupPercent(m));
         return new ModelEntry(m.modelName(), "model",
                 ownedBy(m.provider()), godance);
     }

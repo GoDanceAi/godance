@@ -305,11 +305,13 @@ class ImageGenerationIntegrationTest {
                 "gpt-image-2", "seedream-5.0", "qwen-image-2.0", "qwen-image-2.0-pro",
                 "flux-2-pro", "flux-1.1-pro", "nano-banana", "imagen-4", "sdxl");
 
-        // Every image model carries per-image pricing and is async.
+        // Every image model carries per-image pricing, is async, and publishes
+        // the 12% image-tier markup it is billed at.
         body.data().stream()
                 .filter(m -> "IMAGE".equals(m.godance().get("modality")))
                 .forEach(m -> {
                     assertThat(m.godance()).containsEntry("requires_async", true);
+                    assertThat(m.godance()).containsEntry("markup_percent", 12.0);
                     assertThat(m.godance().get("pricing")).isInstanceOf(Map.class);
                     @SuppressWarnings("unchecked")
                     Map<String, Object> pricing = (Map<String, Object>) m.godance().get("pricing");

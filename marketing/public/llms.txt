@@ -1,16 +1,17 @@
 # Godance
 
-> Drop-in OpenAI-compatible REST API that routes to 15+ AI providers across text, image,
-> and video. One credit ledger, one billing line, one SDK. Pay with card, ACH, SEPA,
-> or USDT. Pass-through provider pricing plus a flat 5% platform fee — no tiers, no seats,
-> no subscriptions.
+> OpenAI-compatible REST API that routes to 15+ AI providers across text, image, and
+> video — drop-in for chat; image and video run as async jobs. One credit ledger, one
+> billing line, one SDK. Pay with card, ACH, SEPA, or USDT. Pass-through provider pricing
+> plus a platform fee (5% text, 12% image, 10–15% video) — no tiers, no seats, no
+> subscriptions.
 
 ## Positioning
 
 - vs. OpenRouter: Godance covers image and video too, not just text.
-- vs. Eden AI: simpler flat 5% fee (Eden charges 5.5%, tier-dependent).
+- vs. Eden AI: no account tiers — one published fee per model (Eden's fee is tier-dependent).
 - vs. Fireworks / Together: pure aggregator — no GPUs, no model weights, no lock-in.
-- vs. B.AI / WorldClaw: a drop-in developer API, not an end-user product — targets
+- vs. B.AI / WorldClaw: an OpenAI-compatible developer API, not an end-user product — targets
   engineering teams integrating models into their own apps.
 
 ## API surface (OpenAI-compatible)
@@ -64,9 +65,11 @@ The live list, with current per-model rates, is GET https://api.godance.ai/v1/mo
 
 ## Pricing
 
-Provider list price plus a flat 5% platform fee — same percentage across text, image,
-video. No tiers, no seats, no minimums. Top up the ledger; spend across every model.
+Provider list price plus a platform fee: 5% on text, 12% on images, and 10–15% on video
+depending on the model. No tiers, no seats, no minimums. Top up the ledger; spend across
+every model.
 
+- Per-model fee: the markup_percent field on each entry in GET /v1/models
 - Per-model rates: https://godance.ai/models
 - Pricing page: https://godance.ai/pricing
 
