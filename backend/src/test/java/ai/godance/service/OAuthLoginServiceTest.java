@@ -17,9 +17,11 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
+import ai.godance.domain.AuditOutcome;
 import ai.godance.domain.OAuthProvider;
 import ai.godance.domain.User;
 import ai.godance.domain.UserRole;
+import ai.godance.repository.AuditLogEntryRepository;
 import ai.godance.repository.OAuthIdentityRepository;
 import ai.godance.repository.UserRepository;
 import ai.godance.web.dto.AuthDtos.AuthResponse;
@@ -41,6 +43,7 @@ class OAuthLoginServiceTest {
     @Autowired OAuthLoginService oauthLogin;
     @Autowired UserRepository users;
     @Autowired OAuthIdentityRepository identities;
+    @Autowired AuditLogEntryRepository audits;
     @Autowired ReactiveJwtDecoder jwtDecoder;
 
     private static String uniqueEmail(String tag) {
@@ -140,6 +143,35 @@ class OAuthLoginServiceTest {
 
         assertThat(identities.findByProviderAndSubject(OAuthProvider.GOOGLE, subject)).isEmpty();
         assertThat(users.findById(existing.getId()).orElseThrow().isEmailVerified()).isFalse();
+    }
+
+    @Test
+    void completeLogin_givenInactiveUserOnNewProviderSubject_persistsDeniedAuditWithoutLinking() {
+        String email = uniqueEmail("oauth-inactive");
+        User disabled = new User();
+        disabled.setEmail(email);
+        disabled.setFullName("Disabled User");
+        disabled.setPasswordHash("$2a$12$placeholderplaceholderplaceholderplaceholderplaceh");
+        disabled.setRole(UserRole.USER);
+        disabled.setActive(false);
+        disabled.setEmailVerified(true);
+        users.save(disabled);
+
+        String subject = "google-" + UUID.randomUUID();
+        assertThatThrownBy(() -> oauthLogin.completeLogin(
+                OAuthProvider.GOOGLE, subject, email, true, "Disabled User"))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        e -> assertThat(e.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN));
+
+        // The denial is on record, but the link it reached first did not commit.
+        assertThat(audits.findByEventType(AuditLogService.EVT_AUTH_OAUTH_LOGIN))
+                .filteredOn(e -> disabled.getId().equals(e.getUserId()))
+                .singleElement()
+                .satisfies(e -> {
+                    assertThat(e.getOutcome()).isEqualTo(AuditOutcome.DENIED);
+                    assertThat(e.getEventDetail()).containsEntry("reason", "inactive");
+                });
+        assertThat(identities.findByProviderAndSubject(OAuthProvider.GOOGLE, subject)).isEmpty();
     }
 
     @Test
