@@ -12,17 +12,20 @@ import ai.godance.domain.ModelChangeProposal;
 import ai.godance.domain.User;
 
 /**
- * The four transactional email templates (brief 02), inline — subject +
- * text + minimal HTML, no template engine. Call sites inject this facade
- * and never touch the {@link EmailSender} directly.
+ * The transactional email templates (the four from brief 02, plus
+ * topup-payment-failed), inline — subject + text + minimal HTML, no
+ * template engine. Call sites inject this facade and never touch the
+ * {@link EmailSender} directly.
  *
  * <p>Two invariants:
  * <ul>
  *   <li>Every text body's <b>first line</b> is exactly the message the
- *       old inline {@code [email-stub]} logs produced, so the
- *       {@link LoggingEmailSender} keeps dev output verbatim.</li>
+ *       old inline {@code [email-stub]} logs produced (a one-line summary
+ *       for templates added since), so the {@link LoggingEmailSender}
+ *       keeps dev output verbatim.</li>
  *   <li>No method here ever throws — mail failures must not propagate
- *       into signup, chat requests, auto-recharge or the pricing cron.</li>
+ *       into signup, chat requests, auto-recharge, billing webhooks or
+ *       the pricing cron.</li>
  * </ul>
  */
 @Service
@@ -109,6 +112,31 @@ public class MailService {
             sender.send(List.of(user.getEmail()), "Godance: auto-recharge failed", text, html);
         } catch (Exception e) {
             log.error("autorecharge-failed build/send failed for {}: {}", user.getId(), e.getMessage());
+        }
+    }
+
+    /**
+     * topup-payment-failed — a delayed-notification Stripe payment (ACH
+     * Direct Debit, SEPA Debit) for a top-up failed after checkout, so the
+     * credits the user was expecting never arrived.
+     */
+    public void sendTopUpPaymentFailed(User user, long amountCents) {
+        try {
+            String stubLine = "Top-up payment failed for " + user.getEmail() + ": "
+                    + dollars(amountCents) + " not credited";
+            String text = stubLine + "\n\n"
+                    + "The bank payment for your " + dollars(amountCents) + " Godance top-up\n"
+                    + "did not go through, so no credits were added to your balance.\n\n"
+                    + "Your bank may have more detail on why. You can top up again with\n"
+                    + "another payment method at any time.\n";
+            String html = "<p>The bank payment for your <b>" + dollars(amountCents)
+                    + "</b> Godance top-up did not go through, so no credits were added "
+                    + "to your balance.</p>"
+                    + "<p>Your bank may have more detail on why. You can top up again with "
+                    + "another payment method at any time.</p>";
+            sender.send(List.of(user.getEmail()), "Godance: top-up payment failed", text, html);
+        } catch (Exception e) {
+            log.error("topup-payment-failed build/send failed for {}: {}", user.getId(), e.getMessage());
         }
     }
 
