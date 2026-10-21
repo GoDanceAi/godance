@@ -2,7 +2,10 @@
 
 Godance (godance.ai) is a multimodal AI aggregator: text + image + video +
 audio behind one OpenAI-compatible API and a simple chat UI. Stripe primary
-billing, Coinbase Commerce for crypto top-ups. Single credit ledger.
+billing, NOWPayments (USDT) for crypto top-ups; Binance Pay is scaffolded but
+not live, and the legacy Coinbase Commerce rail is retired
+(`CreditSource.COINBASE` survives only for historical ledger rows). Single
+credit ledger.
 
 **Read this first:** [`HANDOFF.md`](./HANDOFF.md) (in this folder).
 Everything below is shorthand; that document is canonical for the initial
@@ -16,7 +19,7 @@ scaffold and entity-porting plan.
 - Flyway migrations
 - Redis (rate limits, prompt cache hints, session)
 - Spring Security + JWT
-- Stripe Java SDK + Coinbase Commerce webhook integration
+- Stripe Java SDK + NOWPayments (REST via `RestClient`, HMAC-signed IPN webhook)
 - Quartz scheduler (embedded — no separate worker fleet)
 - S3-compatible object storage via a single `ObjectStorageClient` abstraction
   (MinIO locally, DO Spaces in prod, Alicloud OSS in failover)
@@ -32,8 +35,8 @@ scaffold and entity-porting plan.
    Google Terms of Service that restrict serving these models from
    Chinese-owned infrastructure. Tests must cover the negative case (OpenAI
    call from Alicloud region → 503).
-2. **No plaintext secrets at rest.** API keys, user passwords, Coinbase
-   webhook secrets, Stripe keys, provider keys — all encrypted (AES-256). A
+2. **No plaintext secrets at rest.** API keys, user passwords, NOWPayments
+   IPN secrets, Stripe keys, provider keys — all encrypted (AES-256). A
    dedicated `secrets` table with a `KeyVault` service, or Spring's
    Jasypt-style property encryption.
 3. **Single-tenant.** The system has no notion of organizations or tenants.
@@ -42,10 +45,14 @@ scaffold and entity-porting plan.
    agent runtime. Model in, content out. Architect the
    Provider/Gateway/Router so an orchestrator could be added later, but do
    not ship it.
-5. **OpenAI-compatible REST contract.** `/v1/chat/completions`,
-   `/v1/images/generations`, `/v1/videos/generations`, `/v1/audio/speech`,
-   `/v1/audio/transcriptions`, `/v1/embeddings`, `/v1/models`. OpenAI SDKs
-   must work as drop-in clients by swapping `base_url`.
+5. **OpenAI-compatible REST contract.** The target contract is
+   `/v1/chat/completions`, `/v1/images/generations`, `/v1/videos/generations`,
+   `/v1/audio/speech`, `/v1/audio/transcriptions`, `/v1/embeddings`,
+   `/v1/models`. Implemented today: `/v1/chat/completions`,
+   `/v1/images/generations`, `/v1/videos/generations`, `/v1/models` (plus
+   `/v1/jobs` for async polling). Audio and embeddings have no controller
+   yet — don't document them as live. OpenAI SDKs must work as drop-in
+   clients by swapping `base_url`.
 6. **Crypto top-up is payment flexibility, not a brand identity.** Do not
    put "blockchain" or "crypto-native" in any user-facing copy, marketing,
    or default landing page. Crypto is one of three payment methods, not the
@@ -67,7 +74,7 @@ scaffold and entity-porting plan.
 - All HTTP errors return RFC 7807 problem details
   (`application/problem+json`)
 - Idempotency on all webhook handlers via a unique key from the upstream
-  provider (Stripe `idempotency-key` header, Coinbase Commerce `id`)
+  provider (Stripe `idempotency-key` header, NOWPayments `payment_id`)
 - Money is always in **integer cents** (`BigInteger` or `long`) — never
   `double`, never `BigDecimal` for arithmetic. Convert to display strings
   only at the boundary.

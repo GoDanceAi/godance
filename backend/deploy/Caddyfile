@@ -28,7 +28,7 @@ api.godance.ai {
         header_up X-Real-IP {remote_host}
         header_up X-Forwarded-For {remote_host}
         header_up X-Forwarded-Proto {scheme}
-        # Match Stripe / Coinbase webhook timeouts — they can take seconds
+        # Match Stripe / NOWPayments webhook timeouts — they can take seconds
         # to deliver large events, and SSE chat streams can run minutes.
         flush_interval -1
         transport http {
