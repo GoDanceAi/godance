@@ -1,6 +1,6 @@
 # Godance
 
-> Multimodal AI aggregator: text, image, video, and audio behind one
+> Multimodal AI aggregator: text, image, and video behind one
 > OpenAI-compatible API. Stripe card billing + NOWPayments (USDT)
 > top-ups. Single credit ledger. Drop-in for any OpenAI SDK — point
 > `base_url` at `https://api.godance.ai/v1` and it works.

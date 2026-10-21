@@ -3,7 +3,7 @@ import Layout from '../layouts/Layout.astro';
 
 const title = 'Godance — every AI model, one API, drop-in OpenAI compatible';
 const description =
-  'OpenAI, Anthropic, Sora, Claude, Flux, Gemini, Volcengine Ark — text, image, video, audio behind one ' +
+  'OpenAI, Anthropic, Sora, Claude, Flux, Gemini, Volcengine Ark — text, image, and video behind one ' +
   'OpenAI-compatible REST API. Swap base_url, ship. Pay with card, ACH, SEPA, or USDT.';
 
 const orgSchema = {
@@ -24,7 +24,7 @@ const productSchema = {
   operatingSystem: 'Web, REST',
   offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
   description:
-    'OpenAI-compatible REST API for text, image, video, and audio generation across 16+ upstream providers, ' +
+    'OpenAI-compatible REST API for text, image, and video generation across 15+ upstream providers, ' +
     'with built-in fallback chains, signed webhooks, and a 5% flat platform fee.',
 };
 
@@ -49,7 +49,7 @@ const faqs = [
   },
   {
     q: 'Which providers and models do you support?',
-    a: 'OpenAI (GPT, Sora, gpt-image), Anthropic (Claude), Google Vertex (Gemini, Imagen, Veo), Black Forest Labs (Flux), Volcengine Ark (Doubao, Seedream, Seedance), DeepSeek, Moonshot (Kimi), Alibaba (Qwen), Zhipu (GLM), MiniMax, xAI (Grok), Kling, Runway, ElevenLabs, Cartesia, Deepgram, and Stability. New providers ship as needed — email us.',
+    a: 'OpenAI (GPT, Sora, gpt-image), Anthropic (Claude), Google Vertex (Gemini, Imagen, Veo), Black Forest Labs (Flux), Volcengine Ark (Doubao, Seedream, Seedance), DeepSeek, Moonshot (Kimi), Alibaba (Qwen), Zhipu (GLM), MiniMax, Baidu (ERNIE), xAI (Grok), Kling, Runway, and Stability. New providers ship as needed — email us.',
   },
   {
     q: 'What does it actually cost?',
@@ -78,8 +78,8 @@ const faqSchema = {
 // Provider list anchors trust in the hero. Order: alphabetical inside category.
 const providerNames = [
   'OpenAI', 'Anthropic', 'Google Vertex', 'Sora', 'Black Forest Labs',
-  'Volcengine Ark', 'DeepSeek', 'Moonshot', 'Qwen', 'MiniMax',
-  'xAI', 'Kling', 'Runway', 'ElevenLabs', 'Cartesia', 'Deepgram',
+  'Volcengine Ark', 'DeepSeek', 'Moonshot', 'Qwen', 'Zhipu', 'MiniMax', 'Baidu',
+  'xAI', 'Kling', 'Runway', 'Stability',
 ];
 ---
 
@@ -88,14 +88,14 @@ const providerNames = [
   <!-- ===== Hero ===== -->
   <section class="mx-auto max-w-5xl px-6 pt-24 pb-12 text-center">
     <p class="text-sm font-semibold tracking-wider uppercase" style="color: var(--color-primary)">
-      One API. Every model. Text, image, video, audio.
+      One API. Every model. Text, image, video.
     </p>
     <h1 class="mt-5 text-5xl md:text-6xl font-bold tracking-tight text-fg">
       Build with every AI model.<br class="hidden md:block" />
       Skip the integration tax.
     </h1>
     <p class="mt-6 text-lg md:text-xl text-fg-muted max-w-2xl mx-auto">
-      Godance is a drop-in OpenAI-compatible API that routes to 16+ providers — OpenAI,
+      Godance is a drop-in OpenAI-compatible API that routes to 15+ providers — OpenAI,
       Anthropic, Sora, Claude, Flux, Gemini, Volcengine Ark, and more. One credit ledger,
       one billing line, one SDK.
     </p>
@@ -233,7 +233,7 @@ const providerNames = [
   <section style="background: var(--color-primary)">
     <div class="mx-auto max-w-4xl px-6 py-20 text-center">
       <h2 class="text-3xl md:text-4xl font-bold tracking-tight text-white">
-        Sixteen providers. One bill. Ten minutes to first call.
+        15+ providers. One bill. Ten minutes to first call.
       </h2>
       <p class="mt-4 text-lg" style="color: rgba(255,255,255,0.85)">
         Free to sign up. Free to read the docs. Pay only for what you generate.

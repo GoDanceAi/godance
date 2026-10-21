@@ -1,6 +1,6 @@
 # Godance — Backend
 
-Multimodal AI aggregator: text, image, video, and audio behind one
+Multimodal AI aggregator: text, image, and video behind one
 OpenAI-compatible HTTP API. Stripe primary billing, NOWPayments (USDT)
 for crypto top-ups. Single credit ledger with idempotent webhook
 handling.
