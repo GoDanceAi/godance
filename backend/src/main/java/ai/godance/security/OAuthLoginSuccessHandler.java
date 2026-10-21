@@ -29,6 +29,8 @@ import reactor.core.scheduler.Schedulers;
  * and bounces the browser back to the SPA with the token in the URL
  * fragment — the same shape a native SPA OAuth callback expects. A
  * refused sign-in comes back the same way with {@code #error=<reason>}.
+ * Either carries {@code &login_nonce=} when the SPA started the sign-in
+ * with one (see {@link OAuthLoginNonce}).
  */
 @Component
 public class OAuthLoginSuccessHandler implements ServerAuthenticationSuccessHandler {
@@ -71,12 +73,20 @@ public class OAuthLoginSuccessHandler implements ServerAuthenticationSuccessHand
         return redirect(exchange, props.postLoginRedirectUri()
                 + "#access_token=" + enc(auth.accessToken())
                 + "&token_type=" + enc(auth.tokenType())
-                + "&expires_at=" + enc(auth.expiresAt().toString()));
+                + "&expires_at=" + enc(auth.expiresAt().toString())
+                + nonceParam(exchange));
     }
 
     private Mono<Void> redirectWithError(ServerWebExchange exchange, String reason) {
         return redirect(exchange, props.postLoginRedirectUri()
-                + "#error=" + enc(reason != null ? reason : "Sign-in failed"));
+                + "#error=" + enc(reason != null ? reason : "Sign-in failed")
+                + nonceParam(exchange));
+    }
+
+    /** Echo of the SPA's login nonce, or nothing when it sent none. */
+    private static String nonceParam(ServerWebExchange exchange) {
+        String nonce = OAuthLoginNonce.from(exchange);
+        return nonce == null ? "" : "&" + OAuthLoginNonce.PARAM + "=" + enc(nonce);
     }
 
     private static Mono<Void> redirect(ServerWebExchange exchange, String target) {

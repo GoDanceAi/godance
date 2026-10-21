@@ -18,6 +18,7 @@ import org.springframework.security.config.web.server.SecurityWebFiltersOrder;
 import org.springframework.security.config.web.server.ServerHttpSecurity;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.oauth2.client.registration.ReactiveClientRegistrationRepository;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
@@ -35,6 +36,7 @@ import org.springframework.web.cors.reactive.UrlBasedCorsConfigurationSource;
 import com.nimbusds.jose.jwk.source.ImmutableSecret;
 
 import ai.godance.security.ApiKeyAuthFilter;
+import ai.godance.security.OAuthLoginNonce;
 import ai.godance.security.OAuthLoginSuccessHandler;
 import ai.godance.security.SpendingLimitFilter;
 import reactor.core.publisher.Mono;
@@ -169,17 +171,23 @@ public class SecurityConfig {
      * matcher so it cannot affect {@code /v1/**} authentication. Handles
      * the provider redirect dance; {@link OAuthLoginSuccessHandler} mints
      * the Godance JWT once a provider has authenticated the user.
+     * {@link OAuthLoginNonce} carries the SPA's login nonce from the start of
+     * the round-trip to that handler.
      */
     @Bean
     @Order(1)
     SecurityWebFilterChain oauthLoginSecurityChain(ServerHttpSecurity http,
+            ReactiveClientRegistrationRepository clientRegistrations,
             OAuthLoginSuccessHandler oauthLoginSuccessHandler) {
         return http
                 .securityMatcher(ServerWebExchangeMatchers.pathMatchers(
                         "/oauth2/authorization/**", "/login/oauth2/code/**"))
                 .csrf(ServerHttpSecurity.CsrfSpec::disable)
                 .authorizeExchange(ex -> ex.anyExchange().permitAll())
-                .oauth2Login(oauth -> oauth.authenticationSuccessHandler(oauthLoginSuccessHandler))
+                .oauth2Login(oauth -> oauth
+                        .authorizationRequestResolver(OAuthLoginNonce.resolver(clientRegistrations))
+                        .authorizationRequestRepository(OAuthLoginNonce.repository())
+                        .authenticationSuccessHandler(oauthLoginSuccessHandler))
                 .build();
     }
 
