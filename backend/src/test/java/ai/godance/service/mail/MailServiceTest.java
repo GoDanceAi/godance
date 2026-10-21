@@ -69,7 +69,7 @@ class MailServiceTest {
 
         String text = captureText(List.of("a@godance.test"), "Verify");
         assertThat(text.lines().findFirst().orElseThrow())
-                .isEqualTo("Verification URL for a@godance.test: /v1/auth/verify?token=tok-123");
+                .isEqualTo("Verification URL for a@godance.test: /verify-email?token=tok-123");
     }
 
     @Test

@@ -138,7 +138,8 @@ public class SecurityConfig {
                                 "/actuator/health/**", "/actuator/info").permitAll()
                         // Pre-auth surface.
                         .pathMatchers(HttpMethod.POST, "/v1/auth/signup", "/v1/auth/login").permitAll()
-                        .pathMatchers(HttpMethod.GET, "/v1/auth/verify").permitAll()
+                        // Not /v1/auth/verify: it must run in the account's own
+                        // session (see AuthService.verifyEmail).
                         // Public read-only: model catalog (model picker) and
                         // provider status board (marketing /status page).
                         .pathMatchers(HttpMethod.GET, "/v1/models", "/v1/status").permitAll()

@@ -100,10 +100,22 @@ public class AuthService {
         return AuthResponse.bearer(issued.token(), issued.expiresAt());
     }
 
+    /**
+     * Confirm the signed-in user's email. The token proves access to the
+     * inbox; requiring that user's own session proves the same person
+     * holds the account. Without it, the owner of an address could verify
+     * an account someone else registered with it, and OAuth sign-in would
+     * then link into that account (see {@code OAuthLoginService}).
+     */
     @Transactional
-    public void verifyEmail(String token, String ipAddress) {
+    public void verifyEmail(UUID userId, String token, String ipAddress) {
         User u = users.findByEmailVerificationToken(token).orElseThrow(() ->
                 new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid verification token"));
+        if (!u.getId().equals(userId)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "This verification link is for a different account. "
+                            + "Sign in to that account and open the link again.");
+        }
         u.setEmailVerified(true);
         u.setEmailVerificationToken(null);
         users.save(u);

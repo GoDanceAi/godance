@@ -17,9 +17,10 @@ export default function VerifyEmailPage() {
     if (!token) return;
     (async () => {
       try {
-        await apiFetch(`/v1/auth/verify?token=${encodeURIComponent(token)}`, { auth: false });
+        // Sent with the session's token: the API only verifies the signed-in account.
+        await apiFetch(`/v1/auth/verify?token=${encodeURIComponent(token)}`);
         setStatus('success');
-        // Refresh /me so emailVerified flips immediately for any logged-in session.
+        // Refresh /me so emailVerified flips immediately.
         void refresh();
       } catch (err) {
         setStatus('error');

@@ -42,15 +42,16 @@ public class MailService {
     public void sendVerificationEmail(User user) {
         try {
             String stubLine = "Verification URL for " + user.getEmail()
-                    + ": /v1/auth/verify?token=" + user.getEmailVerificationToken();
+                    + ": /verify-email?token=" + user.getEmailVerificationToken();
             String text = stubLine + "\n\n"
                     + "Hi " + user.getFullName() + ",\n\n"
                     + "Welcome to Godance. Please confirm this email address by opening the\n"
-                    + "verification link above against the Godance API.\n\n"
+                    + "verification link above in the Godance app, signed in to this account.\n\n"
                     + "If you didn't create a Godance account, you can ignore this email.\n";
             String html = "<p>Hi " + escape(user.getFullName()) + ",</p>"
-                    + "<p>Welcome to Godance. Please confirm this email address by opening:</p>"
-                    + "<p><code>/v1/auth/verify?token=" + escape(user.getEmailVerificationToken()) + "</code></p>"
+                    + "<p>Welcome to Godance. Please confirm this email address by opening this"
+                    + " link in the Godance app, signed in to this account:</p>"
+                    + "<p><code>/verify-email?token=" + escape(user.getEmailVerificationToken()) + "</code></p>"
                     + "<p>If you didn't create a Godance account, you can ignore this email.</p>";
             sender.send(List.of(user.getEmail()), "Verify your Godance email", text, html);
         } catch (Exception e) {
