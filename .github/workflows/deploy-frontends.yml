@@ -90,13 +90,18 @@ jobs:
   smoke:
     needs: [deploy-app, deploy-marketing]
     runs-on: ubuntu-latest
+    env:
+      # Cloudflare Pages can answer 502 for a few seconds right after a
+      # deploy. Retry transient errors (5xx, timeouts, refused) for about a
+      # minute so that window doesn't fail the run; a real outage still does.
+      CURL_RETRY: --retry 6 --retry-delay 10 --retry-connrefused
     steps:
       - name: SPA bundle contains USDT rail + save-card
         run: |
-          HTML=$(curl -fsS https://app.godance.ai)
+          HTML=$(curl -fsS $CURL_RETRY https://app.godance.ai)
           BUNDLE=$(echo "$HTML" | grep -oE 'src="/assets/[^"]+\.js"' | head -1 | cut -d'"' -f2)
           echo "bundle: $BUNDLE"
-          JS=$(curl -fsS "https://app.godance.ai$BUNDLE")
+          JS=$(curl -fsS $CURL_RETRY "https://app.godance.ai$BUNDLE")
           echo "$JS" | grep -qi "usdt"     || { echo "USDT missing from deployed bundle" >&2; exit 1; }
           # save_card was asserted here originally, but it is a backend-only
           # string (Stripe auto-recharge) that has never been in the SPA
@@ -105,4 +110,4 @@ jobs:
           echo "$JS" | grep -q "v1/admin"  || { echo "admin console missing from deployed bundle" >&2; exit 1; }
       - name: Marketing mentions USDT
         run: |
-          curl -fsS https://godance.ai | grep -qi "usdt" || { echo "USDT copy missing from marketing" >&2; exit 1; }
+          curl -fsS $CURL_RETRY https://godance.ai | grep -qi "usdt" || { echo "USDT copy missing from marketing" >&2; exit 1; }
