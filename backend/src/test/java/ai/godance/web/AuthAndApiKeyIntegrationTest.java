@@ -399,6 +399,10 @@ class AuthAndApiKeyIntegrationTest {
     void changeEmail_givenPasswordAccountAndCorrectPassword_thenVerify_switchesAddress() {
         String old = uniqueEmail("change-old");
         String bearer = "Bearer " + signup(old).accessToken();
+        // Signup just sent a verification email; step past the one-minute cooldown.
+        var user = users.findByEmail(old).orElseThrow();
+        user.setEmailVerificationSentAt(Instant.now().minus(Duration.ofMinutes(5)));
+        users.save(user);
         String fresh = uniqueEmail("change-new");
 
         changeEmail(bearer, fresh, PASSWORD).expectStatus().isNoContent();
