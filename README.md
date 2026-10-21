@@ -31,7 +31,10 @@ Each subdirectory has its own README with a quickstart.
   code changes — just swap `base_url`. Routes served today:
   `/v1/chat/completions`, `/v1/images/generations`,
   `/v1/videos/generations`, `/v1/models` (plus `/v1/jobs/{id}` to
-  poll async generations). `/v1/audio/speech`,
+  poll async generations). Image and video generation take OpenAI's
+  request shape but run as async jobs (`202` + `job_id`), so those
+  calls poll `/v1/jobs/{id}` or use a webhook instead of getting the
+  result inline. `/v1/audio/speech`,
   `/v1/audio/transcriptions` and `/v1/embeddings` are planned but not
   yet implemented.
 - **Regional provider allowlist is code, not config.** The provider

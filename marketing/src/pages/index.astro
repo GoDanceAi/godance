@@ -46,7 +46,7 @@ r = client.chat.completions.create(
 const faqs = [
   {
     q: 'Will my existing OpenAI SDK code work?',
-    a: 'Yes — swap base_url to https://api.godance.ai/v1 and use a Godance API key. /v1/chat/completions (streaming + non-streaming), /v1/images/generations, and /v1/models all match OpenAI\'s contract.',
+    a: 'For chat, yes — swap base_url to https://api.godance.ai/v1 and use a Godance API key. /v1/chat/completions (streaming + non-streaming) and /v1/models match OpenAI\'s contract. /v1/images/generations takes OpenAI\'s request shape but runs async: it returns 202 with a job_id, and you fetch the result from GET /v1/jobs/{id} or receive it at a webhook_url. Video generation works the same way.',
   },
   {
     q: 'Which providers and models do you support?',
@@ -205,8 +205,9 @@ const providerNames = [
           Change one URL. Start calling Claude, Gemini, or any other model the next request.
         </p>
         <p class="mt-4 text-sm text-fg-subtle">
-          Same idiom for <code class="code-chip">/v1/images/generations</code>
-          and <code class="code-chip">/v1/models</code>.
+          Same idiom for <code class="code-chip">/v1/models</code>. Image and video
+          generation take the same request shape but run as async jobs — poll
+          <code class="code-chip">/v1/jobs/&#123;id&#125;</code> or get a webhook.
         </p>
       </div>
       <pre class="code-block"><code set:html={pythonSnippet} /></pre>
