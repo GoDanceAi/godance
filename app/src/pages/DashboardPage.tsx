@@ -1,5 +1,7 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth, formatCents } from '../lib/auth';
+import { apiFetch, ApiError } from '../lib/api';
 import { Icon } from '../components/Brand';
 
 export default function DashboardPage() {
@@ -14,12 +16,7 @@ export default function DashboardPage() {
         Hi, {user.fullName.split(' ')[0]}.
       </h1>
 
-      {!user.emailVerified && (
-        <div className="mt-6 rounded-md border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
-          We sent a verification link to <strong>{user.email}</strong>. Confirm it whenever you
-          like — for now it's a heads-up; billing features will require it later.
-        </div>
-      )}
+      {user.hasEmail && !user.emailVerified && <VerifyEmailBanner email={user.email} />}
 
       {/* Balance card */}
       <div className="mt-8 card flex items-start justify-between">
@@ -82,5 +79,45 @@ function DashboardCard({ to, title, body }: { to: string; title: string; body: s
       </h3>
       <p className="mt-1 text-sm text-fg-muted">{body}</p>
     </Link>
+  );
+}
+
+type ResendStatus = 'idle' | 'sending' | 'sent' | 'error';
+
+function VerifyEmailBanner({ email }: { email: string }) {
+  const [status, setStatus] = useState<ResendStatus>('idle');
+  const [error, setError] = useState<string | null>(null);
+
+  const resend = async () => {
+    setStatus('sending');
+    setError(null);
+    try {
+      await apiFetch('/v1/auth/verify/resend', { method: 'POST' });
+      setStatus('sent');
+    } catch (err) {
+      setStatus('error');
+      setError(err instanceof ApiError ? err.detail || err.message : 'Could not send the email');
+    }
+  };
+
+  return (
+    <div className="mt-6 rounded-md border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+      <p>
+        We sent a verification link to <strong>{email}</strong>. Confirm it whenever you
+        like — for now it's a heads-up; billing features will require it later.
+      </p>
+      <div className="mt-3 flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          onClick={() => void resend()}
+          disabled={status === 'sending'}
+          className="btn btn-sm btn-secondary"
+        >
+          {status === 'sending' ? 'Sending…' : 'Resend email'}
+        </button>
+        {status === 'sent' && <span role="status">Sent. Check your inbox.</span>}
+        {status === 'error' && <span role="alert" className="text-danger">{error}</span>}
+      </div>
+    </div>
   );
 }

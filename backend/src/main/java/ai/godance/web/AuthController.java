@@ -18,8 +18,10 @@ import ai.godance.security.AuthRateLimits;
 import ai.godance.security.JwtService;
 import ai.godance.service.AuthService;
 import ai.godance.web.dto.AuthDtos.AuthResponse;
+import ai.godance.web.dto.AuthDtos.ForgotPasswordRequest;
 import ai.godance.web.dto.AuthDtos.LoginRequest;
 import ai.godance.web.dto.AuthDtos.MeResponse;
+import ai.godance.web.dto.AuthDtos.ResetPasswordRequest;
 import ai.godance.web.dto.AuthDtos.SignupRequest;
 import jakarta.validation.Valid;
 import reactor.core.publisher.Mono;
@@ -57,15 +59,47 @@ public class AuthController {
     }
 
     @GetMapping("/verify")
-    public Mono<ResponseEntity<Void>> verify(
-            @RequestParam("token") String token, @AuthenticationPrincipal Jwt jwt,
-            ServerWebExchange exchange) {
+    public Mono<ResponseEntity<Void>> verify(@AuthenticationPrincipal Jwt jwt,
+            @RequestParam("token") String token, ServerWebExchange exchange) {
         UUID userId = JwtService.userIdFromSubject(jwt.getSubject());
         String ip = clientIp(exchange);
         return rateLimits.verify(ip)
-                .then(Mono.fromRunnable(() -> auth.verifyEmail(token, userId, ip))
+                .then(Mono.fromRunnable(() -> auth.verifyEmail(userId, token, ip))
                         .subscribeOn(Schedulers.boundedElastic()))
                 .then(Mono.just(ResponseEntity.noContent().build()));
+    }
+
+    @PostMapping("/verify/resend")
+    public Mono<ResponseEntity<Void>> resendVerification(@AuthenticationPrincipal Jwt jwt,
+            ServerWebExchange exchange) {
+        UUID userId = JwtService.userIdFromSubject(jwt.getSubject());
+        String ip = clientIp(exchange);
+        return rateLimits.resendVerification(ip, userId)
+                .then(Mono.fromRunnable(() -> auth.resendVerificationEmail(userId, ip))
+                        .subscribeOn(Schedulers.boundedElastic()))
+                .then(Mono.just(ResponseEntity.noContent().build()));
+    }
+
+    /**
+     * Always 202, so the response never says whether the address is
+     * registered. Over a rate limit the email is just not sent.
+     */
+    @PostMapping("/password/forgot")
+    public Mono<ResponseEntity<Void>> forgotPassword(
+            @Valid @RequestBody ForgotPasswordRequest req, ServerWebExchange exchange) {
+        String ip = clientIp(exchange);
+        return rateLimits.forgotPassword(ip, req.email())
+                .filter(Boolean::booleanValue)
+                .flatMap(allowed -> Mono.fromRunnable(() -> auth.requestPasswordReset(req, ip))
+                        .subscribeOn(Schedulers.boundedElastic()))
+                .then(Mono.just(ResponseEntity.accepted().build()));
+    }
+
+    @PostMapping("/password/reset")
+    public Mono<AuthResponse> resetPassword(
+            @Valid @RequestBody ResetPasswordRequest req, ServerWebExchange exchange) {
+        return Mono.fromCallable(() -> auth.resetPassword(req, clientIp(exchange)))
+                .subscribeOn(Schedulers.boundedElastic());
     }
 
     @GetMapping("/me")

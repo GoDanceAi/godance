@@ -127,6 +127,7 @@ export async function* streamChat(path: string, body: unknown, signal?: AbortSig
 export interface MeResponse {
   id: string;
   email: string;
+  hasEmail: boolean;         // false: `email` is a placeholder (X sign-in shares no address)
   fullName: string;
   role: 'USER' | 'ADMIN';
   emailVerified: boolean;

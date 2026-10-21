@@ -19,6 +19,12 @@ import jakarta.persistence.Table;
 @Table(name = "users")
 public class User {
 
+    /**
+     * Ends the placeholder address given to an OAuth user whose provider
+     * shares no email (X.com). Nothing can be delivered to it.
+     */
+    public static final String SYNTHETIC_EMAIL_SUFFIX = "@oauth.godance.local";
+
     @Id
     @UuidGenerator(style = UuidGenerator.Style.TIME)
     @Column(name = "id", nullable = false, updatable = false)
@@ -68,6 +74,20 @@ public class User {
 
     @Column(name = "email_verification_sent_at")
     private Instant emailVerificationSentAt;
+
+    /** SHA-256 (hex) of the pending password-reset token; the plaintext is only ever emailed. */
+    @Column(name = "password_reset_token_hash")
+    private String passwordResetTokenHash;
+
+    @Column(name = "password_reset_sent_at")
+    private Instant passwordResetSentAt;
+
+    /**
+     * Copied into every JWT issued for this user. Bumping it ends every
+     * earlier session — see {@link ai.godance.security.SessionVersionJwtDecoder}.
+     */
+    @Column(name = "session_version", nullable = false)
+    private int sessionVersion = 0;
 
     @Column(name = "stripe_customer_id", unique = true)
     private String stripeCustomerId;
@@ -164,11 +184,25 @@ public class User {
     public boolean isEmailVerified() { return emailVerified; }
     public void setEmailVerified(boolean emailVerified) { this.emailVerified = emailVerified; }
 
+    /** True when {@link #getEmail()} is a placeholder rather than a real inbox. */
+    public boolean hasSyntheticEmail() {
+        return email != null && email.endsWith(SYNTHETIC_EMAIL_SUFFIX);
+    }
+
     public String getEmailVerificationToken() { return emailVerificationToken; }
     public void setEmailVerificationToken(String emailVerificationToken) { this.emailVerificationToken = emailVerificationToken; }
 
     public Instant getEmailVerificationSentAt() { return emailVerificationSentAt; }
     public void setEmailVerificationSentAt(Instant emailVerificationSentAt) { this.emailVerificationSentAt = emailVerificationSentAt; }
+
+    public String getPasswordResetTokenHash() { return passwordResetTokenHash; }
+    public void setPasswordResetTokenHash(String passwordResetTokenHash) { this.passwordResetTokenHash = passwordResetTokenHash; }
+
+    public Instant getPasswordResetSentAt() { return passwordResetSentAt; }
+    public void setPasswordResetSentAt(Instant passwordResetSentAt) { this.passwordResetSentAt = passwordResetSentAt; }
+
+    public int getSessionVersion() { return sessionVersion; }
+    public void setSessionVersion(int sessionVersion) { this.sessionVersion = sessionVersion; }
 
     public String getStripeCustomerId() { return stripeCustomerId; }
     public void setStripeCustomerId(String stripeCustomerId) { this.stripeCustomerId = stripeCustomerId; }

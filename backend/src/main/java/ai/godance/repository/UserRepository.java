@@ -14,8 +14,13 @@ import ai.godance.domain.User;
 public interface UserRepository extends JpaRepository<User, UUID> {
     Optional<User> findByEmail(String email);
     Optional<User> findByEmailVerificationToken(String token);
+    Optional<User> findByPasswordResetTokenHash(String tokenHash);
     Optional<User> findByStripeCustomerId(String stripeCustomerId);
     boolean existsByEmail(String email);
+
+    /** The per-request JWT check in {@code SessionVersionJwtDecoder} — one column, by primary key. */
+    @Query("SELECT u.sessionVersion FROM User u WHERE u.id = :id")
+    Optional<Integer> findSessionVersionById(@Param("id") UUID id);
 
     /** Admin console user search — case-insensitive email substring, newest first. */
     List<User> findByEmailContainingIgnoreCaseOrderByCreatedAtDesc(

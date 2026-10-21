@@ -148,7 +148,8 @@ godance:
     api-key:  ${RESEND_API_KEY:re_dev_dummy_key_do_not_use_for_real_calls}
     from:     ${EMAIL_FROM:Godance <noreply@godance.ai>}
     api-base: ${RESEND_API_BASE:https://api.resend.com}   # override in tests to point at WireMock
-    app-base-url: ${APP_BASE_URL:http://localhost:5173}  # SPA origin that email links open
+    # SPA origin for links in emails (/verify-email, /reset-password).
+    app-base-url: ${APP_BASE_URL:http://localhost:5173}
   pricing:
     # Daily catalog drift detection + staging. Region-gated to
     # DIGITALOCEAN inside the cron job (Alicloud must not double-fire).
