@@ -1,9 +1,11 @@
 package ai.godance.web;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
+import static com.github.tomakehurst.wiremock.client.WireMock.get;
 import static com.github.tomakehurst.wiremock.client.WireMock.post;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlMatching;
+import static com.github.tomakehurst.wiremock.client.WireMock.urlPathMatching;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
@@ -88,6 +90,16 @@ class AutoRechargeIntegrationTest {
     @BeforeEach
     void resetStubs() {
         stripeMock.resetAll();
+        // Default stub for the saved payment method lookup: a card.
+        stripeMock.stubFor(get(urlPathMatching("/v1/payment_methods/.+"))
+                .willReturn(aResponse().withStatus(200)
+                        .withHeader("content-type", "application/json")
+                        .withBody("""
+                                {"id":"pm_test_card",
+                                 "object":"payment_method",
+                                 "type":"card",
+                                 "livemode":false}
+                                """)));
         // Default stub for off-session PaymentIntent: succeeds.
         stripeMock.stubFor(post(urlMatching("/v1/payment_intents"))
                 .willReturn(aResponse().withStatus(200)
@@ -227,8 +239,8 @@ class AutoRechargeIntegrationTest {
         autoRecharge.enable(u.id(), 500, 2000, null);
         seedBalance(u.id(), 100);
 
-        // Replace the default success stub with a decline.
-        stripeMock.resetAll();
+        // Override the default success stub with a decline (WireMock serves
+        // the newest matching stub).
         stripeMock.stubFor(post(urlEqualTo("/v1/payment_intents"))
                 .willReturn(aResponse().withStatus(402)
                         .withHeader("content-type", "application/json")
@@ -260,7 +272,6 @@ class AutoRechargeIntegrationTest {
         autoRecharge.enable(u.id(), 500, 2000, null);
         seedBalance(u.id(), 100);
 
-        stripeMock.resetAll();
         stripeMock.stubFor(post(urlEqualTo("/v1/payment_intents"))
                 .willReturn(aResponse().withStatus(200)
                         .withHeader("content-type", "application/json")
