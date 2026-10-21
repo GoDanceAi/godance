@@ -23,7 +23,8 @@ import ai.godance.domain.User;
  *   <li>Every text body's <b>first line</b> is exactly the message the
  *       old inline {@code [email-stub]} logs produced (a one-line summary
  *       for templates added since), so the {@link LoggingEmailSender}
- *       keeps dev output verbatim.</li>
+ *       keeps dev output verbatim. (The verify-email line keeps its
+ *       wording; its URL now opens the app.)</li>
  *   <li>No method here ever throws — mail failures must not propagate
  *       into signup, chat requests, auto-recharge, billing webhooks or
  *       the pricing cron.</li>

@@ -141,7 +141,9 @@ public class SecurityConfig {
                         // Liveness / build info — public for Cloudflare DNS health checks.
                         .pathMatchers("/healthz",
                                 "/actuator/health/**", "/actuator/info").permitAll()
-                        // Pre-auth surface.
+                        // Pre-auth surface. /v1/auth/verify is deliberately not
+                        // part of it: verifying needs the account's own session
+                        // as well as the emailed token.
                         .pathMatchers(HttpMethod.POST, "/v1/auth/signup", "/v1/auth/login").permitAll()
                         // Password reset proves itself with the emailed token.
                         .pathMatchers(HttpMethod.POST,

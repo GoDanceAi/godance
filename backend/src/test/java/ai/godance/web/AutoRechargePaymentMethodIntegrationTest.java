@@ -178,7 +178,8 @@ class AutoRechargePaymentMethodIntegrationTest {
                         {"id":"%s","object":"checkout.session","livemode":false,
                          "payment_intent":{"id":"pi_%s","object":"payment_intent","livemode":false,
                                            "payment_method":{"id":"%s","object":"payment_method",
-                                                             "type":"%s","livemode":false}}}
+                                                             "type":"%s","livemode":false},
+                                           "setup_future_usage":"off_session"}}
                         """.formatted(sessionId, sessionId, paymentMethodId, type))));
     }
 
@@ -363,7 +364,8 @@ class AutoRechargePaymentMethodIntegrationTest {
                 .willReturn(json("""
                         {"id":"%s","object":"checkout.session","livemode":false,
                          "payment_intent":{"id":"pi_%s","object":"payment_intent","livemode":false,
-                                           "payment_method":"pm_unexpanded"}}
+                                           "payment_method":"pm_unexpanded",
+                                           "setup_future_usage":"off_session"}}
                         """.formatted(session, session))));
 
         completeTopUp(u, session, 20_00L, false);
