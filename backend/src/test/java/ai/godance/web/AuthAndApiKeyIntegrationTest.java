@@ -276,7 +276,9 @@ class AuthAndApiKeyIntegrationTest {
         String squattedEmail = uniqueEmail("verify-squatted");
         signup(squattedEmail);
         String token = users.findByEmail(squattedEmail).orElseThrow().getEmailVerificationToken();
-        String otherBearer = "Bearer " + signup(uniqueEmail("verify-other")).accessToken();
+        String otherEmail = uniqueEmail("verify-other");
+        String otherBearer = "Bearer " + signup(otherEmail).accessToken();
+        UUID otherId = users.findByEmail(otherEmail).orElseThrow().getId();
 
         http.get().uri("/v1/auth/verify?token={t}", token)
                 .header("Authorization", otherBearer)
@@ -286,6 +288,16 @@ class AuthAndApiKeyIntegrationTest {
         var squatted = users.findByEmail(squattedEmail).orElseThrow();
         assertThat(squatted.isEmailVerified()).isFalse();
         assertThat(squatted.getEmailVerificationToken()).isEqualTo(token);
+        // The refusal's audit row commits even though the request failed.
+        assertThat(audits.findByEventType(AuditLogService.EVT_AUTH_VERIFY))
+                .filteredOn(e -> squatted.getId().equals(e.getUserId()))
+                .singleElement()
+                .satisfies(e -> {
+                    assertThat(e.getOutcome()).isEqualTo(AuditOutcome.DENIED);
+                    assertThat(e.getEventDetail())
+                            .containsEntry("reason", "different-account")
+                            .containsEntry("callerUserId", otherId.toString());
+                });
     }
 
     @Test

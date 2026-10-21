@@ -12,6 +12,7 @@ import static org.mockito.Mockito.when;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -117,8 +118,9 @@ class AuthServiceTest {
     @Test
     void verifyEmail_givenTokenOfAnotherUser_refusesAndLeavesAccountUnverified() {
         User u = unverifiedUserWithToken("tok-squatted");
+        UUID caller = UUID.randomUUID();
 
-        assertThatThrownBy(() -> auth.verifyEmail(UUID.randomUUID(), "tok-squatted", null))
+        assertThatThrownBy(() -> auth.verifyEmail(caller, "tok-squatted", "203.0.113.7"))
                 .isInstanceOfSatisfying(ResponseStatusException.class, e -> {
                     assertThat(e.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
                     assertThat(e.getReason()).contains("different account");
@@ -127,6 +129,8 @@ class AuthServiceTest {
         assertThat(u.isEmailVerified()).isFalse();
         assertThat(u.getEmailVerificationToken()).isEqualTo("tok-squatted");
         verify(users, never()).save(any());
+        verify(audit).record(AuditLogService.EVT_AUTH_VERIFY, AuditOutcome.DENIED, u.getId(),
+                "203.0.113.7", Map.of("reason", "different-account", "callerUserId", caller.toString()));
     }
 
     @Test

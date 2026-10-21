@@ -154,12 +154,19 @@ public class AuthService {
      * <p>For an address being added or changed to (see
      * {@link #requestEmailChange}), this is the point where it replaces the
      * account's email.
+     *
+     * <p>noRollbackFor keeps the DENIED audit row: every refusal throws
+     * before anything else is written.
      */
-    @Transactional
+    @Transactional(noRollbackFor = ResponseStatusException.class)
     public void verifyEmail(UUID userId, String token, String ipAddress) {
         User u = users.findByEmailVerificationToken(token).orElseThrow(() ->
                 new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid verification token"));
         if (!u.getId().equals(userId)) {
+            // Recorded against the account the link belongs to: a likely
+            // sign that someone else registered with this address.
+            audit.record(AuditLogService.EVT_AUTH_VERIFY, AuditOutcome.DENIED, u.getId(), ipAddress,
+                    Map.of("reason", "different-account", "callerUserId", userId.toString()));
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
                     "This verification link is for a different account. "
                             + "Sign in to that account and open the link again.");
