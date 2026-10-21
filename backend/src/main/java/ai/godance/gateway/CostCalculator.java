@@ -65,7 +65,12 @@ public class CostCalculator {
         return Math.round(microcents * (1.0 + markupPercent(model) / 100.0));
     }
 
-    private double markupPercent(ModelInfo model) {
+    /**
+     * Markup percent billed on top of the list price: the model's override
+     * when set, else its modality's default. Published on {@code GET /v1/models}
+     * so displayed prices match what is charged.
+     */
+    public double markupPercent(ModelInfo model) {
         if (model.markupOverride() != null) {
             return model.markupOverride();
         }

@@ -22,9 +22,10 @@ def verify(payload, header, secret):
   <section class="mx-auto max-w-3xl px-6 py-16">
     <h1 class="text-4xl font-bold tracking-tight text-fg">Docs</h1>
     <p class="mt-4 text-fg-muted">
-      Godance is a drop-in OpenAI-compatible REST API. If you've shipped against the OpenAI
-      SDK, you already know the shape of every endpoint below — same JSON, same error codes,
-      same streaming format.
+      Godance is an OpenAI-compatible REST API. If you've shipped against the OpenAI SDK,
+      you already know the request shape of every endpoint below, and chat is drop-in: same
+      JSON, same streaming format. Image and video generation run as async jobs, and errors
+      come back as RFC 7807 problem details.
     </p>
 
     <h2 class="text-2xl font-bold mt-12 mb-4 text-fg">Get to first call in three steps</h2>
@@ -44,7 +45,7 @@ def verify(payload, header, secret):
     <h2 class="text-2xl font-bold mt-12 mb-4 text-fg">Endpoint reference</h2>
     <ul class="space-y-2 text-fg-muted">
       <li><a href="/docs/chat-completions" class="underline" style="color: var(--color-primary)">POST /v1/chat/completions</a> — streaming + non-streaming</li>
-      <li><a href="/docs/images" class="underline" style="color: var(--color-primary)">POST /v1/images/generations</a> — sync + async (HQ models auto-promote)</li>
+      <li><a href="/docs/images" class="underline" style="color: var(--color-primary)">POST /v1/images/generations</a> — async: returns a job_id to poll, or pass webhook_url</li>
       <li><a href="/docs/videos" class="underline" style="color: var(--color-primary)">POST /v1/videos/generations</a> — async-only, signed webhook</li>
       <li><a href="/docs/jobs" class="underline" style="color: var(--color-primary)">GET /v1/jobs/&#123;id&#125;</a> — async job status</li>
       <li><a href="/docs/keys" class="underline" style="color: var(--color-primary)">CRUD /v1/keys</a> — API key management</li>
