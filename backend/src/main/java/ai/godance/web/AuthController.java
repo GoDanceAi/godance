@@ -73,17 +73,25 @@ public class AuthController {
     public Mono<ResponseEntity<Void>> resendVerification(@AuthenticationPrincipal Jwt jwt,
             ServerWebExchange exchange) {
         UUID userId = JwtService.userIdFromSubject(jwt.getSubject());
-        return Mono.fromRunnable(() -> auth.resendVerificationEmail(userId, clientIp(exchange)))
-                .subscribeOn(Schedulers.boundedElastic())
+        String ip = clientIp(exchange);
+        return rateLimits.resendVerification(ip, userId)
+                .then(Mono.fromRunnable(() -> auth.resendVerificationEmail(userId, ip))
+                        .subscribeOn(Schedulers.boundedElastic()))
                 .then(Mono.just(ResponseEntity.noContent().build()));
     }
 
-    /** Always 202, so the response never says whether the address is registered. */
+    /**
+     * Always 202, so the response never says whether the address is
+     * registered. Over a rate limit the email is just not sent.
+     */
     @PostMapping("/password/forgot")
     public Mono<ResponseEntity<Void>> forgotPassword(
             @Valid @RequestBody ForgotPasswordRequest req, ServerWebExchange exchange) {
-        return Mono.fromRunnable(() -> auth.requestPasswordReset(req, clientIp(exchange)))
-                .subscribeOn(Schedulers.boundedElastic())
+        String ip = clientIp(exchange);
+        return rateLimits.forgotPassword(ip, req.email())
+                .filter(Boolean::booleanValue)
+                .flatMap(allowed -> Mono.fromRunnable(() -> auth.requestPasswordReset(req, ip))
+                        .subscribeOn(Schedulers.boundedElastic()))
                 .then(Mono.just(ResponseEntity.accepted().build()));
     }
 
