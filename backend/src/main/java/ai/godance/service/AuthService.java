@@ -1,6 +1,7 @@
 package ai.godance.service;
 
 import java.security.SecureRandom;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.Map;
@@ -28,6 +29,9 @@ import ai.godance.web.dto.AuthDtos.SignupRequest;
 public class AuthService {
 
     private static final SecureRandom RNG = new SecureRandom();
+
+    /** Shortest gap between two verification emails to the same account. */
+    static final Duration RESEND_COOLDOWN = Duration.ofMinutes(1);
 
     private final UserRepository users;
     private final PasswordEncoder passwords;
@@ -120,6 +124,41 @@ public class AuthService {
         u.setEmailVerificationToken(null);
         users.save(u);
         audit.record(AuditLogService.EVT_AUTH_VERIFY, AuditOutcome.SUCCESS,
+                u.getId(), ipAddress, null);
+    }
+
+    /**
+     * Send the signed-in user's verification email again. The current
+     * token is kept, so a link from an earlier email still works.
+     */
+    @Transactional
+    public void resendVerificationEmail(UUID userId, String ipAddress) {
+        User u = loadById(userId);
+        if (u.isEmailVerified()) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Your email address is already verified.");
+        }
+        if (u.getEmail().endsWith(OAuthLoginService.SYNTHETIC_EMAIL_SUFFIX)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "This account has no email address to verify.");
+        }
+        Instant now = Instant.now();
+        Instant lastSent = u.getEmailVerificationSentAt();
+        if (lastSent != null && lastSent.plus(RESEND_COOLDOWN).isAfter(now)) {
+            throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS,
+                    "A verification email was sent less than a minute ago. "
+                            + "Check your inbox, or try again shortly.");
+        }
+        if (u.getEmailVerificationToken() == null) {
+            u.setEmailVerificationToken(randomToken());
+        }
+        u.setEmailVerificationSentAt(now);
+        users.save(u);
+
+        // Mail failures are swallowed inside MailService, as on signup.
+        mail.sendVerificationEmail(u);
+
+        audit.record(AuditLogService.EVT_AUTH_VERIFY_RESEND, AuditOutcome.SUCCESS,
                 u.getId(), ipAddress, null);
     }
 

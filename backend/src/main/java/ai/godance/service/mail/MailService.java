@@ -41,7 +41,7 @@ public class MailService {
         this.admin = admin;
     }
 
-    /** verify-email — sent once per signup. */
+    /** verify-email — sent on signup, and again when the user asks for a resend. */
     public void sendVerificationEmail(User user) {
         try {
             String stubLine = "Verification URL for " + user.getEmail()

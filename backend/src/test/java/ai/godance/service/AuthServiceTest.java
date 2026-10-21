@@ -8,6 +8,8 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -26,18 +28,21 @@ import ai.godance.service.mail.MailService;
 /**
  * {@link AuthService#verifyEmail} binds the inbox token to the account's
  * own session, so the owner of an address cannot verify an account that
- * someone else registered with it.
+ * someone else registered with it. {@link AuthService#resendVerificationEmail}
+ * re-sends that token, at most once a minute.
  */
 class AuthServiceTest {
 
     UserRepository users;
+    MailService mail;
     AuthService auth;
 
     @BeforeEach
     void setUp() {
         users = mock(UserRepository.class);
+        mail = mock(MailService.class);
         auth = new AuthService(users, mock(PasswordEncoder.class), mock(JwtService.class),
-                mock(AuditLogService.class), mock(MailService.class));
+                mock(AuditLogService.class), mail);
         when(users.findByEmailVerificationToken(any())).thenReturn(Optional.empty());
     }
 
@@ -51,8 +56,17 @@ class AuthServiceTest {
         u.setActive(true);
         u.setEmailVerified(false);
         u.setEmailVerificationToken(token);
-        when(users.findByEmailVerificationToken(token)).thenReturn(Optional.of(u));
+        u.setEmailVerificationSentAt(Instant.now().minus(Duration.ofMinutes(10)));
+        if (token != null) {
+            when(users.findByEmailVerificationToken(token)).thenReturn(Optional.of(u));
+        }
+        when(users.findById(u.getId())).thenReturn(Optional.of(u));
         return u;
+    }
+
+    private static void assertRefused(Runnable call, HttpStatus status) {
+        assertThatThrownBy(call::run).isInstanceOfSatisfying(ResponseStatusException.class,
+                e -> assertThat(e.getStatusCode()).isEqualTo(status));
     }
 
     @Test
@@ -83,10 +97,65 @@ class AuthServiceTest {
 
     @Test
     void verifyEmail_givenUnknownToken_rejectsWith400() {
-        assertThatThrownBy(() -> auth.verifyEmail(UUID.randomUUID(), "tok-unknown", null))
-                .isInstanceOfSatisfying(ResponseStatusException.class,
-                        e -> assertThat(e.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST));
+        assertRefused(() -> auth.verifyEmail(UUID.randomUUID(), "tok-unknown", null),
+                HttpStatus.BAD_REQUEST);
 
         verify(users, never()).save(any());
+    }
+
+    @Test
+    void resendVerificationEmail_givenUnverifiedUserPastCooldown_sendsEmailWithSameToken() {
+        User u = unverifiedUserWithToken("tok-keep");
+        Instant before = Instant.now();
+
+        auth.resendVerificationEmail(u.getId(), "203.0.113.7");
+
+        verify(mail).sendVerificationEmail(u);
+        assertThat(u.getEmailVerificationToken()).isEqualTo("tok-keep");
+        assertThat(u.getEmailVerificationSentAt()).isAfterOrEqualTo(before);
+        verify(users).save(u);
+    }
+
+    @Test
+    void resendVerificationEmail_givenNoToken_issuesOneAndSends() {
+        User u = unverifiedUserWithToken(null);
+
+        auth.resendVerificationEmail(u.getId(), null);
+
+        assertThat(u.getEmailVerificationToken()).isNotBlank();
+        verify(mail).sendVerificationEmail(u);
+    }
+
+    @Test
+    void resendVerificationEmail_givenEmailSentWithinCooldown_rejectsWith429AndSendsNothing() {
+        User u = unverifiedUserWithToken("tok-recent");
+        Instant recent = Instant.now().minusSeconds(10);
+        u.setEmailVerificationSentAt(recent);
+
+        assertRefused(() -> auth.resendVerificationEmail(u.getId(), null), HttpStatus.TOO_MANY_REQUESTS);
+
+        verify(mail, never()).sendVerificationEmail(any());
+        assertThat(u.getEmailVerificationSentAt()).isEqualTo(recent);
+    }
+
+    @Test
+    void resendVerificationEmail_givenVerifiedUser_rejectsWith409AndSendsNothing() {
+        User u = unverifiedUserWithToken(null);
+        u.setEmailVerified(true);
+
+        assertRefused(() -> auth.resendVerificationEmail(u.getId(), null), HttpStatus.CONFLICT);
+
+        verify(mail, never()).sendVerificationEmail(any());
+    }
+
+    @Test
+    void resendVerificationEmail_givenSyntheticOAuthAddress_rejectsWith409AndSendsNothing() {
+        User u = unverifiedUserWithToken(null);
+        u.setEmail("x-42" + OAuthLoginService.SYNTHETIC_EMAIL_SUFFIX);
+        u.setPasswordHash(null);
+
+        assertRefused(() -> auth.resendVerificationEmail(u.getId(), null), HttpStatus.CONFLICT);
+
+        verify(mail, never()).sendVerificationEmail(any());
     }
 }

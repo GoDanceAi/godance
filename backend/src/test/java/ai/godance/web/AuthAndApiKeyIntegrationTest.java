@@ -2,6 +2,8 @@ package ai.godance.web;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -227,6 +229,43 @@ class AuthAndApiKeyIntegrationTest {
         var squatted = users.findByEmail(squattedEmail).orElseThrow();
         assertThat(squatted.isEmailVerified()).isFalse();
         assertThat(squatted.getEmailVerificationToken()).isEqualTo(token);
+    }
+
+    @Test
+    void resendVerification_givenNoSession_returns401() {
+        http.post().uri("/v1/auth/verify/resend")
+                .exchange()
+                .expectStatus().isUnauthorized();
+    }
+
+    @Test
+    void resendVerification_givenSignupEmailJustSent_returns429() {
+        String bearer = "Bearer " + signup(uniqueEmail("resend-soon")).accessToken();
+
+        http.post().uri("/v1/auth/verify/resend")
+                .header("Authorization", bearer)
+                .exchange()
+                .expectStatus().isEqualTo(HttpStatus.TOO_MANY_REQUESTS);
+    }
+
+    @Test
+    void resendVerification_givenCooldownPassed_returns204AndKeepsToken() {
+        String email = uniqueEmail("resend-ok");
+        String bearer = "Bearer " + signup(email).accessToken();
+        var user = users.findByEmail(email).orElseThrow();
+        String token = user.getEmailVerificationToken();
+        Instant longAgo = Instant.now().minus(Duration.ofMinutes(5));
+        user.setEmailVerificationSentAt(longAgo);
+        users.save(user);
+
+        http.post().uri("/v1/auth/verify/resend")
+                .header("Authorization", bearer)
+                .exchange()
+                .expectStatus().isNoContent();
+
+        var refreshed = users.findByEmail(email).orElseThrow();
+        assertThat(refreshed.getEmailVerificationToken()).isEqualTo(token);
+        assertThat(refreshed.getEmailVerificationSentAt()).isAfter(longAgo);
     }
 
     @Test

@@ -58,6 +58,15 @@ public class AuthController {
                 .then(Mono.just(ResponseEntity.noContent().build()));
     }
 
+    @PostMapping("/verify/resend")
+    public Mono<ResponseEntity<Void>> resendVerification(@AuthenticationPrincipal Jwt jwt,
+            ServerWebExchange exchange) {
+        UUID userId = JwtService.userIdFromSubject(jwt.getSubject());
+        return Mono.fromRunnable(() -> auth.resendVerificationEmail(userId, clientIp(exchange)))
+                .subscribeOn(Schedulers.boundedElastic())
+                .then(Mono.just(ResponseEntity.noContent().build()));
+    }
+
     @GetMapping("/me")
     public Mono<MeResponse> me(@AuthenticationPrincipal Jwt jwt) {
         UUID userId = JwtService.userIdFromSubject(jwt.getSubject());

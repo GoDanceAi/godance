@@ -67,6 +67,9 @@ public class OAuthLoginService {
 
     private static final Logger log = LoggerFactory.getLogger(OAuthLoginService.class);
 
+    /** Ends the placeholder address of a user whose provider gave no email (X.com). */
+    public static final String SYNTHETIC_EMAIL_SUFFIX = "@oauth.godance.local";
+
     private final UserRepository users;
     private final OAuthIdentityRepository identities;
     private final JwtService jwt;
@@ -162,7 +165,7 @@ public class OAuthLoginService {
         // password-login path.
         u.setEmail(email != null
                 ? email
-                : provider.name().toLowerCase() + "-" + subject + "@oauth.godance.local");
+                : provider.name().toLowerCase() + "-" + subject + SYNTHETIC_EMAIL_SUFFIX);
         u.setFullName(fullName != null && !fullName.isBlank()
                 ? fullName.trim() : defaultName(u.getEmail()));
         u.setPasswordHash(null);
