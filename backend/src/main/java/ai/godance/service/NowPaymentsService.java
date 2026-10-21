@@ -15,7 +15,6 @@ import org.springframework.web.client.RestClient;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
 
 import ai.godance.config.BillingProperties;
 import ai.godance.config.NowPaymentsProperties;
@@ -30,9 +29,10 @@ import ai.godance.domain.User;
  *
  * <p><b>IPN signature scheme.</b> NOWPayments signs the callback body with
  * HMAC-SHA512 of the JSON re-serialised with its keys sorted recursively
- * (not the raw bytes) — header {@code x-nowpayments-sig}. We reproduce
- * that canonical form, HMAC it, and {@linkplain MessageDigest#isEqual
- * constant-time compare}.
+ * (not the raw bytes), in JavaScript's {@code JSON.stringify} format —
+ * header {@code x-nowpayments-sig}. We reproduce that canonical form
+ * ({@link NowPaymentsCanonicalJson}), HMAC it, and
+ * {@linkplain MessageDigest#isEqual constant-time compare}.
  */
 @Service
 public class NowPaymentsService implements CryptoPaymentRail {
@@ -43,8 +43,6 @@ public class NowPaymentsService implements CryptoPaymentRail {
     private final NowPaymentsProperties props;
     private final BillingProperties billing;
     private final ObjectMapper json;
-    /** Dedicated mapper that sorts map keys — used only for IPN canonicalisation. */
-    private final ObjectMapper canonicalJson;
     private final RestClient client;
 
     public NowPaymentsService(NowPaymentsProperties props, BillingProperties billing,
@@ -52,8 +50,6 @@ public class NowPaymentsService implements CryptoPaymentRail {
         this.props = props;
         this.billing = billing;
         this.json = json;
-        this.canonicalJson = new ObjectMapper()
-                .configure(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true);
         this.client = RestClient.builder()
                 .baseUrl(props.apiBase())
                 .defaultHeader("x-api-key", props.apiKey())
@@ -118,14 +114,18 @@ public class NowPaymentsService implements CryptoPaymentRail {
         if (sigHeader == null || sigHeader.isBlank()) {
             throw new InvalidSignatureException("missing x-nowpayments-sig");
         }
-        String expected = hmacSha512Hex(props.ipnSecret(), canonicalise(payload));
+        String canonical = canonicalise(payload);
+        String expected = hmacSha512Hex(props.ipnSecret(), canonical);
         if (!MessageDigest.isEqual(
                 expected.getBytes(StandardCharsets.US_ASCII),
                 sigHeader.trim().getBytes(StandardCharsets.US_ASCII))) {
             throw new InvalidSignatureException("signature mismatch");
         }
         try {
-            JsonNode root = json.readTree(payload);
+            // Parse what was signed, not the raw body: bodies that differ only
+            // in number spelling (5077125051 vs 5077125051.0) share a signature
+            // and must yield the same payment_id — it's the idempotency key.
+            JsonNode root = json.readTree(canonical);
             String paymentId = root.path("payment_id").asText(null);
             String status = root.path("payment_status").asText(null);
             String orderId = root.path("order_id").asText(null);
@@ -141,14 +141,13 @@ public class NowPaymentsService implements CryptoPaymentRail {
     }
 
     /**
-     * Re-serialise {@code payload} with object keys sorted recursively —
-     * the canonical form NOWPayments HMACs. A malformed body can't be
-     * canonicalised, which is itself a signature failure.
+     * Re-serialise {@code payload} the way NOWPayments' reference code does
+     * before HMACing it. A malformed body can't be canonicalised, which is
+     * itself a signature failure.
      */
-    private String canonicalise(String payload) {
+    private static String canonicalise(String payload) {
         try {
-            Object tree = canonicalJson.readValue(payload, Object.class);
-            return canonicalJson.writeValueAsString(tree);
+            return NowPaymentsCanonicalJson.canonicalise(payload);
         } catch (Exception e) {
             throw new InvalidSignatureException("uncanonicalisable IPN body: " + e.getMessage());
         }

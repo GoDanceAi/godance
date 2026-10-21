@@ -27,13 +27,12 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
 import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
 
 import ai.godance.repository.CreditLedgerRepository;
 import ai.godance.repository.UserRepository;
+import ai.godance.service.NowPaymentsCanonicalJson;
 import ai.godance.web.dto.AuthDtos.AuthResponse;
 import ai.godance.web.dto.BillingDtos.TopUpResponse;
 
@@ -50,10 +49,6 @@ import ai.godance.web.dto.BillingDtos.TopUpResponse;
 class BillingNowPaymentsIntegrationTest {
 
     private static final String TEST_IPN_SECRET = "np_test_ipn_secret_value_for_integration";
-
-    /** Mirrors NowPaymentsService's canonicalisation — sorted map keys. */
-    private static final ObjectMapper CANON = new ObjectMapper()
-            .configure(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true);
 
     @Container
     @ServiceConnection
@@ -106,10 +101,15 @@ class BillingNowPaymentsIntegrationTest {
         return new SignedUser(userId, "Bearer " + resp.accessToken());
     }
 
-    /** HMAC-SHA512 hex over the sorted-JSON canonical form — the scheme NOWPayments uses. */
+    /**
+     * HMAC-SHA512 hex over the canonical form — the scheme NOWPayments uses.
+     * Reuses the production canonicaliser: these tests cover the webhook
+     * flow, while {@code NowPaymentsServiceTest} pins the canonical form
+     * against signatures from NOWPayments' own JS reference code.
+     */
     private static String nowPaymentsSignature(String payload) {
         try {
-            String canonical = CANON.writeValueAsString(CANON.readValue(payload, Object.class));
+            String canonical = NowPaymentsCanonicalJson.canonicalise(payload);
             Mac mac = Mac.getInstance("HmacSHA512");
             mac.init(new SecretKeySpec(TEST_IPN_SECRET.getBytes(), "HmacSHA512"));
             byte[] h = mac.doFinal(canonical.getBytes());
