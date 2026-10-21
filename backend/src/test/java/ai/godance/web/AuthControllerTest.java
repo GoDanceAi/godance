@@ -78,7 +78,7 @@ class AuthControllerTest {
 
     @Test
     void verify_givenApiKey_refusesWithoutCallingService() {
-        assertForbidden(() -> controller.verify("tok", apiKey(), exchange));
+        assertForbidden(() -> controller.verify(apiKey(), "tok", exchange));
 
         verifyNoInteractions(auth);
     }

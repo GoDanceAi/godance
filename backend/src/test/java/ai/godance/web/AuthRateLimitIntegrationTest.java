@@ -1,7 +1,6 @@
 package ai.godance.web;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -26,8 +25,6 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import ai.godance.repository.UserRepository;
-import ai.godance.security.AuthRateLimits;
-import ai.godance.security.RateLimitExceededException;
 import ai.godance.service.mail.LoggingEmailSender;
 import ai.godance.web.dto.AuthDtos.AuthResponse;
 import ch.qos.logback.classic.Logger;
@@ -67,7 +64,6 @@ class AuthRateLimitIntegrationTest {
 
     @Autowired WebTestClient http;
     @Autowired UserRepository users;
-    @Autowired AuthRateLimits rateLimits;
 
     private static String uniqueEmail(String tag) {
         return tag + "-" + UUID.randomUUID() + "@godance.test";
@@ -86,6 +82,12 @@ class AuthRateLimitIntegrationTest {
                 .exchange();
     }
 
+    private String signupBearer(String clientIp, String email) {
+        AuthResponse out = signup(clientIp, email).expectStatus().isCreated()
+                .expectBody(AuthResponse.class).returnResult().getResponseBody();
+        return "Bearer " + out.accessToken();
+    }
+
     private ResponseSpec login(String clientIp, String email, String password) {
         return http.post().uri("/v1/auth/login")
                 .header("X-Forwarded-For", clientIp)
@@ -94,16 +96,25 @@ class AuthRateLimitIntegrationTest {
                 .exchange();
     }
 
-    private String signupBearer(String clientIp, String email) {
-        AuthResponse out = signup(clientIp, email).expectStatus().isCreated()
-                .expectBody(AuthResponse.class).returnResult().getResponseBody();
-        return "Bearer " + out.accessToken();
-    }
-
     private ResponseSpec verify(String clientIp, String bearer, String token) {
         return http.get().uri("/v1/auth/verify?token={t}", token)
                 .header("X-Forwarded-For", clientIp)
                 .header("Authorization", bearer)
+                .exchange();
+    }
+
+    private ResponseSpec resend(String clientIp, String bearer) {
+        return http.post().uri("/v1/auth/verify/resend")
+                .header("X-Forwarded-For", clientIp)
+                .header("Authorization", bearer)
+                .exchange();
+    }
+
+    private ResponseSpec forgot(String clientIp, String email) {
+        return http.post().uri("/v1/auth/password/forgot")
+                .header("X-Forwarded-For", clientIp)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("email", email))
                 .exchange();
     }
 
@@ -115,11 +126,36 @@ class AuthRateLimitIntegrationTest {
                 .exchange();
     }
 
-    /** Push the last verification email past AuthService's one-minute cooldown. */
+    /** Push the last verification email past AuthService's one-minute resend cooldown. */
     private void backdateVerificationEmail(String email) {
         var user = users.findByEmail(email).orElseThrow();
         user.setEmailVerificationSentAt(Instant.now().minus(Duration.ofMinutes(5)));
         users.save(user);
+    }
+
+    /** Push the last reset email past AuthService's one-minute resend cooldown. */
+    private void backdateResetEmail(String email) {
+        var user = users.findByEmail(email).orElseThrow();
+        user.setPasswordResetSentAt(Instant.now().minus(Duration.ofMinutes(5)));
+        users.save(user);
+    }
+
+    /** Reset emails the [email-stub] sender logs for {@code email} while {@code requests} run. */
+    private static long resetEmailsSent(String email, Runnable requests) {
+        Logger stubLog = (Logger) LoggerFactory.getLogger(LoggingEmailSender.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        stubLog.addAppender(appender);
+        try {
+            requests.run();
+        } finally {
+            stubLog.detachAppender(appender);
+        }
+        return appender.list.stream()
+                .map(ILoggingEvent::getFormattedMessage)
+                // The INFO stub line only; the DEBUG line repeats it inside the full body.
+                .filter(m -> m.startsWith("[email-stub] Password reset URL for " + email + ":"))
+                .count();
     }
 
     /** Verification emails the [email-stub] sender logs for {@code email} while {@code requests} run. */
@@ -144,7 +180,7 @@ class AuthRateLimitIntegrationTest {
         response.expectStatus().isEqualTo(HttpStatus.TOO_MANY_REQUESTS)
                 .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON)
                 .expectHeader().value(HttpHeaders.RETRY_AFTER,
-                        v -> assertThat(Long.parseLong(v)).isBetween(1L, 3600L))
+                        v -> assertThat(Long.parseLong(v)).isBetween(1L, 86_400L))
                 .expectBody()
                 .jsonPath("$.status").isEqualTo(429)
                 .jsonPath("$.detail").value(String.class,
@@ -219,42 +255,56 @@ class AuthRateLimitIntegrationTest {
         expectTooManyRequests(verify(ip, bearer, "no-such-token"));
     }
 
-    // ---------- forgot password / resend verification -----------------
-    // Their endpoints are not on main yet, so these drive AuthRateLimits
-    // directly: real Redis counters and the bound godance.rate-limit config.
-
-    @Test
-    void forgotPassword_givenTooManyForOneEmail_expectsSendRefusedWithoutError() {
-        String email = uniqueEmail("rl-forgot");
-        assertThat(rateLimits.forgotPassword(randomClientIp(), email).block()).isTrue();
-        assertThat(rateLimits.forgotPassword(randomClientIp(), email.toUpperCase(Locale.ROOT)).block()).isTrue();
-
-        assertThat(rateLimits.forgotPassword(randomClientIp(), email).block()).isFalse();
-        // Per email: another address is unaffected.
-        assertThat(rateLimits.forgotPassword(randomClientIp(), uniqueEmail("rl-forgot-other")).block()).isTrue();
-    }
-
-    @Test
-    void forgotPassword_givenTooManyFromOneIp_expectsSendRefusedForAnyEmail() {
-        String ip = randomClientIp();
-        for (int i = 0; i < 4; i++) {
-            assertThat(rateLimits.forgotPassword(ip, uniqueEmail("rl-forgot-spray")).block()).isTrue();
-        }
-
-        assertThat(rateLimits.forgotPassword(ip, uniqueEmail("rl-forgot-fresh")).block()).isFalse();
-    }
+    // ---------- /v1/auth/verify/resend --------------------------------
 
     @Test
     void resendVerification_givenTooManyForOneAccount_expects429() {
-        UUID account = UUID.randomUUID();
-        rateLimits.resendVerification(randomClientIp(), account).block();
-        rateLimits.resendVerification(randomClientIp(), account).block();
+        String email = uniqueEmail("rl-resend");
+        String bearer = signupBearer(randomClientIp(), email);
+        for (int i = 0; i < 2; i++) {
+            backdateVerificationEmail(email);
+            resend(randomClientIp(), bearer).expectStatus().isNoContent();
+        }
 
-        assertThatThrownBy(() -> rateLimits.resendVerification(randomClientIp(), account).block())
-                .isInstanceOfSatisfying(RateLimitExceededException.class,
-                        e -> assertThat(e.getRetryAfterSeconds()).isBetween(1L, 86_400L));
-        // Per account: another account is unaffected.
-        rateLimits.resendVerification(randomClientIp(), UUID.randomUUID()).block();
+        // Past AuthService's cooldown, but over the per-account limit: the
+        // limiter's 429 (with Retry-After), not the cooldown's.
+        backdateVerificationEmail(email);
+        expectTooManyRequests(resend(randomClientIp(), bearer));
+    }
+
+    // ---------- /v1/auth/password/forgot ------------------------------
+
+    @Test
+    void forgotPassword_givenTooManyForOneEmail_expects202ButNoMoreEmails() {
+        String email = uniqueEmail("rl-forgot-email");
+        signup(randomClientIp(), email).expectStatus().isCreated();
+
+        long sent = resetEmailsSent(email, () -> {
+            forgot(randomClientIp(), email).expectStatus().isAccepted();
+            backdateResetEmail(email);
+            forgot(randomClientIp(), email.toUpperCase(Locale.ROOT)).expectStatus().isAccepted();
+            backdateResetEmail(email);
+            // Past AuthService's cooldown, but over the per-email limit.
+            forgot(randomClientIp(), email).expectStatus().isAccepted().expectBody().isEmpty();
+        });
+
+        assertThat(sent).isEqualTo(2);
+    }
+
+    @Test
+    void forgotPassword_givenTooManyFromOneIp_expects202ButNoEmail() {
+        String ip = randomClientIp();
+        String email = uniqueEmail("rl-forgot-ip");
+        signup(randomClientIp(), email).expectStatus().isCreated();
+        for (int i = 0; i < 4; i++) {
+            forgot(ip, uniqueEmail("rl-forgot-spray")).expectStatus().isAccepted();
+        }
+
+        assertThat(resetEmailsSent(email, () -> forgot(ip, email).expectStatus().isAccepted())).isZero();
+
+        // Other clients are unaffected, and the refused request did not count against the email.
+        assertThat(resetEmailsSent(email, () -> forgot(randomClientIp(), email).expectStatus().isAccepted()))
+                .isEqualTo(1);
     }
 
     // ---------- /v1/auth/email/release-link ---------------------------

@@ -3,11 +3,11 @@ package ai.godance.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.time.Duration;
@@ -17,47 +17,67 @@ import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.server.ResponseStatusException;
 
 import ai.godance.domain.AuditOutcome;
 import ai.godance.domain.User;
 import ai.godance.domain.UserRole;
+import ai.godance.repository.ApiKeyRepository;
 import ai.godance.repository.UserRepository;
 import ai.godance.security.JwtService;
+import ai.godance.security.JwtService.IssuedToken;
+import ai.godance.security.WebhookSigner;
 import ai.godance.service.mail.MailService;
+import ai.godance.web.dto.AuthDtos.AuthResponse;
+import ai.godance.web.dto.AuthDtos.ForgotPasswordRequest;
+import ai.godance.web.dto.AuthDtos.ResetPasswordRequest;
 
 /**
- * Email rules of {@link AuthService} against a mocked repository.
- * {@code AuthAndApiKeyIntegrationTest} covers the same endpoints over HTTP
- * against Postgres. {@link AuthService#verifyEmail} binds the inbox token
- * to the account's own session, so the owner of an address cannot verify
- * an account someone else registered with it.
- * {@link AuthService#resendVerificationEmail} re-sends that token, at most
- * once a minute. {@link AuthService#requestEmailChange} needs the caller to
- * prove again who they are, and keeps the new address pending until it is
- * verified.
+ * {@link AuthService#verifyEmail} binds the inbox token to the account's
+ * own session, so the owner of an address cannot verify an account that
+ * someone else registered with it. {@link AuthService#resendVerificationEmail}
+ * re-sends that token, at most once a minute. A password reset
+ * ({@link AuthService#resetPassword}) hands such an account to the
+ * address's owner and locks out whoever set the old password; releasing
+ * ({@link AuthService#releaseEmail}) instead frees the address and leaves
+ * the account to whoever made it. {@link AuthService#requestEmailChange}
+ * needs the caller to prove again who they are, and keeps the new address
+ * pending until it is verified.
  */
 class AuthServiceTest {
 
-    private static final String HASH = "$2a$12$placeholderplaceholderplaceholderplaceholderplaceh";
+    private static final String SQUATTER_PASSWORD = "squatter-chosen-password";
+    private static final String OWNER_PASSWORD = "owner-chosen-password";
     private static final String PASSWORD = "correct-horse-battery-staple";
 
     UserRepository users;
+    ApiKeyRepository apiKeys;
+    JwtService jwt;
+    WebhookSigner webhooks;
     MailService mail;
     AuditLogService audit;
+    // Real BCrypt (minimum cost) so stored hashes are checked for what they hash.
+    final PasswordEncoder passwords = new BCryptPasswordEncoder(4);
     AuthService auth;
 
     @BeforeEach
     void setUp() {
         users = mock(UserRepository.class);
+        apiKeys = mock(ApiKeyRepository.class);
+        jwt = mock(JwtService.class);
+        webhooks = mock(WebhookSigner.class);
         mail = mock(MailService.class);
         audit = mock(AuditLogService.class);
-        PasswordEncoder passwords = mock(PasswordEncoder.class);
-        when(passwords.matches(PASSWORD, HASH)).thenReturn(true);
-        auth = new AuthService(users, passwords, mock(JwtService.class), audit, mail);
+        auth = new AuthService(users, apiKeys, passwords, jwt, webhooks, audit, mail);
         when(users.findByEmailVerificationToken(any())).thenReturn(Optional.empty());
+        when(users.findByEmail(any())).thenReturn(Optional.empty());
+        when(users.findByPasswordResetTokenHash(any())).thenReturn(Optional.empty());
+        when(jwt.issueFor(any())).thenAnswer(inv -> new IssuedToken(
+                "jwt-for-" + inv.<User>getArgument(0).getId(), Instant.now().plusSeconds(3600)));
     }
 
     private User unverifiedUserWithToken(String token) {
@@ -65,7 +85,7 @@ class AuthServiceTest {
         u.setId(UUID.randomUUID());
         u.setEmail("holder@godance.test");
         u.setFullName("Holder");
-        u.setPasswordHash(HASH);
+        u.setPasswordHash("$2a$12$placeholderplaceholderplaceholderplaceholderplaceh");
         u.setRole(UserRole.USER);
         u.setActive(true);
         u.setEmailVerified(false);
@@ -83,26 +103,11 @@ class AuthServiceTest {
                 e -> assertThat(e.getStatusCode()).isEqualTo(status));
     }
 
-    /** As left by password signup: a password, a pending verification token. */
-    private User signedUpUser(String email, String token) {
-        User u = new User();
-        u.setId(UUID.randomUUID());
-        u.setEmail(email);
-        u.setFullName("Signed Up");
-        u.setPasswordHash(HASH);
-        u.setRole(UserRole.USER);
-        u.setActive(true);
-        u.setEmailVerified(false);
-        u.setEmailVerificationToken(token);
-        when(users.findByEmailVerificationToken(token)).thenReturn(Optional.of(u));
-        return u;
-    }
-
     @Test
-    void verifyEmail_givenTokenOfCallersAccount_marksEmailVerifiedAndClearsToken() {
-        User u = signedUpUser("owner@godance.test", "tok-owner");
+    void verifyEmail_givenTokenOfSignedInUser_marksVerifiedAndClearsToken() {
+        User u = unverifiedUserWithToken("tok-own");
 
-        auth.verifyEmail("tok-owner", u.getId(), "203.0.113.7");
+        auth.verifyEmail(u.getId(), "tok-own", "203.0.113.7");
 
         assertThat(u.isEmailVerified()).isTrue();
         assertThat(u.getEmailVerificationToken()).isNull();
@@ -110,33 +115,26 @@ class AuthServiceTest {
     }
 
     @Test
-    void verifyEmail_givenTokenOfAnotherAccount_refusesWithoutVerifying() {
-        // Pre-hijack: someone registered the owner's address with their own
-        // password; the owner, signed in to a different account, opens the
-        // link from the unsolicited verification email.
-        User squatted = signedUpUser("owner@godance.test", "tok-squatted");
-        UUID otherAccount = UUID.randomUUID();
+    void verifyEmail_givenTokenOfAnotherUser_refusesAndLeavesAccountUnverified() {
+        User u = unverifiedUserWithToken("tok-squatted");
 
-        assertThatThrownBy(() -> auth.verifyEmail("tok-squatted", otherAccount, "203.0.113.7"))
+        assertThatThrownBy(() -> auth.verifyEmail(UUID.randomUUID(), "tok-squatted", null))
                 .isInstanceOfSatisfying(ResponseStatusException.class, e -> {
                     assertThat(e.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
                     assertThat(e.getReason()).contains("different account");
                 });
 
-        assertThat(squatted.isEmailVerified()).isFalse();
-        assertThat(squatted.getEmailVerificationToken()).isEqualTo("tok-squatted");
+        assertThat(u.isEmailVerified()).isFalse();
+        assertThat(u.getEmailVerificationToken()).isEqualTo("tok-squatted");
         verify(users, never()).save(any());
-        verifyNoInteractions(audit);
     }
 
     @Test
     void verifyEmail_givenUnknownToken_rejectsWith400() {
-        assertThatThrownBy(() -> auth.verifyEmail("no-such-token", UUID.randomUUID(), null))
-                .isInstanceOfSatisfying(ResponseStatusException.class,
-                        e -> assertThat(e.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST));
+        assertRefused(() -> auth.verifyEmail(UUID.randomUUID(), "tok-unknown", null),
+                HttpStatus.BAD_REQUEST);
 
         verify(users, never()).save(any());
-        verifyNoInteractions(audit);
     }
 
     @Test
@@ -186,11 +184,169 @@ class AuthServiceTest {
 
     @Test
     void resendVerificationEmail_givenSyntheticOAuthAddress_rejectsWith409AndSendsNothing() {
-        User u = placeholderUser();
+        User u = unverifiedUserWithToken(null);
+        u.setEmail("x-42" + User.SYNTHETIC_EMAIL_SUFFIX);
+        u.setPasswordHash(null);
 
         assertRefused(() -> auth.resendVerificationEmail(u.getId(), null), HttpStatus.CONFLICT);
 
         verify(mail, never()).sendVerificationEmail(any(), any());
+    }
+
+    @Test
+    void verifyEmail_givenOwnTokenOlderThanTtl_rejectsWith400AndLeavesUnverified() {
+        User u = unverifiedUserWithToken("tok-old");
+        u.setEmailVerificationSentAt(Instant.now().minus(AuthService.VERIFICATION_TTL).minusSeconds(1));
+
+        assertThatThrownBy(() -> auth.verifyEmail(u.getId(), "tok-old", null))
+                .isInstanceOfSatisfying(ResponseStatusException.class, e -> {
+                    assertThat(e.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+                    assertThat(e.getReason()).contains("expired");
+                });
+
+        assertThat(u.isEmailVerified()).isFalse();
+        verify(users, never()).save(any());
+    }
+
+    // ---------- password reset ----------------------------------------
+
+    /** Someone signed up with the owner's address and a password of their own. */
+    private User squattedAccount(String email) {
+        User u = unverifiedUserWithToken("tok-squatter");
+        u.setEmail(email);
+        u.setPasswordHash(passwords.encode(SQUATTER_PASSWORD));
+        when(users.findByEmail(email)).thenReturn(Optional.of(u));
+        // Resolve a reset token the way the database would: by its stored hash.
+        when(users.findByPasswordResetTokenHash(any())).thenAnswer(inv ->
+                inv.getArgument(0).equals(u.getPasswordResetTokenHash())
+                        ? Optional.of(u) : Optional.empty());
+        return u;
+    }
+
+    /** Request a reset for {@code email} and return the token the email carried. */
+    private String requestResetToken(String email) {
+        auth.requestPasswordReset(new ForgotPasswordRequest(email), "203.0.113.7");
+        ArgumentCaptor<String> token = ArgumentCaptor.forClass(String.class);
+        verify(mail).sendPasswordResetEmail(any(User.class), token.capture());
+        return token.getValue();
+    }
+
+    @Test
+    void requestPasswordReset_givenRegisteredEmail_storesOnlyTokenHashAndEmailsToken() {
+        User u = squattedAccount("owner@godance.test");
+
+        String token = requestResetToken(" Owner@Godance.test ");
+
+        assertThat(token).isNotBlank();
+        assertThat(u.getPasswordResetTokenHash())
+                .isEqualTo(AuthService.sha256Hex(token))
+                .isNotEqualTo(token);
+        assertThat(u.getPasswordResetSentAt()).isNotNull();
+        verify(mail).sendPasswordResetEmail(eq(u), anyString());
+    }
+
+    @Test
+    void requestPasswordReset_givenUnknownEmail_sendsNothing() {
+        auth.requestPasswordReset(new ForgotPasswordRequest("nobody@godance.test"), null);
+
+        verify(mail, never()).sendPasswordResetEmail(any(), any());
+        verify(users, never()).save(any());
+    }
+
+    @Test
+    void requestPasswordReset_givenRequestWithinCooldown_sendsNothing() {
+        User u = squattedAccount("owner@godance.test");
+        u.setPasswordResetTokenHash("hash-of-earlier-token");
+        u.setPasswordResetSentAt(Instant.now().minusSeconds(10));
+
+        auth.requestPasswordReset(new ForgotPasswordRequest("owner@godance.test"), null);
+
+        assertThat(u.getPasswordResetTokenHash()).isEqualTo("hash-of-earlier-token");
+        verify(mail, never()).sendPasswordResetEmail(any(), any());
+    }
+
+    @Test
+    void requestPasswordReset_givenInactiveUser_sendsNothing() {
+        User u = squattedAccount("owner@godance.test");
+        u.setActive(false);
+
+        auth.requestPasswordReset(new ForgotPasswordRequest("owner@godance.test"), null);
+
+        assertThat(u.getPasswordResetTokenHash()).isNull();
+        verify(mail, never()).sendPasswordResetEmail(any(), any());
+    }
+
+    @Test
+    void resetPassword_givenValidToken_replacesPasswordAndEvictsPreviousHolder() {
+        User squatted = squattedAccount("owner@godance.test");
+        String token = requestResetToken("owner@godance.test");
+
+        AuthResponse response = auth.resetPassword(
+                new ResetPasswordRequest(token, OWNER_PASSWORD), "203.0.113.7");
+
+        assertThat(passwords.matches(OWNER_PASSWORD, squatted.getPasswordHash())).isTrue();
+        assertThat(passwords.matches(SQUATTER_PASSWORD, squatted.getPasswordHash())).isFalse();
+        // The link proved the inbox, and the password is now that person's.
+        assertThat(squatted.isEmailVerified()).isTrue();
+        assertThat(squatted.getEmailVerificationToken()).isNull();
+        assertThat(squatted.getPasswordResetTokenHash()).isNull();
+        // Every JWT issued before the reset now fails the session-version check.
+        assertThat(squatted.getSessionVersion()).isEqualTo(1);
+        verify(apiKeys).deleteByUserId(squatted.getId());
+        verify(webhooks).rotateSecretWithoutGrace(squatted.getId());
+        assertThat(response.accessToken()).isEqualTo("jwt-for-" + squatted.getId());
+    }
+
+    @Test
+    void resetPassword_givenTokenAlreadyUsed_rejectsWith400() {
+        User u = squattedAccount("owner@godance.test");
+        String token = requestResetToken("owner@godance.test");
+        auth.resetPassword(new ResetPasswordRequest(token, OWNER_PASSWORD), null);
+
+        assertRefused(() -> auth.resetPassword(
+                new ResetPasswordRequest(token, "someone-elses-password"), null), HttpStatus.BAD_REQUEST);
+
+        assertThat(passwords.matches(OWNER_PASSWORD, u.getPasswordHash())).isTrue();
+        assertThat(u.getSessionVersion()).isEqualTo(1);
+    }
+
+    @Test
+    void resetPassword_givenExpiredToken_rejectsWith400AndChangesNothing() {
+        User u = squattedAccount("owner@godance.test");
+        String token = requestResetToken("owner@godance.test");
+        u.setPasswordResetSentAt(Instant.now().minus(AuthService.PASSWORD_RESET_TTL).minusSeconds(1));
+
+        assertRefused(() -> auth.resetPassword(
+                new ResetPasswordRequest(token, OWNER_PASSWORD), null), HttpStatus.BAD_REQUEST);
+
+        assertThat(passwords.matches(SQUATTER_PASSWORD, u.getPasswordHash())).isTrue();
+        assertThat(u.getSessionVersion()).isZero();
+        verify(apiKeys, never()).deleteByUserId(any());
+        verify(webhooks, never()).rotateSecretWithoutGrace(any());
+        verify(jwt, never()).issueFor(any());
+    }
+
+    @Test
+    void resetPassword_givenInactiveUser_rejectsWith403AndChangesNothing() {
+        User u = squattedAccount("owner@godance.test");
+        String token = requestResetToken("owner@godance.test");
+        u.setActive(false);
+
+        assertRefused(() -> auth.resetPassword(
+                new ResetPasswordRequest(token, OWNER_PASSWORD), null), HttpStatus.FORBIDDEN);
+
+        assertThat(passwords.matches(SQUATTER_PASSWORD, u.getPasswordHash())).isTrue();
+        verify(apiKeys, never()).deleteByUserId(any());
+        verify(jwt, never()).issueFor(any());
+    }
+
+    @Test
+    void resetPassword_givenUnknownToken_rejectsWith400() {
+        assertRefused(() -> auth.resetPassword(
+                new ResetPasswordRequest("no-such-token", OWNER_PASSWORD), null), HttpStatus.BAD_REQUEST);
+
+        verify(users, never()).save(any());
+        verify(jwt, never()).issueFor(any());
     }
 
     @Test
@@ -215,9 +371,10 @@ class AuthServiceTest {
         return u;
     }
 
-    /** A password account whose current address is verified. */
+    /** A password account (password {@link #PASSWORD}) whose current address is verified. */
     private User verifiedPasswordUser() {
         User u = unverifiedUserWithToken(null);
+        u.setPasswordHash(passwords.encode(PASSWORD));
         u.setEmailVerified(true);
         return u;
     }
@@ -360,6 +517,7 @@ class AuthServiceTest {
     private User withPendingAddress(User u, String pending) {
         u.setPendingEmail(pending);
         u.setEmailVerificationToken("tok-pending");
+        u.setEmailVerificationSentAt(Instant.now());   // as the change request just did
         when(users.findByEmailVerificationToken("tok-pending")).thenReturn(Optional.of(u));
         return u;
     }
@@ -368,7 +526,7 @@ class AuthServiceTest {
     void verifyEmail_givenAddressBeingAdded_replacesPlaceholderAndMarksVerified() {
         User u = withPendingAddress(placeholderUser(), "added@godance.test");
 
-        auth.verifyEmail("tok-pending", u.getId(), null);
+        auth.verifyEmail(u.getId(), "tok-pending", null);
 
         assertThat(u.getEmail()).isEqualTo("added@godance.test");
         assertThat(u.getPendingEmail()).isNull();
@@ -381,7 +539,7 @@ class AuthServiceTest {
     void verifyEmail_givenChangeFromVerifiedAddress_switchesAndNotifiesTheOldAddress() {
         User u = withPendingAddress(verifiedPasswordUser(), "new@godance.test");
 
-        auth.verifyEmail("tok-pending", u.getId(), null);
+        auth.verifyEmail(u.getId(), "tok-pending", null);
 
         assertThat(u.getEmail()).isEqualTo("new@godance.test");
         assertThat(u.isEmailVerified()).isTrue();
@@ -392,7 +550,7 @@ class AuthServiceTest {
     void verifyEmail_givenChangeFromUnverifiedAddress_switchesWithoutMailingTheOldAddress() {
         User u = withPendingAddress(unverifiedUserWithToken(null), "fixed-typo@godance.test");
 
-        auth.verifyEmail("tok-pending", u.getId(), null);
+        auth.verifyEmail(u.getId(), "tok-pending", null);
 
         assertThat(u.getEmail()).isEqualTo("fixed-typo@godance.test");
         assertThat(u.isEmailVerified()).isTrue();
@@ -404,7 +562,7 @@ class AuthServiceTest {
         User u = withPendingAddress(placeholderUser(), "added@godance.test");
         when(users.existsByEmail("added@godance.test")).thenReturn(true);
 
-        assertRefused(() -> auth.verifyEmail("tok-pending", u.getId(), null), HttpStatus.CONFLICT);
+        assertRefused(() -> auth.verifyEmail(u.getId(), "tok-pending", null), HttpStatus.CONFLICT);
 
         assertThat(u.getEmail()).isEqualTo("x-42" + User.SYNTHETIC_EMAIL_SUFFIX);
         assertThat(u.isEmailVerified()).isFalse();
@@ -417,14 +575,15 @@ class AuthServiceTest {
     void releaseEmail_givenTokenOfUnverifiedSignup_movesAccountToPlaceholderAndFreesAddress() {
         // Someone registered the owner's address; the owner opens the link
         // from the verification email and releases it.
-        User squatter = signedUpUser("owner@godance.test", "tok-squat");
+        User squatter = unverifiedUserWithToken("tok-squat");
+        String squatterHash = squatter.getPasswordHash();
 
         auth.releaseEmail("tok-squat", "203.0.113.7");
 
         assertThat(squatter.getEmail()).isEqualTo("released-" + squatter.getId() + User.SYNTHETIC_EMAIL_SUFFIX);
         assertThat(squatter.hasSyntheticEmail()).isTrue();
         assertThat(squatter.getEmailVerificationToken()).isNull();
-        assertThat(squatter.getPasswordHash()).isEqualTo(HASH);   // the account itself stays
+        assertThat(squatter.getPasswordHash()).isEqualTo(squatterHash);   // the account itself stays
         verify(users).save(squatter);
         verify(audit).record(eq(AuditLogService.EVT_AUTH_EMAIL_RELEASE), eq(AuditOutcome.SUCCESS),
                 eq(squatter.getId()), any(), any());
@@ -440,6 +599,18 @@ class AuthServiceTest {
         assertThat(u.getEmail()).isEqualTo("holder@godance.test");
         assertThat(u.isEmailVerified()).isTrue();
         assertThat(u.getEmailVerificationToken()).isNull();
+    }
+
+    @Test
+    void releaseEmail_givenTokenOlderThanTtl_rejectsWith400AndKeepsTheAddress() {
+        User squatter = unverifiedUserWithToken("tok-old");
+        squatter.setEmailVerificationSentAt(
+                Instant.now().minus(AuthService.VERIFICATION_TTL).minusSeconds(1));
+
+        assertRefused(() -> auth.releaseEmail("tok-old", null), HttpStatus.BAD_REQUEST);
+
+        assertThat(squatter.getEmail()).isEqualTo("holder@godance.test");
+        verify(users, never()).save(any());
     }
 
     @Test
@@ -463,6 +634,7 @@ class AuthServiceTest {
     @Test
     void sendReleaseLink_givenPendingChange_dropsItSoTheLinkStandsForThisAddress() {
         User u = withPendingAddress(unverifiedUserWithToken(null), "elsewhere@godance.test");
+        u.setEmailVerificationSentAt(Instant.now().minus(Duration.ofMinutes(10)));   // past the cooldown
         when(users.findByEmail("holder@godance.test")).thenReturn(Optional.of(u));
 
         auth.sendReleaseLink("holder@godance.test", null);
@@ -501,5 +673,17 @@ class AuthServiceTest {
         auth.sendReleaseLink("holder@godance.test", null);   // no 429: the caller learns nothing
 
         verify(mail, never()).sendVerificationEmail(any(), any());
+    }
+
+    @Test
+    void resetPassword_givenPendingAddressChange_dropsItWithTheEvictedHolder() {
+        User u = squattedAccount("owner@godance.test");
+        u.setPendingEmail("squatter-elsewhere@godance.test");
+        String token = requestResetToken("owner@godance.test");
+
+        auth.resetPassword(new ResetPasswordRequest(token, OWNER_PASSWORD), null);
+
+        assertThat(u.getPendingEmail()).isNull();
+        assertThat(u.getEmail()).isEqualTo("owner@godance.test");
     }
 }

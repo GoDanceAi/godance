@@ -55,6 +55,19 @@ class JwtServiceTest {
     }
 
     @Test
+    void issueFor_givenSessionVersion_expectsItInSessionVersionClaim() {
+        User u = new User();
+        u.setId(UUID.randomUUID());
+        u.setEmail("sv@godance.ai");
+        u.setRole(UserRole.USER);
+        u.setSessionVersion(3);
+
+        Jwt decoded = decoder.decode(jwt.issueFor(u).token());
+
+        assertThat(JwtService.sessionVersionOf(decoded)).isEqualTo(3L);
+    }
+
+    @Test
     void userIdFromSubject_givenUuidString_returnsUuid() {
         UUID id = UUID.randomUUID();
         assertThat(JwtService.userIdFromSubject(id.toString())).isEqualTo(id);

@@ -41,8 +41,16 @@ class MailServiceTest {
         sender = mock(EmailSender.class);
         admin = new AdminProperties();
         admin.setEmails(List.of("ops@godance.ai"));
-        mail = new MailService(sender, admin, new MailProperties(MailProperties.DUMMY_API_KEY,
-                "Godance <noreply@godance.ai>", "https://api.resend.com", "https://app.godance.test/"));
+        // Trailing slash on purpose: links must not come out as "//verify-email".
+        MailProperties props = new MailProperties(MailProperties.DUMMY_API_KEY,
+                "Godance <noreply@godance.ai>", "https://api.resend.com", "https://app.godance.test/");
+        mail = new MailService(sender, admin, props);
+    }
+
+    private String captureHtml() {
+        ArgumentCaptor<String> html = ArgumentCaptor.forClass(String.class);
+        verify(sender).send(anyList(), anyString(), anyString(), html.capture());
+        return html.getValue();
     }
 
     private static User user(String email) {
@@ -75,14 +83,27 @@ class MailServiceTest {
     }
 
     @Test
-    void sendVerificationEmail_givenUser_expectsHtmlLinkToAppVerifyPage() {
+    void sendVerificationEmail_givenUser_expectsSignedInStepAndDidntSignUpGuidance() {
         mail.sendVerificationEmail(user("a@godance.test"));
 
-        ArgumentCaptor<String> html = ArgumentCaptor.forClass(String.class);
-        verify(sender).send(anyList(), anyString(), anyString(), html.capture());
-        assertThat(html.getValue())
+        String text = captureText(List.of("a@godance.test"), "Verify");
+        assertThat(text)
+                .contains("signed in to this account")
+                .contains("works for 24 hours")
+                .contains("Didn't sign up?")
+                .contains("the link does\nnothing unless it is opened signed in to that account")
+                .contains("open the link and release the address from\nthat account")
+                .contains("forgot your password? Reset it at https://app.godance.test/forgot-password");
+    }
+
+    @Test
+    void sendVerificationEmail_givenUser_expectsClickableLinksInHtml() {
+        mail.sendVerificationEmail(user("a@godance.test"));
+
+        assertThat(captureHtml())
                 .contains("<a href=\"https://app.godance.test/verify-email?token=tok-123\">")
-                .contains("asked to sign in first");
+                .contains("<a href=\"https://app.godance.test/forgot-password\">")
+                .contains("release the address");
     }
 
     @Test
@@ -105,6 +126,20 @@ class MailServiceTest {
         assertThat(text.lines().findFirst().orElseThrow())
                 .isEqualTo("Email changed for old@godance.test: now new@godance.test");
         assertThat(text).contains("hello@godance.ai");
+    }
+
+    @Test
+    void sendPasswordResetEmail_givenToken_expectsStubFirstLineWithResetLink() {
+        mail.sendPasswordResetEmail(user("a@godance.test"), "reset-tok-456");
+
+        String text = captureText(List.of("a@godance.test"), "Reset your Godance password");
+        assertThat(text.lines().findFirst().orElseThrow())
+                .isEqualTo("Password reset URL for a@godance.test: "
+                        + "https://app.godance.test/reset-password?token=reset-tok-456");
+        assertThat(text)
+                .contains("within\nan hour")
+                .contains("revokes the account's API keys")
+                .contains("Didn't ask for this? Ignore this email");
     }
 
     @Test
@@ -194,6 +229,7 @@ class MailServiceTest {
 
         assertThatCode(() -> {
             mail.sendVerificationEmail(user("a@godance.test"));
+            mail.sendPasswordResetEmail(user("a@godance.test"), "tok");
             mail.sendSpendWarning("a@godance.test", "user x", "daily", 1, 2);
             mail.sendAutoRechargeFailed(user("a@godance.test"), "boom");
             mail.sendTopUpPaymentFailed(user("a@godance.test"), 1_00L);

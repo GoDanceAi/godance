@@ -75,6 +75,20 @@ public class User {
     @Column(name = "email_verification_sent_at")
     private Instant emailVerificationSentAt;
 
+    /** SHA-256 (hex) of the pending password-reset token; the plaintext is only ever emailed. */
+    @Column(name = "password_reset_token_hash")
+    private String passwordResetTokenHash;
+
+    @Column(name = "password_reset_sent_at")
+    private Instant passwordResetSentAt;
+
+    /**
+     * Copied into every JWT issued for this user. Bumping it ends every
+     * earlier session — see {@link ai.godance.security.SessionVersionJwtDecoder}.
+     */
+    @Column(name = "session_version", nullable = false)
+    private int sessionVersion = 0;
+
     /** Address being added to a placeholder account; becomes {@code email} once verified. */
     @Column(name = "pending_email")
     private String pendingEmail;
@@ -184,6 +198,15 @@ public class User {
 
     public Instant getEmailVerificationSentAt() { return emailVerificationSentAt; }
     public void setEmailVerificationSentAt(Instant emailVerificationSentAt) { this.emailVerificationSentAt = emailVerificationSentAt; }
+
+    public String getPasswordResetTokenHash() { return passwordResetTokenHash; }
+    public void setPasswordResetTokenHash(String passwordResetTokenHash) { this.passwordResetTokenHash = passwordResetTokenHash; }
+
+    public Instant getPasswordResetSentAt() { return passwordResetSentAt; }
+    public void setPasswordResetSentAt(Instant passwordResetSentAt) { this.passwordResetSentAt = passwordResetSentAt; }
+
+    public int getSessionVersion() { return sessionVersion; }
+    public void setSessionVersion(int sessionVersion) { this.sessionVersion = sessionVersion; }
 
     public String getPendingEmail() { return pendingEmail; }
     public void setPendingEmail(String pendingEmail) { this.pendingEmail = pendingEmail; }

@@ -58,9 +58,13 @@ import ai.godance.web.dto.AuthDtos.AuthResponse;
  * share it between the provider's user and whoever set the password.
  * Clearing the password on link would not evict that person: issued JWTs
  * stay valid until expiry, and API keys, the webhook signing secret and a
- * saved card survive. Refusing leaves the account untouched; once its
- * holder signs in with the password and verifies the email, the next
- * provider sign-in links.
+ * saved card survive. Refusing leaves the account untouched. Verifying
+ * the email takes the emailed link opened in the account's own session
+ * ({@link AuthService#verifyEmail}), so a verified password account has
+ * one person behind both and is safe to link. The address's owner, if
+ * they don't hold that account, resets its password instead, which
+ * evicts whoever set it ({@link AuthService#resetPassword}); either way
+ * the next provider sign-in links.
  */
 @Service
 public class OAuthLoginService {
@@ -126,7 +130,8 @@ public class OAuthLoginService {
                     throw new ResponseStatusException(HttpStatus.CONFLICT,
                             "An account with this email address already exists and its email "
                                     + "is not verified. Sign in with your password and verify "
-                                    + "your email, then sign in with " + displayName(provider) + ". "
+                                    + "your email (or reset the password if you don't know it), "
+                                    + "then sign in with " + displayName(provider) + ". "
                                     + "If you didn't create that account, you can release the "
                                     + "address from the sign-up page.");
                 }
