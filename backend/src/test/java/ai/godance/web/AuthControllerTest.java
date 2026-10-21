@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -23,11 +24,15 @@ import ai.godance.security.ApiKeyAuthFilter;
 import ai.godance.security.AuthRateLimits;
 import ai.godance.service.AuthService;
 import ai.godance.web.dto.AuthDtos.ChangeEmailRequest;
+import ai.godance.web.dto.AuthDtos.ReleaseLinkRequest;
+import reactor.core.publisher.Mono;
 
 /**
  * The email endpoints act only for a signed-in session: an API key
  * (which {@link ApiKeyAuthFilter} presents as a {@link Jwt} carrying
- * {@code api_key_id}) is refused before the service is called.
+ * {@code api_key_id}) is refused before the service is called. The
+ * anonymous release-link endpoint answers 202 whether or not its rate
+ * limit lets the email go out.
  */
 class AuthControllerTest {
 
@@ -92,5 +97,25 @@ class AuthControllerTest {
 
         verify(auth).requestEmailChange(eq(userId), eq("new@godance.test"), eq("pw"),
                 eq(signedInAt), any());
+    }
+
+    @Test
+    void sendReleaseLink_givenRateLimitReached_answers202WithoutSending() {
+        when(rateLimits.releaseLink(any(), eq("held@godance.test"))).thenReturn(Mono.just(false));
+
+        var response = controller.sendReleaseLink(new ReleaseLinkRequest("held@godance.test"), exchange).block();
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+        verifyNoInteractions(auth);
+    }
+
+    @Test
+    void sendReleaseLink_givenWithinLimits_sendsAndAnswers202() {
+        when(rateLimits.releaseLink(any(), eq("held@godance.test"))).thenReturn(Mono.just(true));
+
+        var response = controller.sendReleaseLink(new ReleaseLinkRequest("held@godance.test"), exchange).block();
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+        verify(auth).sendReleaseLink(eq("held@godance.test"), any());
     }
 }

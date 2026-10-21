@@ -86,11 +86,13 @@ godance:
     login-per-email:    { requests: 10, window: 15m }   # password guessing against one account
     signup-per-ip:      { requests: 10, window: 1h }    # each signup sends a verification email
     verify-per-ip:      { requests: 30, window: 15m }
-    # Each forgot-password / resend-verification request can send an email.
+    # Each forgot-password / resend-verification / release-link request can send an email.
     forgot-per-ip:      { requests: 10, window: 1h }
     forgot-per-email:   { requests: 5,  window: 24h }   # a handful of reset emails per address per day
     resend-per-ip:      { requests: 10, window: 1h }
     resend-per-account: { requests: 5,  window: 24h }   # a handful of verification emails per account per day
+    release-link-per-ip:    { requests: 10, window: 1h }
+    release-link-per-email: { requests: 5,  window: 24h }   # a handful of release links per address per day
   object-storage:
     endpoint:         ${OBJECT_STORAGE_ENDPOINT:http://localhost:9000}
     region:           ${OBJECT_STORAGE_REGION:us-east-1}   # MinIO accepts any placeholder

@@ -104,12 +104,18 @@ public class AuthController {
                 .then(Mono.just(ResponseEntity.noContent().build()));
     }
 
-    /** Re-send that email to an address held by an unverified account. Always 202. */
+    /**
+     * Re-send that email to an address held by an unverified account. Always
+     * 202; over a rate limit the email is just not sent.
+     */
     @PostMapping("/email/release-link")
     public Mono<ResponseEntity<Void>> sendReleaseLink(
             @Valid @RequestBody ReleaseLinkRequest req, ServerWebExchange exchange) {
-        return Mono.fromRunnable(() -> auth.sendReleaseLink(req.email(), clientIp(exchange)))
-                .subscribeOn(Schedulers.boundedElastic())
+        String ip = clientIp(exchange);
+        return rateLimits.releaseLink(ip, req.email())
+                .filter(Boolean::booleanValue)
+                .flatMap(allowed -> Mono.fromRunnable(() -> auth.sendReleaseLink(req.email(), ip))
+                        .subscribeOn(Schedulers.boundedElastic()))
                 .then(Mono.just(ResponseEntity.accepted().build()));
     }
 

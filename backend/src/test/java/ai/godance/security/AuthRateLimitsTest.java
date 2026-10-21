@@ -32,6 +32,8 @@ class AuthRateLimitsTest {
     private static final Limit FORGOT_PER_EMAIL = new Limit(5, Duration.ofDays(1));
     private static final Limit RESEND_PER_IP = new Limit(12, Duration.ofHours(1));
     private static final Limit RESEND_PER_ACCOUNT = new Limit(6, Duration.ofDays(1));
+    private static final Limit RELEASE_LINK_PER_IP = new Limit(13, Duration.ofHours(1));
+    private static final Limit RELEASE_LINK_PER_EMAIL = new Limit(7, Duration.ofDays(1));
     private static final String IP = "203.0.113.7";
     private static final UUID USER_ID = UUID.fromString("5b0c8a4e-2f6d-4c1a-9e3b-7d2f1a6c8e90");
 
@@ -43,7 +45,8 @@ class AuthRateLimitsTest {
         limiter = mock(RateLimiter.class);
         rateLimits = new AuthRateLimits(limiter, new RateLimitProperties(
                 true, LOGIN_PER_IP, LOGIN_PER_EMAIL, SIGNUP_PER_IP, VERIFY_PER_IP,
-                FORGOT_PER_IP, FORGOT_PER_EMAIL, RESEND_PER_IP, RESEND_PER_ACCOUNT));
+                FORGOT_PER_IP, FORGOT_PER_EMAIL, RESEND_PER_IP, RESEND_PER_ACCOUNT,
+                RELEASE_LINK_PER_IP, RELEASE_LINK_PER_EMAIL));
     }
 
     private static Mono<Void> over() {
@@ -175,5 +178,40 @@ class AuthRateLimitsTest {
 
         StepVerifier.create(rateLimits.resendVerification(IP, USER_ID))
                 .verifyError(RateLimitExceededException.class);
+    }
+
+    // ---------- release link: never a 429 ----------------------------
+
+    @Test
+    void releaseLink_givenWithinLimits_expectsTrueAndNormalizedEmailCounted() {
+        PublisherProbe<Void> ipCheck = PublisherProbe.empty();
+        PublisherProbe<Void> emailCheck = PublisherProbe.empty();
+        when(limiter.check("release-link-ip", IP, RELEASE_LINK_PER_IP)).thenReturn(ipCheck.mono());
+        when(limiter.check("release-link-email", "alice@example.com", RELEASE_LINK_PER_EMAIL))
+                .thenReturn(emailCheck.mono());
+
+        StepVerifier.create(rateLimits.releaseLink(IP, " Alice@Example.com")).expectNext(true).verifyComplete();
+
+        ipCheck.assertWasSubscribed();
+        emailCheck.assertWasSubscribed();
+    }
+
+    @Test
+    void releaseLink_givenIpOverLimit_expectsFalseAndEmailNotCounted() {
+        PublisherProbe<Void> emailCheck = PublisherProbe.empty();
+        when(limiter.check("release-link-ip", IP, RELEASE_LINK_PER_IP)).thenReturn(over());
+        when(limiter.check(eq("release-link-email"), any(), any())).thenReturn(emailCheck.mono());
+
+        StepVerifier.create(rateLimits.releaseLink(IP, "alice@example.com")).expectNext(false).verifyComplete();
+
+        emailCheck.assertWasNotSubscribed();
+    }
+
+    @Test
+    void releaseLink_givenEmailOverLimit_expectsFalse() {
+        when(limiter.check("release-link-ip", IP, RELEASE_LINK_PER_IP)).thenReturn(Mono.empty());
+        when(limiter.check("release-link-email", "alice@example.com", RELEASE_LINK_PER_EMAIL)).thenReturn(over());
+
+        StepVerifier.create(rateLimits.releaseLink(IP, "alice@example.com")).expectNext(false).verifyComplete();
     }
 }
