@@ -95,19 +95,26 @@ jobs:
       # deploy. Retry transient errors (5xx, timeouts, refused) for about a
       # minute so that window doesn't fail the run; a real outage still does.
       CURL_RETRY: --retry 6 --retry-delay 10 --retry-connrefused
+    # Each page is fetched into a variable and grepped from a here-string,
+    # never piped: `grep -q` exits on the first match, which breaks a pipe
+    # (curl error 23, echo SIGPIPE) and fails the step under pipefail. It
+    # also lets a curl error fail the step as itself, not as a missing string.
     steps:
       - name: SPA bundle contains USDT rail + save-card
         run: |
           HTML=$(curl -fsS $CURL_RETRY https://app.godance.ai)
-          BUNDLE=$(echo "$HTML" | grep -oE 'src="/assets/[^"]+\.js"' | head -1 | cut -d'"' -f2)
+          re='src="(/assets/[^"]+\.js)"'
+          [[ $HTML =~ $re ]] || { echo "no /assets/*.js bundle in the SPA index" >&2; exit 1; }
+          BUNDLE=${BASH_REMATCH[1]}
           echo "bundle: $BUNDLE"
           JS=$(curl -fsS $CURL_RETRY "https://app.godance.ai$BUNDLE")
-          echo "$JS" | grep -qi "usdt"     || { echo "USDT missing from deployed bundle" >&2; exit 1; }
+          grep -qi "usdt" <<<"$JS"     || { echo "USDT missing from deployed bundle" >&2; exit 1; }
           # save_card was asserted here originally, but it is a backend-only
           # string (Stripe auto-recharge) that has never been in the SPA
           # bundle — the check could never pass. v1/admin proves the admin
           # console (round 5) is in the deployed bundle.
-          echo "$JS" | grep -q "v1/admin"  || { echo "admin console missing from deployed bundle" >&2; exit 1; }
+          grep -q "v1/admin" <<<"$JS"  || { echo "admin console missing from deployed bundle" >&2; exit 1; }
       - name: Marketing mentions USDT
         run: |
-          curl -fsS $CURL_RETRY https://godance.ai | grep -qi "usdt" || { echo "USDT copy missing from marketing" >&2; exit 1; }
+          PAGE=$(curl -fsS $CURL_RETRY https://godance.ai)
+          grep -qi "usdt" <<<"$PAGE" || { echo "USDT copy missing from marketing" >&2; exit 1; }

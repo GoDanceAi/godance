@@ -34,11 +34,33 @@ import ai.godance.web.dto.AuthDtos.AuthResponse;
  *
  * <p>Resolution order:
  * <ol>
- *   <li>Known {@code (provider, subject)} → that user.</li>
+ *   <li>Known {@code (provider, subject)} → that user, whatever the
+ *       email says.</li>
+ *   <li>Else an email the provider has <em>not</em> verified → refuse.
+ *       Nothing is written, so the person can verify with the provider
+ *       and sign in again.</li>
+ *   <li>Else a user with the provider-verified email that has a password
+ *       but never verified the email → refuse. Nothing is written.</li>
  *   <li>Else a user with the provider-verified email → link a new
  *       identity to them.</li>
  *   <li>Else create a fresh OAuth-only user (no password) and link.</li>
  * </ol>
+ *
+ * <p>Refusing, rather than creating a second account, keeps an
+ * unverified address out of {@code users.email} entirely: it can neither
+ * take over an existing account nor be parked on a new one for its real
+ * owner to link into later. A throwaway account would also bind the
+ * {@code (provider, subject)} for good, so the person would keep landing
+ * in it after verifying.
+ *
+ * <p>Password signup takes any address unchecked, so an unverified
+ * password account proves nobody owns its email. Linking into one would
+ * share it between the provider's user and whoever set the password.
+ * Clearing the password on link would not evict that person: issued JWTs
+ * stay valid until expiry, and API keys, the webhook signing secret and a
+ * saved card survive. Refusing leaves the account untouched; once its
+ * holder signs in with the password and verifies the email, the next
+ * provider sign-in links.
  */
 @Service
 public class OAuthLoginService {
@@ -60,12 +82,14 @@ public class OAuthLoginService {
 
     /**
      * Complete an OAuth sign-in. {@code email} / {@code fullName} may be
-     * null (e.g. X.com does not return an email). Returns the bearer
-     * token the caller hands back to the client.
+     * null (e.g. X.com does not return an email). {@code emailVerified}
+     * is the provider's {@code email_verified} claim; an email without it
+     * is never trusted. Returns the bearer token the caller hands back to
+     * the client.
      */
     @Transactional
     public AuthResponse completeLogin(OAuthProvider provider, String subject,
-                                      String email, String fullName) {
+                                      String email, boolean emailVerified, String fullName) {
         if (subject == null || subject.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "oauth provider returned no subject identifier");
@@ -80,13 +104,31 @@ public class OAuthLoginService {
                     new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
                             "oauth identity references a missing user"));
         } else {
+            if (normalizedEmail != null && !emailVerified) {
+                // Same answer whether or not an account holds this email,
+                // so the refusal reveals nothing about who is registered.
+                log.warn("Refused {} sign-in: provider email not verified", provider);
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                        "Your " + displayName(provider) + " email address is not verified. "
+                                + "Verify it with " + displayName(provider) + ", then sign in again.");
+            }
             user = (normalizedEmail != null)
                     ? users.findByEmail(normalizedEmail).orElse(null)
                     : null;
             if (user == null) {
                 user = createOAuthUser(provider, subject, normalizedEmail, fullName);
             } else if (!user.isEmailVerified()) {
-                // The provider asserts ownership of this email — trust it.
+                if (user.getPasswordHash() != null) {
+                    // Possibly pre-registered by someone who doesn't own the
+                    // address; linking would share the account with them.
+                    log.warn("Refused {} sign-in: email held by unverified password account {}",
+                            provider, user.getId());
+                    throw new ResponseStatusException(HttpStatus.CONFLICT,
+                            "An account with this email address already exists and its email "
+                                    + "is not verified. Sign in with your password and verify "
+                                    + "your email, then sign in with " + displayName(provider) + ".");
+                }
+                // The provider has verified ownership of this email — trust it.
                 user.setEmailVerified(true);
             }
             OAuthIdentity identity = new OAuthIdentity();
@@ -126,10 +168,19 @@ public class OAuthLoginService {
         u.setPasswordHash(null);
         u.setRole(UserRole.USER);
         u.setActive(true);
+        // Only reached with a null or provider-verified email.
         u.setEmailVerified(email != null);
         users.save(u);
         log.info("Created OAuth-only user {} via {}", u.getId(), provider);
         return u;
+    }
+
+    private static String displayName(OAuthProvider provider) {
+        return switch (provider) {
+            case GOOGLE -> "Google";
+            case APPLE -> "Apple";
+            case X -> "X";
+        };
     }
 
     private static String defaultName(String email) {

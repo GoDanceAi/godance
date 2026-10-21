@@ -6,8 +6,13 @@
 #
 #   backend    — mvn -B verify against MinIO + Redis (the shared
 #                backing-services action, identical to deploy.yml's test job)
-#   app        — npm ci && npm run lint && npm run build
-#   marketing  — npm ci && npm run lint && npm run build
+#   app        — npm ci && npm run lint && npm run build && npm audit
+#   marketing  — npm ci && npm run lint && npm run build && npm audit
+#
+# npm audit runs last and fails on high or critical findings; it still
+# lists low and moderate ones in the log. A newly published advisory can
+# turn it red on a PR that didn't cause it; Lint and Build have already
+# reported by then.
 #
 # No secrets: the only credential is the default, read-only GITHUB_TOKEN,
 # so PRs from forks run exactly like PRs from branches in this repo.
@@ -70,6 +75,9 @@ jobs:
         env:
           VITE_API_URL: https://api.godance.ai
         run: npm run build
+      - name: Audit
+        working-directory: app
+        run: npm audit --audit-level=high
 
   marketing:
     name: marketing (build)
@@ -95,3 +103,6 @@ jobs:
           SITE_URL: https://godance.ai
           PUBLIC_API_BASE: https://api.godance.ai
         run: npm run build
+      - name: Audit
+        working-directory: marketing
+        run: npm audit --audit-level=high
