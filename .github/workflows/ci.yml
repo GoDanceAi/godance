@@ -5,14 +5,15 @@
 # build and test steps they gate deploys on, and deploys nothing:
 #
 #   backend    — mvn -B verify against MinIO + Redis (the shared
-#                backing-services action, identical to deploy.yml's test job)
+#                backing-services action, identical to deploy.yml's test job),
+#                then the OSV scan (backend/dev/osv-scan.py)
 #   app        — npm ci && npm run lint && npm run build && npm audit
 #   marketing  — npm ci && npm run lint && npm run build && npm audit
 #
-# npm audit runs last and fails on high or critical findings; it still
-# lists low and moderate ones in the log. A newly published advisory can
-# turn it red on a PR that didn't cause it; Lint and Build have already
-# reported by then.
+# npm audit and the OSV scan run last and fail on high or critical findings;
+# they still list low and moderate ones in the log. A newly published
+# advisory can turn them red on a PR that didn't cause it; the tests, Lint
+# and Build have already reported by then.
 #
 # No secrets: the only credential is the default, read-only GITHUB_TOKEN,
 # so PRs from forks run exactly like PRs from branches in this repo.
@@ -51,6 +52,14 @@ jobs:
       - name: mvn verify
         working-directory: backend
         run: mvn -B verify
+      # The resolved Maven tree, including BOM-managed and transitive
+      # versions, checked against osv.dev. Fails on high, critical or
+      # unrated advisories.
+      - name: OSV scan
+        working-directory: backend
+        run: |
+          mvn -B -q dependency:list -DoutputFile=target/deps.txt -DoutputAbsoluteArtifactFilename=false
+          python3 dev/osv-scan.py target/deps.txt
 
   app:
     name: app (build)

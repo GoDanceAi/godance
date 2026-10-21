@@ -28,7 +28,9 @@ import ai.godance.service.mail.MailService;
  * <ol>
  *   <li>User enables: must already have a saved {@code stripe_payment_method_id}
  *       (captured during a prior interactive top-up with
- *       {@code setup_future_usage=off_session}).</li>
+ *       {@code setup_future_usage=off_session}), and it must be a card.
+ *       Bank debits (ACH, SEPA) settle days after confirming, so an
+ *       off-session charge on one can't be credited when it's made.</li>
  *   <li>{@link CreditLedgerService} debits → if balance crosses below the
  *       configured threshold AND auto-recharge is enabled, a one-shot Quartz
  *       job is enqueued that calls {@link #chargeIfNeeded(UUID)} on the
@@ -72,11 +74,13 @@ public class AutoRechargeService {
     }
 
     /**
-     * Enable + configure (or update) auto-recharge. Requires a saved payment
-     * method; {@code thresholdCents} and {@code topupCents} must be inside
-     * the platform top-up bounds.
+     * Enable + configure (or update) auto-recharge. Requires a saved card;
+     * {@code thresholdCents} and {@code topupCents} must be inside the
+     * platform top-up bounds. A saved payment method that isn't a card
+     * (saved before cards-only was enforced) is dropped and the call
+     * answers 409, so the user's next card top-up can save a card.
      */
-    @Transactional
+    @Transactional(noRollbackFor = PaymentMethodNotCardException.class)
     public Config enable(UUID userId, long thresholdCents, long topupCents, String ip) {
         if (topupCents < billing.topupMinCents() || topupCents > billing.topupMaxCents()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
@@ -92,6 +96,18 @@ public class AutoRechargeService {
         if (u.getStripePaymentMethodId() == null || u.getStripeCustomerId() == null) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
                     "no saved payment method on file — run a top-up with save_card=true first");
+        }
+        String pmType;
+        try {
+            pmType = stripe.retrievePaymentMethodType(u.getStripePaymentMethodId());
+        } catch (StripeException e) {
+            log.warn("could not retrieve payment_method {} for user {}: {}",
+                    u.getStripePaymentMethodId(), userId, e.getMessage());
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "payment provider unavailable");
+        }
+        if (!StripeService.isCard(pmType)) {
+            dropNonCardPaymentMethod(u, pmType, ip);
+            throw new PaymentMethodNotCardException(pmType);
         }
         u.setAutoRechargeEnabled(true);
         u.setAutoRechargeThresholdCents(thresholdCents);
@@ -128,6 +144,10 @@ public class AutoRechargeService {
      * auto-recharge in the same transaction. The user has to re-enable
      * (which presumably means updating their card first via a new
      * interactive top-up). This matches "disable after 1 hard fail".
+     *
+     * <p>A saved payment method that isn't a card is never charged: it is
+     * dropped and auto-recharge is disabled the same way, before any
+     * PaymentIntent is created.
      */
     @Transactional
     public Outcome chargeIfNeeded(UUID userId) {
@@ -141,6 +161,14 @@ public class AutoRechargeService {
 
         String idem = idempotencyKey(u, topup);
         try {
+            // Users who enabled before cards-only was enforced may have a bank
+            // debit saved. chargeOffSession only accepts cards too, but drop
+            // the method here so the user can save a card.
+            String pmType = stripe.retrievePaymentMethodType(u.getStripePaymentMethodId());
+            if (!StripeService.isCard(pmType)) {
+                dropNonCardPaymentMethod(u, pmType, null);
+                return hardFail(u, "payment_method.type=" + pmType + ": auto-recharge needs a card");
+            }
             PaymentIntent pi = stripe.chargeOffSession(
                     u.getStripeCustomerId(), u.getStripePaymentMethodId(), topup, idem);
             // Stripe returned without throwing — status should be "succeeded".
@@ -181,6 +209,23 @@ public class AutoRechargeService {
     }
 
     /**
+     * Forget a saved payment method that isn't a card. BillingService never
+     * overwrites a saved method, so the user's next card top-up with
+     * {@code save_card=true} can save a card only once this one is gone.
+     */
+    private void dropNonCardPaymentMethod(User u, String pmType, String ip) {
+        String pmId = u.getStripePaymentMethodId();
+        log.warn("dropping saved {} payment method {} for user {}: auto-recharge charges cards only",
+                pmType, pmId, u.getId());
+        u.setStripePaymentMethodId(null);
+        users.save(u);
+        audit.record(AuditLogService.EVT_BILLING_PAYMENT_METHOD_REJECTED, AuditOutcome.DENIED,
+                u.getId(), ip, Map.of(
+                        "paymentMethodId", pmId,
+                        "paymentMethodType", String.valueOf(pmType)));
+    }
+
+    /**
      * Stripe idempotency key. Floored to the minute so the debit-trigger
      * and the cron safety net can't double-charge if they race within the
      * same window.
@@ -188,6 +233,18 @@ public class AutoRechargeService {
     private static String idempotencyKey(User u, long topup) {
         long minute = Instant.now().getEpochSecond() / 60;
         return "autorecharge-" + u.getId() + "-" + topup + "-" + minute;
+    }
+
+    /**
+     * 409: the saved payment method isn't a card. {@link #enable} drops the
+     * method before throwing this, and that must not roll back.
+     */
+    static final class PaymentMethodNotCardException extends ResponseStatusException {
+        PaymentMethodNotCardException(String pmType) {
+            super(HttpStatus.CONFLICT, "saved payment method is " + pmType
+                    + ", not a card — auto-recharge charges cards only; run a top-up with a card"
+                    + " and save_card=true first");
+        }
     }
 
     public enum Outcome {

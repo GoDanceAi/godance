@@ -23,7 +23,10 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
+import ai.godance.domain.AuditOutcome;
+import ai.godance.repository.AuditLogEntryRepository;
 import ai.godance.repository.UserRepository;
+import ai.godance.service.AuditLogService;
 import ai.godance.service.mail.LoggingEmailSender;
 import ai.godance.web.dto.ApiKeyDtos.ApiKeySummary;
 import ch.qos.logback.classic.Logger;
@@ -49,6 +52,7 @@ class AuthAndApiKeyIntegrationTest {
 
     @Autowired WebTestClient http;
     @Autowired UserRepository users;
+    @Autowired AuditLogEntryRepository audits;
 
     private static String uniqueEmail(String tag) {
         return tag + "-" + UUID.randomUUID() + "@godance.test";
@@ -89,6 +93,23 @@ class AuthAndApiKeyIntegrationTest {
                 .bodyValue(signupBody(email))
                 .exchange()
                 .expectStatus().isEqualTo(HttpStatus.CONFLICT);
+    }
+
+    @Test
+    void signup_givenDuplicateEmail_persistsDeniedSignupAuditRow() {
+        String email = uniqueEmail("signup-dup-audit");
+        signup(email);
+        http.post().uri("/v1/auth/signup")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(signupBody(email))
+                .exchange()
+                .expectStatus().isEqualTo(HttpStatus.CONFLICT);
+
+        assertThat(audits.findByEventType(AuditLogService.EVT_AUTH_SIGNUP))
+                .filteredOn(e -> email.equals(e.getEventDetail().get("email")))
+                .filteredOn(e -> e.getOutcome() == AuditOutcome.DENIED)
+                .singleElement()
+                .satisfies(e -> assertThat(e.getEventDetail()).containsEntry("reason", "duplicate"));
     }
 
     @Test
@@ -141,6 +162,27 @@ class AuthAndApiKeyIntegrationTest {
                 .bodyValue(Map.of("email", email, "password", "wrong-password-here"))
                 .exchange()
                 .expectStatus().isUnauthorized();
+    }
+
+    @Test
+    void login_givenWrongPassword_persistsLoginFailureAuditRow() {
+        String email = uniqueEmail("login-bad-pw-audit");
+        signup(email);
+        UUID userId = users.findByEmail(email).orElseThrow().getId();
+
+        http.post().uri("/v1/auth/login")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("email", email, "password", "wrong-password-here"))
+                .exchange()
+                .expectStatus().isUnauthorized();
+
+        assertThat(audits.findByEventType(AuditLogService.EVT_AUTH_LOGIN_FAIL))
+                .filteredOn(e -> userId.equals(e.getUserId()))
+                .singleElement()
+                .satisfies(e -> {
+                    assertThat(e.getOutcome()).isEqualTo(AuditOutcome.FAILURE);
+                    assertThat(e.getEventDetail()).containsEntry("email", email);
+                });
     }
 
     @Test

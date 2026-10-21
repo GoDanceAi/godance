@@ -79,7 +79,9 @@ public class AuthService {
         this.mail = mail;
     }
 
-    @Transactional
+    // noRollbackFor keeps the DENIED audit row. The duplicate check throws
+    // before the user is saved, so the audit row is the only write it commits.
+    @Transactional(noRollbackFor = ResponseStatusException.class)
     public AuthResponse signup(SignupRequest req, String ipAddress) {
         String email = req.email().trim().toLowerCase();
         if (users.existsByEmail(email)) {
@@ -109,7 +111,9 @@ public class AuthService {
         return AuthResponse.bearer(issued.token(), issued.expiresAt());
     }
 
-    @Transactional
+    // noRollbackFor keeps the FAILURE / DENIED audit rows. Both throws come
+    // before lastLoginAt is saved, so the audit row is the only write they commit.
+    @Transactional(noRollbackFor = ResponseStatusException.class)
     public AuthResponse login(LoginRequest req, String ipAddress) {
         String email = req.email().trim().toLowerCase();
         Optional<User> maybe = users.findByEmail(email);

@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ServerWebExchange;
 
+import ai.godance.security.AuthRateLimits;
 import ai.godance.security.JwtService;
 import ai.godance.service.AuthService;
 import ai.godance.web.dto.AuthDtos.AuthResponse;
@@ -31,32 +32,40 @@ import reactor.core.scheduler.Schedulers;
 public class AuthController {
 
     private final AuthService auth;
+    private final AuthRateLimits rateLimits;
 
-    public AuthController(AuthService auth) {
+    public AuthController(AuthService auth, AuthRateLimits rateLimits) {
         this.auth = auth;
+        this.rateLimits = rateLimits;
     }
 
     @PostMapping("/signup")
     public Mono<ResponseEntity<AuthResponse>> signup(
             @Valid @RequestBody SignupRequest req, ServerWebExchange exchange) {
-        return Mono.fromCallable(() -> auth.signup(req, clientIp(exchange)))
-                .subscribeOn(Schedulers.boundedElastic())
+        String ip = clientIp(exchange);
+        return rateLimits.signup(ip)
+                .then(Mono.fromCallable(() -> auth.signup(req, ip))
+                        .subscribeOn(Schedulers.boundedElastic()))
                 .map(body -> ResponseEntity.status(HttpStatus.CREATED).body(body));
     }
 
     @PostMapping("/login")
     public Mono<AuthResponse> login(
             @Valid @RequestBody LoginRequest req, ServerWebExchange exchange) {
-        return Mono.fromCallable(() -> auth.login(req, clientIp(exchange)))
-                .subscribeOn(Schedulers.boundedElastic());
+        String ip = clientIp(exchange);
+        return rateLimits.login(ip, req.email())
+                .then(Mono.fromCallable(() -> auth.login(req, ip))
+                        .subscribeOn(Schedulers.boundedElastic()));
     }
 
     @GetMapping("/verify")
     public Mono<ResponseEntity<Void>> verify(@AuthenticationPrincipal Jwt jwt,
             @RequestParam("token") String token, ServerWebExchange exchange) {
         UUID userId = JwtService.userIdFromSubject(jwt.getSubject());
-        return Mono.fromRunnable(() -> auth.verifyEmail(userId, token, clientIp(exchange)))
-                .subscribeOn(Schedulers.boundedElastic())
+        String ip = clientIp(exchange);
+        return rateLimits.verify(ip)
+                .then(Mono.fromRunnable(() -> auth.verifyEmail(userId, token, ip))
+                        .subscribeOn(Schedulers.boundedElastic()))
                 .then(Mono.just(ResponseEntity.noContent().build()));
     }
 

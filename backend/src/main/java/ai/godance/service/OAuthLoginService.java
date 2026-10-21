@@ -144,7 +144,9 @@ public class OAuthLoginService {
         }
 
         if (!user.isActive()) {
-            audit.record(AuditLogService.EVT_AUTH_OAUTH_LOGIN, AuditOutcome.DENIED,
+            // The link above may already be written. The rollback must undo
+            // it, so the denial's audit row commits on its own.
+            audit.recordInNewTransaction(AuditLogService.EVT_AUTH_OAUTH_LOGIN, AuditOutcome.DENIED,
                     user.getId(), null, Map.of("provider", provider.name(), "reason", "inactive"));
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "account disabled");
         }
