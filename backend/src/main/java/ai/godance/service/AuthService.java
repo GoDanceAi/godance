@@ -262,12 +262,85 @@ public class AuthService {
 
     /** One verification email a minute per account, whatever triggers it. */
     private static void requireCooldownPassed(User u, Instant now) {
-        Instant lastSent = u.getEmailVerificationSentAt();
-        if (lastSent != null && lastSent.plus(RESEND_COOLDOWN).isAfter(now)) {
+        if (!cooldownPassed(u, now)) {
             throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS,
                     "A verification email was sent less than a minute ago. "
                             + "Check your inbox, or try again shortly.");
         }
+    }
+
+    private static boolean cooldownPassed(User u, Instant now) {
+        Instant lastSent = u.getEmailVerificationSentAt();
+        return lastSent == null || !lastSent.plus(RESEND_COOLDOWN).isAfter(now);
+    }
+
+    /**
+     * Free an address from an account that never proved it owns it. The
+     * token is the one from the verification email, so only someone who
+     * reads that inbox can do this. Password signup takes any address, so
+     * without it whoever registered someone else's address first would hold
+     * it for good: the owner's signup would say it's taken, and their
+     * Google or Apple sign-in would be refused (see {@code OAuthLoginService}).
+     *
+     * <p>A token sent to an address the account was changing to clears
+     * that pending change. A token sent to the account's own unverified
+     * email moves the account to a placeholder address, so the real one is
+     * free to sign up with. The account itself, and anything in it, stays.
+     */
+    @Transactional
+    public void releaseEmail(String token, String ipAddress) {
+        User u = users.findByEmailVerificationToken(token).orElseThrow(() ->
+                new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid verification token"));
+        String released;
+        if (u.getPendingEmail() != null) {
+            released = u.getPendingEmail();
+            u.setPendingEmail(null);
+        } else if (!u.isEmailVerified()) {
+            released = u.getEmail();
+            u.setEmail("released-" + u.getId() + User.SYNTHETIC_EMAIL_SUFFIX);
+        } else {
+            // A verified address has no outstanding token; refuse rather than guess.
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "This address has been verified by its account.");
+        }
+        u.setEmailVerificationToken(null);
+        users.save(u);
+        audit.record(AuditLogService.EVT_AUTH_EMAIL_RELEASE, AuditOutcome.SUCCESS,
+                u.getId(), ipAddress, Map.of("email", released));
+    }
+
+    /**
+     * Email a fresh verification link to {@code email} if an account holds
+     * it without having verified it, for an owner who no longer has the
+     * first email: the link lets them release the address (or, if the
+     * account is theirs after all, sign in and verify). Does nothing, and
+     * says nothing, otherwise: the caller isn't signed in, and the reply
+     * must not tell them whether such an account exists. The one-minute
+     * cooldown keeps it from being used to flood an inbox.
+     */
+    @Transactional
+    public void sendReleaseLink(String email, String ipAddress) {
+        User u = users.findByEmail(email.trim().toLowerCase()).orElse(null);
+        if (u == null || u.isEmailVerified() || u.hasSyntheticEmail()) {
+            return;
+        }
+        Instant now = Instant.now();
+        if (!cooldownPassed(u, now)) {
+            return;
+        }
+        if (u.getPendingEmail() != null || u.getEmailVerificationToken() == null) {
+            // The link must stand for this address. A pending change's token
+            // went to the address being changed to, so that change is dropped.
+            u.setPendingEmail(null);
+            u.setEmailVerificationToken(randomToken());
+        }
+        u.setEmailVerificationSentAt(now);
+        users.save(u);
+
+        mail.sendVerificationEmail(u, u.getEmail());
+
+        audit.record(AuditLogService.EVT_AUTH_EMAIL_RELEASE_LINK, AuditOutcome.SUCCESS,
+                u.getId(), ipAddress, null);
     }
 
     @Transactional(readOnly = true)

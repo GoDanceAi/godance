@@ -410,4 +410,96 @@ class AuthServiceTest {
         assertThat(u.isEmailVerified()).isFalse();
         verify(users, never()).save(any());
     }
+
+    // ---------- releaseEmail / sendReleaseLink ------------------------
+
+    @Test
+    void releaseEmail_givenTokenOfUnverifiedSignup_movesAccountToPlaceholderAndFreesAddress() {
+        // Someone registered the owner's address; the owner opens the link
+        // from the verification email and releases it.
+        User squatter = signedUpUser("owner@godance.test", "tok-squat");
+
+        auth.releaseEmail("tok-squat", "203.0.113.7");
+
+        assertThat(squatter.getEmail()).isEqualTo("released-" + squatter.getId() + User.SYNTHETIC_EMAIL_SUFFIX);
+        assertThat(squatter.hasSyntheticEmail()).isTrue();
+        assertThat(squatter.getEmailVerificationToken()).isNull();
+        assertThat(squatter.getPasswordHash()).isEqualTo(HASH);   // the account itself stays
+        verify(users).save(squatter);
+        verify(audit).record(eq(AuditLogService.EVT_AUTH_EMAIL_RELEASE), eq(AuditOutcome.SUCCESS),
+                eq(squatter.getId()), any(), any());
+    }
+
+    @Test
+    void releaseEmail_givenTokenOfPendingChange_clearsItAndKeepsTheAccountsEmail() {
+        User u = withPendingAddress(verifiedPasswordUser(), "owner@godance.test");
+
+        auth.releaseEmail("tok-pending", null);
+
+        assertThat(u.getPendingEmail()).isNull();
+        assertThat(u.getEmail()).isEqualTo("holder@godance.test");
+        assertThat(u.isEmailVerified()).isTrue();
+        assertThat(u.getEmailVerificationToken()).isNull();
+    }
+
+    @Test
+    void releaseEmail_givenUnknownToken_rejectsWith400() {
+        assertRefused(() -> auth.releaseEmail("no-such-token", null), HttpStatus.BAD_REQUEST);
+
+        verify(users, never()).save(any());
+    }
+
+    @Test
+    void sendReleaseLink_givenUnverifiedAccount_mailsTheLinkToThatAddress() {
+        User u = unverifiedUserWithToken("tok-signup");
+        when(users.findByEmail("holder@godance.test")).thenReturn(Optional.of(u));
+
+        auth.sendReleaseLink(" Holder@Godance.test ", null);
+
+        assertThat(u.getEmailVerificationToken()).isEqualTo("tok-signup");
+        verify(mail).sendVerificationEmail(u, "holder@godance.test");
+    }
+
+    @Test
+    void sendReleaseLink_givenPendingChange_dropsItSoTheLinkStandsForThisAddress() {
+        User u = withPendingAddress(unverifiedUserWithToken(null), "elsewhere@godance.test");
+        when(users.findByEmail("holder@godance.test")).thenReturn(Optional.of(u));
+
+        auth.sendReleaseLink("holder@godance.test", null);
+
+        assertThat(u.getPendingEmail()).isNull();
+        assertThat(u.getEmailVerificationToken()).isNotBlank().isNotEqualTo("tok-pending");
+        verify(mail).sendVerificationEmail(u, "holder@godance.test");
+    }
+
+    @Test
+    void sendReleaseLink_givenVerifiedAccount_sendsNothing() {
+        User u = verifiedPasswordUser();
+        when(users.findByEmail("holder@godance.test")).thenReturn(Optional.of(u));
+
+        auth.sendReleaseLink("holder@godance.test", null);
+
+        verify(mail, never()).sendVerificationEmail(any(), any());
+        verify(users, never()).save(any());
+    }
+
+    @Test
+    void sendReleaseLink_givenNoAccount_sendsNothing() {
+        when(users.findByEmail(any())).thenReturn(Optional.empty());
+
+        auth.sendReleaseLink("nobody@godance.test", null);
+
+        verify(mail, never()).sendVerificationEmail(any(), any());
+    }
+
+    @Test
+    void sendReleaseLink_givenEmailSentWithinCooldown_sendsNothingAndSaysNothing() {
+        User u = unverifiedUserWithToken("tok-signup");
+        u.setEmailVerificationSentAt(Instant.now().minusSeconds(10));
+        when(users.findByEmail("holder@godance.test")).thenReturn(Optional.of(u));
+
+        auth.sendReleaseLink("holder@godance.test", null);   // no 429: the caller learns nothing
+
+        verify(mail, never()).sendVerificationEmail(any(), any());
+    }
 }

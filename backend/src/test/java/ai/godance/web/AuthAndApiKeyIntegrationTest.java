@@ -457,6 +457,87 @@ class AuthAndApiKeyIntegrationTest {
         changeEmail(xSignIn(), "not-an-email", null).expectStatus().isBadRequest();
     }
 
+    // ---------- /v1/auth/email/release (squatted addresses) -----------
+
+    @Test
+    void releaseEmail_givenSquattedAddress_freesItForItsOwnersSignup() {
+        // Someone signs up with the owner's address and a password of their own.
+        String owned = uniqueEmail("release-owned");
+        signup(owned);
+        UUID squatterId = users.findByEmail(owned).orElseThrow().getId();
+        String token = users.findByEmail(owned).orElseThrow().getEmailVerificationToken();
+
+        http.post().uri("/v1/auth/signup")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(signupBody(owned))
+                .exchange()
+                .expectStatus().isEqualTo(HttpStatus.CONFLICT);
+
+        // The owner opens the link from the verification email; no session.
+        http.post().uri("/v1/auth/email/release")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("token", token))
+                .exchange()
+                .expectStatus().isNoContent();
+
+        assertThat(users.findById(squatterId).orElseThrow().hasSyntheticEmail()).isTrue();
+        AuthResponse owner = signup(owned);
+        assertThat(me("Bearer " + owner.accessToken()).id()).isNotEqualTo(squatterId);
+    }
+
+    @Test
+    void releaseEmail_givenSquattedAddress_letsItsOwnersGoogleSignInCreateTheirAccount() {
+        String owned = uniqueEmail("release-google");
+        signup(owned);
+        String token = users.findByEmail(owned).orElseThrow().getEmailVerificationToken();
+
+        http.post().uri("/v1/auth/email/release")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("token", token))
+                .exchange()
+                .expectStatus().isNoContent();
+
+        AuthResponse google = oauthLogin.completeLogin(
+                OAuthProvider.GOOGLE, "google-" + UUID.randomUUID(), owned, true, "Owner");
+        assertThat(me("Bearer " + google.accessToken()).email()).isEqualTo(owned);
+    }
+
+    @Test
+    void releaseEmail_givenBadToken_returns400() {
+        http.post().uri("/v1/auth/email/release")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("token", "this-token-does-not-exist"))
+                .exchange()
+                .expectStatus().isBadRequest();
+    }
+
+    @Test
+    void sendReleaseLink_givenSquattedAddressPastCooldown_returns202AndRefreshesTheSendTime() {
+        String owned = uniqueEmail("release-link");
+        signup(owned);
+        var squatter = users.findByEmail(owned).orElseThrow();
+        Instant longAgo = Instant.now().minus(Duration.ofMinutes(5));
+        squatter.setEmailVerificationSentAt(longAgo);
+        users.save(squatter);
+
+        http.post().uri("/v1/auth/email/release-link")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("email", owned))
+                .exchange()
+                .expectStatus().isAccepted();
+
+        assertThat(users.findByEmail(owned).orElseThrow().getEmailVerificationSentAt()).isAfter(longAgo);
+    }
+
+    @Test
+    void sendReleaseLink_givenUnknownAddress_returnsTheSame202() {
+        http.post().uri("/v1/auth/email/release-link")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("email", uniqueEmail("release-nobody")))
+                .exchange()
+                .expectStatus().isAccepted();
+    }
+
     // ---------- /v1/keys ----------------------------------------------
 
     @Test

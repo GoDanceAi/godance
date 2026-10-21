@@ -140,6 +140,11 @@ public class SecurityConfig {
                         // part of it: verifying needs the account's own session
                         // as well as the emailed token.
                         .pathMatchers(HttpMethod.POST, "/v1/auth/signup", "/v1/auth/login").permitAll()
+                        // Releasing an address from an account that never verified
+                        // it: the emailed token is the proof, and the address's
+                        // owner has no session on that account.
+                        .pathMatchers(HttpMethod.POST,
+                                "/v1/auth/email/release", "/v1/auth/email/release-link").permitAll()
                         // Public read-only: model catalog (model picker) and
                         // provider status board (marketing /status page).
                         .pathMatchers(HttpMethod.GET, "/v1/models", "/v1/status").permitAll()

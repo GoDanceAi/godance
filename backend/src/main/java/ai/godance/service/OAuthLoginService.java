@@ -126,7 +126,9 @@ public class OAuthLoginService {
                     throw new ResponseStatusException(HttpStatus.CONFLICT,
                             "An account with this email address already exists and its email "
                                     + "is not verified. Sign in with your password and verify "
-                                    + "your email, then sign in with " + displayName(provider) + ".");
+                                    + "your email, then sign in with " + displayName(provider) + ". "
+                                    + "If you didn't create that account, you can release the "
+                                    + "address from the sign-up page.");
                 }
                 // The provider has verified ownership of this email — trust it.
                 user.setEmailVerified(true);

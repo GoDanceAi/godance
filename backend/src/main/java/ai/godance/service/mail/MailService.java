@@ -69,12 +69,14 @@ public class MailService {
                     + "Hi " + user.getFullName() + ",\n\n"
                     + "Welcome to Godance. Please confirm this email address by opening the\n"
                     + "link above. If you aren't signed in, you'll be asked to sign in first.\n\n"
-                    + "If you didn't create a Godance account, you can ignore this email.\n";
+                    + "If you didn't create a Godance account, you can ignore this email, or\n"
+                    + "open the link to release this address so you can use it yourself.\n";
             String html = "<p>Hi " + escape(user.getFullName()) + ",</p>"
                     + "<p>Welcome to Godance. Please confirm this email address:</p>"
                     + "<p><a href=\"" + escape(link) + "\">Verify my email</a></p>"
                     + "<p>If you aren't signed in, you'll be asked to sign in first.</p>"
-                    + "<p>If you didn't create a Godance account, you can ignore this email.</p>";
+                    + "<p>If you didn't create a Godance account, you can ignore this email, "
+                    + "or open the link to release this address so you can use it yourself.</p>";
             sender.send(List.of(toEmail), "Verify your Godance email", text, html);
         } catch (Exception e) {
             log.error("verify-email build/send failed for {}: {}", user.getId(), e.getMessage());

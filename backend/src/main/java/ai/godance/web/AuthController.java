@@ -23,6 +23,8 @@ import ai.godance.web.dto.AuthDtos.AuthResponse;
 import ai.godance.web.dto.AuthDtos.ChangeEmailRequest;
 import ai.godance.web.dto.AuthDtos.LoginRequest;
 import ai.godance.web.dto.AuthDtos.MeResponse;
+import ai.godance.web.dto.AuthDtos.ReleaseEmailRequest;
+import ai.godance.web.dto.AuthDtos.ReleaseLinkRequest;
 import ai.godance.web.dto.AuthDtos.SignupRequest;
 import jakarta.validation.Valid;
 import reactor.core.publisher.Mono;
@@ -82,6 +84,24 @@ public class AuthController {
                         req.currentPassword(), signedInAt, clientIp(exchange)))
                 .subscribeOn(Schedulers.boundedElastic())
                 .then(Mono.just(ResponseEntity.noContent().build()));
+    }
+
+    /** From the verification email: free the address from an account that never verified it. */
+    @PostMapping("/email/release")
+    public Mono<ResponseEntity<Void>> releaseEmail(
+            @Valid @RequestBody ReleaseEmailRequest req, ServerWebExchange exchange) {
+        return Mono.fromRunnable(() -> auth.releaseEmail(req.token(), clientIp(exchange)))
+                .subscribeOn(Schedulers.boundedElastic())
+                .then(Mono.just(ResponseEntity.noContent().build()));
+    }
+
+    /** Re-send that email to an address held by an unverified account. Always 202. */
+    @PostMapping("/email/release-link")
+    public Mono<ResponseEntity<Void>> sendReleaseLink(
+            @Valid @RequestBody ReleaseLinkRequest req, ServerWebExchange exchange) {
+        return Mono.fromRunnable(() -> auth.sendReleaseLink(req.email(), clientIp(exchange)))
+                .subscribeOn(Schedulers.boundedElastic())
+                .then(Mono.just(ResponseEntity.accepted().build()));
     }
 
     @GetMapping("/me")

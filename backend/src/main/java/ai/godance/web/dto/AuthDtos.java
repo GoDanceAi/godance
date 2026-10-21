@@ -34,6 +34,16 @@ public final class AuthDtos {
         }
     }
 
+    /** The token from a verification email, to free that address from its account. */
+    public record ReleaseEmailRequest(
+            @NotBlank @Size(max = 64) String token
+    ) { }
+
+    /** An address to send a fresh verification (and release) link to. */
+    public record ReleaseLinkRequest(
+            @Email @NotBlank @Size(max = 320) String email
+    ) { }
+
     /**
      * A new email for the signed-in account: a first real address for an
      * X.com placeholder account, or a change. {@code currentPassword} is
