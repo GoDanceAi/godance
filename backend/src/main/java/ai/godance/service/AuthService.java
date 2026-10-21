@@ -138,7 +138,7 @@ public class AuthService {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
                     "Your email address is already verified.");
         }
-        if (u.getEmail().endsWith(OAuthLoginService.SYNTHETIC_EMAIL_SUFFIX)) {
+        if (u.hasSyntheticEmail()) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
                     "This account has no email address to verify.");
         }

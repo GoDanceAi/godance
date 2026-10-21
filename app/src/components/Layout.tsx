@@ -42,7 +42,7 @@ export default function Layout({ children }: Props) {
             <div className="flex items-center gap-3">
               <span className="hidden md:inline text-sm text-fg-muted">
                 <span className="font-medium text-fg">{formatCents(user.creditBalanceCents)}</span>
-                <span className="text-fg-faint"> · {user.email}</span>
+                {user.hasEmail && <span className="text-fg-faint"> · {user.email}</span>}
               </span>
               <ThemeToggle compact />
               <button

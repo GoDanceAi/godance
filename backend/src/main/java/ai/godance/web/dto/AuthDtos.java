@@ -34,9 +34,15 @@ public final class AuthDtos {
         }
     }
 
+    /**
+     * {@code hasEmail} is false when {@code email} is only a placeholder
+     * (an X.com sign-in, which shares no address), so clients don't show
+     * it or offer to verify it.
+     */
     public record MeResponse(
             UUID id,
             String email,
+            boolean hasEmail,
             String fullName,
             UserRole role,
             boolean emailVerified,
@@ -49,6 +55,7 @@ public final class AuthDtos {
             return new MeResponse(
                     u.getId(),
                     u.getEmail(),
+                    !u.hasSyntheticEmail(),
                     u.getFullName(),
                     u.getRole(),
                     u.isEmailVerified(),

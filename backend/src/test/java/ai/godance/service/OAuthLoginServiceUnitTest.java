@@ -193,6 +193,7 @@ class OAuthLoginServiceUnitTest {
         verify(users, atLeastOnce()).save(created.capture());
         User user = created.getValue();
         assertThat(user.getEmail()).isEqualTo("x-x-42@oauth.godance.local");
+        assertThat(user.hasSyntheticEmail()).isTrue();
         assertThat(user.isEmailVerified()).isFalse();
         assertThat(savedIdentity().getUserId()).isEqualTo(user.getId());
         verify(users, never()).findByEmail(any());

@@ -16,7 +16,7 @@ export default function DashboardPage() {
         Hi, {user.fullName.split(' ')[0]}.
       </h1>
 
-      {!user.emailVerified && <VerifyEmailBanner email={user.email} />}
+      {user.hasEmail && !user.emailVerified && <VerifyEmailBanner email={user.email} />}
 
       {/* Balance card */}
       <div className="mt-8 card flex items-start justify-between">

@@ -19,6 +19,12 @@ import jakarta.persistence.Table;
 @Table(name = "users")
 public class User {
 
+    /**
+     * Ends the placeholder address given to an OAuth user whose provider
+     * shares no email (X.com). Nothing can be delivered to it.
+     */
+    public static final String SYNTHETIC_EMAIL_SUFFIX = "@oauth.godance.local";
+
     @Id
     @UuidGenerator(style = UuidGenerator.Style.TIME)
     @Column(name = "id", nullable = false, updatable = false)
@@ -163,6 +169,11 @@ public class User {
 
     public boolean isEmailVerified() { return emailVerified; }
     public void setEmailVerified(boolean emailVerified) { this.emailVerified = emailVerified; }
+
+    /** True when {@link #getEmail()} is a placeholder rather than a real inbox. */
+    public boolean hasSyntheticEmail() {
+        return email != null && email.endsWith(SYNTHETIC_EMAIL_SUFFIX);
+    }
 
     public String getEmailVerificationToken() { return emailVerificationToken; }
     public void setEmailVerificationToken(String emailVerificationToken) { this.emailVerificationToken = emailVerificationToken; }

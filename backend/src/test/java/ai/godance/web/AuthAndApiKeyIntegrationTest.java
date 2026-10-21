@@ -159,6 +159,7 @@ class AuthAndApiKeyIntegrationTest {
                 .expectBody(MeResponse.class).returnResult().getResponseBody();
 
         assertThat(me.email()).isEqualTo(email);
+        assertThat(me.hasEmail()).isTrue();
         assertThat(me.emailVerified()).isFalse();
         assertThat(me.creditBalanceCents()).isZero();
     }

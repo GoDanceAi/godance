@@ -151,7 +151,7 @@ class AuthServiceTest {
     @Test
     void resendVerificationEmail_givenSyntheticOAuthAddress_rejectsWith409AndSendsNothing() {
         User u = unverifiedUserWithToken(null);
-        u.setEmail("x-42" + OAuthLoginService.SYNTHETIC_EMAIL_SUFFIX);
+        u.setEmail("x-42" + User.SYNTHETIC_EMAIL_SUFFIX);
         u.setPasswordHash(null);
 
         assertRefused(() -> auth.resendVerificationEmail(u.getId(), null), HttpStatus.CONFLICT);
