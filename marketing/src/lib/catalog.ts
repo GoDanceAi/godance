@@ -19,7 +19,8 @@ interface ModelPricing {
 interface ModelEntry {
   id: string;
   owned_by: string;
-  godance: { modality: Modality; requires_async: boolean; pricing: ModelPricing };
+  // virtual: routing presets (godance-fast/auto/quality), which have no pricing.
+  godance: { modality: Modality; requires_async: boolean; pricing: ModelPricing; virtual?: boolean };
 }
 interface ModelListResponse { object: 'list'; data: ModelEntry[] }
 
@@ -110,7 +111,12 @@ async function fetchModels(): Promise<ModelEntry[] | null> {
     clearTimeout(timer);
     if (!res.ok) return null;
     const body = (await res.json()) as ModelListResponse;
-    return Array.isArray(body?.data) && body.data.length ? body.data : null;
+    // List concrete models only. A routing preset bills at whichever model
+    // serves it, so it would show up here with blank prices.
+    const models = Array.isArray(body?.data)
+      ? body.data.filter((m) => m.godance?.virtual !== true)
+      : [];
+    return models.length ? models : null;
   } catch {
     return null;
   }

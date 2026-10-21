@@ -1,5 +1,6 @@
 package ai.godance.web;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -11,6 +12,8 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 
 import ai.godance.gateway.ModelCatalog;
 import ai.godance.gateway.ModelCatalog.ModelInfo;
+import ai.godance.routing.RoutingPolicy;
+import ai.godance.routing.RoutingPolicyRegistry;
 import reactor.core.publisher.Mono;
 
 /**
@@ -25,21 +28,41 @@ import reactor.core.publisher.Mono;
  *
  * <p>Godance extends each entry with {@code godance: {modality, pricing}}
  * — pure OpenAI clients ignore unknown fields.
+ *
+ * <p>Virtual routing ids ({@code godance-fast/auto/quality}) are appended
+ * after the concrete catalog as purely additive entries (owned_by
+ * {@code "godance"}, {@code godance.virtual = true}) so OpenAI clients can
+ * discover them via {@code client.models.list()}. They have no
+ * {@code pricing} block: a routed call is billed at the concrete model that
+ * serves it, so a virtual id has no fixed price. Consumers that read
+ * {@code godance.pricing} (the app's chat presets, the marketing catalog)
+ * skip {@code godance.virtual} entries.
  */
 @RestController
 @RequestMapping("/v1")
 public class ModelsController {
 
     private final ModelCatalog catalog;
+    private final RoutingPolicyRegistry routing;
 
-    public ModelsController(ModelCatalog catalog) {
+    public ModelsController(ModelCatalog catalog, RoutingPolicyRegistry routing) {
         this.catalog = catalog;
+        this.routing = routing;
     }
 
     @GetMapping("/models")
     public Mono<ModelListResponse> list() {
-        List<ModelEntry> entries = catalog.all().stream().map(ModelsController::toEntry).toList();
+        List<ModelEntry> entries = new ArrayList<>();
+        catalog.all().forEach(m -> entries.add(toEntry(m)));      // concrete catalog, unchanged
+        routing.all().forEach(p -> entries.add(toVirtualEntry(p))); // virtual ids, additive
         return Mono.just(new ModelListResponse("list", entries));
+    }
+
+    private static ModelEntry toVirtualEntry(RoutingPolicy p) {
+        Map<String, Object> godance = Map.of(
+                "virtual",  true,
+                "modality", p.modality().name());
+        return new ModelEntry(p.id(), "model", "godance", godance);
     }
 
     private static ModelEntry toEntry(ModelInfo m) {
