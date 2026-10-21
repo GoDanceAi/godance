@@ -41,6 +41,8 @@ public class AuditLogService {
     public static final String EVT_BILLING_NOWPAYMENTS_SUCCEEDED = "billing.topup.nowpayments.succeeded";
     public static final String EVT_BILLING_NOWPAYMENTS_DUPLICATE = "billing.topup.nowpayments.duplicate";
     public static final String EVT_BILLING_PAYMENT_METHOD_SAVED = "billing.payment_method.saved";
+    /** A payment method refused for auto-recharge (not saved, or dropped from the user): not a card. */
+    public static final String EVT_BILLING_PAYMENT_METHOD_REJECTED = "billing.payment_method.rejected";
     // Auto-recharge (Session 13)
     public static final String EVT_BILLING_AUTORECHARGE_ENABLED   = "billing.autorecharge.enabled";
     public static final String EVT_BILLING_AUTORECHARGE_DISABLED  = "billing.autorecharge.disabled";
