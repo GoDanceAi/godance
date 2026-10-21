@@ -7,8 +7,11 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webtestclient.autoconfigure.AutoConfigureWebTestClient;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -21,7 +24,11 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import ai.godance.repository.UserRepository;
+import ai.godance.service.mail.LoggingEmailSender;
 import ai.godance.web.dto.ApiKeyDtos.ApiKeySummary;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import ai.godance.web.dto.ApiKeyDtos.CreateApiKeyResponse;
 import ai.godance.web.dto.AuthDtos.AuthResponse;
 import ai.godance.web.dto.AuthDtos.MeResponse;
@@ -275,6 +282,122 @@ class AuthAndApiKeyIntegrationTest {
 
         http.get().uri("/v1/auth/verify?token=this-token-does-not-exist")
                 .header("Authorization", bearer)
+                .exchange()
+                .expectStatus().isBadRequest();
+    }
+
+    @Test
+    void verify_givenOwnTokenOlderThan24Hours_returns400AndStaysUnverified() {
+        String email = uniqueEmail("verify-expired");
+        String bearer = "Bearer " + signup(email).accessToken();
+        var user = users.findByEmail(email).orElseThrow();
+        String token = user.getEmailVerificationToken();
+        user.setEmailVerificationSentAt(Instant.now().minus(Duration.ofHours(25)));
+        users.save(user);
+
+        http.get().uri("/v1/auth/verify?token={t}", token)
+                .header("Authorization", bearer)
+                .exchange()
+                .expectStatus().isBadRequest();
+
+        assertThat(users.findByEmail(email).orElseThrow().isEmailVerified()).isFalse();
+    }
+
+    // ---------- /v1/auth/password/* -----------------------------------
+
+    /** Read the reset link the [email-stub] sender logs, as a dev would. */
+    private String requestResetToken(String email) {
+        Logger stubLog = (Logger) LoggerFactory.getLogger(LoggingEmailSender.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        stubLog.addAppender(appender);
+        try {
+            http.post().uri("/v1/auth/password/forgot")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .bodyValue(Map.of("email", email))
+                    .exchange()
+                    .expectStatus().isAccepted();
+        } finally {
+            stubLog.detachAppender(appender);
+        }
+        Pattern link = Pattern.compile(
+                "Password reset URL for " + Pattern.quote(email) + ": \\S+/reset-password\\?token=(\\S+)");
+        return appender.list.stream()
+                .map(ILoggingEvent::getFormattedMessage)
+                .map(link::matcher)
+                .filter(Matcher::find)
+                .map(m -> m.group(1))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("no reset email logged for " + email));
+    }
+
+    @Test
+    void passwordForgot_givenUnknownEmail_returns202() {
+        http.post().uri("/v1/auth/password/forgot")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("email", uniqueEmail("nobody")))
+                .exchange()
+                .expectStatus().isAccepted();
+    }
+
+    @Test
+    void passwordReset_givenEmailedToken_locksOutPreviousSessionsKeysAndPassword() {
+        // Someone signs up with the owner's address and sets up access.
+        String email = uniqueEmail("reset-takeover");
+        String oldBearer = "Bearer " + signup(email).accessToken();
+        String oldApiKey = http.post().uri("/v1/keys")
+                .header("Authorization", oldBearer)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("name", "squatter"))
+                .exchange()
+                .expectStatus().isCreated()
+                .expectBody(CreateApiKeyResponse.class).returnResult().getResponseBody()
+                .plaintext();
+        http.get().uri("/v1/auth/me").header("Authorization", "Bearer " + oldApiKey)
+                .exchange().expectStatus().isOk();
+        http.get().uri("/v1/webhooks/secret").header("Authorization", oldBearer)
+                .exchange().expectStatus().isOk();
+        String oldSecret = users.findByEmail(email).orElseThrow().getWebhookSigningSecret();
+
+        // The owner resets the password from the emailed link.
+        String token = requestResetToken(email);
+        AuthResponse reset = http.post().uri("/v1/auth/password/reset")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("token", token, "newPassword", "owners-brand-new-password"))
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody(AuthResponse.class).returnResult().getResponseBody();
+
+        // Everything the previous holder had stops working ...
+        http.get().uri("/v1/auth/me").header("Authorization", oldBearer)
+                .exchange().expectStatus().isUnauthorized();
+        http.post().uri("/v1/keys").header("Authorization", oldBearer)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("name", "after-reset"))
+                .exchange().expectStatus().isUnauthorized();
+        http.get().uri("/v1/auth/me").header("Authorization", "Bearer " + oldApiKey)
+                .exchange().expectStatus().isUnauthorized();
+        http.post().uri("/v1/auth/login")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("email", email, "password", "correct-horse-battery-staple"))
+                .exchange().expectStatus().isUnauthorized();
+        assertThat(users.findByEmail(email).orElseThrow().getWebhookSigningSecret())
+                .isNotEqualTo(oldSecret);
+
+        // ... and the owner holds a verified account with no keys.
+        String newBearer = "Bearer " + reset.accessToken();
+        MeResponse me = http.get().uri("/v1/auth/me").header("Authorization", newBearer)
+                .exchange().expectStatus().isOk()
+                .expectBody(MeResponse.class).returnResult().getResponseBody();
+        assertThat(me.emailVerified()).isTrue();
+        http.get().uri("/v1/keys").header("Authorization", newBearer)
+                .exchange().expectStatus().isOk()
+                .expectBodyList(ApiKeySummary.class).hasSize(0);
+
+        // The link is single-use.
+        http.post().uri("/v1/auth/password/reset")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("token", token, "newPassword", "a-second-attempt-password"))
                 .exchange()
                 .expectStatus().isBadRequest();
     }

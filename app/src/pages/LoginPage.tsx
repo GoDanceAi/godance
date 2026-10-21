@@ -78,6 +78,11 @@ export default function LoginPage() {
       <form onSubmit={onSubmit} className="space-y-4">
         <Field label="Email" type="email" value={email} onChange={setEmail} autoComplete="email" required />
         <Field label="Password" type="password" value={password} onChange={setPassword} autoComplete="current-password" required />
+        <p className="text-right text-xs">
+          <Link to="/forgot-password" className="text-brand-600 hover:text-brand-700 underline">
+            Forgot password?
+          </Link>
+        </p>
         {(error || oauthError) && <p className="text-sm text-danger">{error ?? oauthError}</p>}
         <button type="submit" disabled={busy} className="btn btn-primary btn-lg w-full">
           {busy ? 'Signing in…' : 'Sign in'}

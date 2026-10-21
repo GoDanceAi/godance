@@ -34,8 +34,10 @@ import org.springframework.web.cors.reactive.UrlBasedCorsConfigurationSource;
 
 import com.nimbusds.jose.jwk.source.ImmutableSecret;
 
+import ai.godance.repository.UserRepository;
 import ai.godance.security.ApiKeyAuthFilter;
 import ai.godance.security.OAuthLoginSuccessHandler;
+import ai.godance.security.SessionVersionJwtDecoder;
 import ai.godance.security.SpendingLimitFilter;
 import reactor.core.publisher.Mono;
 
@@ -70,10 +72,11 @@ public class SecurityConfig {
     }
 
     @Bean
-    ReactiveJwtDecoder reactiveJwtDecoder(JwtProperties props) {
-        return NimbusReactiveJwtDecoder.withSecretKey(secretKey(props))
+    ReactiveJwtDecoder reactiveJwtDecoder(JwtProperties props, UserRepository users) {
+        ReactiveJwtDecoder signed = NimbusReactiveJwtDecoder.withSecretKey(secretKey(props))
                 .macAlgorithm(MacAlgorithm.HS256)
                 .build();
+        return new SessionVersionJwtDecoder(signed, users);
     }
 
     private static SecretKey secretKey(JwtProperties props) {
@@ -138,6 +141,9 @@ public class SecurityConfig {
                                 "/actuator/health/**", "/actuator/info").permitAll()
                         // Pre-auth surface.
                         .pathMatchers(HttpMethod.POST, "/v1/auth/signup", "/v1/auth/login").permitAll()
+                        // Password reset proves itself with the emailed token.
+                        .pathMatchers(HttpMethod.POST,
+                                "/v1/auth/password/forgot", "/v1/auth/password/reset").permitAll()
                         // Not /v1/auth/verify: it must run in the account's own
                         // session (see AuthService.verifyEmail).
                         // Public read-only: model catalog (model picker) and

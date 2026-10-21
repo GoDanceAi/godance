@@ -17,8 +17,10 @@ import org.springframework.web.server.ServerWebExchange;
 import ai.godance.security.JwtService;
 import ai.godance.service.AuthService;
 import ai.godance.web.dto.AuthDtos.AuthResponse;
+import ai.godance.web.dto.AuthDtos.ForgotPasswordRequest;
 import ai.godance.web.dto.AuthDtos.LoginRequest;
 import ai.godance.web.dto.AuthDtos.MeResponse;
+import ai.godance.web.dto.AuthDtos.ResetPasswordRequest;
 import ai.godance.web.dto.AuthDtos.SignupRequest;
 import jakarta.validation.Valid;
 import reactor.core.publisher.Mono;
@@ -65,6 +67,22 @@ public class AuthController {
         return Mono.fromRunnable(() -> auth.resendVerificationEmail(userId, clientIp(exchange)))
                 .subscribeOn(Schedulers.boundedElastic())
                 .then(Mono.just(ResponseEntity.noContent().build()));
+    }
+
+    /** Always 202, so the response never says whether the address is registered. */
+    @PostMapping("/password/forgot")
+    public Mono<ResponseEntity<Void>> forgotPassword(
+            @Valid @RequestBody ForgotPasswordRequest req, ServerWebExchange exchange) {
+        return Mono.fromRunnable(() -> auth.requestPasswordReset(req, clientIp(exchange)))
+                .subscribeOn(Schedulers.boundedElastic())
+                .then(Mono.just(ResponseEntity.accepted().build()));
+    }
+
+    @PostMapping("/password/reset")
+    public Mono<AuthResponse> resetPassword(
+            @Valid @RequestBody ResetPasswordRequest req, ServerWebExchange exchange) {
+        return Mono.fromCallable(() -> auth.resetPassword(req, clientIp(exchange)))
+                .subscribeOn(Schedulers.boundedElastic());
     }
 
     @GetMapping("/me")

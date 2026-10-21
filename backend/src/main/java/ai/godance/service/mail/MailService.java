@@ -13,9 +13,10 @@ import ai.godance.domain.User;
 
 /**
  * The transactional email templates (the four from brief 02, plus
- * topup-payment-failed), inline — subject + text + minimal HTML, no
- * template engine. Call sites inject this facade and never touch the
- * {@link EmailSender} directly.
+ * topup-payment-failed and password-reset), inline — subject + text +
+ * minimal HTML, no template engine. Call sites inject this facade and
+ * never touch the {@link EmailSender} directly. Links point at the SPA
+ * ({@link MailProperties#appBaseUrl()}).
  *
  * <p>Two invariants:
  * <ul>
@@ -35,30 +36,75 @@ public class MailService {
 
     private final EmailSender sender;
     private final AdminProperties admin;
+    private final MailProperties props;
 
-    public MailService(EmailSender sender, AdminProperties admin) {
+    public MailService(EmailSender sender, AdminProperties admin, MailProperties props) {
         this.sender = sender;
         this.admin = admin;
+        this.props = props;
     }
 
-    /** verify-email — sent on signup, and again when the user asks for a resend. */
+    /**
+     * verify-email — sent on signup, and again when the user asks for a
+     * resend. The link only verifies when opened signed in to the account,
+     * so someone who never signed up can ignore it, or reset the password
+     * to take the address back.
+     */
     public void sendVerificationEmail(User user) {
         try {
-            String stubLine = "Verification URL for " + user.getEmail()
-                    + ": /verify-email?token=" + user.getEmailVerificationToken();
+            String link = props.appBaseUrl() + "/verify-email?token=" + user.getEmailVerificationToken();
+            String reset = props.appBaseUrl() + "/forgot-password";
+            String stubLine = "Verification URL for " + user.getEmail() + ": " + link;
             String text = stubLine + "\n\n"
                     + "Hi " + user.getFullName() + ",\n\n"
                     + "Welcome to Godance. Please confirm this email address by opening the\n"
-                    + "verification link above in the Godance app, signed in to this account.\n\n"
-                    + "If you didn't create a Godance account, you can ignore this email.\n";
+                    + "verification link above in the Godance app, signed in to this account.\n"
+                    + "The link works for 24 hours.\n\n"
+                    + "Didn't sign up? Someone may have entered your address by mistake. You\n"
+                    + "can ignore this email: the account stays unverified, and the link does\n"
+                    + "nothing unless it is opened signed in to that account. To use Godance\n"
+                    + "with this address yourself, reset the password at " + reset + "\n";
             String html = "<p>Hi " + escape(user.getFullName()) + ",</p>"
-                    + "<p>Welcome to Godance. Please confirm this email address by opening this"
-                    + " link in the Godance app, signed in to this account:</p>"
-                    + "<p><code>/verify-email?token=" + escape(user.getEmailVerificationToken()) + "</code></p>"
-                    + "<p>If you didn't create a Godance account, you can ignore this email.</p>";
+                    + "<p>Welcome to Godance. Please confirm this email address by opening "
+                    + "<a href=\"" + escape(link) + "\">this link</a> in the Godance app, signed "
+                    + "in to this account. The link works for 24 hours.</p>"
+                    + "<p><b>Didn't sign up?</b> Someone may have entered your address by mistake. "
+                    + "You can ignore this email: the account stays unverified, and the link does "
+                    + "nothing unless it is opened signed in to that account. To use Godance with "
+                    + "this address yourself, <a href=\"" + escape(reset) + "\">reset the "
+                    + "password</a>.</p>";
             sender.send(List.of(user.getEmail()), "Verify your Godance email", text, html);
         } catch (Exception e) {
             log.error("verify-email build/send failed for {}: {}", user.getId(), e.getMessage());
+        }
+    }
+
+    /**
+     * password-reset — {@code token} is the plaintext; only its hash is
+     * stored, so this email is the one place it exists.
+     */
+    public void sendPasswordResetEmail(User user, String token) {
+        try {
+            String link = props.appBaseUrl() + "/reset-password?token=" + token;
+            String stubLine = "Password reset URL for " + user.getEmail() + ": " + link;
+            String text = stubLine + "\n\n"
+                    + "Someone asked to reset the password of the Godance account that uses\n"
+                    + "this address. To choose a new password, open the link above within\n"
+                    + "an hour.\n\n"
+                    + "Resetting signs out every session and revokes the account's API keys\n"
+                    + "and webhook signing secret, so whoever knew the old password loses\n"
+                    + "access.\n\n"
+                    + "Didn't ask for this? Ignore this email; nothing changes.\n";
+            String html = "<p>Someone asked to reset the password of the Godance account that "
+                    + "uses this address. To choose a new password, open "
+                    + "<a href=\"" + escape(link) + "\">this link</a> within an hour.</p>"
+                    + "<p>Resetting signs out every session and revokes the account's API keys "
+                    + "and webhook signing secret, so whoever knew the old password loses "
+                    + "access.</p>"
+                    + "<p>Didn't ask for this? Ignore this email; nothing changes.</p>";
+            sender.send(List.of(user.getEmail()), "Reset your Godance password", text, html);
+        } catch (Exception e) {
+            log.error("password-reset build/send failed for {}: {}", user.getId(), e.getMessage());
         }
     }
 
@@ -191,9 +237,9 @@ public class MailService {
         return String.format("$%d.%02d", cents / 100, Math.abs(cents % 100));
     }
 
-    /** Minimal HTML escaping for values interpolated into the inline templates. */
+    /** Minimal HTML escaping for values interpolated into the inline templates (text and attributes). */
     private static String escape(String s) {
         if (s == null) return "";
-        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;");
     }
 }
