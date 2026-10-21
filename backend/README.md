@@ -56,6 +56,8 @@ ports above. Postgres is supplied per test class by Testcontainers, and
 their own throwaway MinIO from the same locally built image. Every
 upstream provider is WireMock-stubbed, so no real API keys are needed.
 
+CI runs the same thing. See [CI](#ci) below.
+
 ### MinIO (built from source)
 
 MinIO withdrew its public images from Docker Hub and Quay in 2025:
@@ -101,6 +103,13 @@ If MinIO refuses to start against an existing `godance_minio_data`
 volume, the volume may have been written by the newer MinIO in the old
 GHCR mirror. The data is dev-only, so `docker compose down -v` starts
 clean.
+
+### CI
+
+| Workflow | Runs on | Does |
+|---|---|---|
+| `.github/workflows/ci.yml` | every pull request, pushes to non-`main` branches | backend `mvn -B verify`, and `npm ci && npm run build` for `app/` and `marketing/`. Deploys nothing; uses only the read-only `GITHUB_TOKEN`, so fork PRs work too |
+| `.github/workflows/deploy.yml` | push to `main` (backend paths) | same backend tests, then build, push and deploy the image |
 
 ### Tearing down
 
