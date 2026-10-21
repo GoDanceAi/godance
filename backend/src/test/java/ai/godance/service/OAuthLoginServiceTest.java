@@ -78,7 +78,7 @@ class OAuthLoginServiceTest {
         existing.setPasswordHash("$2a$12$placeholderplaceholderplaceholderplaceholderplaceh");
         existing.setRole(UserRole.USER);
         existing.setActive(true);
-        existing.setEmailVerified(false);
+        existing.setEmailVerified(true);
         users.save(existing);
 
         String subject = "apple-" + UUID.randomUUID();
@@ -88,11 +88,36 @@ class OAuthLoginServiceTest {
         Jwt decoded = jwtDecoder.decode(response.accessToken()).block();
         assertThat(decoded).isNotNull();
         assertThat(decoded.getSubject()).isEqualTo(existing.getId().toString());
-        // The OAuth identity links to the existing account; email is now verified.
+        // The OAuth identity links to the existing account; the password stays.
         assertThat(identities.findByProviderAndSubject(OAuthProvider.APPLE, subject))
                 .get()
                 .satisfies(id -> assertThat(id.getUserId()).isEqualTo(existing.getId()));
-        assertThat(users.findById(existing.getId()).orElseThrow().isEmailVerified()).isTrue();
+        assertThat(users.findById(existing.getId()).orElseThrow().getPasswordHash())
+                .isEqualTo(existing.getPasswordHash());
+    }
+
+    @Test
+    void completeLogin_givenVerifiedEmailOfUnverifiedPasswordUser_refusesWithoutLinking() {
+        String email = uniqueEmail("oauth-prehijack");
+        User squatted = new User();
+        squatted.setEmail(email);
+        squatted.setFullName("Squatter");
+        squatted.setPasswordHash("$2a$12$placeholderplaceholderplaceholderplaceholderplaceh");
+        squatted.setRole(UserRole.USER);
+        squatted.setActive(true);
+        squatted.setEmailVerified(false);
+        users.save(squatted);
+
+        String subject = "google-" + UUID.randomUUID();
+        assertThatThrownBy(() -> oauthLogin.completeLogin(
+                OAuthProvider.GOOGLE, subject, email, true, "Real Owner"))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        e -> assertThat(e.getStatusCode()).isEqualTo(HttpStatus.CONFLICT));
+
+        assertThat(identities.findByProviderAndSubject(OAuthProvider.GOOGLE, subject)).isEmpty();
+        User after = users.findById(squatted.getId()).orElseThrow();
+        assertThat(after.isEmailVerified()).isFalse();
+        assertThat(after.getPasswordHash()).isEqualTo(squatted.getPasswordHash());
     }
 
     @Test
