@@ -151,11 +151,13 @@ const providerNames = [
           </p>
         </div>
         <div>
-          <h3 class="text-lg font-semibold text-fg">Truly drop-in for OpenAI clients</h3>
+          <h3 class="text-lg font-semibold text-fg">Drop-in for OpenAI chat clients</h3>
           <p class="mt-2 text-fg-muted leading-relaxed">
             Point the OpenAI SDK at <code class="code-chip">api.godance.ai/v1</code>
-            and you're done. Same endpoints, same JSON, same error codes, same streaming format.
-            Migrating production is a one-line diff.
+            and chat just works: same endpoints, same JSON, same streaming format. Migrating
+            chat is a one-line diff. Image and video take OpenAI's request shape but return a
+            <code class="code-chip">job_id</code> to poll. Errors come back as RFC 7807
+            problem details.
           </p>
         </div>
         <div>
