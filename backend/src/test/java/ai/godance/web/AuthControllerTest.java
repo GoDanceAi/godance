@@ -20,6 +20,7 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.server.ResponseStatusException;
 
 import ai.godance.security.ApiKeyAuthFilter;
+import ai.godance.security.AuthRateLimits;
 import ai.godance.service.AuthService;
 import ai.godance.web.dto.AuthDtos.ChangeEmailRequest;
 
@@ -34,13 +35,15 @@ class AuthControllerTest {
     private final Instant signedInAt = Instant.parse("2026-10-21T18:00:00Z");
 
     AuthService auth;
+    AuthRateLimits rateLimits;
     AuthController controller;
     MockServerWebExchange exchange;
 
     @BeforeEach
     void setUp() {
         auth = mock(AuthService.class);
-        controller = new AuthController(auth);
+        rateLimits = mock(AuthRateLimits.class);
+        controller = new AuthController(auth, rateLimits);
         exchange = MockServerWebExchange.from(MockServerHttpRequest.post("/v1/auth/email"));
     }
 

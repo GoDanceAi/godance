@@ -37,11 +37,14 @@ import reactor.core.publisher.Mono;
 /**
  * The handler's half of the email-verification policy: it reads the
  * provider's {@code email_verified} claim into a boolean, and turns a
- * refused sign-in into a redirect the SPA can show.
+ * refused sign-in into a redirect the SPA can show. It also echoes the
+ * SPA's login nonce on either redirect so the SPA can refuse one it didn't
+ * start.
  */
 class OAuthLoginSuccessHandlerTest {
 
     private static final String CALLBACK = "https://app.godance.test/oauth/callback";
+    private static final String NONCE = "0123456789abcdef".repeat(2);
 
     OAuthLoginService oauthLogin;
     OAuthLoginSuccessHandler handler;
@@ -62,8 +65,14 @@ class OAuthLoginSuccessHandlerTest {
     }
 
     private MockServerWebExchange signIn(String registrationId, OAuth2User principal) {
+        return signIn(registrationId, principal, null);
+    }
+
+    /** {@code loginNonce} stands in for what {@link OAuthLoginNonce} leaves on the callback exchange. */
+    private MockServerWebExchange signIn(String registrationId, OAuth2User principal, String loginNonce) {
         MockServerWebExchange exchange = MockServerWebExchange.from(
                 MockServerHttpRequest.get("/login/oauth2/code/" + registrationId));
+        if (loginNonce != null) exchange.getAttributes().put(OAuthLoginNonce.EXCHANGE_ATTRIBUTE, loginNonce);
         OAuth2AuthenticationToken token = new OAuth2AuthenticationToken(
                 principal, principal.getAuthorities(), registrationId);
         handler.onAuthenticationSuccess(new WebFilterExchange(exchange, e -> Mono.empty()), token)
@@ -126,5 +135,29 @@ class OAuthLoginSuccessHandlerTest {
         assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.FOUND);
         assertThat(exchange.getResponse().getHeaders().getLocation()).hasToString(
                 CALLBACK + "#error=Your+Google+email+address+is+not+verified.");
+    }
+
+    @Test
+    void onAuthenticationSuccess_givenLoginNonce_expectsNonceEchoedAfterToken() {
+        when(oauthLogin.completeLogin(any(), any(), any(), anyBoolean(), any()))
+                .thenReturn(AuthResponse.bearer("jwt-3", Instant.parse("2026-01-01T00:00:00Z")));
+
+        MockServerWebExchange exchange = signIn("google", principal(Boolean.TRUE), NONCE);
+
+        assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.FOUND);
+        assertThat(exchange.getResponse().getHeaders().getLocation()).hasToString(
+                CALLBACK + "#access_token=jwt-3&token_type=Bearer&expires_at=2026-01-01T00%3A00%3A00Z"
+                        + "&login_nonce=" + NONCE);
+    }
+
+    @Test
+    void onAuthenticationSuccess_givenRefusedSignInWithLoginNonce_expectsNonceEchoedAfterError() {
+        when(oauthLogin.completeLogin(any(), any(), any(), anyBoolean(), any()))
+                .thenThrow(new ResponseStatusException(HttpStatus.FORBIDDEN, "Account disabled."));
+
+        MockServerWebExchange exchange = signIn("google", principal(Boolean.TRUE), NONCE);
+
+        assertThat(exchange.getResponse().getHeaders().getLocation()).hasToString(
+                CALLBACK + "#error=Account+disabled.&login_nonce=" + NONCE);
     }
 }
