@@ -26,7 +26,6 @@ import org.testcontainers.containers.MinIOContainer;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.utility.DockerImageName;
 
 import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
@@ -71,9 +70,7 @@ class ImageGenerationIntegrationTest {
     static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16");
 
     @Container
-    static final MinIOContainer MINIO = new MinIOContainer(DockerImageName
-            .parse("ghcr.io/godanceai/minio:RELEASE.2024-12-13T22-19-12Z")
-            .asCompatibleSubstituteFor("minio/minio"))
+    static final MinIOContainer MINIO = new MinIOContainer(MinioTestImage.get())
             .withUserName("test-access").withPassword("test-secret-key-1234");
 
     static WireMockServer openAiMock;
