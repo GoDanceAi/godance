@@ -1,5 +1,5 @@
 -- =====================================================================
--- Godance V12 — an email address waiting to be verified.
+-- Godance V14 — an email address waiting to be verified.
 --
 -- An X.com sign-in shares no email, so the account gets a placeholder
 -- address. When the user adds a real one it waits here, unverified, and
