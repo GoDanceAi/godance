@@ -56,9 +56,8 @@ client-side routes don't 404 on direct visits.
 
 ```
 frontend-app/
-├── vite.config.ts            # Vite + React plugin
+├── vite.config.ts            # Vite + React + Tailwind plugins
 ├── tailwind.config.js        # Same palette as marketing
-├── postcss.config.js         # Tailwind + Autoprefixer
 ├── tsconfig.{,app,node}.json # Strict TS with project references
 ├── index.html                # Vite entry HTML
 ├── public/
@@ -68,7 +67,7 @@ frontend-app/
 └── src/
     ├── main.tsx              # createRoot + BrowserRouter
     ├── App.tsx               # Routes + AuthProvider
-    ├── index.css             # Tailwind directives
+    ├── index.css             # Tailwind import + design tokens
     ├── lib/
     │   ├── api.ts            # apiFetch wrapper + streamChat generator + DTOs
     │   └── auth.tsx          # AuthContext (login/signup/logout/refresh)

@@ -1,10 +1,11 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
 
 // Backend API URL is configurable so dev/preview can point at localhost,
 // staging, or prod without code changes. Vite exposes VITE_* vars to the client.
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
   envPrefix: 'VITE_',
   server: {
     port: 5173,
