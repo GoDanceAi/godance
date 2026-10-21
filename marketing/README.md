@@ -43,6 +43,12 @@ npx wrangler pages deploy dist --project-name=godance-marketing
 Set `SITE_URL` at build time for non-prod (e.g. `SITE_URL=https://preview.godance.ai npm run build`).
 Defaults to `https://godance.ai`.
 
+Cloudflare's Email Address Obfuscation rewrites email addresses in the HTML it serves and
+needs JavaScript to restore them, so visitors without JS and crawlers see
+`[email protected]`. Wrap every email link in `<!--email_off-->` … `<!--/email_off-->`
+(the whole `<a>`, so the `mailto:` and the visible text are both left alone), including in
+`public/*.html`.
+
 ## Project layout
 
 ```

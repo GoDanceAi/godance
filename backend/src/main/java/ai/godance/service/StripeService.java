@@ -10,6 +10,7 @@ import com.stripe.exception.StripeException;
 import com.stripe.model.Customer;
 import com.stripe.model.Event;
 import com.stripe.model.PaymentIntent;
+import com.stripe.model.PaymentMethod;
 import com.stripe.model.checkout.Session;
 import com.stripe.net.Webhook;
 import com.stripe.param.CustomerCreateParams;
@@ -35,6 +36,9 @@ public class StripeService {
 
     /** Stripe metadata key — also set on Checkout Sessions so webhooks can resolve the user. */
     public static final String META_USER_ID = "godance_user_id";
+
+    /** The only {@code PaymentMethod.type} auto-recharge saves and charges. */
+    public static final String PAYMENT_METHOD_TYPE_CARD = "card";
 
     private final StripeProperties stripe;
     private final BillingProperties billing;
@@ -110,20 +114,38 @@ public class StripeService {
 
     /**
      * Re-fetch a completed Checkout Session with its {@code payment_intent}
-     * expanded so we can read the saved {@code payment_method} id. Returns
-     * null if the session has no payment method (e.g., zero-amount session).
+     * and that intent's {@code payment_method} expanded, so one call gives
+     * the payment method's id and type. Returns null if the session has no
+     * payment method (e.g., zero-amount session). The type is null if
+     * Stripe didn't expand the payment method; callers treat that as
+     * not-a-card.
      */
-    public String retrievePaymentMethodId(String sessionId) throws StripeException {
+    public CheckoutPaymentMethod retrieveCheckoutPaymentMethod(String sessionId) throws StripeException {
         SessionRetrieveParams params = SessionRetrieveParams.builder()
-                .addExpand("payment_intent")
+                .addExpand("payment_intent.payment_method")
                 .build();
         Session full = Session.retrieve(sessionId, params, null);
         PaymentIntent pi = full.getPaymentIntentObject();
-        return pi == null ? null : pi.getPaymentMethod();
+        if (pi == null || pi.getPaymentMethod() == null) return null;
+        PaymentMethod pm = pi.getPaymentMethodObject();
+        return new CheckoutPaymentMethod(pi.getPaymentMethod(), pm == null ? null : pm.getType());
     }
 
     /**
-     * Charge a saved payment method off-session. Used by auto-recharge.
+     * The {@code type} of a saved PaymentMethod: {@code card},
+     * {@code us_bank_account}, {@code sepa_debit}, and so on.
+     */
+    public String retrievePaymentMethodType(String paymentMethodId) throws StripeException {
+        return PaymentMethod.retrieve(paymentMethodId).getType();
+    }
+
+    /** True for a card, including Apple Pay / Google Pay, which Stripe types as {@code card}. */
+    public static boolean isCard(String paymentMethodType) {
+        return PAYMENT_METHOD_TYPE_CARD.equals(paymentMethodType);
+    }
+
+    /**
+     * Charge a saved card off-session. Used by auto-recharge.
      * Throws {@link StripeException} for any decline / SCA-required / etc;
      * caller treats that as a hard failure and disables auto-recharge.
      */
@@ -136,11 +158,11 @@ public class StripeService {
                 .setPaymentMethod(paymentMethodId)
                 .setConfirm(true)
                 .setOffSession(true)
-                // No redirect-based payment methods are eligible off-session.
-                .setAutomaticPaymentMethods(PaymentIntentCreateParams.AutomaticPaymentMethods.builder()
-                        .setEnabled(true)
-                        .setAllowRedirects(PaymentIntentCreateParams.AutomaticPaymentMethods.AllowRedirects.NEVER)
-                        .build())
+                // Cards only. A bank debit (ACH, SEPA) confirms to "processing"
+                // and settles days later, which auto-recharge can't credit. With
+                // this list, Stripe rejects the request for any other saved type
+                // instead of starting the debit.
+                .addPaymentMethodType(PAYMENT_METHOD_TYPE_CARD)
                 .build();
         com.stripe.net.RequestOptions opts = com.stripe.net.RequestOptions.builder()
                 .setIdempotencyKey(idempotencyKey)
@@ -155,5 +177,12 @@ public class StripeService {
      */
     public Event verifyAndParse(String payload, String sigHeader) throws SignatureVerificationException {
         return Webhook.constructEvent(payload, sigHeader, stripe.webhookSecret());
+    }
+
+    /** The payment method a Checkout Session's payment used. {@code type} may be null. */
+    public record CheckoutPaymentMethod(String id, String type) {
+        public boolean isCard() {
+            return StripeService.isCard(type);
+        }
     }
 }
