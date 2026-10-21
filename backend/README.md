@@ -110,6 +110,7 @@ clean.
 |---|---|---|
 | `.github/workflows/ci.yml` | every pull request, pushes to non-`main` branches | backend `mvn -B verify`, and `npm ci && npm run build` for `app/` and `marketing/`. Deploys nothing; uses only the read-only `GITHUB_TOKEN`, so fork PRs work too |
 | `.github/workflows/deploy.yml` | push to `main` (backend paths) | same backend tests, then build, push and deploy the image |
+| `.github/workflows/dependency-graph.yml` | push to `main` | submits the resolved Maven dependency tree to GitHub's dependency graph, so Dependabot alerts cover the backend (its static `pom.xml` parsing can't see BOM-managed or transitive versions; see `docs/dependency-triage-2026-09.md`) |
 
 ### Tearing down
 
