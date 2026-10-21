@@ -20,13 +20,21 @@ public record RateLimitProperties(
         Limit loginPerIp,
         Limit loginPerEmail,
         Limit signupPerIp,
-        Limit verifyPerIp
+        Limit verifyPerIp,
+        Limit forgotPerIp,
+        Limit forgotPerEmail,
+        Limit resendPerIp,
+        Limit resendPerAccount
 ) {
     public RateLimitProperties {
         require("login-per-ip", loginPerIp);
         require("login-per-email", loginPerEmail);
         require("signup-per-ip", signupPerIp);
         require("verify-per-ip", verifyPerIp);
+        require("forgot-per-ip", forgotPerIp);
+        require("forgot-per-email", forgotPerEmail);
+        require("resend-per-ip", resendPerIp);
+        require("resend-per-account", resendPerAccount);
     }
 
     public record Limit(int requests, Duration window) { }

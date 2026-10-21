@@ -1,6 +1,7 @@
 package ai.godance.web;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.Locale;
 import java.util.Map;
@@ -22,6 +23,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import ai.godance.repository.UserRepository;
+import ai.godance.security.AuthRateLimits;
+import ai.godance.security.RateLimitExceededException;
 
 /**
  * Auth rate limits end to end, against the same Redis every integration
@@ -37,7 +40,11 @@ import ai.godance.repository.UserRepository;
         "godance.rate-limit.login-per-ip.requests=6",
         "godance.rate-limit.login-per-email.requests=3",
         "godance.rate-limit.signup-per-ip.requests=2",
-        "godance.rate-limit.verify-per-ip.requests=2"})
+        "godance.rate-limit.verify-per-ip.requests=2",
+        "godance.rate-limit.forgot-per-ip.requests=4",
+        "godance.rate-limit.forgot-per-email.requests=2",
+        "godance.rate-limit.resend-per-ip.requests=4",
+        "godance.rate-limit.resend-per-account.requests=2"})
 @AutoConfigureWebTestClient
 @Testcontainers
 class AuthRateLimitIntegrationTest {
@@ -50,6 +57,7 @@ class AuthRateLimitIntegrationTest {
 
     @Autowired WebTestClient http;
     @Autowired UserRepository users;
+    @Autowired AuthRateLimits rateLimits;
 
     private static String uniqueEmail(String tag) {
         return tag + "-" + UUID.randomUUID() + "@godance.test";
@@ -158,5 +166,43 @@ class AuthRateLimitIntegrationTest {
         verify(ip, "no-such-token").expectStatus().isBadRequest();
 
         expectTooManyRequests(verify(ip, "no-such-token"));
+    }
+
+    // ---------- forgot password / resend verification -----------------
+    // Their endpoints are not on main yet, so these drive AuthRateLimits
+    // directly: real Redis counters and the bound godance.rate-limit config.
+
+    @Test
+    void forgotPassword_givenTooManyForOneEmail_expectsSendRefusedWithoutError() {
+        String email = uniqueEmail("rl-forgot");
+        assertThat(rateLimits.forgotPassword(randomClientIp(), email).block()).isTrue();
+        assertThat(rateLimits.forgotPassword(randomClientIp(), email.toUpperCase(Locale.ROOT)).block()).isTrue();
+
+        assertThat(rateLimits.forgotPassword(randomClientIp(), email).block()).isFalse();
+        // Per email: another address is unaffected.
+        assertThat(rateLimits.forgotPassword(randomClientIp(), uniqueEmail("rl-forgot-other")).block()).isTrue();
+    }
+
+    @Test
+    void forgotPassword_givenTooManyFromOneIp_expectsSendRefusedForAnyEmail() {
+        String ip = randomClientIp();
+        for (int i = 0; i < 4; i++) {
+            assertThat(rateLimits.forgotPassword(ip, uniqueEmail("rl-forgot-spray")).block()).isTrue();
+        }
+
+        assertThat(rateLimits.forgotPassword(ip, uniqueEmail("rl-forgot-fresh")).block()).isFalse();
+    }
+
+    @Test
+    void resendVerification_givenTooManyForOneAccount_expects429() {
+        UUID account = UUID.randomUUID();
+        rateLimits.resendVerification(randomClientIp(), account).block();
+        rateLimits.resendVerification(randomClientIp(), account).block();
+
+        assertThatThrownBy(() -> rateLimits.resendVerification(randomClientIp(), account).block())
+                .isInstanceOfSatisfying(RateLimitExceededException.class,
+                        e -> assertThat(e.getRetryAfterSeconds()).isBetween(1L, 86_400L));
+        // Per account: another account is unaffected.
+        rateLimits.resendVerification(randomClientIp(), UUID.randomUUID()).block();
     }
 }

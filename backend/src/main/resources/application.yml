@@ -82,10 +82,15 @@ godance:
     # Over a limit → 429 problem+json with Retry-After. Fails open if Redis
     # is unreachable. Per-IP limits use X-Forwarded-For as set by Caddy.
     enabled: true
-    login-per-ip:    { requests: 30, window: 15m }   # credential stuffing across many accounts
-    login-per-email: { requests: 10, window: 15m }   # password guessing against one account
-    signup-per-ip:   { requests: 10, window: 1h }    # each signup sends a verification email
-    verify-per-ip:   { requests: 30, window: 15m }
+    login-per-ip:       { requests: 30, window: 15m }   # credential stuffing across many accounts
+    login-per-email:    { requests: 10, window: 15m }   # password guessing against one account
+    signup-per-ip:      { requests: 10, window: 1h }    # each signup sends a verification email
+    verify-per-ip:      { requests: 30, window: 15m }
+    # Each forgot-password / resend-verification request can send an email.
+    forgot-per-ip:      { requests: 10, window: 1h }
+    forgot-per-email:   { requests: 5,  window: 24h }   # a handful of reset emails per address per day
+    resend-per-ip:      { requests: 10, window: 1h }
+    resend-per-account: { requests: 5,  window: 24h }   # a handful of verification emails per account per day
   object-storage:
     endpoint:         ${OBJECT_STORAGE_ENDPOINT:http://localhost:9000}
     region:           ${OBJECT_STORAGE_REGION:us-east-1}   # MinIO accepts any placeholder
