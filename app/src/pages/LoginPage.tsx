@@ -1,30 +1,26 @@
 import { useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
-import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
-import { ApiError, API_BASE } from '../lib/api';
+import { ApiError } from '../lib/api';
+import { startOAuth } from '../lib/oauth';
 
-// Spring Security OAuth2 Client registration ids. Hitting
-// `${API_BASE}/oauth2/authorization/{id}` starts the provider round-trip; the
-// backend success handler mints the standard Godance JWT and redirects to
-// `/oauth/callback?token=…` (see OAuthCallbackPage).
+// Spring Security OAuth2 Client registration ids (see lib/oauth startOAuth).
 const OAUTH_PROVIDERS: { id: string; label: string; icon: ReactNode }[] = [
   { id: 'google', label: 'Google', icon: <GoogleIcon /> },
   { id: 'apple', label: 'Apple', icon: <AppleIcon /> },
   { id: 'x', label: 'X', icon: <XIcon /> },
 ];
 
-function startOAuth(id: string) {
-  window.location.href = `${API_BASE}/oauth2/authorization/${id}`;
-}
-
 export default function LoginPage() {
   const { login } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const [searchParams] = useSearchParams();
-  const redirectTo = (location.state as { from?: string } | null)?.from ?? '/dashboard';
-  const oauthError = searchParams.get('oauth_error');
+  const state = location.state as { from?: string; oauthError?: string } | null;
+  const redirectTo = state?.from ?? '/dashboard';
+  // Navigation state, not the query string, so a crafted link can't put
+  // words in this error line; only OAuthCallbackPage sets it.
+  const oauthError = state?.oauthError ?? null;
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
