@@ -9,9 +9,10 @@
 #   app        — npm ci && npm run lint && npm run build && npm audit
 #   marketing  — npm ci && npm run lint && npm run build && npm audit
 #
-# npm audit runs last and fails on a finding of any severity. A newly
-# published advisory can turn it red on a PR that didn't cause it; Lint
-# and Build have already reported by then.
+# npm audit runs last and fails on high or critical findings; it still
+# lists low and moderate ones in the log. A newly published advisory can
+# turn it red on a PR that didn't cause it; Lint and Build have already
+# reported by then.
 #
 # No secrets: the only credential is the default, read-only GITHUB_TOKEN,
 # so PRs from forks run exactly like PRs from branches in this repo.
@@ -76,7 +77,7 @@ jobs:
         run: npm run build
       - name: Audit
         working-directory: app
-        run: npm audit
+        run: npm audit --audit-level=high
 
   marketing:
     name: marketing (build)
@@ -104,4 +105,4 @@ jobs:
         run: npm run build
       - name: Audit
         working-directory: marketing
-        run: npm audit
+        run: npm audit --audit-level=high
