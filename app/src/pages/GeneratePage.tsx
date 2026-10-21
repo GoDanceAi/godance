@@ -3,6 +3,7 @@ import type { FormEvent } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import {
   apiFetch,
+  isVirtualModel,
   type AsyncJobAcknowledged,
   type GenerationJob,
   type ModelEntry,
@@ -190,8 +191,9 @@ export default function GeneratePage() {
     apiFetch<ModelListResponse>('/v1/models', { auth: false })
       .then((response) => {
         if (cancelled) return;
-        const filtered = response.data.filter((m) =>
-          m.godance.modality === 'IMAGE' || m.godance.modality === 'VIDEO',
+        const filtered = response.data.filter(
+          (m): m is ModelEntry => !isVirtualModel(m)
+            && (m.godance.modality === 'IMAGE' || m.godance.modality === 'VIDEO'),
         );
         setModels(filtered.length > 0 ? filtered : FALLBACK_MODELS);
       })
