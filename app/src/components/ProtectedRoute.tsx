@@ -19,9 +19,8 @@ export default function ProtectedRoute({ children }: { children: ReactNode }) {
   }
 
   if (!user) {
-    // Preserve the intended destination (query included, e.g. /verify-email?token=…)
-    // so /login can redirect back after auth.
-    return <Navigate to="/login" replace state={{ from: location.pathname + location.search }} />;
+    // Preserve the intended destination so /login can redirect back after auth.
+    return <Navigate to="/login" replace state={{ from: location.pathname }} />;
   }
 
   return <>{children}</>;

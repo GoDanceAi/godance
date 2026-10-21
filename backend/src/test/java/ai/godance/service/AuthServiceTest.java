@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.time.Duration;
@@ -28,12 +29,15 @@ import ai.godance.security.JwtService;
 import ai.godance.service.mail.MailService;
 
 /**
- * {@link AuthService#verifyEmail} binds the inbox token to the account's
- * own session, so the owner of an address cannot verify an account that
- * someone else registered with it. {@link AuthService#resendVerificationEmail}
- * re-sends that token, at most once a minute.
- * {@link AuthService#requestEmailChange} needs the caller to prove again who
- * they are, and keeps the new address pending until it is verified.
+ * Email rules of {@link AuthService} against a mocked repository.
+ * {@code AuthAndApiKeyIntegrationTest} covers the same endpoints over HTTP
+ * against Postgres. {@link AuthService#verifyEmail} binds the inbox token
+ * to the account's own session, so the owner of an address cannot verify
+ * an account someone else registered with it.
+ * {@link AuthService#resendVerificationEmail} re-sends that token, at most
+ * once a minute. {@link AuthService#requestEmailChange} needs the caller to
+ * prove again who they are, and keeps the new address pending until it is
+ * verified.
  */
 class AuthServiceTest {
 
@@ -79,11 +83,26 @@ class AuthServiceTest {
                 e -> assertThat(e.getStatusCode()).isEqualTo(status));
     }
 
-    @Test
-    void verifyEmail_givenTokenOfSignedInUser_marksVerifiedAndClearsToken() {
-        User u = unverifiedUserWithToken("tok-own");
+    /** As left by password signup: a password, a pending verification token. */
+    private User signedUpUser(String email, String token) {
+        User u = new User();
+        u.setId(UUID.randomUUID());
+        u.setEmail(email);
+        u.setFullName("Signed Up");
+        u.setPasswordHash(HASH);
+        u.setRole(UserRole.USER);
+        u.setActive(true);
+        u.setEmailVerified(false);
+        u.setEmailVerificationToken(token);
+        when(users.findByEmailVerificationToken(token)).thenReturn(Optional.of(u));
+        return u;
+    }
 
-        auth.verifyEmail(u.getId(), "tok-own", "203.0.113.7");
+    @Test
+    void verifyEmail_givenTokenOfCallersAccount_marksEmailVerifiedAndClearsToken() {
+        User u = signedUpUser("owner@godance.test", "tok-owner");
+
+        auth.verifyEmail("tok-owner", u.getId(), "203.0.113.7");
 
         assertThat(u.isEmailVerified()).isTrue();
         assertThat(u.getEmailVerificationToken()).isNull();
@@ -91,26 +110,33 @@ class AuthServiceTest {
     }
 
     @Test
-    void verifyEmail_givenTokenOfAnotherUser_refusesAndLeavesAccountUnverified() {
-        User u = unverifiedUserWithToken("tok-squatted");
+    void verifyEmail_givenTokenOfAnotherAccount_refusesWithoutVerifying() {
+        // Pre-hijack: someone registered the owner's address with their own
+        // password; the owner, signed in to a different account, opens the
+        // link from the unsolicited verification email.
+        User squatted = signedUpUser("owner@godance.test", "tok-squatted");
+        UUID otherAccount = UUID.randomUUID();
 
-        assertThatThrownBy(() -> auth.verifyEmail(UUID.randomUUID(), "tok-squatted", null))
+        assertThatThrownBy(() -> auth.verifyEmail("tok-squatted", otherAccount, "203.0.113.7"))
                 .isInstanceOfSatisfying(ResponseStatusException.class, e -> {
                     assertThat(e.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
                     assertThat(e.getReason()).contains("different account");
                 });
 
-        assertThat(u.isEmailVerified()).isFalse();
-        assertThat(u.getEmailVerificationToken()).isEqualTo("tok-squatted");
+        assertThat(squatted.isEmailVerified()).isFalse();
+        assertThat(squatted.getEmailVerificationToken()).isEqualTo("tok-squatted");
         verify(users, never()).save(any());
+        verifyNoInteractions(audit);
     }
 
     @Test
     void verifyEmail_givenUnknownToken_rejectsWith400() {
-        assertRefused(() -> auth.verifyEmail(UUID.randomUUID(), "tok-unknown", null),
-                HttpStatus.BAD_REQUEST);
+        assertThatThrownBy(() -> auth.verifyEmail("no-such-token", UUID.randomUUID(), null))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        e -> assertThat(e.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST));
 
         verify(users, never()).save(any());
+        verifyNoInteractions(audit);
     }
 
     @Test
@@ -342,7 +368,7 @@ class AuthServiceTest {
     void verifyEmail_givenAddressBeingAdded_replacesPlaceholderAndMarksVerified() {
         User u = withPendingAddress(placeholderUser(), "added@godance.test");
 
-        auth.verifyEmail(u.getId(), "tok-pending", null);
+        auth.verifyEmail("tok-pending", u.getId(), null);
 
         assertThat(u.getEmail()).isEqualTo("added@godance.test");
         assertThat(u.getPendingEmail()).isNull();
@@ -355,7 +381,7 @@ class AuthServiceTest {
     void verifyEmail_givenChangeFromVerifiedAddress_switchesAndNotifiesTheOldAddress() {
         User u = withPendingAddress(verifiedPasswordUser(), "new@godance.test");
 
-        auth.verifyEmail(u.getId(), "tok-pending", null);
+        auth.verifyEmail("tok-pending", u.getId(), null);
 
         assertThat(u.getEmail()).isEqualTo("new@godance.test");
         assertThat(u.isEmailVerified()).isTrue();
@@ -366,7 +392,7 @@ class AuthServiceTest {
     void verifyEmail_givenChangeFromUnverifiedAddress_switchesWithoutMailingTheOldAddress() {
         User u = withPendingAddress(unverifiedUserWithToken(null), "fixed-typo@godance.test");
 
-        auth.verifyEmail(u.getId(), "tok-pending", null);
+        auth.verifyEmail("tok-pending", u.getId(), null);
 
         assertThat(u.getEmail()).isEqualTo("fixed-typo@godance.test");
         assertThat(u.isEmailVerified()).isTrue();
@@ -378,7 +404,7 @@ class AuthServiceTest {
         User u = withPendingAddress(placeholderUser(), "added@godance.test");
         when(users.existsByEmail("added@godance.test")).thenReturn(true);
 
-        assertRefused(() -> auth.verifyEmail(u.getId(), "tok-pending", null), HttpStatus.CONFLICT);
+        assertRefused(() -> auth.verifyEmail("tok-pending", u.getId(), null), HttpStatus.CONFLICT);
 
         assertThat(u.getEmail()).isEqualTo("x-42" + User.SYNTHETIC_EMAIL_SUFFIX);
         assertThat(u.isEmailVerified()).isFalse();

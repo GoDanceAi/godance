@@ -112,24 +112,25 @@ public class AuthService {
     }
 
     /**
-     * Confirm the signed-in user's email. The token proves access to the
-     * inbox; requiring that user's own session proves the same person
-     * holds the account. Without it, the owner of an address could verify
-     * an account someone else registered with it, and OAuth sign-in would
-     * then link into that account (see {@code OAuthLoginService}).
+     * Mark the caller's email verified. The token proves the inbox and the
+     * caller's session proves the account; both are required. Signup takes
+     * any address, so whoever reads the inbox may not be whoever set the
+     * password. Accepting the token alone would let the inbox owner confirm
+     * an account someone else pre-registered in their name, and a later
+     * Google or Apple sign-in would then link into it.
      *
      * <p>For an address being added or changed to (see
      * {@link #requestEmailChange}), this is the point where it replaces the
      * account's email.
      */
     @Transactional
-    public void verifyEmail(UUID userId, String token, String ipAddress) {
+    public void verifyEmail(String token, UUID userId, String ipAddress) {
         User u = users.findByEmailVerificationToken(token).orElseThrow(() ->
                 new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid verification token"));
         if (!u.getId().equals(userId)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
                     "This verification link is for a different account. "
-                            + "Sign in to that account and open the link again.");
+                            + "Sign in to that account, then open the link again.");
         }
         String replacedEmail = null;
         if (u.getPendingEmail() != null) {

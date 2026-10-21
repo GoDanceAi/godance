@@ -54,10 +54,11 @@ public class AuthController {
     }
 
     @GetMapping("/verify")
-    public Mono<ResponseEntity<Void>> verify(@AuthenticationPrincipal Jwt jwt,
-            @RequestParam("token") String token, ServerWebExchange exchange) {
+    public Mono<ResponseEntity<Void>> verify(
+            @RequestParam("token") String token, @AuthenticationPrincipal Jwt jwt,
+            ServerWebExchange exchange) {
         UUID userId = sessionUserId(jwt);
-        return Mono.fromRunnable(() -> auth.verifyEmail(userId, token, clientIp(exchange)))
+        return Mono.fromRunnable(() -> auth.verifyEmail(token, userId, clientIp(exchange)))
                 .subscribeOn(Schedulers.boundedElastic())
                 .then(Mono.just(ResponseEntity.noContent().build()));
     }
