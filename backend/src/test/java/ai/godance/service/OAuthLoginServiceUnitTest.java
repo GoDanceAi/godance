@@ -17,6 +17,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
@@ -37,6 +38,9 @@ import ai.godance.web.dto.AuthDtos.AuthResponse;
  * {@link OAuthLoginServiceTest} covers the same flow against Postgres.
  */
 class OAuthLoginServiceUnitTest {
+
+    private static final String PASSWORD_HASH =
+            "$2a$12$placeholderplaceholderplaceholderplaceholderplaceh";
 
     UserRepository users;
     OAuthIdentityRepository identities;
@@ -62,18 +66,23 @@ class OAuthLoginServiceUnitTest {
                 "jwt-for-" + inv.<User>getArgument(0).getId(), Instant.now().plusSeconds(3600)));
     }
 
-    private User existingPasswordUser(String email) {
+    private User existingUser(String email, String passwordHash, boolean emailVerified) {
         User u = new User();
         u.setId(UUID.randomUUID());
         u.setEmail(email);
         u.setFullName("Existing User");
-        u.setPasswordHash("$2a$12$placeholderplaceholderplaceholderplaceholderplaceh");
+        u.setPasswordHash(passwordHash);
         u.setRole(UserRole.USER);
         u.setActive(true);
-        u.setEmailVerified(false);
+        u.setEmailVerified(emailVerified);
         when(users.findByEmail(email)).thenReturn(Optional.of(u));
         when(users.findById(u.getId())).thenReturn(Optional.of(u));
         return u;
+    }
+
+    /** As left by password signup: a password, email not yet verified. */
+    private User existingPasswordUser(String email) {
+        return existingUser(email, PASSWORD_HASH, false);
     }
 
     private OAuthIdentity savedIdentity() {
@@ -83,8 +92,8 @@ class OAuthLoginServiceUnitTest {
     }
 
     @Test
-    void completeLogin_givenVerifiedEmailOfExistingUser_linksIdentityToThatUser() {
-        User existing = existingPasswordUser("linked@godance.test");
+    void completeLogin_givenVerifiedEmailOfVerifiedPasswordUser_linksAndKeepsPassword() {
+        User existing = existingUser("linked@godance.test", PASSWORD_HASH, true);
 
         AuthResponse response = oauthLogin.completeLogin(
                 OAuthProvider.GOOGLE, "google-123", "Linked@Godance.test", true, "Linked");
@@ -95,6 +104,44 @@ class OAuthLoginServiceUnitTest {
         assertThat(identity.getProvider()).isEqualTo(OAuthProvider.GOOGLE);
         assertThat(identity.getSubject()).isEqualTo("google-123");
         assertThat(existing.isEmailVerified()).isTrue();
+        assertThat(existing.getPasswordHash()).isEqualTo(PASSWORD_HASH);
+    }
+
+    @Test
+    void completeLogin_givenVerifiedEmailOfUnverifiedPasswordlessUser_linksAndMarksEmailVerified() {
+        User existing = existingUser("passwordless@godance.test", null, false);
+
+        AuthResponse response = oauthLogin.completeLogin(
+                OAuthProvider.APPLE, "apple-123", "passwordless@godance.test", true, "Passwordless");
+
+        assertThat(response.accessToken()).isEqualTo("jwt-for-" + existing.getId());
+        assertThat(savedIdentity().getUserId()).isEqualTo(existing.getId());
+        assertThat(existing.isEmailVerified()).isTrue();
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = OAuthProvider.class, names = {"GOOGLE", "APPLE"})
+    void completeLogin_givenVerifiedEmailOfUnverifiedPasswordUser_refusesWithoutLinking(
+            OAuthProvider provider) {
+        // Pre-hijack: someone signed up with the owner's address and a
+        // password of their choosing, then the owner arrives via a provider.
+        User squatted = existingPasswordUser("owner@godance.test");
+
+        assertThatThrownBy(() -> oauthLogin.completeLogin(
+                provider, "owner-subject", "Owner@Godance.test", true, "Owner"))
+                .isInstanceOfSatisfying(ResponseStatusException.class, e -> {
+                    assertThat(e.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+                    assertThat(e.getReason())
+                            .contains("Sign in with your password and verify your email")
+                            .endsWith("then sign in with "
+                                    + (provider == OAuthProvider.GOOGLE ? "Google" : "Apple") + ".");
+                });
+
+        verify(identities, never()).save(any());
+        verify(users, never()).save(any());
+        verify(jwt, never()).issueFor(any());
+        assertThat(squatted.isEmailVerified()).isFalse();
+        assertThat(squatted.getPasswordHash()).isEqualTo(PASSWORD_HASH);
     }
 
     @Test

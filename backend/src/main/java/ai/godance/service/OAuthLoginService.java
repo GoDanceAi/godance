@@ -39,6 +39,8 @@ import ai.godance.web.dto.AuthDtos.AuthResponse;
  *   <li>Else an email the provider has <em>not</em> verified → refuse.
  *       Nothing is written, so the person can verify with the provider
  *       and sign in again.</li>
+ *   <li>Else a user with the provider-verified email that has a password
+ *       but never verified the email → refuse. Nothing is written.</li>
  *   <li>Else a user with the provider-verified email → link a new
  *       identity to them.</li>
  *   <li>Else create a fresh OAuth-only user (no password) and link.</li>
@@ -50,6 +52,15 @@ import ai.godance.web.dto.AuthDtos.AuthResponse;
  * owner to link into later. A throwaway account would also bind the
  * {@code (provider, subject)} for good, so the person would keep landing
  * in it after verifying.
+ *
+ * <p>Password signup takes any address unchecked, so an unverified
+ * password account proves nobody owns its email. Linking into one would
+ * share it between the provider's user and whoever set the password.
+ * Clearing the password on link would not evict that person: issued JWTs
+ * stay valid until expiry, and API keys, the webhook signing secret and a
+ * saved card survive. Refusing leaves the account untouched; once its
+ * holder signs in with the password and verifies the email, the next
+ * provider sign-in links.
  */
 @Service
 public class OAuthLoginService {
@@ -107,6 +118,16 @@ public class OAuthLoginService {
             if (user == null) {
                 user = createOAuthUser(provider, subject, normalizedEmail, fullName);
             } else if (!user.isEmailVerified()) {
+                if (user.getPasswordHash() != null) {
+                    // Possibly pre-registered by someone who doesn't own the
+                    // address; linking would share the account with them.
+                    log.warn("Refused {} sign-in: email held by unverified password account {}",
+                            provider, user.getId());
+                    throw new ResponseStatusException(HttpStatus.CONFLICT,
+                            "An account with this email address already exists and its email "
+                                    + "is not verified. Sign in with your password and verify "
+                                    + "your email, then sign in with " + displayName(provider) + ".");
+                }
                 // The provider has verified ownership of this email — trust it.
                 user.setEmailVerified(true);
             }
