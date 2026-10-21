@@ -2,10 +2,14 @@ package ai.godance.web;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import static com.github.tomakehurst.wiremock.client.WireMock.equalTo;
+import static com.github.tomakehurst.wiremock.client.WireMock.matchingJsonPath;
 import static com.github.tomakehurst.wiremock.client.WireMock.post;
+import static com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -31,11 +35,13 @@ import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
 
 import ai.godance.domain.CallOutcome;
 import ai.godance.domain.CreditSource;
+import ai.godance.domain.UsageRecord;
 import ai.godance.repository.UsageRecordRepository;
 import ai.godance.repository.UserRepository;
 import ai.godance.service.CreditLedgerService;
 import ai.godance.web.dto.AuthDtos.AuthResponse;
 import ai.godance.web.dto.ChatCompletionDtos.ChatCompletionResponse;
+import reactor.core.publisher.Flux;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.MOCK)
 @AutoConfigureWebTestClient
@@ -355,5 +361,136 @@ class ChatCompletionIntegrationTest {
 
         assertThat(users.findById(u.id()).orElseThrow().getCreditBalanceCents())
                 .isEqualTo(100_00L);
+    }
+
+    // ===== Streaming fall-through =====================================
+
+    private static String sseBody(String model, String content) {
+        return String.join("",
+                "data: {\"id\":\"chatcmpl-ft\",\"object\":\"chat.completion.chunk\",",
+                "\"created\":1700000000,\"model\":\"" + model + "\",",
+                "\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"" + content + "\"},",
+                "\"finish_reason\":null}]}\n\n",
+                "data: {\"id\":\"chatcmpl-ft\",\"object\":\"chat.completion.chunk\",",
+                "\"created\":1700000000,\"model\":\"" + model + "\",",
+                "\"choices\":[],\"usage\":{\"prompt_tokens\":50,\"completion_tokens\":25,\"total_tokens\":75}}\n\n",
+                "data: [DONE]\n\n");
+    }
+
+    private WebTestClient.ResponseSpec streamGpt4o(Signed u) {
+        return http.post().uri("/v1/chat/completions")
+                .header("Authorization", u.bearer())
+                .accept(MediaType.TEXT_EVENT_STREAM)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of(
+                        "model", "gpt-4o",
+                        "messages", List.of(Map.of("role", "user", "content", "Hello stream")),
+                        "stream", true))
+                .exchange();
+    }
+
+    private List<UsageRecord> recordsFor(Signed u) {
+        return usage.findByUserIdAndRecordedAtGreaterThanEqual(u.id(),
+                java.time.Instant.now().minusSeconds(60));
+    }
+
+    @Test
+    void chatCompletions_streaming_primaryFailsBeforeFirstChunk_fallsThroughToFallback() {
+        Signed u = signupWithBalance(100_00L);
+
+        // gpt-4o -> [gpt-4o-mini]: the gpt-4o stream 500s before any chunk,
+        // so the gpt-4o-mini fallback serves the stream.
+        openAiMock.stubFor(post(urlEqualTo("/v1/chat/completions"))
+                .inScenario("stream-fallback").whenScenarioStateIs(com.github.tomakehurst.wiremock.stubbing.Scenario.STARTED)
+                .willReturn(aResponse().withStatus(500).withBody("primary down"))
+                .willSetStateTo("primary-failed"));
+        openAiMock.stubFor(post(urlEqualTo("/v1/chat/completions"))
+                .inScenario("stream-fallback").whenScenarioStateIs("primary-failed")
+                .willReturn(aResponse().withStatus(200)
+                        .withHeader("content-type", "text/event-stream")
+                        .withBody(sseBody("gpt-4o-mini", "Hi from mini"))));
+
+        List<String> events = streamGpt4o(u)
+                .expectStatus().isOk()
+                .expectHeader().contentTypeCompatibleWith(MediaType.TEXT_EVENT_STREAM)
+                .returnResult(String.class).getResponseBody()
+                .collectList().block(Duration.ofSeconds(10));
+
+        assertThat(events).anySatisfy(e -> assertThat(e).contains("\"content\":\"Hi from mini\""));
+        assertThat(events).anySatisfy(e -> assertThat(e).contains("[DONE]"));
+        openAiMock.verify(1, postRequestedFor(urlEqualTo("/v1/chat/completions"))
+                .withRequestBody(matchingJsonPath("$.model", equalTo("gpt-4o-mini"))));
+
+        // Same records as the non-streaming fallback: an ERROR row for gpt-4o,
+        // an OK row (written after the stream ends) for gpt-4o-mini.
+        await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> {
+            var records = recordsFor(u);
+            assertThat(records).hasSize(2);
+            assertThat(records).anySatisfy(r -> {
+                assertThat(r.getModelName()).isEqualTo("gpt-4o");
+                assertThat(r.getOutcome()).isEqualTo(CallOutcome.ERROR);
+                assertThat(r.isFallbackUsed()).isFalse();
+            });
+            assertThat(records).anySatisfy(r -> {
+                assertThat(r.getModelName()).isEqualTo("gpt-4o-mini");
+                assertThat(r.getOutcome()).isEqualTo(CallOutcome.OK);
+                assertThat(r.isFallbackUsed()).isTrue();
+            });
+        });
+    }
+
+    @Test
+    void chatCompletions_streaming_failsAfterFirstChunk_endsStreamWithoutFallThrough() {
+        Signed u = signupWithBalance(100_00L);
+
+        // One good chunk reaches the client, then the upstream sends garbage.
+        // The response already belongs to gpt-4o, so gpt-4o-mini must not run.
+        String brokenSse = String.join("",
+                "data: {\"id\":\"chatcmpl-mid\",\"object\":\"chat.completion.chunk\",",
+                "\"created\":1700000000,\"model\":\"gpt-4o\",",
+                "\"choices\":[{\"index\":0,\"delta\":{\"content\":\"partial\"},\"finish_reason\":null}]}\n\n",
+                "data: {not json\n\n");
+        openAiMock.stubFor(post(urlEqualTo("/v1/chat/completions"))
+                .willReturn(aResponse().withStatus(200)
+                        .withHeader("content-type", "text/event-stream")
+                        .withBody(brokenSse)));
+
+        // 200, not an error status: the first chunk committed the response.
+        // (How much of it the in-memory test client sees before the abrupt
+        // end is up to the transport, so only the server side is asserted.)
+        streamGpt4o(u)
+                .expectStatus().isOk()
+                .returnResult(String.class).getResponseBody()
+                .onErrorResume(e -> Flux.empty())
+                .collectList().block(Duration.ofSeconds(10));
+
+        assertThat(openAiMock.getAllServeEvents()).hasSize(1);
+
+        // Full refund, plus one failure row for gpt-4o.
+        await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> {
+            assertThat(users.findById(u.id()).orElseThrow().getCreditBalanceCents()).isEqualTo(100_00L);
+            assertThat(recordsFor(u)).singleElement().satisfies(r -> {
+                assertThat(r.getModelName()).isEqualTo("gpt-4o");
+                assertThat(r.getOutcome()).isEqualTo(CallOutcome.ERROR);
+            });
+        });
+    }
+
+    @Test
+    void chatCompletions_streaming_allAttemptsFailBeforeFirstChunk_returns502_fullyRefunds() {
+        Signed u = signupWithBalance(100_00L);
+
+        openAiMock.stubFor(post(urlEqualTo("/v1/chat/completions"))
+                .willReturn(aResponse().withStatus(500).withBody("everything down")));
+
+        streamGpt4o(u).expectStatus().isEqualTo(502);
+
+        // Both gpt-4o and gpt-4o-mini were tried; each failure is recorded.
+        assertThat(openAiMock.getAllServeEvents()).hasSize(2);
+        await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> {
+            assertThat(users.findById(u.id()).orElseThrow().getCreditBalanceCents()).isEqualTo(100_00L);
+            assertThat(recordsFor(u)).hasSize(2)
+                    .allSatisfy(r -> assertThat(r.getOutcome()).isEqualTo(CallOutcome.ERROR));
+        });
     }
 }

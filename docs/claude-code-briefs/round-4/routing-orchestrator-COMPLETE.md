@@ -74,24 +74,29 @@ New and changed tests:
 
 ---
 
-## Known limitation: streaming has no fall-through
+## Known limitation: streaming has no fall-through (fixed since)
 
-`executeStreaming()` dispatches only `attemptModels.get(0)`. There is no
-attempt loop, no `reorderByHealth()`, and the static fallback chain is never
-used. A region-forbidden first candidate returns `dispatch()`'s 503, and an
-upstream failure errors the stream. Both get a full refund, but the request
-is not retried on the next candidate the way `execute()` retries it.
+> **Fixed in a follow-up change.** `executeStreaming()` now walks the same
+> candidate list as `execute()`, after the same `reorderByHealth()`. An
+> attempt that fails before relaying its first chunk falls through to the
+> next candidate: a dispatch rejection, a model missing from the catalog, or
+> an upstream error. Once a chunk has reached the client, the response
+> belongs to that model, and a later error ends the stream. The rest of this
+> section describes the behavior when this report was written.
+
+At merge time, `executeStreaming()` dispatched only `attemptModels.get(0)`.
+There was no attempt loop, no `reorderByHealth()`, and the static fallback
+chain was never used. A region-forbidden first candidate returned
+`dispatch()`'s 503, and an upstream failure errored the stream. Both got a
+full refund, but the request was not retried on the next candidate the way
+`execute()` retries it.
 
 Direct streaming calls already behaved this way before routing. Virtual ids
 hit it more often because they depend on their candidate lists. Under
 `region=alicloud`, a streamed `godance-quality` call (and a streamed
-`godance-auto` code, reasoning or long-context call) leads with an OpenAI
-model and gets a 503. The same request without streaming is served by
+`godance-auto` code, reasoning or long-context call) led with an OpenAI
+model and got a 503. The same request without streaming was served by
 `deepseek-v4-pro`.
-
-This is not fixed here. A fix needs a fall-through that is safe before the
-first byte is sent, and that is a separate change. The limitation is also
-documented in the `executeStreaming()` Javadoc.
 
 ---
 
