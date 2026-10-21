@@ -610,11 +610,11 @@
         </div>
         <div class="boiler">
           <span class="tag">Standard &#183; ~60 words</span>
-          <p>Godance is a multimodal AI aggregator that routes chat, image, and video requests to 15+ providers &#8212; OpenAI, Anthropic, Google Vertex, Flux, DeepSeek, and more &#8212; through one OpenAI-compatible API. Usage from every provider lands on a single append-only credit ledger with per-model fallback chains and pass-through pricing plus 5%. No tiers, no seats, no minimums.</p>
+          <p>Godance is a multimodal AI aggregator that routes chat, image, and video requests to 15+ providers &#8212; OpenAI, Anthropic, Google Vertex, Flux, DeepSeek, and more &#8212; through one OpenAI-compatible API. Usage from every provider lands on a single append-only credit ledger with per-model fallback chains and pass-through pricing plus a published platform fee. No tiers, no seats, no minimums.</p>
         </div>
         <div class="boiler">
           <span class="tag">Extended &#183; ~100 words</span>
-          <p>Godance is a multimodal AI aggregator that puts every major AI model behind one OpenAI-compatible API. Any OpenAI SDK works as a drop-in client by swapping <code class="inline">base_url</code> &#8212; chat completions and image and video generation route to 15+ providers, including OpenAI, Anthropic, Google Vertex, Black Forest Labs, DeepSeek, xAI, Runway, and Kling. Every request is metered on a single append-only credit ledger at microcent precision, with per-model fallback chains and signed webhooks. Pricing is pass-through plus 5% &#8212; no tiers, no seats, no minimums. The platform is open source under the Apache 2.0 license.</p>
+          <p>Godance is a multimodal AI aggregator that puts every major AI model behind one OpenAI-compatible API. Any OpenAI SDK works as a drop-in client by swapping <code class="inline">base_url</code> &#8212; chat completions and image and video generation route to 15+ providers, including OpenAI, Anthropic, Google Vertex, Black Forest Labs, DeepSeek, xAI, Runway, and Kling. Every request is metered on a single append-only credit ledger at microcent precision, with per-model fallback chains and signed webhooks. Pricing is pass-through plus a platform fee of 5% on text, 12% on images, and 10&#8211;15% on video &#8212; no tiers, no seats, no minimums. The platform is open source under the Apache 2.0 license.</p>
         </div>
       </div>
 
@@ -626,7 +626,7 @@
             <tr><td>API contract</td><td>OpenAI-compatible REST &#8212; <span class="mono">/v1/chat/completions</span>, <span class="mono">/v1/images/generations</span>, <span class="mono">/v1/videos/generations</span>, <span class="mono">/v1/models</span></td></tr>
             <tr><td>Providers</td><td>15+ &#8212; OpenAI, Anthropic, Google Vertex, Black Forest Labs, Volcengine Ark, DeepSeek, Moonshot, Qwen, Zhipu, MiniMax, Baidu, xAI, Kling, Runway, Stability</td></tr>
             <tr><td>Billing</td><td>Single append-only credit ledger, microcent precision. Card billing via Stripe; USDT top-ups accepted via NOWPayments.</td></tr>
-            <tr><td>Pricing</td><td>Pass-through provider price + 5%. No tiers, no seats, no minimums.</td></tr>
+            <tr><td>Pricing</td><td>Pass-through provider price plus a platform fee: 5% text, 12% image, 10&#8211;15% video (per model). No tiers, no seats, no minimums.</td></tr>
             <tr><td>Reliability</td><td>Per-model fallback chains; responses carry <span class="mono">fallback_used:true</span> when a chain fires</td></tr>
             <tr><td>License</td><td>Open source, Apache 2.0</td></tr>
             <tr><td>Source</td><td><a href="https://github.com/GoDanceAi/godance">github.com/GoDanceAi/godance</a></td></tr>
@@ -993,7 +993,7 @@ curl https://api.godance.ai/v1/chat/completions \
       <div class="pair">
         <div class="col">
           <div class="quote">Build with every AI model. Skip the integration tax.<span class="why">Declarative. Names the pain in four words.</span></div>
-          <div class="quote">One number. Pinned to the floor.<span class="why">Pricing headline. Dry, specific, no adjectives doing hype work.</span></div>
+          <div class="quote">Provider price, plus a published fee.<span class="why">Pricing headline. Dry, specific, no adjectives doing hype work.</span></div>
           <div class="quote">Six provider integrations, six rate-limit dashboards, six invoices.<span class="why">Wry by enumeration, not by joke.</span></div>
           <div class="quote">Low balance. Top up to keep requests flowing.<span class="why">Advisory states the fact, then the action.</span></div>
         </div>
@@ -1183,7 +1183,7 @@ curl https://api.godance.ai/v1/chat/completions \
           <ul class="rules">
             <li>Describe Godance as a "multimodal AI aggregator" on first mention.</li>
             <li>Provider count is "15+" &#8212; it moves; don't hard-code a larger number.</li>
-            <li>Pricing is "pass-through plus 5%" &#8212; not "markup", not "commission".</li>
+            <li>Pricing is "pass-through plus a platform fee" (5% text, 12% image, 10&#8211;15% video) &#8212; not "markup", not "commission".</li>
             <li>Screenshots: current app chrome may still show the legacy lowercase wordmark; prefer assets from this kit for anything designed.</li>
           </ul>
         </div></div>

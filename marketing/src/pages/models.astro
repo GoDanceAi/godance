@@ -33,8 +33,9 @@ const itemList = {
     <h1 class="text-4xl font-bold tracking-tight text-fg">Every model, one URL.</h1>
     <p class="mt-4 text-fg-muted max-w-2xl">
       The full set of models you can call through Godance today, with provider attribution
-      and what each one costs. Prices are pass-through plus a flat 5% platform fee — see
-      <a href="/pricing" class="underline" style="color: var(--color-primary)">why we charge a single percentage</a>.
+      and what each one costs. Prices are pass-through plus a platform fee — 5% on text,
+      12% on images, 10–15% on video — shown per model below. See
+      <a href="/pricing" class="underline" style="color: var(--color-primary)">how pricing works</a>.
       New models arrive as providers ship them.
     </p>
   </section>
@@ -50,6 +51,7 @@ const itemList = {
               <th class="px-4 py-3 font-semibold">Model ID</th>
               <th class="px-4 py-3 font-semibold">Provider</th>
               <th class="px-4 py-3 font-semibold text-right">Provider price</th>
+              <th class="px-4 py-3 font-semibold text-right">Fee</th>
               <th class="px-4 py-3 font-semibold text-right">Godance price</th>
             </tr>
           </thead>
@@ -64,6 +66,7 @@ const itemList = {
                 </td>
                 <td class="px-4 py-3 text-fg-muted">{m.provider}</td>
                 <td class="px-4 py-3 text-right text-fg-muted">{m.listPrice}</td>
+                <td class="px-4 py-3 text-right text-fg-muted">{m.fee}</td>
                 <td class="px-4 py-3 text-right font-medium text-fg">{m.godancePrice}</td>
               </tr>
             ))}
