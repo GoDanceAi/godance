@@ -1,6 +1,30 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+/* Theme tokens stay in the JS config; Tailwind 4 loads it through @config. */
+@config "../../tailwind.config.mjs";
+
+/* Tailwind 3 defaults that Tailwind 4 changed, kept so the site renders the
+   same: borders default to gray-200 (v4: currentColor), buttons get a
+   pointer cursor (v4: default), and table cells keep the browser's 1px
+   padding (v4 resets all padding to 0). */
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--gd-gray-200);
+  }
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  th,
+  td {
+    padding: 1px;
+  }
+}
 
 /* =========================================================================
    Godance design tokens — "Unified Ledger".
@@ -114,8 +138,10 @@ body { background: var(--color-bg); color: var(--color-fg); }
            leading-none whitespace-nowrap cursor-pointer select-none
            transition-colors;
   }
-  .btn-sm { @apply px-3 py-1.5 text-xs; }
-  .btn-lg { @apply px-5 py-3 text-sm; }
+  /* leading-* restates the size's own line height: in Tailwind 4 the
+     leading-none from .btn would otherwise win over it. */
+  .btn-sm { @apply px-3 py-1.5 text-xs leading-4; }
+  .btn-lg { @apply px-5 py-3 text-sm leading-5; }
   .btn-primary { background: var(--color-primary); @apply text-white; }
   .btn-primary:hover { background: var(--color-primary-hover); }
   .btn-primary:disabled { background: var(--gd-violet-300); @apply cursor-default; }
