@@ -271,18 +271,34 @@ public class BillingService {
      * Best-effort: pull the payment_method off the completed Checkout Session
      * and persist it so auto-recharge can use it later. Failures here don't
      * roll back the top-up — credits should always apply.
+     *
+     * <p>Only cards are saved. Auto-recharge charges off-session and credits
+     * as soon as the charge succeeds; a bank debit (ACH Direct Debit
+     * {@code us_bank_account}, SEPA Debit {@code sepa_debit}) only reaches
+     * {@code processing} and settles days later, so auto-recharge would take
+     * the money without crediting it. Skipping the save leaves the top-up
+     * itself untouched.
      */
     private void capturePaymentMethodIfPresent(UUID userId, String sessionId, String ip) {
         try {
             User user = users.findById(userId).orElse(null);
             if (user == null || user.getStripePaymentMethodId() != null) return;
-            String pm = stripe.retrievePaymentMethodId(sessionId);
+            StripeService.CheckoutPaymentMethod pm = stripe.retrieveCheckoutPaymentMethod(sessionId);
             if (pm == null) return;
-            user.setStripePaymentMethodId(pm);
+            if (!pm.isCard()) {
+                log.info("not saving {} payment method {} from session {}: auto-recharge charges cards only",
+                        pm.type(), pm.id(), sessionId);
+                audit.record(AuditLogService.EVT_BILLING_PAYMENT_METHOD_REJECTED,
+                        AuditOutcome.DENIED, userId, ip,
+                        Map.of("sessionId", sessionId, "paymentMethodId", pm.id(),
+                                "paymentMethodType", String.valueOf(pm.type())));
+                return;
+            }
+            user.setStripePaymentMethodId(pm.id());
             users.save(user);
             audit.record(AuditLogService.EVT_BILLING_PAYMENT_METHOD_SAVED,
                     AuditOutcome.SUCCESS, userId, ip,
-                    Map.of("sessionId", sessionId, "paymentMethodId", pm));
+                    Map.of("sessionId", sessionId, "paymentMethodId", pm.id()));
         } catch (StripeException e) {
             log.warn("could not retrieve payment_method for session {}: {}", sessionId, e.getMessage());
         }
