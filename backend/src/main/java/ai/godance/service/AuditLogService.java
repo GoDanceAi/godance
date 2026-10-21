@@ -29,6 +29,10 @@ public class AuditLogService {
     public static final String EVT_BILLING_TOPUP_INTENT      = "billing.topup.intent";
     public static final String EVT_BILLING_TOPUP_SUCCEEDED   = "billing.topup.succeeded";
     public static final String EVT_BILLING_TOPUP_DUPLICATE   = "billing.topup.duplicate";
+    /** Stripe Checkout completed but a delayed-notification payment (ACH, SEPA) hasn't cleared. */
+    public static final String EVT_BILLING_TOPUP_PENDING     = "billing.topup.pending";
+    /** A delayed-notification payment for a Stripe Checkout top-up failed — never credited. */
+    public static final String EVT_BILLING_TOPUP_FAILED      = "billing.topup.failed";
     public static final String EVT_BILLING_WEBHOOK_REJECTED  = "billing.webhook.rejected";
     public static final String EVT_BILLING_WEBHOOK_IGNORED   = "billing.webhook.ignored";
     public static final String EVT_BILLING_NOWPAYMENTS_INTENT    = "billing.topup.nowpayments.intent";
