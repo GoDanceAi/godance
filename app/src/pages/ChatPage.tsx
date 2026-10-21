@@ -3,6 +3,7 @@ import type { FormEvent } from 'react';
 import {
   ApiError,
   apiFetch,
+  isVirtualModel,
   streamChat,
   type ModelEntry,
   type ModelListResponse,
@@ -90,10 +91,12 @@ export default function ChatPage() {
   useEffect(() => {
     let cancelled = false;
     // Only TEXT models drive the chat picker — image/video have no chat UI.
+    // Virtual routing ids are skipped: they have no pricing for textPrice().
     apiFetch<ModelListResponse>('/v1/models', { auth: false })
       .then((res) => {
         if (cancelled) return;
-        const textEntries = res.data.filter((m) => m.godance.modality === 'TEXT');
+        const textEntries = res.data.filter(
+          (m): m is ModelEntry => !isVirtualModel(m) && m.godance.modality === 'TEXT');
         if (!textEntries.length) return;
         setModels(textEntries.map(toOption));
         setPresets(resolvePresets(textEntries));
