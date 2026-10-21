@@ -1,0 +1,26 @@
+---
+import Layout from '../../layouts/Layout.astro';
+
+// Placeholder until the real Terms of Service are written and reviewed.
+// When they land: replace the notice below, drop `noindex`, and remove the
+// /legal/ sitemap filter in astro.config.mjs.
+const title = 'Terms of Service — Godance';
+const description = 'Godance Terms of Service (placeholder until the full terms are published).';
+---
+
+<Layout {title} {description} canonicalPath="/legal/terms" noindex>
+  <section class="mx-auto max-w-3xl px-6 py-16">
+    <h1 class="text-4xl font-bold tracking-tight text-fg">Terms of Service</h1>
+    <div class="mt-8 rounded-md border border-border bg-bg-muted p-5">
+      <p class="font-semibold text-fg">Placeholder</p>
+      <p class="mt-2 text-fg-muted">
+        Our full Terms of Service haven't been published yet. They will replace this page.
+        Until then, send questions about using Godance to
+        <a href="mailto:hello@godance.ai" class="underline" style="color: var(--color-primary)">hello@godance.ai</a>.
+      </p>
+    </div>
+    <p class="mt-8 text-sm text-fg-subtle">
+      See also our <a href="/legal/privacy" class="underline" style="color: var(--color-primary)">Privacy Policy</a>.
+    </p>
+  </section>
+</Layout>

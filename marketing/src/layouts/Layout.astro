@@ -12,6 +12,8 @@ export interface Props {
   jsonLd?: object[];
   /** Open Graph image path (defaults to /og-default.png). */
   ogImage?: string;
+  /** Ask crawlers not to index the page (e.g. placeholder pages). */
+  noindex?: boolean;
 }
 
 const {
@@ -23,6 +25,7 @@ const {
   // The file isn't shipped yet; social previews will show "image missing" until
   // public/og-default.png is in place. Meta tags stay so the markup is complete.
   ogImage = '/og-default.png',
+  noindex = false,
 } = Astro.props;
 
 const canonical = new URL(canonicalPath, Astro.site).toString();
@@ -53,7 +56,7 @@ const ogImageUrl = new URL(ogImage, Astro.site).toString();
     <meta name="twitter:image" content={ogImageUrl} />
 
     <!-- Crawler / AI agent hints -->
-    <meta name="robots" content="index, follow" />
+    <meta name="robots" content={noindex ? 'noindex, follow' : 'index, follow'} />
     <meta name="generator" content={Astro.generator} />
 
     <!-- Fonts: Inter (UI) + JetBrains Mono (code), matching the design system. -->

@@ -1,0 +1,26 @@
+---
+import Layout from '../../layouts/Layout.astro';
+
+// Placeholder until the real Privacy Policy is written and reviewed.
+// When it lands: replace the notice below, drop `noindex`, and remove the
+// /legal/ sitemap filter in astro.config.mjs.
+const title = 'Privacy Policy — Godance';
+const description = 'Godance Privacy Policy (placeholder until the full policy is published).';
+---
+
+<Layout {title} {description} canonicalPath="/legal/privacy" noindex>
+  <section class="mx-auto max-w-3xl px-6 py-16">
+    <h1 class="text-4xl font-bold tracking-tight text-fg">Privacy Policy</h1>
+    <div class="mt-8 rounded-md border border-border bg-bg-muted p-5">
+      <p class="font-semibold text-fg">Placeholder</p>
+      <p class="mt-2 text-fg-muted">
+        Our full Privacy Policy hasn't been published yet. It will replace this page.
+        Until then, send privacy questions or data requests to
+        <a href="mailto:hello@godance.ai" class="underline" style="color: var(--color-primary)">hello@godance.ai</a>.
+      </p>
+    </div>
+    <p class="mt-8 text-sm text-fg-subtle">
+      See also our <a href="/legal/terms" class="underline" style="color: var(--color-primary)">Terms of Service</a>.
+    </p>
+  </section>
+</Layout>
