@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { TOKEN_KEY } from '../lib/api';
 import { useAuth } from '../lib/auth';
+import { consumeOAuthPending, OAUTH_GENERIC_ERROR } from '../lib/oauth';
 
 /**
  * Landing route for the OAuth2 round-trip. The backend success handler
@@ -9,7 +10,8 @@ import { useAuth } from '../lib/auth';
  * here with the token in the URL *fragment*:
  *   /oauth/callback#access_token=<jwt>&token_type=Bearer&expires_at=<iso>
  * We store the token exactly as the email flow does, hydrate /me, and hand
- * off to the dashboard.
+ * off to the dashboard. A refused sign-in arrives as `#error=<reason>` and
+ * is handed to the login page in navigation state.
  */
 export default function OAuthCallbackPage() {
   const navigate = useNavigate();
@@ -24,6 +26,7 @@ export default function OAuthCallbackPage() {
     const query = new URLSearchParams(window.location.search);
     const token = fragment.get('access_token');
     const error = fragment.get('error') ?? query.get('error');
+    const startedHere = consumeOAuthPending();
 
     if (token) {
       localStorage.setItem(TOKEN_KEY, token);
@@ -31,8 +34,10 @@ export default function OAuthCallbackPage() {
       window.history.replaceState(null, '', window.location.pathname);
       void refresh().then(() => navigate('/dashboard', { replace: true }));
     } else {
-      const reason = error ?? 'Sign-in was cancelled or failed';
-      navigate(`/login?oauth_error=${encodeURIComponent(reason)}`, { replace: true });
+      // Anyone can link to /oauth/callback#error=…, so the backend's reason
+      // is shown only for a sign-in this tab started.
+      const reason = error && startedHere ? error : OAUTH_GENERIC_ERROR;
+      navigate('/login', { replace: true, state: { oauthError: reason } });
     }
   }, [navigate, refresh]);
 
