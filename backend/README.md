@@ -12,7 +12,9 @@ handling.
 ## Quickstart
 
 ```bash
-# 1. Bring up dev dependencies (Postgres, Redis, MinIO).
+# 1. Bring up dev dependencies (Postgres, Redis, MinIO). The first run
+#    builds MinIO from source, which takes a few minutes; see
+#    "MinIO (built from source)" below.
 docker compose up -d
 
 # 2. Run the app. Java 21 must be on PATH or pointed at via JAVA_HOME.
@@ -39,12 +41,66 @@ should poll; `region` is sourced from the `REGION` env var (defaults to
 
 ### Build & test
 
+Needs Docker, and nothing else beyond Java 21 and Maven. No registry
+login is required: every image is public or built locally.
+
 ```bash
+docker compose up -d --wait   # Redis + MinIO on localhost (6380 / 9000)
 mvn clean verify
 ```
 
-The integration tests stand up Postgres + MinIO via Testcontainers and
-WireMock-stub each upstream provider — no external services required.
+The `@SpringBootTest` integration tests boot the full application
+context, which connects to the compose stack's Redis and MinIO on the
+ports above. Postgres is supplied per test class by Testcontainers, and
+`ImageGenerationIntegrationTest` / `VideoGenerationIntegrationTest` start
+their own throwaway MinIO from the same locally built image. Every
+upstream provider is WireMock-stubbed, so no real API keys are needed.
+
+### MinIO (built from source)
+
+MinIO withdrew its public images from Docker Hub and Quay in 2025:
+`docker pull minio/minio` now fails with "pull access denied". Our GHCR
+mirror can't be made public, so it is no use to contributors. Instead,
+[`dev/minio/Dockerfile`](dev/minio/Dockerfile) builds MinIO
+`RELEASE.2024-12-13T22-19-12Z` from source with `go install`. It needs only
+the public `golang` and `alpine` images and the Go module proxy, and
+`sum.golang.org` verifies the source hash. The build mirrors upstream's
+release build (Go 1.23, `CGO_ENABLED=0`, version ldflags), so `minio
+--version` reports the release.
+
+All three consumers share one local-only tag:
+
+```text
+localhost/godance/minio:RELEASE.2024-12-13T22-19-12Z
+```
+
+| Consumer | How it gets the image |
+|---|---|
+| `docker compose up` | builds it if missing (`pull_policy: never`), otherwise reuses it |
+| Testcontainers tests | reuse it; if it is missing (for example, a single test run from the IDE without compose), [`MinioTestImage`](src/test/java/ai/godance/web/MinioTestImage.java) builds it once |
+| CI | the shared `.github/actions/backing-services` action builds it with a GitHub Actions layer cache |
+
+The `localhost/` prefix makes Docker treat the tag as local-only, so it
+never pulls a same-named image from a remote registry.
+
+Useful commands:
+
+```bash
+docker compose build minio      # (re)build the image explicitly
+
+# Different builder base: a registry mirror, or a golang image that trusts
+# your network's TLS-intercepting proxy CA.
+docker compose build --build-arg GO_IMAGE=<registry>/golang:1.23.12-alpine3.22 minio
+```
+
+Upgrading MinIO: follow the steps in the Dockerfile header (resolve the
+new tag with `go list -m github.com/minio/minio@RELEASE.<tag>`, then bump
+the tag everywhere it is listed).
+
+If MinIO refuses to start against an existing `godance_minio_data`
+volume, the volume may have been written by the newer MinIO in the old
+GHCR mirror. The data is dev-only, so `docker compose down -v` starts
+clean.
 
 ### Tearing down
 
@@ -71,6 +127,7 @@ docker compose down -v   # -v also wipes the postgres/minio volumes
 ```
 backend/
 ├── docker-compose.yml         # Postgres 16, Redis 7, MinIO
+├── dev/minio/Dockerfile       # MinIO built from source (no public image exists)
 ├── pom.xml
 ├── HANDOFF.md                 # Session-by-session scaffold spec + porting plan
 ├── CLAUDE.md                  # Tech stack, hard constraints, code conventions
