@@ -37,6 +37,7 @@ import com.nimbusds.jose.jwk.source.ImmutableSecret;
 
 import ai.godance.repository.UserRepository;
 import ai.godance.security.ApiKeyAuthFilter;
+import ai.godance.security.OAuthLoginFailureHandler;
 import ai.godance.security.OAuthLoginNonce;
 import ai.godance.security.OAuthLoginSuccessHandler;
 import ai.godance.security.SessionVersionJwtDecoder;
@@ -182,13 +183,15 @@ public class SecurityConfig {
      * the provider redirect dance; {@link OAuthLoginSuccessHandler} mints
      * the Godance JWT once a provider has authenticated the user.
      * {@link OAuthLoginNonce} carries the SPA's login nonce from the start of
-     * the round-trip to that handler.
+     * the round-trip to that handler. {@link OAuthLoginFailureHandler} sends
+     * a sign-in that fails before then back to the SPA as well.
      */
     @Bean
     @Order(1)
     SecurityWebFilterChain oauthLoginSecurityChain(ServerHttpSecurity http,
             ReactiveClientRegistrationRepository clientRegistrations,
-            OAuthLoginSuccessHandler oauthLoginSuccessHandler) {
+            OAuthLoginSuccessHandler oauthLoginSuccessHandler,
+            OAuthLoginFailureHandler oauthLoginFailureHandler) {
         return http
                 .securityMatcher(ServerWebExchangeMatchers.pathMatchers(
                         "/oauth2/authorization/**", "/login/oauth2/code/**"))
@@ -197,7 +200,8 @@ public class SecurityConfig {
                 .oauth2Login(oauth -> oauth
                         .authorizationRequestResolver(OAuthLoginNonce.resolver(clientRegistrations))
                         .authorizationRequestRepository(OAuthLoginNonce.repository())
-                        .authenticationSuccessHandler(oauthLoginSuccessHandler))
+                        .authenticationSuccessHandler(oauthLoginSuccessHandler)
+                        .authenticationFailureHandler(oauthLoginFailureHandler))
                 .build();
     }
 
