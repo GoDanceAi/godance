@@ -79,6 +79,21 @@ public class WebhookSigner {
     }
 
     /**
+     * Rotate with no grace window: the old secret stops signing at once.
+     * For a password reset, where whoever held the account before may
+     * know it.
+     */
+    @Transactional
+    public void rotateSecretWithoutGrace(UUID userId) {
+        User u = users.findById(userId).orElseThrow(() ->
+                new ResponseStatusException(HttpStatus.NOT_FOUND, "user not found"));
+        u.setWebhookSigningSecret(generate());
+        u.setWebhookSigningSecretPrevious(null);
+        u.setWebhookSigningSecretRotatedAt(Instant.now());
+        users.save(u);
+    }
+
+    /**
      * Snapshot of the secret material at the moment of signing — the
      * current value, plus optionally the previous one while within the
      * grace window. Caller passes to {@link #headerValueFromMaterial}.

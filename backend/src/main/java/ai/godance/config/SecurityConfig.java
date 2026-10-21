@@ -35,9 +35,11 @@ import org.springframework.web.cors.reactive.UrlBasedCorsConfigurationSource;
 
 import com.nimbusds.jose.jwk.source.ImmutableSecret;
 
+import ai.godance.repository.UserRepository;
 import ai.godance.security.ApiKeyAuthFilter;
 import ai.godance.security.OAuthLoginNonce;
 import ai.godance.security.OAuthLoginSuccessHandler;
+import ai.godance.security.SessionVersionJwtDecoder;
 import ai.godance.security.SpendingLimitFilter;
 import reactor.core.publisher.Mono;
 
@@ -57,7 +59,8 @@ import reactor.core.publisher.Mono;
         VolcengineProperties.class,
         SecurityProperties.class,
         PricingProperties.class,
-        AdminProperties.class})
+        AdminProperties.class,
+        RateLimitProperties.class})
 public class SecurityConfig {
 
     @Bean
@@ -72,10 +75,11 @@ public class SecurityConfig {
     }
 
     @Bean
-    ReactiveJwtDecoder reactiveJwtDecoder(JwtProperties props) {
-        return NimbusReactiveJwtDecoder.withSecretKey(secretKey(props))
+    ReactiveJwtDecoder reactiveJwtDecoder(JwtProperties props, UserRepository users) {
+        ReactiveJwtDecoder signed = NimbusReactiveJwtDecoder.withSecretKey(secretKey(props))
                 .macAlgorithm(MacAlgorithm.HS256)
                 .build();
+        return new SessionVersionJwtDecoder(signed, users);
     }
 
     private static SecretKey secretKey(JwtProperties props) {
@@ -90,7 +94,8 @@ public class SecurityConfig {
         cfg.setAllowedHeaders(new java.util.ArrayList<>(List.of(
                 "Authorization", "Content-Type", "Accept",
                 "X-Godance-Signature", "Stripe-Signature", "x-nowpayments-sig")));
-        cfg.setExposedHeaders(new java.util.ArrayList<>(List.of("X-Godance-Signature")));
+        // Retry-After accompanies the auth endpoints' 429s; it is not CORS-safelisted.
+        cfg.setExposedHeaders(new java.util.ArrayList<>(List.of("X-Godance-Signature", "Retry-After")));
         cfg.setAllowCredentials(true);
         cfg.setMaxAge(Duration.ofHours(1).getSeconds());
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
@@ -142,6 +147,11 @@ public class SecurityConfig {
                         // part of it: verifying needs the account's own session
                         // as well as the emailed token.
                         .pathMatchers(HttpMethod.POST, "/v1/auth/signup", "/v1/auth/login").permitAll()
+                        // Password reset proves itself with the emailed token.
+                        .pathMatchers(HttpMethod.POST,
+                                "/v1/auth/password/forgot", "/v1/auth/password/reset").permitAll()
+                        // Not /v1/auth/verify: it must run in the account's own
+                        // session (see AuthService.verifyEmail).
                         // Public read-only: model catalog (model picker) and
                         // provider status board (marketing /status page).
                         .pathMatchers(HttpMethod.GET, "/v1/models", "/v1/status").permitAll()

@@ -1,13 +1,21 @@
 package ai.godance.security;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.util.Optional;
+import java.util.UUID;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 
 import org.junit.jupiter.api.Test;
+
+import ai.godance.domain.User;
+import ai.godance.repository.UserRepository;
 
 class WebhookSignerTest {
 
@@ -88,6 +96,30 @@ class WebhookSignerTest {
     void graceWindow_is24Hours() {
         // Pinned so external docs / runbooks can reference the constant.
         assertThat(WebhookSigner.GRACE_WINDOW.toHours()).isEqualTo(24);
+    }
+
+    // ===== Password reset: rotation with no grace window ==============
+
+    @Test
+    void rotateSecretWithoutGrace_givenSecretInGraceWindow_replacesItAndSignsWithNewOnly() {
+        UserRepository users = mock(UserRepository.class);
+        WebhookSigner withDb = new WebhookSigner(users);
+        User u = new User();
+        u.setId(UUID.randomUUID());
+        u.setWebhookSigningSecret("whsec_known_to_previous_holder");
+        u.setWebhookSigningSecretPrevious("whsec_older");
+        u.setWebhookSigningSecretRotatedAt(Instant.now().minusSeconds(60));
+        when(users.findById(u.getId())).thenReturn(Optional.of(u));
+
+        withDb.rotateSecretWithoutGrace(u.getId());
+
+        assertThat(u.getWebhookSigningSecret())
+                .startsWith("whsec_")
+                .isNotEqualTo("whsec_known_to_previous_holder");
+        assertThat(u.getWebhookSigningSecretPrevious()).isNull();
+        WebhookSigner.SigningMaterial material = withDb.materialFor(u.getId());
+        assertThat(material.current()).isEqualTo(u.getWebhookSigningSecret());
+        assertThat(material.hasPrevious()).isFalse();
     }
 
     private static int countV1(String header) {
