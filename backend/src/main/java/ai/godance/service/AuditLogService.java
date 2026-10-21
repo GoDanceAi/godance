@@ -25,6 +25,9 @@ public class AuditLogService {
     public static final String EVT_AUTH_LOGIN_OK      = "auth.login.success";
     public static final String EVT_AUTH_LOGIN_FAIL    = "auth.login.failure";
     public static final String EVT_AUTH_VERIFY        = "auth.verify";
+    public static final String EVT_AUTH_VERIFY_RESEND = "auth.verify.resend";
+    public static final String EVT_AUTH_PASSWORD_RESET_REQUESTED = "auth.password_reset.requested";
+    public static final String EVT_AUTH_PASSWORD_RESET_COMPLETED = "auth.password_reset.completed";
     public static final String EVT_AUTH_OAUTH_LOGIN   = "auth.oauth.login";
     public static final String EVT_API_KEY_CREATED    = "apikey.created";
     public static final String EVT_API_KEY_DELETED    = "apikey.deleted";

@@ -27,6 +27,11 @@ spring:
 godance:
   scheduling:
     providers-health-initial-delay: PT24H
+  # Integration suites share one Redis whose counters outlive a test class and
+  # a run, so a limit tripped by one suite could fail another. Off here;
+  # AuthRateLimitIntegrationTest turns them back on with its own limits.
+  rate-limit:
+    enabled: false
   pricing:
     # Quartz cron must remain syntactically valid (the scheduler parses it
     # eagerly at JobDetail registration). 2099 sentinel is fine; combined

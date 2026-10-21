@@ -77,6 +77,20 @@ godance:
     # CORS allow-list for browser-origin /v1/** calls. Comma-separate via env;
     # prod must include https://app.godance.ai.
     cors-allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:4173}
+  rate-limit:
+    # Fixed-window Redis counters on the pre-auth endpoints (RateLimiter).
+    # Over a limit → 429 problem+json with Retry-After. Fails open if Redis
+    # is unreachable. Per-IP limits use X-Forwarded-For as set by Caddy.
+    enabled: true
+    login-per-ip:       { requests: 30, window: 15m }   # credential stuffing across many accounts
+    login-per-email:    { requests: 10, window: 15m }   # password guessing against one account
+    signup-per-ip:      { requests: 10, window: 1h }    # each signup sends a verification email
+    verify-per-ip:      { requests: 30, window: 15m }
+    # Each forgot-password / resend-verification request can send an email.
+    forgot-per-ip:      { requests: 10, window: 1h }
+    forgot-per-email:   { requests: 5,  window: 24h }   # a handful of reset emails per address per day
+    resend-per-ip:      { requests: 10, window: 1h }
+    resend-per-account: { requests: 5,  window: 24h }   # a handful of verification emails per account per day
   object-storage:
     endpoint:         ${OBJECT_STORAGE_ENDPOINT:http://localhost:9000}
     region:           ${OBJECT_STORAGE_REGION:us-east-1}   # MinIO accepts any placeholder
@@ -134,7 +148,8 @@ godance:
     api-key:  ${RESEND_API_KEY:re_dev_dummy_key_do_not_use_for_real_calls}
     from:     ${EMAIL_FROM:Godance <noreply@godance.ai>}
     api-base: ${RESEND_API_BASE:https://api.resend.com}   # override in tests to point at WireMock
-    app-base-url: ${APP_BASE_URL:http://localhost:5173}  # SPA origin that email links open
+    # SPA origin for links in emails (/verify-email, /reset-password).
+    app-base-url: ${APP_BASE_URL:http://localhost:5173}
   pricing:
     # Daily catalog drift detection + staging. Region-gated to
     # DIGITALOCEAN inside the cron job (Alicloud must not double-fire).

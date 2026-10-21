@@ -24,6 +24,15 @@ public final class AuthDtos {
             @NotBlank String password
     ) { }
 
+    public record ForgotPasswordRequest(
+            @Email @NotBlank String email
+    ) { }
+
+    public record ResetPasswordRequest(
+            @NotBlank String token,
+            @NotBlank @Size(min = 12, max = 128) String newPassword
+    ) { }
+
     public record AuthResponse(
             String accessToken,
             String tokenType,
@@ -34,9 +43,15 @@ public final class AuthDtos {
         }
     }
 
+    /**
+     * {@code hasEmail} is false when {@code email} is only a placeholder
+     * (an X.com sign-in, which shares no address), so clients don't show
+     * it or offer to verify it.
+     */
     public record MeResponse(
             UUID id,
             String email,
+            boolean hasEmail,
             String fullName,
             UserRole role,
             boolean emailVerified,
@@ -49,6 +64,7 @@ public final class AuthDtos {
             return new MeResponse(
                     u.getId(),
                     u.getEmail(),
+                    !u.hasSyntheticEmail(),
                     u.getFullName(),
                     u.getRole(),
                     u.isEmailVerified(),

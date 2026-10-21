@@ -12,8 +12,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * the key is {@link #DUMMY_API_KEY} (dev/CI), {@link MailConfig} wires the
  * {@link LoggingEmailSender} so no real HTTP call is ever attempted.
  *
- * <p>{@code appBaseUrl} is the SPA origin (e.g. {@code https://app.godance.ai})
- * that links in emails open.
+ * <p>{@code appBaseUrl} is the SPA origin that links in emails point at
+ * (verify-email, reset-password); a trailing slash is dropped.
  */
 @ConfigurationProperties(prefix = "godance.mail")
 public record MailProperties(
@@ -39,6 +39,7 @@ public record MailProperties(
         if (appBaseUrl == null || appBaseUrl.isBlank()) {
             throw new IllegalStateException("godance.mail.app-base-url must be set");
         }
+        appBaseUrl = appBaseUrl.strip().replaceAll("/+$", "");
     }
 
     /** True when no real Resend key is configured (dev/CI). */
