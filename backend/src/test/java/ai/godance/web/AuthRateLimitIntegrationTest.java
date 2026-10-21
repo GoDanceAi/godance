@@ -25,6 +25,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 import ai.godance.repository.UserRepository;
 import ai.godance.security.AuthRateLimits;
 import ai.godance.security.RateLimitExceededException;
+import ai.godance.web.dto.AuthDtos.AuthResponse;
 
 /**
  * Auth rate limits end to end, against the same Redis every integration
@@ -84,9 +85,16 @@ class AuthRateLimitIntegrationTest {
                 .exchange();
     }
 
-    private ResponseSpec verify(String clientIp, String token) {
+    private String signupBearer(String clientIp, String email) {
+        AuthResponse out = signup(clientIp, email).expectStatus().isCreated()
+                .expectBody(AuthResponse.class).returnResult().getResponseBody();
+        return "Bearer " + out.accessToken();
+    }
+
+    private ResponseSpec verify(String clientIp, String bearer, String token) {
         return http.get().uri("/v1/auth/verify?token={t}", token)
                 .header("X-Forwarded-For", clientIp)
+                .header("Authorization", bearer)
                 .exchange();
     }
 
@@ -162,10 +170,11 @@ class AuthRateLimitIntegrationTest {
     @Test
     void verify_givenTooManyFromOneIp_expects429() {
         String ip = randomClientIp();
-        verify(ip, "no-such-token").expectStatus().isBadRequest();
-        verify(ip, "no-such-token").expectStatus().isBadRequest();
+        String bearer = signupBearer(randomClientIp(), uniqueEmail("rl-verify"));
+        verify(ip, bearer, "no-such-token").expectStatus().isBadRequest();
+        verify(ip, bearer, "no-such-token").expectStatus().isBadRequest();
 
-        expectTooManyRequests(verify(ip, "no-such-token"));
+        expectTooManyRequests(verify(ip, bearer, "no-such-token"));
     }
 
     // ---------- forgot password / resend verification -----------------

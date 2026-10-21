@@ -230,10 +230,13 @@ public class BillingService {
 
         // If the session was created with setup_future_usage=off_session, the
         // PaymentIntent will have a payment_method we can charge later. Persist
-        // it on the user the first time we see it (don't overwrite — the user
-        // may already have a saved card from an earlier session). Only here,
-        // once the payment has succeeded: a pending one may never clear.
-        capturePaymentMethodIfPresent(userId, session.getId(), ip);
+        // it on the user, replacing any card saved by an earlier session. Only
+        // here, once the payment has succeeded: a pending one may never clear.
+        // And only on the delivery that credited the session: a redelivered
+        // older event must not put back a card the user has since replaced.
+        if (result == TopUpResult.APPLIED) {
+            capturePaymentMethodIfPresent(userId, session.getId(), ip);
+        }
     }
 
     /**
@@ -272,6 +275,12 @@ public class BillingService {
      * and persist it so auto-recharge can use it later. Failures here don't
      * roll back the top-up — credits should always apply.
      *
+     * <p>Only a {@code save_card=true} session's method is saved: Stripe
+     * attaches a method to the customer for off-session charges only when
+     * the PaymentIntent has {@code setup_future_usage=off_session}. Such a
+     * session replaces the saved method, so a user whose card was declined
+     * saves a new one with a top-up, as the auto-recharge-failed email says.
+     *
      * <p>Only cards are saved. Auto-recharge charges off-session and credits
      * as soon as the charge succeeds; a bank debit (ACH Direct Debit
      * {@code us_bank_account}, SEPA Debit {@code sepa_debit}) only reaches
@@ -282,9 +291,9 @@ public class BillingService {
     private void capturePaymentMethodIfPresent(UUID userId, String sessionId, String ip) {
         try {
             User user = users.findById(userId).orElse(null);
-            if (user == null || user.getStripePaymentMethodId() != null) return;
+            if (user == null) return;
             StripeService.CheckoutPaymentMethod pm = stripe.retrieveCheckoutPaymentMethod(sessionId);
-            if (pm == null) return;
+            if (pm == null || !pm.savedForOffSession()) return;
             if (!pm.isCard()) {
                 log.info("not saving {} payment method {} from session {}: auto-recharge charges cards only",
                         pm.type(), pm.id(), sessionId);

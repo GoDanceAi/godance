@@ -41,7 +41,8 @@ class MailServiceTest {
         sender = mock(EmailSender.class);
         admin = new AdminProperties();
         admin.setEmails(List.of("ops@godance.ai"));
-        mail = new MailService(sender, admin);
+        mail = new MailService(sender, admin, new MailProperties(MailProperties.DUMMY_API_KEY,
+                "Godance <noreply@godance.ai>", "https://api.resend.com", "https://app.godance.test/"));
     }
 
     private static User user(String email) {
@@ -69,7 +70,19 @@ class MailServiceTest {
 
         String text = captureText(List.of("a@godance.test"), "Verify");
         assertThat(text.lines().findFirst().orElseThrow())
-                .isEqualTo("Verification URL for a@godance.test: /v1/auth/verify?token=tok-123");
+                .isEqualTo("Verification URL for a@godance.test: "
+                        + "https://app.godance.test/verify-email?token=tok-123");
+    }
+
+    @Test
+    void sendVerificationEmail_givenUser_expectsHtmlLinkToAppVerifyPage() {
+        mail.sendVerificationEmail(user("a@godance.test"));
+
+        ArgumentCaptor<String> html = ArgumentCaptor.forClass(String.class);
+        verify(sender).send(anyList(), anyString(), anyString(), html.capture());
+        assertThat(html.getValue())
+                .contains("<a href=\"https://app.godance.test/verify-email?token=tok-123\">")
+                .contains("asked to sign in first");
     }
 
     @Test

@@ -58,10 +58,12 @@ public class AuthController {
 
     @GetMapping("/verify")
     public Mono<ResponseEntity<Void>> verify(
-            @RequestParam("token") String token, ServerWebExchange exchange) {
+            @RequestParam("token") String token, @AuthenticationPrincipal Jwt jwt,
+            ServerWebExchange exchange) {
+        UUID userId = JwtService.userIdFromSubject(jwt.getSubject());
         String ip = clientIp(exchange);
         return rateLimits.verify(ip)
-                .then(Mono.fromRunnable(() -> auth.verifyEmail(token, ip))
+                .then(Mono.fromRunnable(() -> auth.verifyEmail(token, userId, ip))
                         .subscribeOn(Schedulers.boundedElastic()))
                 .then(Mono.just(ResponseEntity.noContent().build()));
     }
