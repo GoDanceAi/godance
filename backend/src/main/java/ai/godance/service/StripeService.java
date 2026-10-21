@@ -115,10 +115,10 @@ public class StripeService {
     /**
      * Re-fetch a completed Checkout Session with its {@code payment_intent}
      * and that intent's {@code payment_method} expanded, so one call gives
-     * the payment method's id and type. Returns null if the session has no
-     * payment method (e.g., zero-amount session). The type is null if
-     * Stripe didn't expand the payment method; callers treat that as
-     * not-a-card.
+     * the payment method's id and type, and whether the intent set it up
+     * for off-session use. Returns null if the session has no payment
+     * method (e.g., zero-amount session). The type is null if Stripe didn't
+     * expand the payment method; callers treat that as not-a-card.
      */
     public CheckoutPaymentMethod retrieveCheckoutPaymentMethod(String sessionId) throws StripeException {
         SessionRetrieveParams params = SessionRetrieveParams.builder()
@@ -128,7 +128,8 @@ public class StripeService {
         PaymentIntent pi = full.getPaymentIntentObject();
         if (pi == null || pi.getPaymentMethod() == null) return null;
         PaymentMethod pm = pi.getPaymentMethodObject();
-        return new CheckoutPaymentMethod(pi.getPaymentMethod(), pm == null ? null : pm.getType());
+        return new CheckoutPaymentMethod(pi.getPaymentMethod(), pm == null ? null : pm.getType(),
+                "off_session".equals(pi.getSetupFutureUsage()));
     }
 
     /**
@@ -179,8 +180,14 @@ public class StripeService {
         return Webhook.constructEvent(payload, sigHeader, stripe.webhookSecret());
     }
 
-    /** The payment method a Checkout Session's payment used. {@code type} may be null. */
-    public record CheckoutPaymentMethod(String id, String type) {
+    /**
+     * The payment method a Checkout Session's payment used. {@code type}
+     * may be null. {@code savedForOffSession}: its PaymentIntent had
+     * {@code setup_future_usage=off_session} (a {@code save_card=true}
+     * top-up), so Stripe attached the method to the customer for
+     * off-session charges.
+     */
+    public record CheckoutPaymentMethod(String id, String type, boolean savedForOffSession) {
         public boolean isCard() {
             return StripeService.isCard(type);
         }

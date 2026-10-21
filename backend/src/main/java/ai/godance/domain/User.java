@@ -104,7 +104,7 @@ public class User {
     private Long autoRechargeTopupCents;
 
     /**
-     * Stripe payment-method handle (pm_xxx) captured during the user's first
+     * Stripe payment-method handle (pm_xxx) captured during the user's latest
      * top-up with setup_future_usage=off_session. Not a secret — same trust
      * level as {@link #stripeCustomerId}.
      */

@@ -50,6 +50,8 @@ public class AuditLogService {
     public static final String EVT_BILLING_AUTORECHARGE_DISABLED  = "billing.autorecharge.disabled";
     public static final String EVT_BILLING_AUTORECHARGE_FIRED     = "billing.autorecharge.fired";
     public static final String EVT_BILLING_AUTORECHARGE_FAILED    = "billing.autorecharge.failed";
+    /** A saved card dropped after an auto-recharge decline that means it can never be charged again. */
+    public static final String EVT_BILLING_PAYMENT_METHOD_REMOVED = "billing.payment_method.removed";
     // Admin console (round 5)
     public static final String EVT_ADMIN_CREDIT_ADJUSTED = "admin.credit.adjusted";
     public static final String EVT_ADMIN_CATALOG_UPDATED = "admin.catalog.updated";
