@@ -55,7 +55,8 @@ import reactor.core.publisher.Mono;
         VolcengineProperties.class,
         SecurityProperties.class,
         PricingProperties.class,
-        AdminProperties.class})
+        AdminProperties.class,
+        RateLimitProperties.class})
 public class SecurityConfig {
 
     @Bean
@@ -88,7 +89,8 @@ public class SecurityConfig {
         cfg.setAllowedHeaders(new java.util.ArrayList<>(List.of(
                 "Authorization", "Content-Type", "Accept",
                 "X-Godance-Signature", "Stripe-Signature", "x-nowpayments-sig")));
-        cfg.setExposedHeaders(new java.util.ArrayList<>(List.of("X-Godance-Signature")));
+        // Retry-After accompanies the auth endpoints' 429s; it is not CORS-safelisted.
+        cfg.setExposedHeaders(new java.util.ArrayList<>(List.of("X-Godance-Signature", "Retry-After")));
         cfg.setAllowCredentials(true);
         cfg.setMaxAge(Duration.ofHours(1).getSeconds());
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
