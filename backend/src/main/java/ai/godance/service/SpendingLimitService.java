@@ -6,8 +6,6 @@ import java.time.YearMonth;
 import java.time.ZoneOffset;
 import java.util.UUID;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -16,6 +14,7 @@ import ai.godance.domain.User;
 import ai.godance.repository.ApiKeyRepository;
 import ai.godance.repository.UserRepository;
 import ai.godance.repository.UsageRecordRepository;
+import ai.godance.service.mail.MailService;
 
 /**
  * Enforces per-user and per-API-key spending caps (outcome-brief
@@ -30,9 +29,10 @@ import ai.godance.repository.UsageRecordRepository;
  * <ul>
  *   <li><b>Hard cap</b> (100%): {@link SpendingLimitExceededException}
  *       → the filter surfaces 402 Payment Required.</li>
- *   <li><b>Soft cap</b> (80%): a warning email (stubbed as a log line,
- *       matching the signup-verification stub) fired at most once per
- *       period via the {@code *_cap_warned_at} bookkeeping columns.</li>
+ *   <li><b>Soft cap</b> (80%): a warning email (via {@link MailService};
+ *       the dev sender logs it as an {@code [email-stub]} line) fired at
+ *       most once per period via the {@code *_cap_warned_at} bookkeeping
+ *       columns.</li>
  * </ul>
  *
  * Deliberately separate from {@code CreditLedgerService} — caps gate
@@ -41,7 +41,6 @@ import ai.godance.repository.UsageRecordRepository;
 @Service
 public class SpendingLimitService {
 
-    private static final Logger log = LoggerFactory.getLogger(SpendingLimitService.class);
     private static final ZoneOffset UTC = ZoneOffset.UTC;
     /** Soft-warning threshold, as a percentage of the cap. */
     private static final int SOFT_PERCENT = 80;
@@ -49,12 +48,14 @@ public class SpendingLimitService {
     private final UserRepository users;
     private final ApiKeyRepository apiKeys;
     private final UsageRecordRepository usage;
+    private final MailService mail;
 
     public SpendingLimitService(UserRepository users, ApiKeyRepository apiKeys,
-                                UsageRecordRepository usage) {
+                                UsageRecordRepository usage, MailService mail) {
         this.users = users;
         this.apiKeys = apiKeys;
         this.usage = usage;
+        this.mail = mail;
     }
 
     /**
@@ -94,29 +95,31 @@ public class SpendingLimitService {
             if (softCrossed(user.getDailyCreditCapCents(), userDay)
                     && stale(user.getDailyCapWarnedAt(), dayStart)) {
                 user.setDailyCapWarnedAt(Instant.now());
-                warn("user " + userId, "daily", userDay, user.getDailyCreditCapCents());
+                warn(user.getEmail(), "user " + userId, "daily", userDay, user.getDailyCreditCapCents());
                 warned = true;
             }
             if (softCrossed(user.getMonthlyCreditCapCents(), userMonth)
                     && stale(user.getMonthlyCapWarnedAt(), monthStart)) {
                 user.setMonthlyCapWarnedAt(Instant.now());
-                warn("user " + userId, "monthly", userMonth, user.getMonthlyCreditCapCents());
+                warn(user.getEmail(), "user " + userId, "monthly", userMonth, user.getMonthlyCreditCapCents());
                 warned = true;
             }
             if (warned) users.save(user);
         }
         if (key != null) {
             boolean warned = false;
+            // API-key warnings go to the key owner — the authenticated user loaded above.
+            String ownerEmail = (user != null) ? user.getEmail() : null;
             if (softCrossed(key.getDailyCreditCapCents(), keyDay)
                     && stale(key.getDailyCapWarnedAt(), dayStart)) {
                 key.setDailyCapWarnedAt(Instant.now());
-                warn("api-key " + apiKeyId, "daily", keyDay, key.getDailyCreditCapCents());
+                warn(ownerEmail, "api-key " + apiKeyId, "daily", keyDay, key.getDailyCreditCapCents());
                 warned = true;
             }
             if (softCrossed(key.getMonthlyCreditCapCents(), keyMonth)
                     && stale(key.getMonthlyCapWarnedAt(), monthStart)) {
                 key.setMonthlyCapWarnedAt(Instant.now());
-                warn("api-key " + apiKeyId, "monthly", keyMonth, key.getMonthlyCreditCapCents());
+                warn(ownerEmail, "api-key " + apiKeyId, "monthly", keyMonth, key.getMonthlyCreditCapCents());
                 warned = true;
             }
             if (warned) apiKeys.save(key);
@@ -152,9 +155,9 @@ public class SpendingLimitService {
         return warnedAt == null || warnedAt.isBefore(periodStart);
     }
 
-    private static void warn(String subject, String period, long spentCents, long capCents) {
-        log.info("[email-stub] Spending warning for {}: {} usage at {} of {} cents "
-                + "({}% soft cap reached)", subject, period, spentCents, capCents, SOFT_PERCENT);
+    /** Mail failures are swallowed inside MailService — a warning must never block the request. */
+    private void warn(String toEmail, String subject, String period, long spentCents, long capCents) {
+        mail.sendSpendWarning(toEmail, subject, period, spentCents, capCents);
     }
 
     /** Thrown on a hard-cap (100%) breach; the spending-limit filter maps it to 402. */

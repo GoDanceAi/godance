@@ -21,6 +21,18 @@ COPY pom.xml ./
 RUN mvn -B -q dependency:go-offline
 
 COPY src/ ./src/
+
+# Stamp the git SHA. The build context is backend/ (no .git), so Spring's
+# GitProperties can't discover it. We ALSO write git.properties, but the
+# authoritative source at runtime is the GODANCE_GIT_SHA env baked into the
+# runtime stage below — the maven git-commit-id plugin runs at `initialize`
+# and, finding no .git, its interaction with resource copying left healthz
+# reporting "unknown". Reading an env var in HealthController is immune to
+# that plugin/classpath ordering entirely. Manual builds without the arg
+# keep "unknown".
+ARG GIT_SHA=unknown
+RUN printf 'git.commit.id.abbrev=%s\n' "$GIT_SHA" > src/main/resources/git.properties
+
 RUN mvn -B -q -DskipTests package \
     && cp target/*.jar /workspace/app.jar
 
@@ -43,6 +55,12 @@ COPY --from=build --chown=app:app /workspace/app.jar /app/app.jar
 # (no auth) and returns build info — see HealthController.
 HEALTHCHECK --interval=15s --timeout=3s --start-period=45s --retries=3 \
   CMD curl -fsS http://localhost:8080/healthz >/dev/null || exit 1
+
+# Re-declare the build arg in this stage (ARGs don't cross stages) and bake
+# it as an env var. HealthController reads GODANCE_GIT_SHA directly, so the
+# deployed commit is always reported regardless of the .git-less build.
+ARG GIT_SHA=unknown
+ENV GODANCE_GIT_SHA=${GIT_SHA}
 
 USER app
 EXPOSE 8080

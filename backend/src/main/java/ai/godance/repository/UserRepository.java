@@ -17,6 +17,10 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     Optional<User> findByStripeCustomerId(String stripeCustomerId);
     boolean existsByEmail(String email);
 
+    /** Admin console user search — case-insensitive email substring, newest first. */
+    List<User> findByEmailContainingIgnoreCaseOrderByCreatedAtDesc(
+            String emailFragment, org.springframework.data.domain.Pageable pageable);
+
     /**
      * Cron safety-net candidates: auto-recharge ON, threshold configured,
      * payment method on file, balance below threshold. Returns ids only —

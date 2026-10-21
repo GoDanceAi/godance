@@ -20,4 +20,8 @@ public interface CreditLedgerRepository extends JpaRepository<CreditLedger, UUID
      */
     @Query("SELECT COALESCE(SUM(c.deltaCents), 0) FROM CreditLedger c WHERE c.userId = :userId")
     long sumDeltaForUser(@Param("userId") UUID userId);
+
+    /** Paged ledger history for the admin user-detail drawer, newest first. */
+    org.springframework.data.domain.Page<CreditLedger> findByUserIdOrderByOccurredAtDesc(
+            UUID userId, org.springframework.data.domain.Pageable pageable);
 }

@@ -11,5 +11,7 @@ public enum CreditSource {
     DEBIT,
     REFUND,
     ADJUSTMENT,
+    /** Manual operator credit/debit via the admin console (audited). */
+    ADMIN_ADJUSTMENT,
     PROMO
 }

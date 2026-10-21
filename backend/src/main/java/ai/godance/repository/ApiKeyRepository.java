@@ -11,4 +11,6 @@ import ai.godance.domain.ApiKey;
 public interface ApiKeyRepository extends JpaRepository<ApiKey, UUID> {
     List<ApiKey> findByUserId(UUID userId);
     Optional<ApiKey> findByKeyHash(String keyHash);
+
+    long countByUserId(UUID userId);
 }
