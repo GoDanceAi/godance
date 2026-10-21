@@ -19,9 +19,6 @@
 - POST /v1/images/generations — sync; HQ variants (e.g. gpt-image-1-hd) auto-promote to async
 - POST /v1/videos/generations — async only, signed webhook callback
 - GET /v1/jobs/{id} — poll status of any async generation
-- POST /v1/audio/speech — text-to-speech
-- POST /v1/audio/transcriptions — speech-to-text
-- POST /v1/embeddings — text embeddings
 - GET /v1/models — catalog enumeration
 - CRUD /v1/keys — API key management (plaintext returned exactly once)
 - POST /v1/billing/topup — Stripe Checkout for card / ACH / SEPA

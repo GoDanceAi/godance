@@ -610,11 +610,11 @@
         </div>
         <div class="boiler">
           <span class="tag">Standard &#183; ~60 words</span>
-          <p>Godance is a multimodal AI aggregator that routes chat, image, video, audio, and embedding requests to 16+ providers &#8212; OpenAI, Anthropic, Google Vertex, Flux, ElevenLabs, and more &#8212; through one OpenAI-compatible API. Usage from every provider lands on a single append-only credit ledger with per-model fallback chains and pass-through pricing plus 5%. No tiers, no seats, no minimums.</p>
+          <p>Godance is a multimodal AI aggregator that routes chat, image, and video requests to 16+ providers &#8212; OpenAI, Anthropic, Google Vertex, Flux, ElevenLabs, and more &#8212; through one OpenAI-compatible API. Usage from every provider lands on a single append-only credit ledger with per-model fallback chains and pass-through pricing plus 5%. No tiers, no seats, no minimums.</p>
         </div>
         <div class="boiler">
           <span class="tag">Extended &#183; ~100 words</span>
-          <p>Godance is a multimodal AI aggregator that puts every major AI model behind one OpenAI-compatible API. Any OpenAI SDK works as a drop-in client by swapping <code class="inline">base_url</code> &#8212; chat completions, image and video generation, speech, transcription, and embeddings route to 16+ providers, including OpenAI, Anthropic, Google Vertex, Black Forest Labs, DeepSeek, xAI, Runway, and ElevenLabs. Every request is metered on a single append-only credit ledger at microcent precision, with per-model fallback chains and signed webhooks. Pricing is pass-through plus 5% &#8212; no tiers, no seats, no minimums. The platform is open source under the Apache 2.0 license.</p>
+          <p>Godance is a multimodal AI aggregator that puts every major AI model behind one OpenAI-compatible API. Any OpenAI SDK works as a drop-in client by swapping <code class="inline">base_url</code> &#8212; chat completions and image and video generation route to 16+ providers, including OpenAI, Anthropic, Google Vertex, Black Forest Labs, DeepSeek, xAI, Runway, and ElevenLabs. Every request is metered on a single append-only credit ledger at microcent precision, with per-model fallback chains and signed webhooks. Pricing is pass-through plus 5% &#8212; no tiers, no seats, no minimums. The platform is open source under the Apache 2.0 license.</p>
         </div>
       </div>
 
@@ -623,9 +623,9 @@
         <table>
           <tbody>
             <tr><td>Product</td><td>Multimodal AI aggregator &#8212; one API for text, image, video, and audio models</td></tr>
-            <tr><td>API contract</td><td>OpenAI-compatible REST &#8212; <span class="mono">/v1/chat/completions</span>, <span class="mono">/v1/images/generations</span>, <span class="mono">/v1/videos/generations</span>, <span class="mono">/v1/audio/speech</span>, <span class="mono">/v1/audio/transcriptions</span>, <span class="mono">/v1/embeddings</span>, <span class="mono">/v1/models</span></td></tr>
+            <tr><td>API contract</td><td>OpenAI-compatible REST &#8212; <span class="mono">/v1/chat/completions</span>, <span class="mono">/v1/images/generations</span>, <span class="mono">/v1/videos/generations</span>, <span class="mono">/v1/models</span></td></tr>
             <tr><td>Providers</td><td>16+ &#8212; OpenAI, Anthropic, Google Vertex, Black Forest Labs, Volcengine Ark, DeepSeek, Moonshot, Qwen, MiniMax, xAI, Kling, Runway, ElevenLabs, Cartesia, Deepgram, Stability</td></tr>
-            <tr><td>Billing</td><td>Single append-only credit ledger, microcent precision. Card billing via Stripe; crypto top-ups accepted via Coinbase Commerce.</td></tr>
+            <tr><td>Billing</td><td>Single append-only credit ledger, microcent precision. Card billing via Stripe; USDT top-ups accepted via NOWPayments.</td></tr>
             <tr><td>Pricing</td><td>Pass-through provider price + 5%. No tiers, no seats, no minimums.</td></tr>
             <tr><td>Reliability</td><td>Per-model fallback chains; responses carry <span class="mono">fallback_used:true</span> when a chain fires</td></tr>
             <tr><td>License</td><td>Open source, Apache 2.0</td></tr>
@@ -965,7 +965,7 @@ curl https://api.godance.ai/v1/chat/completions \
         <div class="card"><div class="pad">
           <ul class="rules">
             <li><strong>Sentence case everywhere</strong> &#8212; buttons, headings, nav, table headers. "Get started", not "Get Started".</li>
-            <li><strong>Proper nouns are sacred.</strong> OpenAI, Anthropic, Google Vertex, Black Forest Labs, Stripe, Coinbase Commerce &#8212; each in its owner's preferred casing.</li>
+            <li><strong>Proper nouns are sacred.</strong> OpenAI, Anthropic, Google Vertex, Black Forest Labs, Stripe, NOWPayments &#8212; each in its owner's preferred casing.</li>
           </ul>
         </div></div>
         <div class="card"><div class="pad">

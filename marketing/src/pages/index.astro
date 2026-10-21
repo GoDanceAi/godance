@@ -45,7 +45,7 @@ r = client.chat.completions.create(
 const faqs = [
   {
     q: 'Will my existing OpenAI SDK code work?',
-    a: 'Yes — swap base_url to https://api.godance.ai/v1 and use a Godance API key. /v1/chat/completions (streaming + non-streaming), /v1/images/generations, /v1/audio/speech, /v1/audio/transcriptions, /v1/embeddings, and /v1/models all match OpenAI\'s contract.',
+    a: 'Yes — swap base_url to https://api.godance.ai/v1 and use a Godance API key. /v1/chat/completions (streaming + non-streaming), /v1/images/generations, and /v1/models all match OpenAI\'s contract.',
   },
   {
     q: 'Which providers and models do you support?',
@@ -204,9 +204,8 @@ const providerNames = [
           Change one URL. Start calling Claude, Gemini, or any other model the next request.
         </p>
         <p class="mt-4 text-sm text-fg-subtle">
-          Same idiom for <code class="code-chip">/v1/images/generations</code>,
-          <code class="code-chip">/v1/audio/speech</code>,
-          <code class="code-chip">/v1/embeddings</code>, and the rest.
+          Same idiom for <code class="code-chip">/v1/images/generations</code>
+          and <code class="code-chip">/v1/models</code>.
         </p>
       </div>
       <pre class="code-block"><code set:html={pythonSnippet} /></pre>
