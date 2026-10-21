@@ -26,8 +26,10 @@ import ai.godance.domain.ModelChangeProposal;
 import ai.godance.domain.PriceField;
 import ai.godance.domain.ProposalStatus;
 import ai.godance.domain.ProposalType;
+import ai.godance.domain.User;
 import ai.godance.gateway.ModelCatalog;
 import ai.godance.repository.ModelChangeProposalRepository;
+import ai.godance.repository.UserRepository;
 import ai.godance.web.dto.AuthDtos.AuthResponse;
 
 /**
@@ -58,6 +60,7 @@ class AdminPricingFlowIntegrationTest {
     @Autowired WebTestClient http;
     @Autowired ModelChangeProposalRepository proposals;
     @Autowired ModelCatalog catalog;
+    @Autowired UserRepository users;
 
     private String adminBearer;
     private String userBearer;
@@ -67,6 +70,7 @@ class AdminPricingFlowIntegrationTest {
         // Admin email must match the allowlist exactly. Signup-or-login so
         // the @BeforeEach is idempotent across tests in this class.
         adminBearer = signUpOrLogIn("admin@godance.test");
+        markEmailVerified("admin@godance.test");
         // Non-admin uses a fresh random local-part each test to dodge the
         // signup-uniqueness check; the allowlist still rejects them.
         userBearer  = signUpOrLogIn("user-" + java.util.UUID.randomUUID() + "@godance.test");
@@ -186,6 +190,17 @@ class AdminPricingFlowIntegrationTest {
                 .expectStatus().isOk()
                 .expectBody(AuthResponse.class).returnResult().getResponseBody();
         return "Bearer " + resp.accessToken();
+    }
+
+    /**
+     * Admin access needs the account's email verified. Password signup
+     * leaves it unverified, so mark it directly instead of following the
+     * emailed link.
+     */
+    private void markEmailVerified(String email) {
+        User u = users.findByEmail(email).orElseThrow();
+        u.setEmailVerified(true);
+        users.save(u);
     }
 
     /** Compile-time keep-alive so unused imports don't break -Werror builds. */

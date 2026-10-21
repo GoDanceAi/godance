@@ -1,5 +1,7 @@
 package ai.godance.config;
 
+import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
+import static com.github.tomakehurst.wiremock.client.WireMock.containing;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
 import static com.github.tomakehurst.wiremock.client.WireMock.okJson;
 import static com.github.tomakehurst.wiremock.client.WireMock.post;
@@ -47,6 +49,7 @@ import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
 
 import ai.godance.domain.OAuthProvider;
+import ai.godance.security.OAuthLoginFailureHandler;
 import ai.godance.security.OAuthLoginSuccessHandler;
 import ai.godance.service.OAuthLoginService;
 import ai.godance.web.dto.AuthDtos.AuthResponse;
@@ -56,8 +59,9 @@ import ai.godance.web.dto.AuthDtos.AuthResponse;
  * ({@link SecurityConfig#oauthLoginSecurityChain}): in on
  * {@code /oauth2/authorization/x?login_nonce=}, through the session-stored
  * authorization request and the provider's code callback, and back out in
- * the SPA callback fragment. WireMock stands in for the provider's token
- * and user-info endpoints.
+ * the SPA callback fragment. A sign-in that fails at the provider or in
+ * Spring comes back to the SPA callback the same way, with {@code #error=}.
+ * WireMock stands in for the provider's token and user-info endpoints.
  */
 @SpringJUnitConfig(OAuthLoginNonceFlowTest.Config.class)
 class OAuthLoginNonceFlowTest {
@@ -96,8 +100,9 @@ class OAuthLoginNonceFlowTest {
         @Bean
         SecurityWebFilterChain oauthLoginSecurityChain(ServerHttpSecurity http,
                 ReactiveClientRegistrationRepository clientRegistrations, OAuthLoginService oauthLogin) {
+            OAuthProperties props = new OAuthProperties(CALLBACK, null, null, null);
             return new SecurityConfig().oauthLoginSecurityChain(http, clientRegistrations,
-                    new OAuthLoginSuccessHandler(oauthLogin, new OAuthProperties(CALLBACK, null, null, null)));
+                    new OAuthLoginSuccessHandler(oauthLogin, props), new OAuthLoginFailureHandler(props));
         }
     }
 
@@ -121,14 +126,21 @@ class OAuthLoginNonceFlowTest {
     private static WireMockServer startProvider() {
         WireMockServer server = new WireMockServer(WireMockConfiguration.options().dynamicPort());
         server.start();
-        server.stubFor(post(urlEqualTo("/token")).willReturn(okJson(
+        server.stubFor(post(urlEqualTo("/token")).atPriority(5).willReturn(okJson(
                 "{\"access_token\":\"provider-token\",\"token_type\":\"Bearer\",\"expires_in\":3600}")));
+        server.stubFor(post(urlEqualTo("/token")).atPriority(1)
+                .withRequestBody(containing("code=rejected-code"))
+                .willReturn(aResponse().withStatus(400)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("{\"error\":\"invalid_grant\"}")));
         server.stubFor(get(urlEqualTo("/me")).willReturn(okJson("{\"id\":\"x-user-1\"}")));
         return server;
     }
 
-    /** Starts a sign-in, comes back from the provider with a code, and returns the redirect to the SPA. */
-    private URI signIn(String authorizationPath) {
+    /** A started sign-in: the {@code state} sent to the provider and the session holding the request. */
+    private record Started(String state, ResponseCookie session) { }
+
+    private Started start(String authorizationPath) {
         EntityExchangeResult<byte[]> start = client.get().uri(authorizationPath)
                 .exchange()
                 .expectStatus().isFound()
@@ -143,13 +155,22 @@ class OAuthLoginNonceFlowTest {
                 StandardCharsets.UTF_8);
         ResponseCookie session = start.getResponseCookies().getFirst("SESSION");
         assertThat(session).isNotNull();
+        return new Started(state, session);
+    }
 
-        return client.get().uri("/login/oauth2/code/x?code=code-1&state={state}", state)
-                .cookie(session.getName(), session.getValue())
+    /** Comes back from the provider with {@code callbackQuery} and returns the redirect to the SPA. */
+    private URI returnFromProvider(Started started, String callbackQuery) {
+        return client.get().uri("/login/oauth2/code/x?" + callbackQuery, started.state())
+                .cookie(started.session().getName(), started.session().getValue())
                 .exchange()
                 .expectStatus().isFound()
                 .expectBody().returnResult()
                 .getResponseHeaders().getLocation();
+    }
+
+    /** Starts a sign-in, comes back from the provider with a code, and returns the redirect to the SPA. */
+    private URI signIn(String authorizationPath) {
+        return returnFromProvider(start(authorizationPath), "code=code-1&state={state}");
     }
 
     @Test
@@ -184,5 +205,29 @@ class OAuthLoginNonceFlowTest {
 
         assertThat(signIn(authorizationPath)).hasToString(CALLBACK
                 + "#access_token=jwt-1&token_type=Bearer&expires_at=2026-01-01T00%3A00%3A00Z");
+    }
+
+    @Test
+    void oauthLogin_givenUserCancelsAtProvider_expectsCancelledErrorWithNonce() {
+        Started started = start("/oauth2/authorization/x?login_nonce=" + NONCE);
+
+        assertThat(returnFromProvider(started, "error=access_denied&state={state}"))
+                .hasToString(CALLBACK + "#error=Sign-in+was+cancelled.&login_nonce=" + NONCE);
+    }
+
+    @Test
+    void oauthLogin_givenTokenEndpointRejectsCode_expectsFailedErrorWithNonce() {
+        Started started = start("/oauth2/authorization/x?login_nonce=" + NONCE);
+
+        assertThat(returnFromProvider(started, "code=rejected-code&state={state}"))
+                .hasToString(CALLBACK + "#error=Sign-in+failed.+Please+try+again.&login_nonce=" + NONCE);
+    }
+
+    @Test
+    void oauthLogin_givenStateMatchingNoSavedRequest_expectsFailedErrorWithoutNonce() {
+        Started started = start("/oauth2/authorization/x?login_nonce=" + NONCE);
+
+        assertThat(returnFromProvider(started, "code=code-1&state=someone-elses-state"))
+                .hasToString(CALLBACK + "#error=Sign-in+failed.+Please+try+again.");
     }
 }

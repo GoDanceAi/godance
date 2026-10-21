@@ -28,6 +28,7 @@ import ai.godance.domain.Modality;
 import ai.godance.domain.Provider;
 import ai.godance.domain.Region;
 import ai.godance.domain.UsageRecord;
+import ai.godance.domain.User;
 import ai.godance.repository.AuditLogEntryRepository;
 import ai.godance.repository.CreditLedgerRepository;
 import ai.godance.repository.UsageRecordRepository;
@@ -71,6 +72,7 @@ class AdminConsoleIntegrationTest {
     @BeforeEach
     void seedAccounts() {
         adminBearer = signUpOrLogIn("admin@godance.test");
+        markEmailVerified("admin@godance.test");
         userEmail = "user-" + UUID.randomUUID() + "@godance.test";
         userBearer = signUpOrLogIn(userEmail);
         userId = users.findByEmail(userEmail).orElseThrow().getId();
@@ -372,5 +374,16 @@ class AdminConsoleIntegrationTest {
                 .expectStatus().isOk()
                 .expectBody(AuthResponse.class).returnResult().getResponseBody();
         return "Bearer " + resp.accessToken();
+    }
+
+    /**
+     * Admin access needs the account's email verified. Password signup
+     * leaves it unverified, so mark it directly instead of following the
+     * emailed link.
+     */
+    private void markEmailVerified(String email) {
+        User u = users.findByEmail(email).orElseThrow();
+        u.setEmailVerified(true);
+        users.save(u);
     }
 }

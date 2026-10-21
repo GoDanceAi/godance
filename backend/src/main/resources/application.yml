@@ -141,7 +141,8 @@ godance:
     enabled:     ${BINANCE_PAY_ENABLED:false}    # v1.1 rail — flagged off until merchant KYC clears
   admin:
     # Operator allowlist for /v1/admin/** endpoints. Single-tenant, so we
-    # piggyback on the JWT subject (email) — no is_admin column on users.
+    # match on the caller's account email — no is_admin column on users.
+    # The account must have verified that email; API keys never pass.
     # Comma-separated in env; empty default = fail-closed.
     emails: ${GODANCE_ADMIN_EMAILS:}
   mail:

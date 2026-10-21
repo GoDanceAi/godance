@@ -65,7 +65,7 @@ public class OAuthLoginSuccessHandler implements ServerAuthenticationSuccessHand
                 // back to the SPA, which shows the reason on the login page.
                 .onErrorResume(ResponseStatusException.class,
                         e -> e.getStatusCode().is4xxClientError()
-                                ? redirectWithError(exchange, e.getReason())
+                                ? redirectWithError(exchange, props.postLoginRedirectUri(), e.getReason())
                                 : Mono.error(e));
     }
 
@@ -77,8 +77,9 @@ public class OAuthLoginSuccessHandler implements ServerAuthenticationSuccessHand
                 + nonceParam(exchange));
     }
 
-    private Mono<Void> redirectWithError(ServerWebExchange exchange, String reason) {
-        return redirect(exchange, props.postLoginRedirectUri()
+    /** The SPA callback with {@code #error=<reason>}; also used by {@link OAuthLoginFailureHandler}. */
+    static Mono<Void> redirectWithError(ServerWebExchange exchange, String callbackUri, String reason) {
+        return redirect(exchange, callbackUri
                 + "#error=" + enc(reason != null ? reason : "Sign-in failed")
                 + nonceParam(exchange));
     }

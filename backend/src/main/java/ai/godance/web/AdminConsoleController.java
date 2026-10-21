@@ -6,17 +6,17 @@ import java.util.List;
 import java.util.UUID;
 
 import org.springframework.http.HttpStatus;
-import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestAttribute;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
+import ai.godance.security.AdminAuthorizationFilter;
 import ai.godance.service.admin.AdminConsoleService;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
@@ -25,9 +25,10 @@ import reactor.core.scheduler.Schedulers;
  * Admin console: user lookup / credit adjustment / revenue-vs-cost
  * overview, plus the {@code /me} probe the SPA uses to decide whether to
  * render the Admin nav. Lives under {@code /v1/admin/**} so the email
- * allowlist in {@link ai.godance.security.AdminAuthorizationFilter}
- * gates every route — reaching a handler here implies the caller is an
- * allowlisted admin.
+ * allowlist in {@link AdminAuthorizationFilter} gates every route —
+ * reaching a handler here implies the caller's account has a verified,
+ * allowlisted email, which the filter hands over as the
+ * {@link AdminAuthorizationFilter#ADMIN_EMAIL_ATTRIBUTE} request attribute.
  *
  * <p>JPA calls are blocking, so they hop to {@code boundedElastic}
  * rather than running on the Netty event loop.
@@ -48,8 +49,9 @@ public class AdminConsoleController {
      * hides the Admin nav.
      */
     @GetMapping("/me")
-    public Mono<AdminMeResponse> me(@AuthenticationPrincipal Jwt jwt) {
-        return Mono.just(new AdminMeResponse(emailFromJwt(jwt)));
+    public Mono<AdminMeResponse> me(
+            @RequestAttribute(AdminAuthorizationFilter.ADMIN_EMAIL_ATTRIBUTE) String adminEmail) {
+        return Mono.just(new AdminMeResponse(adminEmail));
     }
 
     @GetMapping("/users")
@@ -70,9 +72,9 @@ public class AdminConsoleController {
     public Mono<AdminConsoleService.AdjustResult> creditAdjust(
             @PathVariable("id") UUID id,
             @RequestBody CreditAdjustRequest body,
-            @AuthenticationPrincipal Jwt jwt) {
+            @RequestAttribute(AdminAuthorizationFilter.ADMIN_EMAIL_ATTRIBUTE) String adminEmail) {
         return Mono.fromCallable(() -> console.adjustCredit(
-                        id, body.amountCents(), body.note(), body.idempotencyKey(), emailFromJwt(jwt)))
+                        id, body.amountCents(), body.note(), body.idempotencyKey(), adminEmail))
                 .subscribeOn(Schedulers.boundedElastic());
     }
 
@@ -98,12 +100,6 @@ public class AdminConsoleController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "dates must be ISO format (yyyy-MM-dd)");
         }
-    }
-
-    private static String emailFromJwt(Jwt jwt) {
-        if (jwt == null) return null;
-        String email = jwt.getClaimAsString("email");
-        return email != null ? email : jwt.getSubject();
     }
 
     public record AdminMeResponse(String email) { }
