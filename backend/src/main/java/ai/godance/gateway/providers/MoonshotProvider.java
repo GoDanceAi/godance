@@ -2,7 +2,7 @@ package ai.godance.gateway.providers;
 
 import org.springframework.stereotype.Component;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 
 import ai.godance.config.MoonshotProperties;
 import ai.godance.domain.Provider;

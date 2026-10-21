@@ -12,8 +12,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 
 import ai.godance.gateway.ChatDtos.ChatMessage;
 import ai.godance.gateway.ChatDtos.ChatRequest;
@@ -74,7 +74,7 @@ public class ChatCompletionController {
     private ServerSentEvent<String> asSse(ChatCompletionChunk chunk) {
         try {
             return ServerSentEvent.<String>builder().data(json.writeValueAsString(chunk)).build();
-        } catch (JsonProcessingException e) {
+        } catch (JacksonException e) {
             throw new IllegalStateException("could not serialize stream chunk", e);
         }
     }

@@ -12,7 +12,7 @@
 
 ```
 godance/
-├── backend/     Java 21 · Spring Boot 3.5 (WebFlux) · PostgreSQL · Redis · Flyway
+├── backend/     Java 21 · Spring Boot 4.1 (WebFlux) · PostgreSQL · Redis · Flyway
 │               OpenAI-compatible REST API, credit ledger, provider gateway with
 │               regional allowlist enforcement, embedded Quartz scheduler.
 │

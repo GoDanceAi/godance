@@ -14,7 +14,10 @@ scaffold and entity-porting plan.
 ## Tech Stack
 
 - Java 21 (LTS — for virtual threads + pattern matching)
-- Spring Boot 3.4+ with **WebFlux** (reactive — required for SSE streaming)
+- Spring Boot 4.1 with **WebFlux** (reactive — required for SSE streaming)
+- Jackson 3: import `tools.jackson.*` (annotations stay `com.fasterxml.jackson.annotation`).
+  The HTTP mapper keeps Jackson 2 defaults (`spring.jackson.use-jackson2-defaults`);
+  hand-built mappers use `JsonMapper.builderWithJackson2Defaults()`
 - PostgreSQL via Spring Data JPA + Hibernate
 - Flyway migrations
 - Redis (rate limits, prompt cache hints, session)
