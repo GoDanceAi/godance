@@ -1,6 +1,30 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+/* Theme tokens stay in the JS config; Tailwind 4 loads it through @config. */
+@config "../tailwind.config.js";
+
+/* Tailwind 3 defaults that Tailwind 4 changed, kept so the app renders the
+   same: borders default to gray-200 (v4: currentColor), buttons get a
+   pointer cursor (v4: default), and table cells keep the browser's 1px
+   padding (v4 resets all padding to 0). */
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--gd-gray-200);
+  }
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  th,
+  td {
+    padding: 1px;
+  }
+}
 
 /* =========================================================================
    Godance design tokens — "Unified Ledger".
@@ -104,11 +128,15 @@ body { background: var(--color-bg); color: var(--color-fg); }
    utilities in the components; these classes carry the brand styling.
    ========================================================================= */
 @layer components {
+  /* Line heights in this layer are plain line-height, not leading-*: in
+     Tailwind 4 a leading-* utility beats the line height of a text-* size on
+     the same element (.btn-sm, .input text-sm), where Tailwind 3 let the
+     size win. */
   .btn {
     @apply inline-flex items-center justify-center gap-1.5 rounded-sm
            border border-transparent px-4 py-2.5 text-[13px] font-semibold
-           leading-none whitespace-nowrap cursor-pointer select-none
-           transition-colors;
+           whitespace-nowrap cursor-pointer select-none transition-colors;
+    line-height: 1;
   }
   .btn-sm { @apply px-3 py-1.5 text-xs; }
   .btn-lg { @apply px-5 py-3 text-sm; }
@@ -131,7 +159,8 @@ body { background: var(--color-bg); color: var(--color-fg); }
   .btn-danger:hover { background: var(--color-danger-bg); }
 
   .input {
-    @apply w-full rounded-sm px-3 py-2 text-[13px] leading-snug transition-colors;
+    @apply w-full rounded-sm px-3 py-2 text-[13px] transition-colors;
+    line-height: 1.375;
     background: var(--color-surface);
     color: var(--color-fg);
     border: 1px solid var(--color-border-strong);
@@ -198,7 +227,8 @@ body { background: var(--color-bg); color: var(--color-fg); }
   .code-block {
     background: var(--color-code-bg);
     color: var(--color-code-fg);
-    @apply rounded-md p-5 overflow-x-auto font-mono text-[12px] leading-relaxed;
+    @apply rounded-md p-5 overflow-x-auto font-mono text-[12px];
+    line-height: 1.625;
   }
   .code-chip {
     background: var(--gd-gray-100);

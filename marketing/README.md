@@ -25,6 +25,7 @@ npm run dev          # http://localhost:4321
 ```bash
 npm run build        # → ./dist/
 npm run preview      # serve ./dist locally
+npm run lint         # astro check: typecheck .astro and .ts files
 ```
 
 ## Deploy to Cloudflare Pages
@@ -36,7 +37,7 @@ npx wrangler pages deploy dist --project-name=godance-marketing
 # Or via the Cloudflare dashboard:
 #   Build command:    npm run build
 #   Output directory: dist
-#   Node version:     20+
+#   Node version:     22.12+ (Astro 7)
 ```
 
 Set `SITE_URL` at build time for non-prod (e.g. `SITE_URL=https://preview.godance.ai npm run build`).

@@ -73,7 +73,7 @@ export default function BillingPage() {
       <p className="mt-2 text-sm text-fg-muted">
         Current balance: <strong className="text-fg tabular-nums">{formatCents(user.creditBalanceCents)}</strong>. One
         balance, pay any way you like — card or USDT, same credits. They never expire;
-        pricing is provider list + flat 5%.
+        pricing is provider list plus a platform fee (5% text, 12% image, 10–15% video).
       </p>
 
       <div className="mt-8 card space-y-6">

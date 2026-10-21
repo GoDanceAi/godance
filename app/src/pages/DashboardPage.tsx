@@ -57,7 +57,7 @@ export default function DashboardPage() {
         <DashboardCard
           to="/billing"
           title="Top up balance"
-          body="Card, ACH, or SEPA. Pass-through provider pricing plus a flat 5% fee."
+          body="Card, ACH, or SEPA. Pass-through provider pricing plus a platform fee from 5%."
         />
         <DashboardCard
           to="/settings"

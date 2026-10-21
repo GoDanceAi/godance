@@ -33,10 +33,13 @@ services:
       retries: 10
 
   minio:
-    # Our GHCR mirror of the last public minio/minio:latest — MinIO withdrew
-    # its public images from Docker Hub/Quay in 2025. Pulling needs a GHCR
-    # login (docker login ghcr.io with a GitHub token that has read:packages).
-    image: ghcr.io/godanceai/minio:mirror-2026-10-04
+    # MinIO RELEASE.2024-12-13T22-19-12Z built from source by
+    # dev/minio/Dockerfile — MinIO withdrew its public images from Docker
+    # Hub/Quay in 2025. The first `docker compose up` builds it (a few
+    # minutes); CI and the Testcontainers tests reuse the same local tag.
+    image: localhost/godance/minio:RELEASE.2024-12-13T22-19-12Z
+    build: ./dev/minio
+    pull_policy: never   # local-only image: build it if missing, never pull
     container_name: godance-minio
     command: server /data --console-address ":9001"
     environment:
@@ -48,7 +51,7 @@ services:
     volumes:
       - godance_minio_data:/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9000/minio/health/live"]
       interval: 10s
       timeout: 5s
       retries: 5
