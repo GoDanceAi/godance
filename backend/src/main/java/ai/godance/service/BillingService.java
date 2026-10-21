@@ -1,6 +1,7 @@
 package ai.godance.service;
 
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import org.slf4j.Logger;
@@ -24,12 +25,20 @@ import ai.godance.service.CreditLedgerService.TopUpResult;
 import ai.godance.service.CryptoPaymentRail.CryptoInvoice;
 import ai.godance.service.NowPaymentsService.InvalidSignatureException;
 import ai.godance.service.NowPaymentsService.NowPaymentsIpn;
+import ai.godance.service.mail.MailService;
 
 @Service
 public class BillingService {
 
     private static final Logger log = LoggerFactory.getLogger(BillingService.class);
     private static final String EVENT_CHECKOUT_COMPLETED = "checkout.session.completed";
+    private static final String EVENT_ASYNC_PAYMENT_SUCCEEDED = "checkout.session.async_payment_succeeded";
+    private static final String EVENT_ASYNC_PAYMENT_FAILED = "checkout.session.async_payment_failed";
+    private static final Set<String> CHECKOUT_EVENTS = Set.of(
+            EVENT_CHECKOUT_COMPLETED, EVENT_ASYNC_PAYMENT_SUCCEEDED, EVENT_ASYNC_PAYMENT_FAILED);
+    /** Checkout Session {@code payment_status} values (the third is {@code no_payment_required}). */
+    private static final String PAYMENT_STATUS_PAID = "paid";
+    private static final String PAYMENT_STATUS_UNPAID = "unpaid";
 
     private final StripeService stripe;
     private final NowPaymentsService nowPayments;
@@ -37,16 +46,19 @@ public class BillingService {
     private final UserRepository users;
     private final AuditLogService audit;
     private final BillingProperties billing;
+    private final MailService mail;
 
     public BillingService(StripeService stripe, NowPaymentsService nowPayments,
                           CreditLedgerService ledger, UserRepository users,
-                          AuditLogService audit, BillingProperties billing) {
+                          AuditLogService audit, BillingProperties billing,
+                          MailService mail) {
         this.stripe = stripe;
         this.nowPayments = nowPayments;
         this.ledger = ledger;
         this.users = users;
         this.audit = audit;
         this.billing = billing;
+        this.mail = mail;
     }
 
     /**
@@ -89,9 +101,16 @@ public class BillingService {
     }
 
     /**
-     * Handle a verified Stripe webhook. Returns true if processed (or
-     * deliberately ignored — unknown event types are not errors). Throws
-     * 400 if signature is invalid.
+     * Handle a verified Stripe webhook. Unknown event types are acked and
+     * ignored, not errors. Throws 400 if the signature is invalid.
+     *
+     * <p>A top-up credits once its payment has actually succeeded: on
+     * {@code checkout.session.completed} with {@code payment_status=paid}
+     * (cards), or — for delayed-notification methods such as ACH Direct
+     * Debit and SEPA Debit, whose session completes {@code unpaid} while
+     * the bank transfer is pending — on the later
+     * {@code checkout.session.async_payment_succeeded}.
+     * {@code checkout.session.async_payment_failed} never credits.
      */
     @Transactional
     public void handleWebhook(String payload, String sigHeader, String ip) {
@@ -104,42 +123,92 @@ public class BillingService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "invalid stripe signature");
         }
 
-        if (!EVENT_CHECKOUT_COMPLETED.equals(event.getType())) {
+        String type = event.getType();
+        if (!CHECKOUT_EVENTS.contains(type)) {
             // Stripe will keep retrying on non-2xx, so explicitly succeed on
             // unknown events. We log for visibility but don't error.
             audit.record(AuditLogService.EVT_BILLING_WEBHOOK_IGNORED, AuditOutcome.SUCCESS,
-                    null, ip, Map.of("eventType", event.getType(), "eventId", event.getId()));
+                    null, ip, Map.of("eventType", type, "eventId", event.getId()));
             return;
         }
 
-        // getObject() returns Optional.empty() when the event's Stripe API
-        // version doesn't match the SDK's pinned version (e.g. live account
-        // on 2026-04-22.dahlia, SDK 28.4.0 pinned to 2024-12-18.acacia).
-        // The fields we actually read (id, metadata, client_reference_id,
-        // amount_total) are stable across versions, so fall through to
-        // deserializeUnsafe() — Stripe themselves recommend this for the
-        // skew case.
+        Session session = checkoutSession(event, ip);
+        log.info("stripe webhook {} eventId={} apiVersion={} sessionId={} paymentStatus={}",
+                type, event.getId(), event.getApiVersion(), session.getId(), session.getPaymentStatus());
+
+        UUID userId = userIdFromSession(session, type);
+        switch (type) {
+            case EVENT_CHECKOUT_COMPLETED -> {
+                String paymentStatus = session.getPaymentStatus();
+                if (PAYMENT_STATUS_PAID.equals(paymentStatus)) {
+                    creditCheckoutSession(event, session, userId, ip);
+                } else if (PAYMENT_STATUS_UNPAID.equals(paymentStatus)) {
+                    // Funds still in flight; async_payment_succeeded / _failed settles it.
+                    audit.record(AuditLogService.EVT_BILLING_TOPUP_PENDING, AuditOutcome.SUCCESS,
+                            userId, ip, Map.of(
+                                    "amountCents", amountOrZero(session),
+                                    "eventId", event.getId(),
+                                    "sessionId", session.getId()));
+                } else {
+                    // no_payment_required: nothing was collected (zero-amount
+                    // session, or a payment deferred to a later date), so
+                    // there is nothing to credit yet. Fail closed.
+                    audit.record(AuditLogService.EVT_BILLING_WEBHOOK_IGNORED, AuditOutcome.SUCCESS,
+                            userId, ip, Map.of(
+                                    "eventId", event.getId(),
+                                    "sessionId", session.getId(),
+                                    "reason", "not-paid",
+                                    "paymentStatus", String.valueOf(paymentStatus)));
+                }
+            }
+            case EVENT_ASYNC_PAYMENT_SUCCEEDED -> creditCheckoutSession(event, session, userId, ip);
+            case EVENT_ASYNC_PAYMENT_FAILED -> recordAsyncPaymentFailed(event, session, userId, ip);
+            default -> throw new IllegalStateException("unhandled checkout event " + type);
+        }
+    }
+
+    /**
+     * The Checkout Session carried by {@code event}.
+     *
+     * <p>getObject() returns Optional.empty() when the event's Stripe API
+     * version doesn't match the SDK's pinned version (e.g. live account
+     * on 2026-04-22.dahlia, SDK 28.4.0 pinned to 2024-12-18.acacia).
+     * The fields we actually read (id, metadata, client_reference_id,
+     * amount_total, payment_status) are stable across versions, so fall
+     * through to deserializeUnsafe() — Stripe themselves recommend this
+     * for the skew case.
+     */
+    private Session checkoutSession(Event event, String ip) {
         var deser = event.getDataObjectDeserializer();
         Session session = (Session) deser.getObject().orElse(null);
-        if (session == null) {
-            try {
-                session = (Session) deser.deserializeUnsafe();
-            } catch (com.stripe.exception.EventDataObjectDeserializationException e) {
-                log.warn("checkout.session.completed deserialize failed (eventId={} apiVersion={}): {}",
-                        event.getId(), event.getApiVersion(), e.getMessage());
-                audit.record(AuditLogService.EVT_BILLING_WEBHOOK_REJECTED, AuditOutcome.FAILURE,
-                        null, ip, Map.of(
-                                "reason", "deserialize-failed",
-                                "eventId", event.getId(),
-                                "apiVersion", String.valueOf(event.getApiVersion())));
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                        "could not deserialize checkout.session.completed payload");
-            }
+        if (session != null) return session;
+        try {
+            return (Session) deser.deserializeUnsafe();
+        } catch (com.stripe.exception.EventDataObjectDeserializationException e) {
+            log.warn("{} deserialize failed (eventId={} apiVersion={}): {}",
+                    event.getType(), event.getId(), event.getApiVersion(), e.getMessage());
+            audit.record(AuditLogService.EVT_BILLING_WEBHOOK_REJECTED, AuditOutcome.FAILURE,
+                    null, ip, Map.of(
+                            "reason", "deserialize-failed",
+                            "eventType", event.getType(),
+                            "eventId", event.getId(),
+                            "apiVersion", String.valueOf(event.getApiVersion())));
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "could not deserialize " + event.getType() + " payload");
         }
-        log.info("stripe webhook checkout.session.completed eventId={} apiVersion={} sessionId={}",
-                event.getId(), event.getApiVersion(), session.getId());
+    }
 
-        UUID userId = userIdFromSession(session);
+    /**
+     * Credit a Checkout Session whose payment has succeeded. Called from
+     * both {@code checkout.session.completed} (paid) and
+     * {@code checkout.session.async_payment_succeeded}, which carry
+     * different event ids: the event-id idempotency key stops a replay of
+     * one event, and the session-id {@code source_ref} check stops the
+     * other event from crediting the same session a second time. That
+     * check is a read, not a constraint — enough because Stripe never
+     * makes both events creditworthy for one session, so they can't race.
+     */
+    private void creditCheckoutSession(Event event, Session session, UUID userId, String ip) {
         Long amount = session.getAmountTotal();
         if (amount == null || amount <= 0) {
             // Free / zero-amount sessions don't credit. Log and ack.
@@ -148,9 +217,10 @@ public class BillingService {
             return;
         }
 
-        TopUpResult result = ledger.topUp(
-                userId, amount, CreditSource.STRIPE, session.getId(), event.getId(),
-                "Stripe Checkout " + session.getId());
+        TopUpResult result = ledger.hasEntryFrom(userId, CreditSource.STRIPE, session.getId())
+                ? TopUpResult.DUPLICATE
+                : ledger.topUp(userId, amount, CreditSource.STRIPE, session.getId(), event.getId(),
+                        "Stripe Checkout " + session.getId());
 
         String evtType = result == TopUpResult.APPLIED
                 ? AuditLogService.EVT_BILLING_TOPUP_SUCCEEDED
@@ -161,8 +231,40 @@ public class BillingService {
         // If the session was created with setup_future_usage=off_session, the
         // PaymentIntent will have a payment_method we can charge later. Persist
         // it on the user the first time we see it (don't overwrite — the user
-        // may already have a saved card from an earlier session).
+        // may already have a saved card from an earlier session). Only here,
+        // once the payment has succeeded: a pending one may never clear.
         capturePaymentMethodIfPresent(userId, session.getId(), ip);
+    }
+
+    /**
+     * A delayed-notification payment failed after checkout, so the session
+     * was never credited. A session that was credited anyway (completed
+     * under the older handler, which credited regardless of
+     * {@code payment_status}) is flagged for an operator to claw back via
+     * the admin console rather than debited here, which could push the
+     * balance negative.
+     */
+    private void recordAsyncPaymentFailed(Event event, Session session, UUID userId, String ip) {
+        long amount = amountOrZero(session);
+        boolean alreadyCredited = ledger.hasEntryFrom(userId, CreditSource.STRIPE, session.getId());
+        if (alreadyCredited) {
+            log.warn("async payment failed for already-credited session {} (user {}, {} cents)",
+                    session.getId(), userId, amount);
+        }
+        audit.record(AuditLogService.EVT_BILLING_TOPUP_FAILED, AuditOutcome.FAILURE, userId, ip, Map.of(
+                "amountCents", amount,
+                "eventId", event.getId(),
+                "sessionId", session.getId(),
+                "alreadyCredited", alreadyCredited));
+        if (!alreadyCredited) {
+            // Mail failures are swallowed inside MailService — never propagated here.
+            users.findById(userId).ifPresent(u -> mail.sendTopUpPaymentFailed(u, amount));
+        }
+    }
+
+    private static long amountOrZero(Session session) {
+        Long amount = session.getAmountTotal();
+        return amount == null ? 0L : amount;
     }
 
     /**
@@ -202,7 +304,7 @@ public class BillingService {
         }
     }
 
-    private static UUID userIdFromSession(Session session) {
+    private static UUID userIdFromSession(Session session, String eventType) {
         // Prefer metadata; fall back to client_reference_id. Both set by us at create time.
         Map<String, String> meta = session.getMetadata();
         if (meta != null && meta.containsKey(StripeService.META_USER_ID)) {
@@ -211,12 +313,13 @@ public class BillingService {
         if (session.getClientReferenceId() != null) {
             return UUID.fromString(session.getClientReferenceId());
         }
-        log.warn("checkout.session.completed missing user id: sessionId={} metadataKeys={} clientRef={}",
+        log.warn("{} missing user id: sessionId={} metadataKeys={} clientRef={}",
+                eventType,
                 session.getId(),
                 meta == null ? "null" : meta.keySet(),
                 session.getClientReferenceId());
         throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                "checkout.session.completed missing user id (no metadata or client_reference_id)");
+                eventType + " missing user id (no metadata or client_reference_id)");
     }
 
     // ===== NOWPayments (crypto / USDT) ===============================

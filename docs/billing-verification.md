@@ -32,7 +32,10 @@ live Stripe API version, and webhook delivery are outside the test harness.
 - **[operator]** `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` set on the
   droplet to the **test-mode** values from the Stripe Dashboard, and the
   endpoint `$API/v1/billing/webhooks/stripe` registered under
-  Developers → Webhooks (event `checkout.session.completed`).
+  Developers → Webhooks, subscribed to `checkout.session.completed`,
+  `checkout.session.async_payment_succeeded` and
+  `checkout.session.async_payment_failed`. Without the two async events,
+  ACH Direct Debit / SEPA Debit top-ups are never credited.
 - **[operator]** `NOWPAYMENTS_IPN_SECRET` set on the droplet, and the IPN
   callback URL `$API/v1/billing/webhooks/nowpayments` set in the
   NOWPayments dashboard.
@@ -62,7 +65,7 @@ expected result is **HTTP 400 `checkout.session.completed missing user id`**
 unattributable event. Confirm in the droplet log:
 
 ```
-stripe webhook checkout.session.completed eventId=evt_... apiVersion=... sessionId=cs_...
+stripe webhook checkout.session.completed eventId=evt_... apiVersion=... sessionId=cs_... paymentStatus=...
 ```
 
 and a `billing.webhook.rejected` audit row should **not** appear for this
@@ -138,7 +141,7 @@ stripe --version            # CLI version
 # Dashboard → Developers → API version shows the account default.
 
 # Droplet log line from step 1b — read the apiVersion field:
-#   stripe webhook checkout.session.completed eventId=... apiVersion=2025-... sessionId=...
+#   stripe webhook checkout.session.completed eventId=... apiVersion=2025-... sessionId=... paymentStatus=paid
 ```
 
 If `apiVersion` shows a release-name other than `acacia` **and** step 1b
@@ -150,6 +153,31 @@ the safe `getObject()` path is exercised instead — to force the fallback,
 top-up, and confirm the credit still lands. A
 `billing.webhook.rejected | reason=deserialize-failed` audit row means the
 fallback itself failed — capture the `eventId`/`apiVersion` and escalate.
+
+### 1e. Delayed-notification payments credit only once they clear — [operator]
+
+ACH Direct Debit and SEPA Debit sessions complete with
+`payment_status=unpaid` while the bank transfer is pending. The webhook
+credits nothing then; it credits on `checkout.session.async_payment_succeeded`
+and never on `checkout.session.async_payment_failed`.
+
+1. Mint a top-up as in 1b and pay with a Stripe **test bank account**
+   (Stripe docs → Testing → ACH Direct Debit / SEPA Debit list account
+   numbers that succeed and that fail).
+2. Right after checkout, before the async event arrives: balance unchanged,
+   no `STRIPE` ledger row for the session, and an audit row
+   `billing.topup.pending | SUCCESS`.
+3. After `checkout.session.async_payment_succeeded`: the 1b queries show the
+   credit (ledger `count=1`, keyed by the async event's id, `source_ref` =
+   the session id) and `billing.topup.succeeded | SUCCESS`.
+4. Repeat with a failing test account. After
+   `checkout.session.async_payment_failed`: still no ledger row, an audit
+   row `billing.topup.failed | FAILURE`, and a "top-up payment failed"
+   email to the user.
+
+A `billing.topup.failed` row whose detail has `"alreadyCredited": true` is a
+session the pre-fix handler credited while still unpaid — claw it back by
+hand via the admin console's credit adjustment.
 
 ## 2. Auto-recharge — off-session PaymentIntent
 

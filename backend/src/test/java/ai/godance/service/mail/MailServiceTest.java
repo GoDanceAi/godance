@@ -99,6 +99,15 @@ class MailServiceTest {
     }
 
     @Test
+    void sendTopUpPaymentFailed_givenAmount_expectsStubFirstLineWithDollarAmount() {
+        mail.sendTopUpPaymentFailed(user("a@godance.test"), 40_05L);
+
+        String text = captureText(List.of("a@godance.test"), "top-up payment failed");
+        assertThat(text.lines().findFirst().orElseThrow())
+                .isEqualTo("Top-up payment failed for a@godance.test: $40.05 not credited");
+    }
+
+    @Test
     void sendPricingProposalsDigest_givenPendingAndAllowlist_expectsOneEmailWithProposalLines() {
         ModelChangeProposal p = new ModelChangeProposal();
         p.setType(ProposalType.PRICE_CHANGE);
@@ -152,6 +161,7 @@ class MailServiceTest {
             mail.sendVerificationEmail(user("a@godance.test"));
             mail.sendSpendWarning("a@godance.test", "user x", "daily", 1, 2);
             mail.sendAutoRechargeFailed(user("a@godance.test"), "boom");
+            mail.sendTopUpPaymentFailed(user("a@godance.test"), 1_00L);
             mail.sendPricingProposalsDigest(List.of(p));
         }).doesNotThrowAnyException();
     }

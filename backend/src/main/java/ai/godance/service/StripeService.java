@@ -81,8 +81,8 @@ public class StripeService {
      * <p>When {@code saveCardForFuture} is true, Stripe captures the payment
      * method with {@code setup_future_usage=off_session} so we can charge
      * the same card later (auto-recharge). The {@code payment_method} id
-     * surfaces on the {@code checkout.session.completed} webhook via the
-     * embedded {@code payment_intent}; we persist it on the user there.
+     * surfaces via the session's {@code payment_intent}; the webhook
+     * persists it on the user once the payment has succeeded.
      */
     public Session createTopUpCheckout(User user, String stripeCustomerId,
                                        long amountCents, boolean saveCardForFuture) throws StripeException {
