@@ -25,6 +25,7 @@ npm run dev          # http://localhost:4321
 ```bash
 npm run build        # → ./dist/
 npm run preview      # serve ./dist locally
+npm run lint         # astro check: typecheck .astro and .ts files
 ```
 
 ## Deploy to Cloudflare Pages

@@ -8,6 +8,7 @@
     "start": "astro dev",
     "build": "astro build",
     "preview": "astro preview",
+    "lint": "astro check",
     "astro": "astro"
   },
   "dependencies": {
@@ -19,5 +20,8 @@
   },
   "overrides": {
     "sharp": "^0.35.0"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.10"
   }
 }
