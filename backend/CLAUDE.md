@@ -1,11 +1,11 @@
 # Godance — Project Memory
 
-Godance (godance.ai) is a multimodal AI aggregator: text + image + video +
-audio behind one OpenAI-compatible API and a simple chat UI. Stripe primary
-billing, NOWPayments (USDT) for crypto top-ups; Binance Pay is scaffolded but
-not live, and the legacy Coinbase Commerce rail is retired
-(`CreditSource.COINBASE` survives only for historical ledger rows). Single
-credit ledger.
+Godance (godance.ai) is a multimodal AI aggregator: text + image + video
+(audio planned) behind one OpenAI-compatible API and a simple chat UI.
+Stripe primary billing, NOWPayments (USDT) for crypto top-ups; Binance Pay
+is scaffolded but not live, and the legacy Coinbase Commerce rail is
+retired (`CreditSource.COINBASE` survives only for historical ledger rows).
+Single credit ledger.
 
 **Read this first:** [`HANDOFF.md`](./HANDOFF.md) (in this folder).
 Everything below is shorthand; that document is canonical for the initial
