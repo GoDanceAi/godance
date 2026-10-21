@@ -8,7 +8,7 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>3.4.13</version>
+        <version>3.5.16</version>
         <relativePath/>
     </parent>
 
@@ -30,18 +30,24 @@
         <aws-sdk.version>2.30.7</aws-sdk.version>
         <git-commit-id-plugin.version>9.0.1</git-commit-id-plugin.version>
 
-        <!-- CVE overrides on top of the Spring Boot 3.4.13 BOM (3.4 is past OSS
+        <!-- CVE overrides on top of the Spring Boot 3.5.16 BOM (3.5 is past OSS
              end-of-life, so the BOM itself no longer moves). Same-line patch
-             bumps unless noted; drop each one once a Spring Boot line that
-             manages a fixed version is adopted. See docs/dependency-triage-2026-09.md. -->
+             bumps; drop each one once a Spring Boot line that manages a fixed
+             version is adopted. Checked against OSV 2026-10-21; see
+             docs/dependency-triage-2026-09.md for the method. -->
+        <!-- 3.5.16 manages 4.1.135; 4.1.137 fixes CVE-2026-75595 (CRITICAL) and 13 more. -->
         <netty.version>4.1.137.Final</netty.version>
-        <jackson-bom.version>2.18.10</jackson-bom.version>
-        <spring-framework.version>6.2.19</spring-framework.version>
-        <logback.version>1.5.38</logback.version>
+        <!-- 3.5.16 manages 2.21.4; 2.21.7 is the first with all 11 jackson-core/-databind
+             fixes (incl. CVE-2026-89425/89407/91776/91777, HIGH). -->
+        <jackson-bom.version>2.21.7</jackson-bom.version>
+        <!-- 3.5.16 manages 42.7.11; CVE-2026-54291 (HIGH) needs 42.7.12. -->
         <postgresql.version>42.7.13</postgresql.version>
+        <!-- 3.5.16 manages 2.24.3; CVE-2026-49844 in log4j-api (only via the log4j-to-slf4j bridge). -->
         <log4j2.version>2.25.5</log4j2.version>
-        <!-- cross-minor (1.14 -> 1.15): the 1.14 line has no fix for CVE-2026-40984. -->
-        <micrometer.version>1.15.12</micrometer.version>
+        <!-- Known and not overridable on this line: spring-webflux 6.2.19 carries
+             CVE-2026-47892 and CVE-2026-47890 (both CRITICAL), fixed only in
+             Spring Framework 7.0.9 (Spring Boot 4). Neither is reachable here: no
+             functional endpoints (RouterFunction) and no SSE view fragments. -->
     </properties>
 
     <dependencyManagement>

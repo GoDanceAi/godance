@@ -5,7 +5,7 @@ OpenAI-compatible HTTP API. Stripe primary billing, Coinbase Commerce
 for crypto top-ups. Single credit ledger with idempotent webhook
 handling.
 
-**Stack:** Java 21 · Spring Boot 3.4 (WebFlux) · PostgreSQL 16 · Redis 7
+**Stack:** Java 21 · Spring Boot 3.5 (WebFlux) · PostgreSQL 16 · Redis 7
 · Flyway · Maven · S3-compatible object storage (MinIO local, DO Spaces
 / Alicloud OSS prod) · Quartz (embedded) · Testcontainers · WireMock.
 

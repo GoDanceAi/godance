@@ -317,6 +317,70 @@ otherwise picks JDK 25, which breaks Mockito inline mocks).
   evaluating every open alert's vulnerable range against the versions in
   the two lockfiles (17/17 app alerts close, 14/23 marketing alerts close).
 
+## Follow-up 2026-10-21 — Spring Boot 3.5.16 landed
+
+The stopgap recommended above, re-measured against OSV on the day it landed.
+Advisories have been published since this report, so the recipe changed in
+one place.
+
+- **Parent 3.4.13 → 3.5.16.** This brings Spring Security 6.5.11, Spring Data
+  3.5.13, Quartz 2.5.2, Flyway 11.7.2, Lettuce 6.6.0 and Hibernate 6.6.53.
+- **Overrides kept:** `netty.version` 4.1.137.Final, `postgresql.version`
+  42.7.13, `log4j2.version` 2.25.5, and the `mchange-commons-java`
+  exclusion.
+- **`jackson-bom.version` is 2.21.7, not 2.21.6.** Four HIGH jackson-core and
+  jackson-databind advisories (CVE-2026-89425, -89407, -91776, -91777) appeared
+  after this report and are fixed only in 2.18.11, 2.21.7 or 2.22.3. `main`
+  on 2.18.10 had them too.
+- **Overrides dropped:** `spring-framework.version`, `logback.version` and
+  `micrometer.version`. 3.5.16 manages 6.2.19, 1.5.34 and 1.15.12, and none of
+  them has an OSV finding.
+
+| | Advisories | Outside test scope |
+|---|---|---|
+| `main` on 3.4.13 + overrides (2026-10-21) | 22 on 13 artifacts | 20 |
+| 3.5.16 with no overrides at all | 30 on 11 artifacts | 29 |
+| 3.5.16 + the overrides above | **3 on 2 artifacts** | 2 |
+
+What is left:
+- **spring-webflux 6.2.19 has CVE-2026-47892 and CVE-2026-47890, both
+  CRITICAL.** OSV lists no 6.2.x fix, only Spring Framework 7.0.9, which means
+  Spring Boot 4. Neither is reachable here:
+  - CVE-2026-47892 needs WebFlux functional endpoints with header predicates.
+    The backend has no `RouterFunction`.
+  - CVE-2026-47890 needs SSE with view fragments. The backend has no template
+    engine, and its SSE streams are plain `ServerSentEvent`s.
+- **commons-lang3 3.17.0** is test scope only.
+
+The manual checks listed under "Spring Boot 3.5.16 as a stopgap" have now
+been done:
+
+- **Quartz 2.3 → 2.5.** The `tables_postgres.sql` shipped in quartz 2.3.2 and
+  2.5.2 is identical, so `V8__autorecharge_and_quartz.sql` stays valid. Upgrade
+  path, simulated on the compose Postgres:
+  1. `main` (3.4.13) booted in the default profile, which uses the JDBC store
+     with `PostgreSQLDelegate` as prod does. It applied V1–V11 and persisted 2
+     jobs with `WAITING` triggers.
+  2. 3.5.16 booted against the same database. Flyway reported "up to date",
+     validated all 11 migrations, and the Quartz 2.5.2 JDBC store resumed both
+     triggers.
+- **Configuration keys.** `spring-boot-properties-migrator` was on the
+  runtime classpath for that boot and reported no renamed or removed keys.
+- **Lettuce 6.6 against Redis 7.** No application code calls Redis directly.
+  `/actuator/health` reported `UP`, then `DOWN` with Redis stopped, then `UP`
+  again after a restart.
+- **Heapdump `access: NONE` default.** No effect: only `health` and `info` are
+  exposed.
+- **Removed `taskExecutor` alias.** Not referenced anywhere.
+- **Stricter boolean and profile parsing.** Every boolean is a plain
+  `true`/`false`, and the only profile expression is `!test`.
+- **Jackson 2.18 → 2.21.** No custom `ObjectMapper` or stream-read limits are
+  configured, and the suite covers the DTOs.
+
+`mvn clean verify`: 353 tests, 0 failures. 3.5 is itself past OSS support
+(2026-06-30), so Spring Boot 4.1 remains the durable target. It is also the
+only line that fixes the two spring-webflux advisories.
+
 ## Appendix — re-running the backend scan
 
 ```bash
