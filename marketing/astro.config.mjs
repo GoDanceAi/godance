@@ -10,7 +10,9 @@ const SITE_URL = process.env.SITE_URL || 'https://godance.ai';
 export default defineConfig({
   site: SITE_URL,
   output: 'static',
-  integrations: [sitemap()],
+  // /legal/* are noindex placeholders until the real policies are published;
+  // drop this filter (and their noindex) when they are.
+  integrations: [sitemap({ filter: (page) => !page.includes('/legal/') })],
   // Astro 7 defaults to 'jsx', which also strips whitespace inside inline
   // elements; true keeps the Astro 5 output.
   compressHTML: true,
