@@ -10,7 +10,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
+import tools.jackson.core.JacksonException;
 
 class NowPaymentsCanonicalJsonTest {
 
@@ -75,6 +75,6 @@ class NowPaymentsCanonicalJsonTest {
     @Test
     void canonicalise_givenTrailingGarbage_throws() {
         assertThatThrownBy(() -> NowPaymentsCanonicalJson.canonicalise("{\"a\":1} {"))
-                .isInstanceOf(JsonProcessingException.class);
+                .isInstanceOf(JacksonException.class);
     }
 }

@@ -381,6 +381,67 @@ been done:
 (2026-06-30), so Spring Boot 4.1 remains the durable target. It is also the
 only line that fixes the two spring-webflux advisories.
 
+## Follow-up 2026-10-21 — Spring Boot 4.1.1
+
+The durable target from above, measured the same way.
+
+- **Parent 3.5.16 → 4.1.1.** This brings Spring Framework 7.0.9, Spring
+  Security 7.1.1, Spring Data 2026.0.1, Hibernate 7.4.5, Flyway 12.4.0,
+  Lettuce 7.5.2, Netty 4.2.17, Jackson 3.1 and JUnit 6. Quartz stays on
+  2.5.2 and Testcontainers on 2.0.5, now BOM-managed, so the pom's own
+  Testcontainers BOM import is gone.
+- **OSV.** 4.1.1 with no overrides has 7 advisories, all on Jackson 3.1.5
+  (CVE-2026-89425, -89407, -91776, -91777 and three more), fixed in 3.1.7.
+  The pom pins `jackson-bom.version` to 3.1.8, the latest 3.1.x, which gives
+  **0 advisories on 235 artifacts**, test scope included. The netty,
+  postgresql and log4j2 pins are dropped because 4.1.1's own versions are
+  clean. The two spring-webflux CRITICALs are closed by Framework 7.0.9. The
+  `mchange-commons-java` exclusion stays.
+- **Modular starters.** Boot 4 auto-configures Flyway only through
+  `spring-boot-starter-flyway`. The OAuth2 starters are renamed to
+  `spring-boot-starter-security-oauth2-{client,resource-server}`.
+  `WebClient.Builder` now needs `spring-boot-starter-webclient`: without it
+  every `@SpringBootTest` context failed to load. Tests use
+  `spring-boot-starter-webflux-test`, and `@AutoConfigureWebTestClient` moved
+  to `org.springframework.boot.webtestclient.autoconfigure`.
+- **Jackson 2 → 3.** Imports move to `tools.jackson`; annotations keep
+  `com.fasterxml.jackson.annotation`. `spring.jackson.use-jackson2-defaults`
+  keeps the HTTP mapper on Jackson 2 behaviour, and the hand-built mappers use
+  `JsonMapper.builderWithJackson2Defaults()`. A jshell side-by-side of
+  2.21.7 against 3.1.8 showed one hazard: `asString()` throws on container
+  nodes where Jackson 2's `asText()` returned `""`. The four bare call sites
+  therefore use `asString("")`, so a malformed pricing-feed value still
+  becomes an ANOMALY row rather than aborting the refresh.
+
+Verification:
+- `mvn clean verify`: 355 tests, 0 failures, rebased onto `main` @ 05f0ef9.
+- **Upgrade path.** On the compose database that 3.4.13 and 3.5.16 had
+  already used, Flyway 12 reported "up to date" and validated V1–V11, and the
+  Quartz JDBC store resumed both `WAITING` triggers.
+  `spring-boot-properties-migrator` reported no renamed or removed keys.
+- **Lettuce 7.** `/actuator/health` reported `UP`, then `DOWN` with Redis
+  stopped, then `UP` again.
+- **Wire format.** `main` (3.5.16) and this branch were booted in turn and
+  ten responses were captured from each: `/healthz`, `/v1/models` anonymous
+  and authenticated, signup success, duplicate and invalid, and the 401, 404
+  and 400 chat errors. After normalising timestamps, UUIDs, JWTs and the test
+  email, 8 of 10 are byte-identical. The other two, both `/v1/models`, differ
+  only in key order inside `godance: {...}`. That object is a `Map.of`, whose
+  iteration order the JDK randomises on every JVM start, so it changes on any
+  restart, on either version.
+
+Behaviour changes that come with Boot 4 and Framework 7 and were kept:
+- Problem details no longer include `"type":"about:blank"`. RFC 9457 §3.1.1
+  defines an absent `type` as `about:blank`, and the SPA reads only `detail`
+  and `title`.
+- `/actuator/health` gains `"groups":["liveness","readiness"]`, and the
+  `/actuator/health/liveness` and `/readiness` endpoints now exist (probes are
+  on by default in Boot 4). The load balancer and deploy checks use
+  `/healthz`, which is unchanged.
+- The two 422 responses in `ProposalApprovalService` use
+  `HttpStatus.UNPROCESSABLE_CONTENT`. `UNPROCESSABLE_ENTITY` is deprecated, so
+  the problem-detail title now reads "Unprocessable Content".
+
 ## Appendix — re-running the backend scan
 
 ```bash

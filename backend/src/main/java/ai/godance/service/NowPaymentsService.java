@@ -13,8 +13,8 @@ import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 import ai.godance.config.BillingProperties;
 import ai.godance.config.NowPaymentsProperties;
@@ -126,9 +126,9 @@ public class NowPaymentsService implements CryptoPaymentRail {
             // in number spelling (5077125051 vs 5077125051.0) share a signature
             // and must yield the same payment_id — it's the idempotency key.
             JsonNode root = json.readTree(canonical);
-            String paymentId = root.path("payment_id").asText(null);
-            String status = root.path("payment_status").asText(null);
-            String orderId = root.path("order_id").asText(null);
+            String paymentId = root.path("payment_id").asString(null);
+            String status = root.path("payment_status").asString(null);
+            String orderId = root.path("order_id").asString(null);
             if (paymentId == null || paymentId.isBlank() || status == null || status.isBlank()) {
                 throw new IllegalArgumentException("NOWPayments IPN missing payment_id or payment_status");
             }
@@ -184,13 +184,13 @@ public class NowPaymentsService implements CryptoPaymentRail {
          * the expected platform fiat currency.
          */
         public long fiatAmountCents(String expectedCurrency) {
-            String currency = raw.path("price_currency").asText("");
+            String currency = raw.path("price_currency").asString("");
             if (!expectedCurrency.equalsIgnoreCase(currency)) {
                 throw new IllegalArgumentException(
                         "NOWPayments price_currency must be '" + expectedCurrency
                                 + "'; got '" + currency + "'");
             }
-            String amount = raw.path("price_amount").asText("0");
+            String amount = raw.path("price_amount").asString("0");
             return new BigDecimal(amount)
                     .movePointRight(2)
                     .setScale(0, RoundingMode.HALF_UP)

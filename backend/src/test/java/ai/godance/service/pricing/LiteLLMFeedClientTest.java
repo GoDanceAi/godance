@@ -11,7 +11,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.reactive.function.client.WebClient;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import ai.godance.config.PricingProperties;
 import ai.godance.domain.Modality;
@@ -19,7 +20,7 @@ import ai.godance.domain.PriceField;
 
 class LiteLLMFeedClientTest {
 
-    private static final ObjectMapper JSON = new ObjectMapper();
+    private static final ObjectMapper JSON = JsonMapper.builderWithJackson2Defaults().build();
     private static final Path FIXTURE = Path.of("src/test/resources/pricing-feed-fixtures/litellm-prices.json");
 
     private LiteLLMFeedClient client;
