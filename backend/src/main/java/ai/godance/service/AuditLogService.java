@@ -4,6 +4,8 @@ import java.util.Map;
 import java.util.UUID;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 import ai.godance.domain.AuditLogEntry;
 import ai.godance.domain.AuditOutcome;
@@ -59,5 +61,17 @@ public class AuditLogService {
         entry.setIpAddress(ipAddress);
         entry.setEventDetail(detail);
         repo.save(entry);
+    }
+
+    /**
+     * {@link #record} in its own transaction, so the row commits even when
+     * the caller's transaction rolls back. For a denial thrown after the
+     * caller has written state that must not commit; when nothing has been
+     * written yet, mark the caller {@code noRollbackFor} instead.
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void recordInNewTransaction(String eventType, AuditOutcome outcome, UUID userId,
+                                       String ipAddress, Map<String, Object> detail) {
+        record(eventType, outcome, userId, ipAddress, detail);
     }
 }
