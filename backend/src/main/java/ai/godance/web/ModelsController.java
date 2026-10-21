@@ -32,7 +32,11 @@ import reactor.core.publisher.Mono;
  * <p>Virtual routing ids ({@code godance-fast/auto/quality}) are appended
  * after the concrete catalog as purely additive entries (owned_by
  * {@code "godance"}, {@code godance.virtual = true}) so OpenAI clients can
- * discover them via {@code client.models.list()}.
+ * discover them via {@code client.models.list()}. They have no
+ * {@code pricing} block: a routed call is billed at the concrete model that
+ * serves it, so a virtual id has no fixed price. Consumers that read
+ * {@code godance.pricing} (the app's chat presets, the marketing catalog)
+ * skip {@code godance.virtual} entries.
  */
 @RestController
 @RequestMapping("/v1")

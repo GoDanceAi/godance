@@ -5,7 +5,9 @@ import java.util.List;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
+import org.springframework.web.server.ResponseStatusException;
 
 import ai.godance.gateway.ModelCatalog;
 import ai.godance.gateway.ModelCatalog.ModelInfo;
@@ -17,7 +19,8 @@ import ai.godance.gateway.ModelCatalog.ModelInfo;
  * used. Candidates are then validated against the live catalog and the
  * policy limits: unknown / wrong-modality / provider-excluded models are
  * dropped (with a warn, never a 500), duplicates removed, and the list
- * truncated to {@code maxCandidates}.
+ * truncated to {@code maxCandidates}. If nothing survives — not even the
+ * default — the request fails with an RFC 7807 503.
  *
  * <p>Region is deliberately NOT considered here — a region-forbidden
  * model is a perfectly valid candidate; {@code ProviderGateway.dispatch()}
@@ -55,10 +58,13 @@ public class RuleBasedRoutingEngine implements RoutingEngine {
             candidates = applyLimitsAndValidate(List.of(policy.defaultModel()), policy);
         }
         if (candidates.isEmpty()) {
-            // Only reachable from a misconfigured policy (bad defaultModel);
-            // never from user input this phase. Caught by an engine test.
-            throw new IllegalStateException(
-                    "policy '" + policy.id() + "' produced no valid candidate (check defaultModel)");
+            // Every target, default included, is unknown or filtered — a bad
+            // defaultModel, or an admin DEPRECATED them all (find() only sees
+            // ACTIVE rows). The caller can't fix that: 503, not a 500.
+            log.warn("policy '{}' has no servable candidate (rule '{}' targets {}, default '{}')",
+                    policy.id(), matched, raw, policy.defaultModel());
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
+                    "model " + policy.id() + " is temporarily unavailable");
         }
 
         log.info("Routed {} -> rule '{}' -> {} (task={}, inTok={})",

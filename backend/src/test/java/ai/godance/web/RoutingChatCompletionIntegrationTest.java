@@ -18,6 +18,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.reactive.AutoConfigureWebTestClient;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -30,7 +31,11 @@ import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
 
 import ai.godance.domain.CallOutcome;
+import ai.godance.domain.CatalogStatus;
 import ai.godance.domain.CreditSource;
+import ai.godance.domain.ModelCatalogEntry;
+import ai.godance.gateway.ModelCatalog;
+import ai.godance.repository.ModelCatalogEntryRepository;
 import ai.godance.repository.UsageRecordRepository;
 import ai.godance.repository.UserRepository;
 import ai.godance.service.ChatCompletionService;
@@ -87,6 +92,8 @@ class RoutingChatCompletionIntegrationTest {
     @Autowired UserRepository users;
     @Autowired UsageRecordRepository usage;
     @Autowired CreditLedgerService ledger;
+    @Autowired ModelCatalogEntryRepository catalogRepo;
+    @Autowired ModelCatalog modelCatalog;
 
     private ListAppender<ILoggingEvent> routingLogs;
 
@@ -186,6 +193,8 @@ class RoutingChatCompletionIntegrationTest {
         assertThat(records).singleElement().satisfies(r -> {
             assertThat(r.getModelName()).isEqualTo("gpt-4o");
             assertThat(r.getOutcome()).isEqualTo(CallOutcome.OK);
+            // gpt-4o is the routed first choice, not a fallback.
+            assertThat(r.isFallbackUsed()).isFalse();
         });
 
         // Balance moved (routed call was billed against the concrete model).
@@ -272,6 +281,79 @@ class RoutingChatCompletionIntegrationTest {
             assertThat(r.isFallbackUsed()).isFalse();
             assertThat(r.getOutcome()).isEqualTo(CallOutcome.OK);
         });
+    }
+
+    // ===== Every preset target deprecated -> 503 =======================
+
+    // godance-fast targets deepseek-v4-flash + glm-4.7-flash; its default is
+    // deepseek-v4-flash. Deprecating both leaves the engine nothing to route to.
+    private static final List<String> FAST_TARGETS = List.of("deepseek-v4-flash", "glm-4.7-flash");
+
+    /** Deprecate {@code models} the way the admin catalog does (save + refresh), run, restore. */
+    private void withDeprecated(List<String> models, Runnable body) {
+        try {
+            for (String name : models) {
+                ModelCatalogEntry e = catalogRepo.findByModelName(name).orElseThrow();
+                e.setStatus(CatalogStatus.DEPRECATED);
+                catalogRepo.save(e);
+            }
+            modelCatalog.refresh();
+            body.run();
+        } finally {
+            for (String name : models) {
+                ModelCatalogEntry e = catalogRepo.findByModelName(name).orElseThrow();
+                e.setStatus(CatalogStatus.ACTIVE);
+                catalogRepo.save(e);
+            }
+            modelCatalog.refresh();
+        }
+    }
+
+    private void assertNothingBilledOrDispatched(Signed u) {
+        assertThat(users.findById(u.id()).orElseThrow().getCreditBalanceCents()).isEqualTo(100_00L);
+        assertThat(usage.findByUserIdAndRecordedAtGreaterThanEqual(u.id(),
+                java.time.Instant.now().minusSeconds(60))).isEmpty();
+        assertThat(openAiMock.getAllServeEvents()).isEmpty();
+    }
+
+    @Test
+    void chatCompletions_virtualFast_givenAllTargetsDeprecated_returns503Problem() {
+        Signed u = signupWithBalance(100_00L);
+
+        withDeprecated(FAST_TARGETS, () -> http.post().uri("/v1/chat/completions")
+                .header("Authorization", u.bearer())
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(request("godance-fast", "Hello"))
+                .exchange()
+                .expectStatus().isEqualTo(HttpStatus.SERVICE_UNAVAILABLE)
+                .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON)
+                .expectBody()
+                .jsonPath("$.status").isEqualTo(503)
+                .jsonPath("$.detail").isEqualTo("model godance-fast is temporarily unavailable"));
+
+        // Routing fails before pre-debit: no charge, no UsageRecord, no upstream call.
+        assertNothingBilledOrDispatched(u);
+    }
+
+    @Test
+    void chatCompletions_virtualFast_streaming_givenAllTargetsDeprecated_returns503Problem() {
+        Signed u = signupWithBalance(100_00L);
+
+        withDeprecated(FAST_TARGETS, () -> http.post().uri("/v1/chat/completions")
+                .header("Authorization", u.bearer())
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of(
+                        "model", "godance-fast",
+                        "messages", List.of(Map.of("role", "user", "content", "Hello")),
+                        "stream", true))
+                .exchange()
+                .expectStatus().isEqualTo(HttpStatus.SERVICE_UNAVAILABLE)
+                .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON)
+                .expectBody()
+                .jsonPath("$.status").isEqualTo(503)
+                .jsonPath("$.detail").isEqualTo("model godance-fast is temporarily unavailable"));
+
+        assertNothingBilledOrDispatched(u);
     }
 
     // ===== /v1/models advertises virtual ids ==========================

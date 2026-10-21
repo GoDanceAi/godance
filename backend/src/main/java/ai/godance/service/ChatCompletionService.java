@@ -112,12 +112,19 @@ public class ChatCompletionService {
                     "insufficient credit; top up via /v1/billing/topup");
         }
 
+        // fallbackUsed means "not the first resolved candidate": request.model()
+        // for a direct call, the routed primary for a virtual id (the virtual
+        // id itself is never an attempt). Read from the route, not
+        // attemptModels, so a health reorder still counts as a fallback, as
+        // it did before routing.
+        String firstChoice = route.orderedCandidates().get(0);
+
         reorderByHealth(attemptModels);
 
         RuntimeException lastError = null;
         for (int i = 0; i < attemptModels.size(); i++) {
             String modelName = attemptModels.get(i);
-            boolean isFallback = !modelName.equals(request.model());
+            boolean isFallback = !modelName.equals(firstChoice);
 
             ModelInfo model = catalog.find(modelName).orElse(null);
             if (model == null) {
@@ -326,6 +333,19 @@ public class ChatCompletionService {
      * upstream stream completes, using the {@code usage} block on the
      * final chunk. Client disconnect or upstream error triggers a full
      * refund.
+     *
+     * <p><b>Known limitation: no fall-through.</b> Only the first resolved
+     * candidate ({@code attemptModels.get(0)}) is dispatched. There is no
+     * attempt loop, no {@link #reorderByHealth}, and the rest of the
+     * candidate list and static fallback chain is ignored. A region-forbidden
+     * first candidate returns {@code dispatch()}'s 503, and a failing one
+     * errors the stream, with a full refund in both cases. {@link #execute}
+     * would try the next candidate instead. Direct calls behaved this way
+     * before routing too, but virtual ids hit it more often: under
+     * {@code region=alicloud}, {@code godance-quality} (and {@code godance-auto}
+     * for code/reasoning/long prompts) leads with an OpenAI model, so the
+     * stream 503s where the non-streaming call is served by
+     * {@code deepseek-v4-pro}.
      */
     public Flux<ChatChunk> executeStreaming(UUID userId, UUID apiKeyId, ChatRequest request) {
         String requestId = "req_" + UUID.randomUUID().toString().replace("-", "").substring(0, 24);

@@ -7,6 +7,8 @@ import java.util.List;
 import java.util.Set;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 
 import ai.godance.domain.Modality;
 import ai.godance.domain.Provider;
@@ -119,12 +121,15 @@ class RuleBasedRoutingEngineTest {
     }
 
     @Test
-    void resolve_givenMisconfiguredDefault_throwsIllegalState() {
+    void resolve_givenNoTargetOrDefaultInCatalog_throwsServiceUnavailable() {
+        // e.g. an admin DEPRECATED every target and the default: find() only sees ACTIVE rows.
         RoutingPolicy policy = new RoutingPolicy("broken", Modality.TEXT,
-                List.of(), "nonexistent-model", RoutingLimits.DEFAULTS);
+                List.of(always("all", "gone-a", "gone-b")), "gone-a", RoutingLimits.DEFAULTS);
 
         assertThatThrownBy(() -> engine.resolve(ctx(TaskType.CHAT, 100), policy))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("broken");
+                .isInstanceOfSatisfying(ResponseStatusException.class, e -> {
+                    assertThat(e.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+                    assertThat(e.getReason()).contains("broken");
+                });
     }
 }

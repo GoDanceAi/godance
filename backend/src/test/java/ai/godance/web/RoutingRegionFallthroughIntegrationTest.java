@@ -29,6 +29,7 @@ import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
 
 import ai.godance.domain.CreditSource;
+import ai.godance.repository.UsageRecordRepository;
 import ai.godance.repository.UserRepository;
 import ai.godance.service.CreditLedgerService;
 import ai.godance.web.dto.AuthDtos.AuthResponse;
@@ -77,6 +78,7 @@ class RoutingRegionFallthroughIntegrationTest {
 
     @Autowired WebTestClient http;
     @Autowired UserRepository users;
+    @Autowired UsageRecordRepository usage;
     @Autowired CreditLedgerService ledger;
 
     @BeforeEach
@@ -84,7 +86,9 @@ class RoutingRegionFallthroughIntegrationTest {
         upstreamMock.resetAll();
     }
 
-    private String signupWithBalance(long cents) {
+    private record Signed(UUID id, String bearer) { }
+
+    private Signed signupWithBalance(long cents) {
         String email = "region-" + UUID.randomUUID() + "@godance.test";
         AuthResponse resp = http.post().uri("/v1/auth/signup")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -98,12 +102,12 @@ class RoutingRegionFallthroughIntegrationTest {
         UUID userId = users.findByEmail(email).orElseThrow().getId();
         ledger.topUp(userId, cents, CreditSource.PROMO,
                 "seed-" + userId, "seed-" + userId, "test seed");
-        return "Bearer " + resp.accessToken();
+        return new Signed(userId, "Bearer " + resp.accessToken());
     }
 
     @Test
     void chatCompletions_virtualQuality_forbiddenTopCandidate_fallsThroughToAllowedModel() {
-        String bearer = signupWithBalance(100_00L);
+        Signed u = signupWithBalance(100_00L);
 
         // The only stub: the China-hosted DeepSeek path. gpt-5.5 / claude-opus-4-7
         // never reach an HTTP call — dispatch() denies them in this region.
@@ -126,7 +130,7 @@ class RoutingRegionFallthroughIntegrationTest {
                                 """)));
 
         ChatCompletionResponse out = http.post().uri("/v1/chat/completions")
-                .header("Authorization", bearer)
+                .header("Authorization", u.bearer())
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(Map.of("model", "godance-quality",
                         "messages", List.of(Map.of("role", "user", "content", "Hello"))))
@@ -142,5 +146,13 @@ class RoutingRegionFallthroughIntegrationTest {
         // forbidden OpenAI/Anthropic candidates were denied at dispatch(),
         // never dispatched, so nothing leaked past the allowlist.
         assertThat(upstreamMock.getAllServeEvents()).hasSize(1);
+
+        // deepseek-v4-pro was the third candidate, so it is recorded as a fallback.
+        var records = usage.findByUserIdAndRecordedAtGreaterThanEqual(u.id(),
+                java.time.Instant.now().minusSeconds(60));
+        assertThat(records).singleElement().satisfies(r -> {
+            assertThat(r.getModelName()).isEqualTo("deepseek-v4-pro");
+            assertThat(r.isFallbackUsed()).isTrue();
+        });
     }
 }
