@@ -36,7 +36,8 @@ public final class OAuthLoginNonce {
     /** Query parameter on the authorization request and key in the callback fragment. */
     public static final String PARAM = "login_nonce";
 
-    private static final String EXCHANGE_ATTRIBUTE = OAuthLoginNonce.class.getName();
+    /** Key on the callback exchange; package-private so handler tests can stand in for the repository. */
+    static final String EXCHANGE_ATTRIBUTE = OAuthLoginNonce.class.getName();
 
     /** The SPA sends 32 hex chars; anything outside this shape is dropped, not echoed. */
     private static final Pattern FORMAT = Pattern.compile("[A-Za-z0-9_-]{16,128}");

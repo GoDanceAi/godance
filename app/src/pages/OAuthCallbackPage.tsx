@@ -37,7 +37,14 @@ export default function OAuthCallbackPage() {
       window.history.replaceState(null, '', window.location.pathname);
       void refresh().then(() => navigate('/dashboard', { replace: true }));
     } else {
-      const reason = error && nonceMatches ? error : OAUTH_GENERIC_ERROR;
+      // A token without this tab's nonce wasn't requested here: never store
+      // it. Replacing the history entry also drops it from the address bar.
+      let reason = OAUTH_GENERIC_ERROR;
+      if (token) {
+        reason = "Sign-in couldn't be verified because it wasn't started in this tab. Please try again.";
+      } else if (error && nonceMatches) {
+        reason = error;
+      }
       navigate('/login', { replace: true, state: { oauthError: reason } });
     }
   }, [navigate, refresh]);
