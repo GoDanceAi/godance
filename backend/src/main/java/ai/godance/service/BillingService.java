@@ -1,5 +1,6 @@
 package ai.godance.service;
 
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -303,11 +304,14 @@ public class BillingService {
                                 "paymentMethodType", String.valueOf(pm.type())));
                 return;
             }
+            String replaced = user.getStripePaymentMethodId();
             user.setStripePaymentMethodId(pm.id());
             users.save(user);
+            Map<String, Object> detail = new HashMap<>(Map.of("sessionId", sessionId, "paymentMethodId", pm.id()));
+            // Absent on a first save, and when Checkout reused the card already on file.
+            if (replaced != null && !replaced.equals(pm.id())) detail.put("replacedPaymentMethodId", replaced);
             audit.record(AuditLogService.EVT_BILLING_PAYMENT_METHOD_SAVED,
-                    AuditOutcome.SUCCESS, userId, ip,
-                    Map.of("sessionId", sessionId, "paymentMethodId", pm.id()));
+                    AuditOutcome.SUCCESS, userId, ip, detail);
         } catch (StripeException e) {
             log.warn("could not retrieve payment_method for session {}: {}", sessionId, e.getMessage());
         }
