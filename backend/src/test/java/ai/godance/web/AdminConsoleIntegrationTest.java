@@ -69,7 +69,7 @@ class AdminConsoleIntegrationTest {
     @Autowired AuditLogEntryRepository audit;
     @Autowired ApiKeyRepository apiKeys;
     @Autowired GenerationJobRepository generationJobs;
-    @org.springframework.boot.test.mock.mockito.MockBean
+    @org.springframework.test.context.bean.override.mockito.MockitoBean
     ai.godance.storage.ObjectStorageClient objectStorageClient;
 
     private String adminBearer;
