@@ -165,9 +165,9 @@ public class SecurityConfig {
                 // installs a Jwt-principal so downstream controllers stay agnostic
                 // to whether the caller used a JWT or an API key.
                 .addFilterBefore(apiKeyAuthFilter::filter, SecurityWebFiltersOrder.AUTHENTICATION)
-                // Admin allowlist guard on /v1/admin/** — fails closed; runs before
-                // the spending-cap filter so a non-admin caller is rejected without
-                // any DB lookups.
+                // Admin allowlist guard on /v1/admin/** — fails closed. Loads the
+                // caller's account and checks its current, verified email; refuses
+                // API-key principals.
                 .addFilterAfter(adminAuthorizationFilter::filter, SecurityWebFiltersOrder.AUTHORIZATION)
                 // Spending caps are checked after authorization, before the controller.
                 .addFilterAfter(spendingLimitFilter::filter, SecurityWebFiltersOrder.AUTHORIZATION)
