@@ -52,8 +52,11 @@ export default function SignupPage() {
       </form>
       <p className="mt-6 text-xs text-fg-subtle">
         By signing up you agree to our{' '}
-        <a href="https://godance.ai/legal/terms" className="underline hover:text-fg">Terms</a> and{' '}
-        <a href="https://godance.ai/legal/privacy" className="underline hover:text-fg">Privacy Policy</a>.
+        {/* New tab, so reading them doesn't throw away what's typed in the form. */}
+        <a href="https://godance.ai/legal/terms" target="_blank" rel="noreferrer"
+           className="underline hover:text-fg">Terms</a> and{' '}
+        <a href="https://godance.ai/legal/privacy" target="_blank" rel="noreferrer"
+           className="underline hover:text-fg">Privacy Policy</a>.
       </p>
     </div>
   );
