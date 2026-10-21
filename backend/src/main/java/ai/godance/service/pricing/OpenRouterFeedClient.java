@@ -12,8 +12,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
 import org.springframework.web.reactive.function.client.WebClient;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 import ai.godance.config.PricingProperties;
 import ai.godance.domain.Modality;
@@ -80,7 +80,7 @@ public class OpenRouterFeedClient {
         JsonNode data = root.path("data");
         if (!data.isArray()) return List.of();
         for (JsonNode entry : data) {
-            String id = entry.path("id").asText(null);
+            String id = entry.path("id").asString(null);
             if (id == null || id.isBlank()) continue;
             JsonNode pricing = entry.path("pricing");
             if (pricing.isMissingNode()) continue;
@@ -97,7 +97,9 @@ public class OpenRouterFeedClient {
                                 PriceField field, Instant observedAt) {
         JsonNode v = pricing.path(key);
         if (v.isMissingNode() || v.isNull()) return;
-        String raw = v.asText();
+        // asString(""), not asString(): Jackson 3 throws on a container node,
+        // where Jackson 2's asText() gave "" and the price was skipped below.
+        String raw = v.asString("");
         if (raw == null || raw.isBlank() || "0".equals(raw)) return;  // skip free/missing
         BigDecimal usd;
         try {

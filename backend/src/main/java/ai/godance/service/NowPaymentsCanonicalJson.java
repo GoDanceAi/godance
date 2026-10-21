@@ -6,10 +6,11 @@ import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.List;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 /**
  * The string NOWPayments HMACs for {@code x-nowpayments-sig}: exactly what
@@ -29,12 +30,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
  */
 public final class NowPaymentsCanonicalJson {
 
-    private static final ObjectMapper MAPPER = new ObjectMapper()
-            .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
+    // Jackson 2 defaults: this parser must keep accepting exactly what it did under Jackson 2.
+    private static final ObjectMapper MAPPER = JsonMapper.builderWithJackson2Defaults()
+            .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+            .build();
 
     private NowPaymentsCanonicalJson() { }
 
-    public static String canonicalise(String payload) throws JsonProcessingException {
+    public static String canonicalise(String payload) throws JacksonException {
         StringBuilder out = new StringBuilder(payload.length());
         write(MAPPER.readTree(payload), out);
         return out.toString();
@@ -43,8 +46,7 @@ public final class NowPaymentsCanonicalJson {
     private static void write(JsonNode node, StringBuilder out) {
         switch (node.getNodeType()) {
             case OBJECT -> {
-                List<String> keys = new ArrayList<>(node.size());
-                node.fieldNames().forEachRemaining(keys::add);
+                List<String> keys = new ArrayList<>(node.propertyNames());
                 keys.sort(NowPaymentsCanonicalJson::compareKeys);
                 out.append('{');
                 for (int i = 0; i < keys.size(); i++) {
@@ -63,7 +65,7 @@ public final class NowPaymentsCanonicalJson {
                 }
                 out.append(']');
             }
-            case STRING -> writeString(node.textValue(), out);
+            case STRING -> writeString(node.stringValue(), out);
             // JSON.parse turns every number literal into a double.
             case NUMBER -> out.append(numberToString(node.doubleValue()));
             case BOOLEAN -> out.append(node.booleanValue());

@@ -5,7 +5,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import org.junit.jupiter.api.Test;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import ai.godance.config.BillingProperties;
 import ai.godance.config.NowPaymentsProperties;
@@ -57,7 +58,7 @@ class NowPaymentsServiceTest {
             new NowPaymentsProperties("np_unit_test_api_key", IPN_SECRET, "http://localhost:1",
                     "http://localhost/success", "http://localhost/cancel"),
             new BillingProperties(100L, 100_000L, "usd", 5.0, 10.0, 12.0),
-            new ObjectMapper());
+            JsonMapper.builderWithJackson2Defaults().build());
 
     @Test
     void verifyAndParse_givenBtcIpnWithSubMilliAmounts_acceptsNowPaymentsSignature() {

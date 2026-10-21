@@ -8,6 +8,12 @@ spring:
   webflux:
     problemdetails:
       enabled: true     # CLAUDE.md: all HTTP errors as application/problem+json
+  jackson:
+    # Spring Boot 4 moved to Jackson 3, whose defaults differ from Jackson 2's
+    # (e.g. FAIL_ON_NULL_FOR_PRIMITIVES, alphabetical property order). Keep the
+    # OpenAI-compatible wire format exactly as it was; adopting Jackson 3
+    # defaults is a deliberate, separate change.
+    use-jackson2-defaults: true
   datasource:
     url: jdbc:postgresql://localhost:5433/godance   # host 5433 → docker pg 5432 (see docker-compose.yml)
     username: godance
