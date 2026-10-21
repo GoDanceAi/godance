@@ -18,7 +18,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
 
@@ -47,7 +48,7 @@ import ai.godance.gateway.ProviderAdapter;
 class OpenAICompatibleProviderTest {
 
     private static final Duration T = Duration.ofSeconds(5);
-    private final ObjectMapper json = new ObjectMapper();
+    private final ObjectMapper json = JsonMapper.builderWithJackson2Defaults().build();
     private WireMockServer wm;
 
     @BeforeEach

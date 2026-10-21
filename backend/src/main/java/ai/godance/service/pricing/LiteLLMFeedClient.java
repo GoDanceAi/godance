@@ -13,8 +13,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
 import org.springframework.web.reactive.function.client.WebClient;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 import ai.godance.config.PricingProperties;
 import ai.godance.domain.Modality;
@@ -34,7 +34,10 @@ import reactor.core.publisher.Mono;
  *
  * <p>Numbers come as JSON numbers here (not strings as on OpenRouter)
  * but we still go through {@link BigDecimal#valueOf(double)} avoidance
- * — pulling the asText() and parsing — so subnormal doubles don't drift.
+ * — pulling the node's text and parsing — so subnormal doubles don't drift.
+ * The text comes from {@code asString("")}, not {@code asString()}: Jackson 3
+ * throws on a container node, and a malformed price must still surface as an
+ * ANOMALY row (as it did under Jackson 2) instead of aborting the whole feed.
  */
 public class LiteLLMFeedClient {
 
@@ -74,15 +77,15 @@ public class LiteLLMFeedClient {
             log.warn("LiteLLM feed parse failed: {}", e.getMessage());
             return List.of();
         }
-        Iterator<Map.Entry<String, JsonNode>> it = root.fields();
+        Iterator<Map.Entry<String, JsonNode>> it = root.properties().iterator();
         while (it.hasNext()) {
             Map.Entry<String, JsonNode> e = it.next();
             String key = e.getKey();
             if (key.startsWith("_") || "sample_spec".equals(key)) continue;
             JsonNode v = e.getValue();
             if (!v.isObject()) continue;
-            String mode = v.path("mode").asText("chat");
-            String sourceUrl = v.path("source").asText(null);
+            String mode = v.path("mode").asString("chat");
+            String sourceUrl = v.path("source").asString(null);
             String bare = stripResolutionPrefix(key);
             switch (mode) {
                 case "chat", "completion", "responses" -> {
@@ -118,7 +121,7 @@ public class LiteLLMFeedClient {
                            String costKey, PriceField field, String sourceUrl, Instant observedAt) {
         JsonNode n = v.path(costKey);
         if (n.isMissingNode() || n.isNull()) return;
-        String raw = n.asText();
+        String raw = n.asString("");
         if ("0".equals(raw) || "0.0".equals(raw)) return;
         BigDecimal usd;
         try {
@@ -138,7 +141,7 @@ public class LiteLLMFeedClient {
                              String sourceUrl, Instant observedAt) {
         JsonNode n = v.path(costKey);
         if (n.isMissingNode() || n.isNull()) return;
-        String raw = n.asText();
+        String raw = n.asString("");
         if ("0".equals(raw) || "0.0".equals(raw)) return;
         BigDecimal usd;
         try {

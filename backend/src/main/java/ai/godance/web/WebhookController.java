@@ -36,7 +36,11 @@ public class WebhookController {
                 .subscribeOn(Schedulers.boundedElastic());
     }
 
-    /** Rotate — invalidates the previous secret. Returns the new one (once). */
+    /**
+     * Rotate — returns the new secret (once). The previous secret is not
+     * invalidated immediately: deliveries keep a second signature with it for
+     * {@link WebhookSigner#GRACE_WINDOW}.
+     */
     @PostMapping("/secret/rotate")
     public Mono<Map<String, String>> rotateSecret(@AuthenticationPrincipal Jwt jwt) {
         UUID userId = JwtService.userIdFromSubject(jwt.getSubject());

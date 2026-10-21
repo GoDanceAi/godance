@@ -1,27 +1,27 @@
 # Godance
 
-> Drop-in OpenAI-compatible REST API that routes to 16+ AI providers across text, image,
-> video, and audio. One credit ledger, one billing line, one SDK. Pay with card, ACH,
-> or SEPA. Pass-through provider pricing plus a flat 5% platform fee — no tiers, no seats,
-> no subscriptions.
+> OpenAI-compatible REST API that routes to 15+ AI providers across text, image, and
+> video — drop-in for chat; image and video run as async jobs. One credit ledger, one
+> billing line, one SDK. Pay with card, ACH, SEPA, or USDT. Pass-through provider pricing
+> plus a platform fee (5% text, 12% image, 10–15% video) — no tiers, no seats, no
+> subscriptions.
 
 ## Positioning
 
 - vs. OpenRouter: Godance covers image and video too, not just text.
-- vs. Eden AI: simpler flat 5% fee (Eden charges 5.5%, tier-dependent).
+- vs. Eden AI: no account tiers — one published fee per model (Eden's fee is tier-dependent).
 - vs. Fireworks / Together: pure aggregator — no GPUs, no model weights, no lock-in.
-- vs. B.AI / WorldClaw: a drop-in developer API, not an end-user product — targets
+- vs. B.AI / WorldClaw: an OpenAI-compatible developer API, not an end-user product — targets
   engineering teams integrating models into their own apps.
 
 ## API surface (OpenAI-compatible)
 
 - POST /v1/chat/completions — streaming + non-streaming
-- POST /v1/images/generations — sync; HQ variants (e.g. gpt-image-1-hd) auto-promote to async
+- POST /v1/images/generations — async (202 + job_id) when the model is flagged
+  requires_async in /v1/models (currently every image model) or the request sets
+  async:true; otherwise sync
 - POST /v1/videos/generations — async only, signed webhook callback
 - GET /v1/jobs/{id} — poll status of any async generation
-- POST /v1/audio/speech — text-to-speech
-- POST /v1/audio/transcriptions — speech-to-text
-- POST /v1/embeddings — text embeddings
 - GET /v1/models — catalog enumeration
 - CRUD /v1/keys — API key management (plaintext returned exactly once)
 - POST /v1/billing/topup — Stripe Checkout for card / ACH / SEPA
@@ -30,26 +30,46 @@
 
 ## Models
 
-### Text
-- OpenAI: gpt-4o-mini, gpt-4o, gpt-4.1
-- Anthropic: claude-3-5-sonnet-20241022, claude-3-5-haiku-20241022
-- Google Vertex: gemini-1.5-pro, gemini-1.5-flash
-- Roadmap: DeepSeek V4, Kimi K2.6, Qwen 3.6, GLM 4.7, MiniMax, Grok
+The live list, with current per-model rates, is GET https://api.godance.ai/v1/models
+(public) or https://godance.ai/models. Snapshot as of October 2026:
 
-### Image
-- OpenAI: gpt-image-1 (sync), gpt-image-1-hd (auto-async)
-- Black Forest Labs: flux-1.1-pro, flux-2
+### Text
+- OpenAI: gpt-5.5, gpt-5.4, gpt-5.4-nano, gpt-4.1, gpt-4o, gpt-4o-mini
+- Anthropic: claude-opus-4-7, claude-sonnet-4-6, claude-haiku-4-5,
+  claude-3-5-sonnet-20241022, claude-3-5-haiku-20241022
+- Google Vertex: gemini-3.1-pro, gemini-3.1-flash-lite, gemini-1.5-pro, gemini-1.5-flash
+- xAI: grok-4
+- DeepSeek: deepseek-v4-pro, deepseek-v4-flash
+- Moonshot: kimi-k2.6
+- Alibaba: qwen-3.6, qwen-3.6-coder
+- Zhipu: glm-4.7-flash
+- MiniMax: minimax-m2.7
+- Baidu: ernie-5.1
+- Volcengine Ark: doubao-1.6-pro
+
+### Image (async — returns a job_id; poll GET /v1/jobs/{id} or use a webhook)
+- OpenAI: gpt-image-2, gpt-image-1.5
+- Google Vertex: imagen-4, nano-banana
+- Black Forest Labs: flux-2-pro, flux-1.1-pro
+- Alibaba: qwen-image-2.0, qwen-image-2.0-pro
+- Volcengine Ark: seedream-5.0
+- Stability: sdxl
 
 ### Video (async-only by design — durations 1–5 minutes; HTTP sync would time out)
-- OpenAI: sora-2 ($0.15/sec)
-- Volcengine Ark: seedance-1.0 ($0.08/sec, Alicloud-allowed)
-- Roadmap: Veo 3.1, Kling, Runway Gen-4
+- OpenAI: sora-2, sora-2-pro, sora-2-pro-hd
+- Google Vertex: veo-3.1, veo-3.1-fast
+- Volcengine Ark: seedance-2.0
+- Kling: kling-3.0
+- Runway: runway-gen4
+- MiniMax: minimax-hailuo-2.3
 
 ## Pricing
 
-Provider list price plus a flat 5% platform fee — same percentage across text, image,
-video. No tiers, no seats, no minimums. Top up the ledger; spend across every model.
+Provider list price plus a platform fee: 5% on text, 12% on images, and 10–15% on video
+depending on the model. No tiers, no seats, no minimums. Top up the ledger; spend across
+every model.
 
+- Per-model fee: the markup_percent field on each entry in GET /v1/models
 - Per-model rates: https://godance.ai/models
 - Pricing page: https://godance.ai/pricing
 
@@ -60,10 +80,10 @@ disaster recovery and low-latency to Chinese model providers. DNS-level failover
 Cloudflare health checks on /healthz.
 
 Per-region provider allowlist enforced in code. The Alicloud region routes only DeepSeek,
-Moonshot (Kimi), Alibaba (Qwen), Zhipu (GLM), MiniMax, and Volcengine Ark (Doubao /
-Seedream / Seedance). Western frontier providers (Anthropic, OpenAI, Google Vertex, BFL
-Flux, ElevenLabs, Cartesia, Runway) never route through Alicloud — compliance with
-upstream terms of service for Chinese-hosted infrastructure.
+Moonshot (Kimi), Alibaba (Qwen), Zhipu (GLM), MiniMax, Baidu (ERNIE), Kling, and
+Volcengine Ark (Doubao / Seedream / Seedance). Western providers (OpenAI, Anthropic,
+Google Vertex, xAI, BFL Flux, Stability, Runway) never route through Alicloud —
+compliance with upstream terms of service for Chinese-hosted infrastructure.
 
 ## Fallback chains
 

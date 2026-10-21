@@ -107,4 +107,20 @@ class CostCalculatorTest {
         assertThat(calc.videoCostCents(vid, 0, 1)).isZero();
         assertThat(calc.videoCostCents(vid, 10, 0)).isZero();
     }
+
+    @Test
+    void markupPercent_givenOverride_returnsOverride() {
+        assertThat(calc.markupPercent(HIGH_MARKUP_TEXT)).isEqualTo(25.0);
+        assertThat(calc.markupPercent(
+                ModelInfo.image("sdxl", Provider.STABILITY, 50_000L, 12.0))).isEqualTo(12.0);
+    }
+
+    @Test
+    void markupPercent_givenNoOverride_returnsModalityDefault() {
+        assertThat(calc.markupPercent(CHEAP_TEXT)).isEqualTo(5.0);
+        assertThat(calc.markupPercent(
+                ModelInfo.image("gpt-image-1", Provider.OPENAI, 40_000L, null))).isEqualTo(10.0);
+        assertThat(calc.markupPercent(
+                ModelInfo.video("sora-2", Provider.OPENAI, 150_000L, null))).isEqualTo(12.0);
+    }
 }

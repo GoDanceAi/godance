@@ -14,8 +14,8 @@ import org.springframework.web.reactive.function.client.WebClient;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 import ai.godance.config.AnthropicProperties;
 import ai.godance.domain.Provider;
@@ -108,11 +108,12 @@ public class AnthropicProvider implements ProviderAdapter {
         if (sse.data() == null || sse.data().isBlank()) return Flux.empty();
         try {
             JsonNode root = json.readTree(sse.data());
-            String type = root.path("type").asText();
+            // asString(""): like Jackson 2's asText(), a non-string type falls to default.
+            String type = root.path("type").asString("");
             long now = System.currentTimeMillis() / 1000;
             return switch (type) {
                 case "message_start" -> {
-                    String id = root.path("message").path("id").asText("msg_unknown");
+                    String id = root.path("message").path("id").asString("msg_unknown");
                     messageId.set(id);
                     int input = root.path("message").path("usage").path("input_tokens").asInt(0);
                     inputTokens.set(input);
@@ -122,7 +123,7 @@ public class AnthropicProvider implements ProviderAdapter {
                             null));
                 }
                 case "content_block_delta" -> {
-                    String text = root.path("delta").path("text").asText("");
+                    String text = root.path("delta").path("text").asString("");
                     if (text.isEmpty()) yield Flux.empty();
                     yield Flux.just(new ChatChunk(messageId.get(), model, now,
                             List.of(new ChunkChoice(0, new ChunkDelta(null, text), null)),
@@ -131,7 +132,7 @@ public class AnthropicProvider implements ProviderAdapter {
                 case "message_delta" -> {
                     int output = root.path("usage").path("output_tokens").asInt(0);
                     if (output > 0) outputTokens.set(output);
-                    String stop = root.path("delta").path("stop_reason").asText(null);
+                    String stop = root.path("delta").path("stop_reason").asString(null);
                     if (stop != null) stopReason.set(stop);
                     yield Flux.empty();
                 }

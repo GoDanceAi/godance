@@ -23,7 +23,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.reactive.AutoConfigureWebTestClient;
+import org.springframework.boot.webtestclient.autoconfigure.AutoConfigureWebTestClient;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.http.MediaType;
@@ -31,10 +31,9 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.reactive.server.WebTestClient;
 import org.testcontainers.containers.MinIOContainer;
-import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.utility.DockerImageName;
+import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
@@ -62,12 +61,10 @@ class VideoGenerationIntegrationTest {
 
     @Container
     @ServiceConnection
-    static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16");
+    static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16");
 
     @Container
-    static final MinIOContainer MINIO = new MinIOContainer(DockerImageName
-            .parse("ghcr.io/godanceai/minio:RELEASE.2024-12-13T22-19-12Z")
-            .asCompatibleSubstituteFor("minio/minio"))
+    static final MinIOContainer MINIO = new MinIOContainer(MinioTestImage.get())
             .withUserName("test-access").withPassword("test-secret-key-1234");
 
     static WireMockServer openAiMock;

@@ -519,7 +519,7 @@
     <div class="eyebrow">Brand guidelines &amp; press kit</div>
     <h1>One ledger, one endpoint.</h1>
     <p class="lede">
-      Godance is a multimodal AI aggregator &#8212; every major text, image, video, and audio
+      Godance is a multimodal AI aggregator &#8212; every major text, image, and video
       model behind one OpenAI-compatible API, metered on one credit ledger. This page is
       the canonical reference for how the brand looks, how it speaks, and how partners,
       press, and integrators use its marks.
@@ -557,7 +557,7 @@
           <h3 class="sub">Positioning</h3>
           <p style="color: var(--fg-muted); font-size: 14.5px;">
             Developer infrastructure, not a chatbot. Godance sells the absence of
-            integration work: sixteen providers, one bill, ten minutes to first call.
+            integration work: 15+ providers, one bill, ten minutes to first call.
           </p>
         </div></div>
         <div class="card"><div class="pad">
@@ -606,15 +606,15 @@
       <div class="grid cols-1" style="display: grid; gap: 16px;">
         <div class="boiler">
           <span class="tag">One-liner &#183; ~20 words</span>
-          <p>Godance is a multimodal AI aggregator: every major text, image, video, and audio model behind one OpenAI-compatible API, on one credit ledger.</p>
+          <p>Godance is a multimodal AI aggregator: every major text, image, and video model behind one OpenAI-compatible API, on one credit ledger.</p>
         </div>
         <div class="boiler">
           <span class="tag">Standard &#183; ~60 words</span>
-          <p>Godance is a multimodal AI aggregator that routes chat, image, video, audio, and embedding requests to 16+ providers &#8212; OpenAI, Anthropic, Google Vertex, Flux, ElevenLabs, and more &#8212; through one OpenAI-compatible API. Usage from every provider lands on a single append-only credit ledger with per-model fallback chains and pass-through pricing plus 5%. No tiers, no seats, no minimums.</p>
+          <p>Godance is a multimodal AI aggregator that routes chat, image, and video requests to 15+ providers &#8212; OpenAI, Anthropic, Google Vertex, Flux, DeepSeek, and more &#8212; through one OpenAI-compatible API. Usage from every provider lands on a single append-only credit ledger with per-model fallback chains and pass-through pricing plus a published platform fee. No tiers, no seats, no minimums.</p>
         </div>
         <div class="boiler">
           <span class="tag">Extended &#183; ~100 words</span>
-          <p>Godance is a multimodal AI aggregator that puts every major AI model behind one OpenAI-compatible API. Any OpenAI SDK works as a drop-in client by swapping <code class="inline">base_url</code> &#8212; chat completions, image and video generation, speech, transcription, and embeddings route to 16+ providers, including OpenAI, Anthropic, Google Vertex, Black Forest Labs, DeepSeek, xAI, Runway, and ElevenLabs. Every request is metered on a single append-only credit ledger at microcent precision, with per-model fallback chains and signed webhooks. Pricing is pass-through plus 5% &#8212; no tiers, no seats, no minimums. The platform is open source under the Apache 2.0 license.</p>
+          <p>Godance is a multimodal AI aggregator that puts every major AI model behind one OpenAI-compatible API. Any OpenAI SDK works as a drop-in client for chat by swapping <code class="inline">base_url</code>; image and video generation take the same request shape and run as async jobs. Requests route to 15+ providers, including OpenAI, Anthropic, Google Vertex, Black Forest Labs, DeepSeek, xAI, Runway, and Kling. Every request is metered on a single append-only credit ledger at microcent precision, with per-model fallback chains and signed webhooks. Pricing is pass-through plus a platform fee of 5% on text, 12% on images, and 10&#8211;15% on video &#8212; no tiers, no seats, no minimums. The platform is open source under the Apache 2.0 license.</p>
         </div>
       </div>
 
@@ -622,11 +622,11 @@
       <div class="tablewrap">
         <table>
           <tbody>
-            <tr><td>Product</td><td>Multimodal AI aggregator &#8212; one API for text, image, video, and audio models</td></tr>
-            <tr><td>API contract</td><td>OpenAI-compatible REST &#8212; <span class="mono">/v1/chat/completions</span>, <span class="mono">/v1/images/generations</span>, <span class="mono">/v1/videos/generations</span>, <span class="mono">/v1/audio/speech</span>, <span class="mono">/v1/audio/transcriptions</span>, <span class="mono">/v1/embeddings</span>, <span class="mono">/v1/models</span></td></tr>
-            <tr><td>Providers</td><td>16+ &#8212; OpenAI, Anthropic, Google Vertex, Black Forest Labs, Volcengine Ark, DeepSeek, Moonshot, Qwen, MiniMax, xAI, Kling, Runway, ElevenLabs, Cartesia, Deepgram, Stability</td></tr>
-            <tr><td>Billing</td><td>Single append-only credit ledger, microcent precision. Card billing via Stripe; crypto top-ups accepted via Coinbase Commerce.</td></tr>
-            <tr><td>Pricing</td><td>Pass-through provider price + 5%. No tiers, no seats, no minimums.</td></tr>
+            <tr><td>Product</td><td>Multimodal AI aggregator &#8212; one API for text, image, and video models</td></tr>
+            <tr><td>API contract</td><td>OpenAI-compatible REST &#8212; <span class="mono">/v1/chat/completions</span>, <span class="mono">/v1/images/generations</span>, <span class="mono">/v1/videos/generations</span>, <span class="mono">/v1/models</span></td></tr>
+            <tr><td>Providers</td><td>15+ &#8212; OpenAI, Anthropic, Google Vertex, Black Forest Labs, Volcengine Ark, DeepSeek, Moonshot, Qwen, Zhipu, MiniMax, Baidu, xAI, Kling, Runway, Stability</td></tr>
+            <tr><td>Billing</td><td>Single append-only credit ledger, microcent precision. Card billing via Stripe; USDT top-ups accepted via NOWPayments.</td></tr>
+            <tr><td>Pricing</td><td>Pass-through provider price plus a platform fee: 5% text, 12% image, 10&#8211;15% video (per model). No tiers, no seats, no minimums.</td></tr>
             <tr><td>Reliability</td><td>Per-model fallback chains; responses carry <span class="mono">fallback_used:true</span> when a chain fires</td></tr>
             <tr><td>License</td><td>Open source, Apache 2.0</td></tr>
             <tr><td>Source</td><td><a href="https://github.com/GoDanceAi/godance">github.com/GoDanceAi/godance</a></td></tr>
@@ -945,7 +945,7 @@ curl https://api.godance.ai/v1/chat/completions \
         <div class="spec">
           <div class="row"><span class="label">display &#183; 60/1.1 &#183; &#8722;0.02em &#183; 700</span><span style="font-size: clamp(28px, 4.4vw, 48px); font-weight: 700; letter-spacing: -0.02em; line-height: 1.1;">Build with every AI model.</span></div>
           <div class="row"><span class="label">h2 &#183; 28/1.25 &#183; &#8722;0.01em &#183; 600</span><span style="font-size: 28px; font-weight: 600; letter-spacing: -0.01em;">Stop maintaining six SDKs.</span></div>
-          <div class="row"><span class="label">body &#183; 16/1.6 &#183; 400</span><span style="max-width: 56ch; color: var(--fg-muted);">Godance is a drop-in OpenAI-compatible API that routes to 16+ providers. Responses stream as tokens arrive.</span></div>
+          <div class="row"><span class="label">body &#183; 16/1.6 &#183; 400</span><span style="max-width: 56ch; color: var(--fg-muted);">Godance is an OpenAI-compatible API, drop-in for chat, that routes to 15+ providers. Responses stream as tokens arrive.</span></div>
           <div class="row"><span class="label">label &#183; 12/1.3 &#183; +0.06em &#183; 600</span><span style="font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--fg-subtle);">Credit ledger</span></div>
           <div class="row"><span class="label">mono &#183; 14/1.55 &#183; 400</span><span class="mono" style="font-size: 14px;">POST /v1/chat/completions &#183; evt_01HXB&#8230;9J2K &#183; $0.024 / 1K tokens</span></div>
         </div>
@@ -965,7 +965,7 @@ curl https://api.godance.ai/v1/chat/completions \
         <div class="card"><div class="pad">
           <ul class="rules">
             <li><strong>Sentence case everywhere</strong> &#8212; buttons, headings, nav, table headers. "Get started", not "Get Started".</li>
-            <li><strong>Proper nouns are sacred.</strong> OpenAI, Anthropic, Google Vertex, Black Forest Labs, Stripe, Coinbase Commerce &#8212; each in its owner's preferred casing.</li>
+            <li><strong>Proper nouns are sacred.</strong> OpenAI, Anthropic, Google Vertex, Black Forest Labs, Stripe, NOWPayments &#8212; each in its owner's preferred casing.</li>
           </ul>
         </div></div>
         <div class="card"><div class="pad">
@@ -993,14 +993,14 @@ curl https://api.godance.ai/v1/chat/completions \
       <div class="pair">
         <div class="col">
           <div class="quote">Build with every AI model. Skip the integration tax.<span class="why">Declarative. Names the pain in four words.</span></div>
-          <div class="quote">One number. Pinned to the floor.<span class="why">Pricing headline. Dry, specific, no adjectives doing hype work.</span></div>
+          <div class="quote">Provider price, plus a published fee.<span class="why">Pricing headline. Dry, specific, no adjectives doing hype work.</span></div>
           <div class="quote">Six provider integrations, six rate-limit dashboards, six invoices.<span class="why">Wry by enumeration, not by joke.</span></div>
           <div class="quote">Low balance. Top up to keep requests flowing.<span class="why">Advisory states the fact, then the action.</span></div>
         </div>
         <div class="col">
           <div class="quote bad">Supercharge your AI workflow with our powerful unified platform!<span class="why">Banned on four counts: "supercharge", "powerful", "AI-powered" framing, exclamation mark.</span></div>
           <div class="quote bad">We're thrilled to unlock next-gen multimodal magic &#10024;<span class="why">No emoji, no "unlock", no thrill. State what shipped.</span></div>
-          <div class="quote bad">We try our best to be a drop-in replacement.<span class="why">Hedging. It either is drop-in or it isn't. "Truly drop-in."</span></div>
+          <div class="quote bad">We try our best to be a drop-in replacement.<span class="why">Hedging. Say exactly where it is drop-in. "Drop-in for chat."</span></div>
           <div class="quote bad">Blockchain-native billing for the crypto economy.<span class="why">Crypto is a payment method, never the identity.</span></div>
         </div>
       </div>
@@ -1012,7 +1012,7 @@ curl https://api.godance.ai/v1/chat/completions \
           <tbody>
             <tr><td>Money</td><td class="mono">$0.024 / 1K tokens &#183; $1,248,394 &#183; +18.6%</td><td>Always mono in tables and metrics.</td></tr>
             <tr><td>Latency</td><td class="mono">412ms &#183; 1.23s &#183; P95 412ms</td><td>No space before the unit, no italics.</td></tr>
-            <tr><td>Counts</td><td class="mono">16+ providers &#183; 99.98%</td><td>Always include the unit.</td></tr>
+            <tr><td>Counts</td><td class="mono">15+ providers &#183; 99.98%</td><td>Always include the unit.</td></tr>
             <tr><td>Ids</td><td class="mono">evt_01HXB&#8230;9J2K &#183; gd_live_xxxx&#8230;</td><td>Middle-truncate with &#8230; &#8212; never three dots.</td></tr>
           </tbody>
         </table>
@@ -1182,8 +1182,8 @@ curl https://api.godance.ai/v1/chat/completions \
           <h3 class="sub">House rules for coverage</h3>
           <ul class="rules">
             <li>Describe Godance as a "multimodal AI aggregator" on first mention.</li>
-            <li>Provider count is "16+" &#8212; it moves; don't hard-code a larger number.</li>
-            <li>Pricing is "pass-through plus 5%" &#8212; not "markup", not "commission".</li>
+            <li>Provider count is "15+" &#8212; it moves; don't hard-code a larger number.</li>
+            <li>Pricing is "pass-through plus a platform fee" (5% text, 12% image, 10&#8211;15% video) &#8212; not "markup", not "commission".</li>
             <li>Screenshots: current app chrome may still show the legacy lowercase wordmark; prefer assets from this kit for anything designed.</li>
           </ul>
         </div></div>

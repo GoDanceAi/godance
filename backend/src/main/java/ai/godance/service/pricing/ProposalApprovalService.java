@@ -115,7 +115,7 @@ public class ProposalApprovalService {
 
     private void applyPriceChange(ModelChangeProposal p) {
         ModelCatalogEntry entry = catalog.findByModelName(p.getModelName())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNPROCESSABLE_CONTENT,
                         "cannot apply PRICE_CHANGE: model " + p.getModelName() + " not in catalog"));
         Map<String, Object> payload = p.getPayload();
         PriceField field = PriceField.valueOf(((String) payload.get("field")).toUpperCase());
@@ -139,7 +139,7 @@ public class ProposalApprovalService {
                 : (payload.get("provider") != null
                         ? Provider.valueOf((String) payload.get("provider")) : null);
         if (provider == null) {
-            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,
+            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_CONTENT,
                     "cannot apply NEW_VERSION without a Provider mapping");
         }
         Modality modality = p.getModality() != null
