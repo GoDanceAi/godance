@@ -1,6 +1,7 @@
 package ai.godance.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.UUID;
 
@@ -8,8 +9,10 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.ReactiveJwtDecoder;
+import org.springframework.web.server.ResponseStatusException;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
@@ -50,7 +53,7 @@ class OAuthLoginServiceTest {
         String email = uniqueEmail("oauth-new");
 
         AuthResponse response = oauthLogin.completeLogin(
-                OAuthProvider.GOOGLE, subject, email, "Ada Lovelace");
+                OAuthProvider.GOOGLE, subject, email, true, "Ada Lovelace");
 
         assertThat(response.tokenType()).isEqualTo("Bearer");
         Jwt decoded = jwtDecoder.decode(response.accessToken()).block();
@@ -67,7 +70,7 @@ class OAuthLoginServiceTest {
     }
 
     @Test
-    void completeLogin_givenEmailOfExistingUser_linksWithoutCreatingNewUser() {
+    void completeLogin_givenVerifiedEmailOfExistingUser_linksWithoutCreatingNewUser() {
         String email = uniqueEmail("oauth-link");
         User existing = new User();
         existing.setEmail(email);
@@ -80,7 +83,7 @@ class OAuthLoginServiceTest {
 
         String subject = "apple-" + UUID.randomUUID();
         AuthResponse response = oauthLogin.completeLogin(
-                OAuthProvider.APPLE, subject, email, "Existing User");
+                OAuthProvider.APPLE, subject, email, true, "Existing User");
 
         Jwt decoded = jwtDecoder.decode(response.accessToken()).block();
         assertThat(decoded).isNotNull();
@@ -93,12 +96,34 @@ class OAuthLoginServiceTest {
     }
 
     @Test
+    void completeLogin_givenUnverifiedEmailOfExistingUser_refusesWithoutLinking() {
+        String email = uniqueEmail("oauth-unverified");
+        User existing = new User();
+        existing.setEmail(email);
+        existing.setFullName("Existing User");
+        existing.setPasswordHash("$2a$12$placeholderplaceholderplaceholderplaceholderplaceh");
+        existing.setRole(UserRole.USER);
+        existing.setActive(true);
+        existing.setEmailVerified(false);
+        users.save(existing);
+
+        String subject = "google-" + UUID.randomUUID();
+        assertThatThrownBy(() -> oauthLogin.completeLogin(
+                OAuthProvider.GOOGLE, subject, email, false, "Someone Else"))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        e -> assertThat(e.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN));
+
+        assertThat(identities.findByProviderAndSubject(OAuthProvider.GOOGLE, subject)).isEmpty();
+        assertThat(users.findById(existing.getId()).orElseThrow().isEmailVerified()).isFalse();
+    }
+
+    @Test
     void completeLogin_givenKnownProviderSubject_resolvesToSameUser() {
         String subject = "x-" + UUID.randomUUID();
         String email = uniqueEmail("oauth-repeat");
 
-        AuthResponse first = oauthLogin.completeLogin(OAuthProvider.X, subject, email, "Repeat");
-        AuthResponse second = oauthLogin.completeLogin(OAuthProvider.X, subject, email, "Repeat");
+        AuthResponse first = oauthLogin.completeLogin(OAuthProvider.X, subject, email, true, "Repeat");
+        AuthResponse second = oauthLogin.completeLogin(OAuthProvider.X, subject, email, true, "Repeat");
 
         Jwt firstJwt = jwtDecoder.decode(first.accessToken()).block();
         Jwt secondJwt = jwtDecoder.decode(second.accessToken()).block();
@@ -111,7 +136,7 @@ class OAuthLoginServiceTest {
     void completeLogin_givenNoEmail_createsUserWithSyntheticAddress() {
         String subject = "x-noemail-" + UUID.randomUUID();
 
-        AuthResponse response = oauthLogin.completeLogin(OAuthProvider.X, subject, null, null);
+        AuthResponse response = oauthLogin.completeLogin(OAuthProvider.X, subject, null, false, null);
 
         Jwt decoded = jwtDecoder.decode(response.accessToken()).block();
         assertThat(decoded).isNotNull();

@@ -12,6 +12,7 @@ import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.security.web.server.WebFilterExchange;
 import org.springframework.security.web.server.authentication.ServerAuthenticationSuccessHandler;
 import org.springframework.stereotype.Component;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.server.ServerWebExchange;
 
 import ai.godance.config.OAuthProperties;
@@ -26,7 +27,8 @@ import reactor.core.scheduler.Schedulers;
  * provider redirect dance has authenticated the user, this translates
  * the provider identity into a Godance JWT (via {@link OAuthLoginService})
  * and bounces the browser back to the SPA with the token in the URL
- * fragment — the same shape a native SPA OAuth callback expects.
+ * fragment — the same shape a native SPA OAuth callback expects. A
+ * refused sign-in comes back the same way with {@code #error=<reason>}.
  */
 @Component
 public class OAuthLoginSuccessHandler implements ServerAuthenticationSuccessHandler {
@@ -49,23 +51,51 @@ public class OAuthLoginSuccessHandler implements ServerAuthenticationSuccessHand
 
         String subject = principal.getName();          // id token `sub` / provider user id
         String email = principal.getAttribute("email");
+        boolean emailVerified = isEmailVerified(principal);
         String fullName = resolveName(principal);
 
         ServerWebExchange exchange = webFilterExchange.getExchange();
-        return Mono.fromCallable(() -> oauthLogin.completeLogin(provider, subject, email, fullName))
+        return Mono.fromCallable(() -> oauthLogin.completeLogin(
+                        provider, subject, email, emailVerified, fullName))
                 .subscribeOn(Schedulers.boundedElastic())
-                .flatMap(auth -> redirectWithToken(exchange, auth));
+                .flatMap(auth -> redirectWithToken(exchange, auth))
+                // A refused sign-in (unverified email, disabled account) goes
+                // back to the SPA, which shows the reason on the login page.
+                .onErrorResume(ResponseStatusException.class,
+                        e -> e.getStatusCode().is4xxClientError()
+                                ? redirectWithError(exchange, e.getReason())
+                                : Mono.error(e));
     }
 
     private Mono<Void> redirectWithToken(ServerWebExchange exchange, AuthResponse auth) {
-        String target = props.postLoginRedirectUri()
+        return redirect(exchange, props.postLoginRedirectUri()
                 + "#access_token=" + enc(auth.accessToken())
                 + "&token_type=" + enc(auth.tokenType())
-                + "&expires_at=" + enc(auth.expiresAt().toString());
+                + "&expires_at=" + enc(auth.expiresAt().toString()));
+    }
+
+    private Mono<Void> redirectWithError(ServerWebExchange exchange, String reason) {
+        return redirect(exchange, props.postLoginRedirectUri()
+                + "#error=" + enc(reason != null ? reason : "Sign-in failed"));
+    }
+
+    private static Mono<Void> redirect(ServerWebExchange exchange, String target) {
         ServerHttpResponse response = exchange.getResponse();
         response.setStatusCode(HttpStatus.FOUND);
         response.getHeaders().setLocation(URI.create(target));
         return response.setComplete();
+    }
+
+    /**
+     * The OIDC {@code email_verified} claim. Google sends a boolean; Apple
+     * may send a boolean or the string {@code "true"}. Anything else,
+     * including a missing claim (X returns no email at all), counts as
+     * unverified.
+     */
+    static boolean isEmailVerified(OAuth2User principal) {
+        Object claim = principal.getAttribute("email_verified");
+        if (claim instanceof Boolean verified) return verified;
+        return claim instanceof String s && "true".equalsIgnoreCase(s.strip());
     }
 
     private static String resolveName(OAuth2User principal) {
