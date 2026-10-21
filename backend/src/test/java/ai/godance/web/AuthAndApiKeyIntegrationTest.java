@@ -179,13 +179,14 @@ class AuthAndApiKeyIntegrationTest {
     // ---------- /v1/auth/verify ---------------------------------------
 
     @Test
-    void verify_givenValidToken_flipsEmailVerifiedFlag() {
+    void verify_givenValidTokenAndOwnSession_flipsEmailVerifiedFlag() {
         String email = uniqueEmail("verify-ok");
-        signup(email);
+        String bearer = "Bearer " + signup(email).accessToken();
         String token = users.findByEmail(email).orElseThrow().getEmailVerificationToken();
         assertThat(token).isNotNull();
 
         http.get().uri("/v1/auth/verify?token={t}", token)
+                .header("Authorization", bearer)
                 .exchange()
                 .expectStatus().isNoContent();
 
@@ -195,8 +196,44 @@ class AuthAndApiKeyIntegrationTest {
     }
 
     @Test
+    void verify_givenValidTokenWithoutSession_returns401AndLeavesEmailUnverified() {
+        // The inbox owner opening the link from a signup someone else made.
+        String email = uniqueEmail("verify-anon");
+        signup(email);
+        String token = users.findByEmail(email).orElseThrow().getEmailVerificationToken();
+
+        http.get().uri("/v1/auth/verify?token={t}", token)
+                .exchange()
+                .expectStatus().isUnauthorized();
+
+        var after = users.findByEmail(email).orElseThrow();
+        assertThat(after.isEmailVerified()).isFalse();
+        assertThat(after.getEmailVerificationToken()).isEqualTo(token);
+    }
+
+    @Test
+    void verify_givenAnotherAccountsSession_returns403AndLeavesEmailUnverified() {
+        String email = uniqueEmail("verify-target");
+        signup(email);
+        String token = users.findByEmail(email).orElseThrow().getEmailVerificationToken();
+        String otherBearer = "Bearer " + signup(uniqueEmail("verify-other")).accessToken();
+
+        http.get().uri("/v1/auth/verify?token={t}", token)
+                .header("Authorization", otherBearer)
+                .exchange()
+                .expectStatus().isForbidden();
+
+        var after = users.findByEmail(email).orElseThrow();
+        assertThat(after.isEmailVerified()).isFalse();
+        assertThat(after.getEmailVerificationToken()).isEqualTo(token);
+    }
+
+    @Test
     void verify_givenBadToken_returns400() {
+        String bearer = "Bearer " + signup(uniqueEmail("verify-bad")).accessToken();
+
         http.get().uri("/v1/auth/verify?token=this-token-does-not-exist")
+                .header("Authorization", bearer)
                 .exchange()
                 .expectStatus().isBadRequest();
     }

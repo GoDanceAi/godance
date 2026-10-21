@@ -88,6 +88,8 @@ godance:
     cancel-url:  ${NOWPAYMENTS_CANCEL_URL}           # REQUIRED
   binancepay:
     enabled:     ${BINANCE_PAY_ENABLED:false}        # v1.1 rail — flagged off until merchant KYC clears
+  mail:
+    app-base-url: ${APP_BASE_URL:https://app.godance.ai}   # SPA origin that email links open
   billing:
     topup-min-cents: ${TOPUP_MIN_CENTS:100}
     topup-max-cents: ${TOPUP_MAX_CENTS:100000}

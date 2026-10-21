@@ -1,5 +1,7 @@
 package ai.godance.service.mail;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 
@@ -20,7 +22,8 @@ import ai.godance.domain.User;
  * <ul>
  *   <li>Every text body's <b>first line</b> is exactly the message the
  *       old inline {@code [email-stub]} logs produced, so the
- *       {@link LoggingEmailSender} keeps dev output verbatim.</li>
+ *       {@link LoggingEmailSender} keeps dev output verbatim. (The
+ *       verify-email line keeps its wording; its URL now opens the app.)</li>
  *   <li>No method here ever throws — mail failures must not propagate
  *       into signup, chat requests, auto-recharge or the pricing cron.</li>
  * </ul>
@@ -32,25 +35,33 @@ public class MailService {
 
     private final EmailSender sender;
     private final AdminProperties admin;
+    private final String appBaseUrl;
 
-    public MailService(EmailSender sender, AdminProperties admin) {
+    public MailService(EmailSender sender, AdminProperties admin, MailProperties props) {
         this.sender = sender;
         this.admin = admin;
+        this.appBaseUrl = props.appBaseUrl().replaceAll("/+$", "");
     }
 
-    /** verify-email — sent once per signup. */
+    /**
+     * verify-email — sent once per signup. The link opens the SPA's
+     * {@code /verify-email} page, which verifies only while signed in to
+     * the account that owns the token.
+     */
     public void sendVerificationEmail(User user) {
         try {
-            String stubLine = "Verification URL for " + user.getEmail()
-                    + ": /v1/auth/verify?token=" + user.getEmailVerificationToken();
+            String link = appBaseUrl + "/verify-email?token="
+                    + URLEncoder.encode(user.getEmailVerificationToken(), StandardCharsets.UTF_8);
+            String stubLine = "Verification URL for " + user.getEmail() + ": " + link;
             String text = stubLine + "\n\n"
                     + "Hi " + user.getFullName() + ",\n\n"
                     + "Welcome to Godance. Please confirm this email address by opening the\n"
-                    + "verification link above against the Godance API.\n\n"
+                    + "link above. If you aren't signed in, you'll be asked to sign in first.\n\n"
                     + "If you didn't create a Godance account, you can ignore this email.\n";
             String html = "<p>Hi " + escape(user.getFullName()) + ",</p>"
-                    + "<p>Welcome to Godance. Please confirm this email address by opening:</p>"
-                    + "<p><code>/v1/auth/verify?token=" + escape(user.getEmailVerificationToken()) + "</code></p>"
+                    + "<p>Welcome to Godance. Please confirm this email address:</p>"
+                    + "<p><a href=\"" + escape(link) + "\">Verify my email</a></p>"
+                    + "<p>If you aren't signed in, you'll be asked to sign in first.</p>"
                     + "<p>If you didn't create a Godance account, you can ignore this email.</p>";
             sender.send(List.of(user.getEmail()), "Verify your Godance email", text, html);
         } catch (Exception e) {
