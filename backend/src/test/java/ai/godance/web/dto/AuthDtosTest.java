@@ -32,6 +32,15 @@ class AuthDtosTest {
 
         assertThat(me.hasEmail()).isTrue();
         assertThat(me.email()).isEqualTo("someone@godance.test");
+        assertThat(me.hasPassword()).isFalse();
+    }
+
+    @Test
+    void meResponseFrom_givenPasswordAccount_expectsHasPasswordTrue() {
+        User u = user("someone@godance.test");
+        u.setPasswordHash("$2a$12$placeholderplaceholderplaceholderplaceholderplaceh");
+
+        assertThat(MeResponse.from(u).hasPassword()).isTrue();
     }
 
     @Test

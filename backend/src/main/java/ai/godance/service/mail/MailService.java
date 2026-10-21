@@ -48,7 +48,8 @@ public class MailService {
 
     /**
      * verify-email to {@code toEmail}: the account's email on a resend, or
-     * the address being added to an X.com sign-in's placeholder account.
+     * the address the account is changing to (or adding, for an X.com
+     * sign-in's placeholder account).
      */
     public void sendVerificationEmail(User user, String toEmail) {
         try {
@@ -100,6 +101,29 @@ public class MailService {
                     "Godance: 80% of your " + period + " spending cap used", text, html);
         } catch (Exception e) {
             log.error("spend-warning build/send failed for {}: {}", capSubject, e.getMessage());
+        }
+    }
+
+    /**
+     * email-changed — to the account's previous (verified) address once a
+     * change to {@code user}'s current email has been verified, so a change
+     * the owner didn't make doesn't go unnoticed.
+     */
+    public void sendEmailChangedNotice(String previousEmail, User user) {
+        try {
+            String stubLine = "Email changed for " + previousEmail + ": now " + user.getEmail();
+            String text = stubLine + "\n\n"
+                    + "Hi " + user.getFullName() + ",\n\n"
+                    + "The email address on your Godance account was changed from\n"
+                    + previousEmail + " to " + user.getEmail() + ".\n\n"
+                    + "If you didn't make this change, email hello@godance.ai right away.\n";
+            String html = "<p>Hi " + escape(user.getFullName()) + ",</p>"
+                    + "<p>The email address on your Godance account was changed from <b>"
+                    + escape(previousEmail) + "</b> to <b>" + escape(user.getEmail()) + "</b>.</p>"
+                    + "<p>If you didn't make this change, email hello@godance.ai right away.</p>";
+            sender.send(List.of(previousEmail), "Your Godance email address was changed", text, html);
+        } catch (Exception e) {
+            log.error("email-changed build/send failed for {}: {}", user.getId(), e.getMessage());
         }
     }
 

@@ -33,6 +33,9 @@ public class AuthService {
     /** Shortest gap between two verification emails to the same account. */
     static final Duration RESEND_COOLDOWN = Duration.ofMinutes(1);
 
+    /** How recently an account without a password must have signed in to change its email. */
+    static final Duration RECENT_SIGN_IN = Duration.ofMinutes(10);
+
     private final UserRepository users;
     private final PasswordEncoder passwords;
     private final JwtService jwt;
@@ -115,8 +118,9 @@ public class AuthService {
      * an account someone else registered with it, and OAuth sign-in would
      * then link into that account (see {@code OAuthLoginService}).
      *
-     * <p>For an address being added (see {@link #addEmail}), this is the
-     * point where it replaces the placeholder.
+     * <p>For an address being added or changed to (see
+     * {@link #requestEmailChange}), this is the point where it replaces the
+     * account's email.
      */
     @Transactional
     public void verifyEmail(UUID userId, String token, String ipAddress) {
@@ -127,35 +131,49 @@ public class AuthService {
                     "This verification link is for a different account. "
                             + "Sign in to that account and open the link again.");
         }
+        String replacedEmail = null;
         if (u.getPendingEmail() != null) {
             // Someone may have signed up with it since it was requested.
             requireUnusedEmail(u.getPendingEmail());
+            // Tell the old address only if it was verified: an unverified
+            // one may be a stranger's (a typo at signup), and a placeholder
+            // is never verified.
+            if (u.isEmailVerified()) {
+                replacedEmail = u.getEmail();
+            }
             u.setEmail(u.getPendingEmail());
             u.setPendingEmail(null);
         }
         u.setEmailVerified(true);
         u.setEmailVerificationToken(null);
         users.save(u);
+        if (replacedEmail != null) {
+            mail.sendEmailChangedNotice(replacedEmail, u);
+        }
         audit.record(AuditLogService.EVT_AUTH_VERIFY, AuditOutcome.SUCCESS,
                 u.getId(), ipAddress, null);
     }
 
     /**
-     * Send the signed-in user's verification email again, to the address
-     * being added if there is one. The current token is kept, so a link
-     * from an earlier email still works.
+     * Send the signed-in user's verification email again: to the address
+     * being added or changed to if there is one, else to the account's own
+     * unverified email. The current token is kept, so a link from an
+     * earlier email still works.
      */
     @Transactional
     public void resendVerificationEmail(UUID userId, String ipAddress) {
         User u = loadById(userId);
-        if (u.isEmailVerified()) {
+        String to;
+        if (u.getPendingEmail() != null) {
+            to = u.getPendingEmail();
+        } else if (u.isEmailVerified()) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
                     "Your email address is already verified.");
-        }
-        String to = u.getPendingEmail() != null ? u.getPendingEmail() : u.getEmail();
-        if (to.endsWith(User.SYNTHETIC_EMAIL_SUFFIX)) {
+        } else if (u.hasSyntheticEmail()) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
                     "This account has no email address to verify.");
+        } else {
+            to = u.getEmail();
         }
         Instant now = Instant.now();
         requireCooldownPassed(u, now);
@@ -173,24 +191,32 @@ public class AuthService {
     }
 
     /**
-     * Start adding a real email to an account that only has a placeholder
-     * (an X.com sign-in). The address waits in {@code pendingEmail} and
-     * replaces the placeholder only when verified from this account's
-     * session (see {@link #verifyEmail}). Until then it is not the
-     * account's email, so it neither blocks the address's owner from
-     * signing up nor lets their OAuth sign-in link into this account.
+     * Start changing the signed-in user's email, or adding a first real
+     * one to an X.com placeholder account. The new address waits in
+     * {@code pendingEmail} and replaces the current one only when verified
+     * from this account's session (see {@link #verifyEmail}). Until then it
+     * is not the account's email, so it neither blocks the address's owner
+     * from signing up nor lets their OAuth sign-in link into this account.
+     *
+     * <p>A session alone is not enough. The account's email decides whose
+     * OAuth sign-in can link in, so a stolen session could otherwise move
+     * the account to an attacker's address for good. The caller proves
+     * again who they are: with the current password, or, for an account
+     * without one, by having signed in within {@link #RECENT_SIGN_IN}.
      */
     @Transactional
-    public void addEmail(UUID userId, String email, String ipAddress) {
+    public void requestEmailChange(UUID userId, String email, String currentPassword,
+                                   Instant signedInAt, String ipAddress) {
         User u = loadById(userId);
-        if (!u.hasSyntheticEmail()) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "This account already has an email address.");
-        }
+        requireReauthenticated(u, currentPassword, signedInAt, ipAddress);
         String normalized = email.trim().toLowerCase();
         if (normalized.endsWith(User.SYNTHETIC_EMAIL_SUFFIX)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "Enter an email address you can receive mail at.");
+        }
+        if (normalized.equals(u.getEmail())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "That is already your email address.");
         }
         requireUnusedEmail(normalized);
         Instant now = Instant.now();
@@ -205,8 +231,25 @@ public class AuthService {
 
         mail.sendVerificationEmail(u, normalized);
 
-        audit.record(AuditLogService.EVT_AUTH_EMAIL_ADD, AuditOutcome.SUCCESS,
+        audit.record(AuditLogService.EVT_AUTH_EMAIL_CHANGE, AuditOutcome.SUCCESS,
                 u.getId(), ipAddress, Map.of("email", normalized));
+    }
+
+    private void requireReauthenticated(User u, String currentPassword, Instant signedInAt,
+                                        String ipAddress) {
+        if (u.getPasswordHash() != null) {
+            if (currentPassword == null || !passwords.matches(currentPassword, u.getPasswordHash())) {
+                // Own transaction: the 403 rolls back the caller's.
+                audit.recordInNewTransaction(AuditLogService.EVT_AUTH_EMAIL_CHANGE,
+                        AuditOutcome.FAILURE, u.getId(), ipAddress, Map.of("reason", "bad-password"));
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                        "Your current password is incorrect.");
+            }
+        } else if (signedInAt == null || signedInAt.plus(RECENT_SIGN_IN).isBefore(Instant.now())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "For your security, sign in again, then change your email within "
+                            + RECENT_SIGN_IN.toMinutes() + " minutes.");
+        }
     }
 
     private void requireUnusedEmail(String email) {

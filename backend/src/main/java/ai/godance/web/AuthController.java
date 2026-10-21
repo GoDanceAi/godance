@@ -1,5 +1,6 @@
 package ai.godance.web;
 
+import java.time.Instant;
 import java.util.UUID;
 
 import org.springframework.http.HttpStatus;
@@ -12,12 +13,14 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.server.ServerWebExchange;
 
+import ai.godance.security.ApiKeyAuthFilter;
 import ai.godance.security.JwtService;
 import ai.godance.service.AuthService;
-import ai.godance.web.dto.AuthDtos.AddEmailRequest;
 import ai.godance.web.dto.AuthDtos.AuthResponse;
+import ai.godance.web.dto.AuthDtos.ChangeEmailRequest;
 import ai.godance.web.dto.AuthDtos.LoginRequest;
 import ai.godance.web.dto.AuthDtos.MeResponse;
 import ai.godance.web.dto.AuthDtos.SignupRequest;
@@ -53,7 +56,7 @@ public class AuthController {
     @GetMapping("/verify")
     public Mono<ResponseEntity<Void>> verify(@AuthenticationPrincipal Jwt jwt,
             @RequestParam("token") String token, ServerWebExchange exchange) {
-        UUID userId = JwtService.userIdFromSubject(jwt.getSubject());
+        UUID userId = sessionUserId(jwt);
         return Mono.fromRunnable(() -> auth.verifyEmail(userId, token, clientIp(exchange)))
                 .subscribeOn(Schedulers.boundedElastic())
                 .then(Mono.just(ResponseEntity.noContent().build()));
@@ -62,17 +65,20 @@ public class AuthController {
     @PostMapping("/verify/resend")
     public Mono<ResponseEntity<Void>> resendVerification(@AuthenticationPrincipal Jwt jwt,
             ServerWebExchange exchange) {
-        UUID userId = JwtService.userIdFromSubject(jwt.getSubject());
+        UUID userId = sessionUserId(jwt);
         return Mono.fromRunnable(() -> auth.resendVerificationEmail(userId, clientIp(exchange)))
                 .subscribeOn(Schedulers.boundedElastic())
                 .then(Mono.just(ResponseEntity.noContent().build()));
     }
 
+    /** Add a first real address (X.com sign-in) or change the account's email. */
     @PostMapping("/email")
-    public Mono<ResponseEntity<Void>> addEmail(@AuthenticationPrincipal Jwt jwt,
-            @Valid @RequestBody AddEmailRequest req, ServerWebExchange exchange) {
-        UUID userId = JwtService.userIdFromSubject(jwt.getSubject());
-        return Mono.fromRunnable(() -> auth.addEmail(userId, req.email(), clientIp(exchange)))
+    public Mono<ResponseEntity<Void>> changeEmail(@AuthenticationPrincipal Jwt jwt,
+            @Valid @RequestBody ChangeEmailRequest req, ServerWebExchange exchange) {
+        UUID userId = sessionUserId(jwt);
+        Instant signedInAt = jwt.getIssuedAt();
+        return Mono.fromRunnable(() -> auth.requestEmailChange(userId, req.email(),
+                        req.currentPassword(), signedInAt, clientIp(exchange)))
                 .subscribeOn(Schedulers.boundedElastic())
                 .then(Mono.just(ResponseEntity.noContent().build()));
     }
@@ -83,6 +89,20 @@ public class AuthController {
         return Mono.fromCallable(() -> auth.loadById(userId))
                 .subscribeOn(Schedulers.boundedElastic())
                 .map(MeResponse::from);
+    }
+
+    /**
+     * The caller's user id, refusing an API key. Which address the account
+     * uses decides whose Google or Apple sign-in can link into it, so only
+     * a signed-in session may change or confirm it; an API key is for the
+     * model API.
+     */
+    private static UUID sessionUserId(Jwt jwt) {
+        if (jwt.hasClaim(ApiKeyAuthFilter.API_KEY_ID_CLAIM)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Sign in to manage your email address; API keys can't.");
+        }
+        return JwtService.userIdFromSubject(jwt.getSubject());
     }
 
     private static String clientIp(ServerWebExchange exchange) {

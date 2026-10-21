@@ -3,6 +3,7 @@ import type { FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth, formatCents } from '../lib/auth';
 import { apiFetch, ApiError } from '../lib/api';
+import ResendEmailButton from '../components/ResendEmailButton';
 import { Icon } from '../components/Brand';
 
 export default function DashboardPage() {
@@ -18,7 +19,7 @@ export default function DashboardPage() {
       </h1>
 
       {user.hasEmail
-        ? !user.emailVerified && <VerifyEmailBanner email={user.email} />
+        ? !user.emailVerified && <VerifyEmailBanner email={user.pendingEmail ?? user.email} />
         : <AddEmailBanner pendingEmail={user.pendingEmail} />}
 
       {/* Balance card */}
@@ -86,41 +87,6 @@ function DashboardCard({ to, title, body }: { to: string; title: string; body: s
 }
 
 const BANNER_CLASS = 'mt-6 rounded-md border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900';
-
-type ResendStatus = 'idle' | 'sending' | 'sent' | 'error';
-
-/** Re-sends the verification email (to the address being added, if there is one). */
-function ResendEmailButton() {
-  const [status, setStatus] = useState<ResendStatus>('idle');
-  const [error, setError] = useState<string | null>(null);
-
-  const resend = async () => {
-    setStatus('sending');
-    setError(null);
-    try {
-      await apiFetch('/v1/auth/verify/resend', { method: 'POST' });
-      setStatus('sent');
-    } catch (err) {
-      setStatus('error');
-      setError(err instanceof ApiError ? err.detail || err.message : 'Could not send the email');
-    }
-  };
-
-  return (
-    <>
-      <button
-        type="button"
-        onClick={() => void resend()}
-        disabled={status === 'sending'}
-        className="btn btn-sm btn-secondary"
-      >
-        {status === 'sending' ? 'Sending…' : 'Resend email'}
-      </button>
-      {status === 'sent' && <span role="status">Sent. Check your inbox.</span>}
-      {status === 'error' && <span role="alert" className="text-danger">{error}</span>}
-    </>
-  );
-}
 
 function VerifyEmailBanner({ email }: { email: string }) {
   return (

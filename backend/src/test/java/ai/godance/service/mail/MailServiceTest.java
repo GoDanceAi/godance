@@ -73,6 +73,18 @@ class MailServiceTest {
     }
 
     @Test
+    void sendEmailChangedNotice_givenPreviousAddress_expectsMailThereNamingBothAddresses() {
+        User u = user("new@godance.test");
+
+        mail.sendEmailChangedNotice("old@godance.test", u);
+
+        String text = captureText(List.of("old@godance.test"), "email address was changed");
+        assertThat(text.lines().findFirst().orElseThrow())
+                .isEqualTo("Email changed for old@godance.test: now new@godance.test");
+        assertThat(text).contains("hello@godance.ai");
+    }
+
+    @Test
     void sendVerificationEmail_givenAddressBeingAdded_expectsMailToThatAddress() {
         mail.sendVerificationEmail(user("x-42@oauth.godance.local"), "added@godance.test");
 

@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -53,6 +54,9 @@ class AuthAndApiKeyIntegrationTest {
     private static String uniqueEmail(String tag) {
         return tag + "-" + UUID.randomUUID() + "@godance.test";
     }
+
+    /** The password every {@link #signup} account gets. */
+    private static final String PASSWORD = "correct-horse-battery-staple";
 
     private static Map<String, Object> signupBody(String email) {
         return Map.of(
@@ -340,31 +344,38 @@ class AuthAndApiKeyIntegrationTest {
                 .expectBody(MeResponse.class).returnResult().getResponseBody();
     }
 
-    private WebTestClient.ResponseSpec addEmail(String bearer, String email) {
+    private WebTestClient.ResponseSpec changeEmail(String bearer, String email, String currentPassword) {
+        Map<String, Object> body = new HashMap<>();
+        body.put("email", email);
+        if (currentPassword != null) body.put("currentPassword", currentPassword);
         return http.post().uri("/v1/auth/email")
                 .header("Authorization", bearer)
                 .contentType(MediaType.APPLICATION_JSON)
-                .bodyValue(Map.of("email", email))
+                .bodyValue(body)
                 .exchange();
     }
 
+    private void verifyPendingEmail(String bearer) {
+        String token = users.findById(me(bearer).id()).orElseThrow().getEmailVerificationToken();
+        http.get().uri("/v1/auth/verify?token={t}", token)
+                .header("Authorization", bearer)
+                .exchange()
+                .expectStatus().isNoContent();
+    }
+
     @Test
-    void addEmail_givenXSignIn_thenVerify_replacesPlaceholderWithVerifiedAddress() {
+    void changeEmail_givenXSignIn_thenVerify_replacesPlaceholderWithVerifiedAddress() {
         String bearer = xSignIn();
         String added = uniqueEmail("x-added");
 
-        addEmail(bearer, added).expectStatus().isNoContent();
+        changeEmail(bearer, added, null).expectStatus().isNoContent();
 
         MeResponse pending = me(bearer);
         assertThat(pending.hasEmail()).isFalse();
         assertThat(pending.pendingEmail()).isEqualTo(added);
         assertThat(users.findByEmail(added)).isEmpty();   // not the account's email yet
 
-        String token = users.findById(pending.id()).orElseThrow().getEmailVerificationToken();
-        http.get().uri("/v1/auth/verify?token={t}", token)
-                .header("Authorization", bearer)
-                .exchange()
-                .expectStatus().isNoContent();
+        verifyPendingEmail(bearer);
 
         MeResponse done = me(bearer);
         assertThat(done.email()).isEqualTo(added);
@@ -374,10 +385,10 @@ class AuthAndApiKeyIntegrationTest {
     }
 
     @Test
-    void addEmail_givenUnverifiedPendingAddress_doesNotLetItsOwnersOAuthSignInLinkIn() {
+    void changeEmail_givenUnverifiedPendingAddress_doesNotLetItsOwnersOAuthSignInLinkIn() {
         String xBearer = xSignIn();
         String victim = uniqueEmail("x-victim");
-        addEmail(xBearer, victim).expectStatus().isNoContent();
+        changeEmail(xBearer, victim, null).expectStatus().isNoContent();
 
         AuthResponse google = oauthLogin.completeLogin(
                 OAuthProvider.GOOGLE, "google-" + UUID.randomUUID(), victim, true, "Victim");
@@ -386,23 +397,61 @@ class AuthAndApiKeyIntegrationTest {
     }
 
     @Test
-    void addEmail_givenPasswordAccount_returns409() {
-        String bearer = "Bearer " + signup(uniqueEmail("add-pw")).accessToken();
+    void changeEmail_givenPasswordAccountAndCorrectPassword_thenVerify_switchesAddress() {
+        String old = uniqueEmail("change-old");
+        String bearer = "Bearer " + signup(old).accessToken();
+        String fresh = uniqueEmail("change-new");
 
-        addEmail(bearer, uniqueEmail("add-other")).expectStatus().isEqualTo(HttpStatus.CONFLICT);
+        changeEmail(bearer, fresh, PASSWORD).expectStatus().isNoContent();
+        assertThat(me(bearer).email()).isEqualTo(old);
+        assertThat(me(bearer).pendingEmail()).isEqualTo(fresh);
+
+        verifyPendingEmail(bearer);
+
+        MeResponse done = me(bearer);
+        assertThat(done.email()).isEqualTo(fresh);
+        assertThat(done.emailVerified()).isTrue();
+        assertThat(users.findByEmail(old)).isEmpty();
     }
 
     @Test
-    void addEmail_givenAddressOfAnotherAccount_returns409() {
+    void changeEmail_givenWrongPassword_returns403AndLeavesNothingPending() {
+        String bearer = "Bearer " + signup(uniqueEmail("change-badpw")).accessToken();
+
+        changeEmail(bearer, uniqueEmail("change-target"), "not-the-password")
+                .expectStatus().isForbidden();
+
+        assertThat(me(bearer).pendingEmail()).isNull();
+    }
+
+    @Test
+    void changeEmail_givenApiKey_returns403() {
+        String bearer = "Bearer " + signup(uniqueEmail("change-apikey")).accessToken();
+        CreateApiKeyResponse key = http.post().uri("/v1/keys")
+                .header("Authorization", bearer)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("name", "change-email", "scopes", List.of("chat.completions")))
+                .exchange()
+                .expectStatus().isCreated()
+                .expectBody(CreateApiKeyResponse.class).returnResult().getResponseBody();
+
+        changeEmail("Bearer " + key.plaintext(), uniqueEmail("change-target"), PASSWORD)
+                .expectStatus().isForbidden();
+
+        assertThat(me(bearer).pendingEmail()).isNull();
+    }
+
+    @Test
+    void changeEmail_givenAddressOfAnotherAccount_returns409() {
         String taken = uniqueEmail("add-taken");
         signup(taken);
 
-        addEmail(xSignIn(), taken).expectStatus().isEqualTo(HttpStatus.CONFLICT);
+        changeEmail(xSignIn(), taken, null).expectStatus().isEqualTo(HttpStatus.CONFLICT);
     }
 
     @Test
-    void addEmail_givenMalformedAddress_returns400() {
-        addEmail(xSignIn(), "not-an-email").expectStatus().isBadRequest();
+    void changeEmail_givenMalformedAddress_returns400() {
+        changeEmail(xSignIn(), "not-an-email", null).expectStatus().isBadRequest();
     }
 
     // ---------- /v1/keys ----------------------------------------------

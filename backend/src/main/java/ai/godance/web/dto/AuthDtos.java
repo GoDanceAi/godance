@@ -34,22 +34,30 @@ public final class AuthDtos {
         }
     }
 
-    /** A real address for an account that only has a placeholder (an X.com sign-in). */
-    public record AddEmailRequest(
-            @Email @NotBlank @Size(max = 320) String email
+    /**
+     * A new email for the signed-in account: a first real address for an
+     * X.com placeholder account, or a change. {@code currentPassword} is
+     * required when the account has a password.
+     */
+    public record ChangeEmailRequest(
+            @Email @NotBlank @Size(max = 320) String email,
+            @Size(max = 128) String currentPassword
     ) { }
 
     /**
      * {@code hasEmail} is false when {@code email} is only a placeholder
      * (an X.com sign-in, which shares no address), so clients don't show
-     * it or offer to verify it. {@code pendingEmail} is an address such a
-     * user has asked to add and not yet verified, or null.
+     * it or offer to verify it. {@code pendingEmail} is an address the
+     * user has asked to add or change to and not yet verified, or null.
+     * {@code hasPassword} tells clients whether a change of email will
+     * ask for the current password.
      */
     public record MeResponse(
             UUID id,
             String email,
             boolean hasEmail,
             String pendingEmail,
+            boolean hasPassword,
             String fullName,
             UserRole role,
             boolean emailVerified,
@@ -64,6 +72,7 @@ public final class AuthDtos {
                     u.getEmail(),
                     !u.hasSyntheticEmail(),
                     u.getPendingEmail(),
+                    u.getPasswordHash() != null,
                     u.getFullName(),
                     u.getRole(),
                     u.isEmailVerified(),
