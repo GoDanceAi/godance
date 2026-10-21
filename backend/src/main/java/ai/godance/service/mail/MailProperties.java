@@ -11,12 +11,16 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * <p>The dummy {@code apiKey} default doubles as the sender selector: while
  * the key is {@link #DUMMY_API_KEY} (dev/CI), {@link MailConfig} wires the
  * {@link LoggingEmailSender} so no real HTTP call is ever attempted.
+ *
+ * <p>{@code appBaseUrl} is the SPA origin (e.g. {@code https://app.godance.ai})
+ * that links in emails open.
  */
 @ConfigurationProperties(prefix = "godance.mail")
 public record MailProperties(
         String apiKey,
         String from,
-        String apiBase
+        String apiBase,
+        String appBaseUrl
 ) {
     /** Dev/CI placeholder — selects the {@code [email-stub]} logging sender. */
     public static final String DUMMY_API_KEY = "re_dev_dummy_key_do_not_use_for_real_calls";
@@ -31,6 +35,9 @@ public record MailProperties(
         }
         if (apiBase == null || apiBase.isBlank()) {
             throw new IllegalStateException("godance.mail.api-base must be set");
+        }
+        if (appBaseUrl == null || appBaseUrl.isBlank()) {
+            throw new IllegalStateException("godance.mail.app-base-url must be set");
         }
     }
 

@@ -61,7 +61,7 @@ class ResendEmailSenderTest {
         resend.resetAll();
         audit = mock(AuditLogService.class);
         sender = new ResendEmailSender(WebClient.builder(),
-                new MailProperties(API_KEY, FROM, resend.baseUrl()), audit);
+                new MailProperties(API_KEY, FROM, resend.baseUrl(), "https://app.godance.test"), audit);
     }
 
     @Test
@@ -114,7 +114,7 @@ class ResendEmailSenderTest {
     void send_givenConnectionFailure_swallowsAndAuditsMailSendFailed() {
         // Point at a port nothing listens on.
         ResendEmailSender dead = new ResendEmailSender(WebClient.builder(),
-                new MailProperties(API_KEY, FROM, "http://127.0.0.1:1"), audit);
+                new MailProperties(API_KEY, FROM, "http://127.0.0.1:1", "https://app.godance.test"), audit);
 
         assertThatCode(() -> dead.send(List.of("user@godance.test"), "subject", "text", "html"))
                 .doesNotThrowAnyException();

@@ -152,7 +152,7 @@ class EmailSendingIntegrationTest {
                 .withRequestBody(matchingJsonPath("$.to[0]", equalTo(email)))
                 .withRequestBody(matchingJsonPath("$.subject", equalTo("Verify your Godance email")))
                 .withRequestBody(matchingJsonPath("$.text",
-                        containing("/v1/auth/verify?token=" + u.getEmailVerificationToken())))
+                        containing("/verify-email?token=" + u.getEmailVerificationToken())))
                 .withRequestBody(matchingJsonPath("$.html", containing("verify"))));
     }
 
