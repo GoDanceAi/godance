@@ -108,7 +108,7 @@ clean.
 
 | Workflow | Runs on | Does |
 |---|---|---|
-| `.github/workflows/ci.yml` | every pull request, pushes to non-`main` branches | backend `mvn -B verify`; `npm ci && npm run lint && npm run build && npm audit` for `app/` and `marketing/`. Deploys nothing; uses only the read-only `GITHUB_TOKEN`, so fork PRs work too |
+| `.github/workflows/ci.yml` | every pull request, pushes to non-`main` branches | backend `mvn -B verify`; `npm ci && npm run lint && npm run build && npm audit --audit-level=high` for `app/` and `marketing/`. Deploys nothing; uses only the read-only `GITHUB_TOKEN`, so fork PRs work too |
 | `.github/workflows/deploy.yml` | push to `main` (backend paths) | same backend tests, then build, push and deploy the image |
 | `.github/workflows/dependency-graph.yml` | push to `main` | submits the resolved Maven dependency tree to GitHub's dependency graph, so Dependabot alerts cover the backend (its static `pom.xml` parsing can't see BOM-managed or transitive versions; see `docs/dependency-triage-2026-09.md`) |
 
