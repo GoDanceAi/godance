@@ -6,6 +6,44 @@ const description =
   'Documentation for the Godance OpenAI-compatible API: authentication, chat completions, ' +
   'image and video generation, webhooks, billing.';
 
+// Endpoint reference — each entry links to its section further down this page.
+const endpoints = [
+  { id: 'chat-completions', label: 'POST /v1/chat/completions', summary: 'streaming + non-streaming' },
+  { id: 'images', label: 'POST /v1/images/generations', summary: 'async: 202 + job_id, then poll or webhook' },
+  { id: 'videos', label: 'POST /v1/videos/generations', summary: 'async-only, signed webhook' },
+  { id: 'jobs', label: 'GET /v1/jobs/{id}', summary: 'async job status' },
+  { id: 'keys', label: 'CRUD /v1/keys', summary: 'API key management' },
+  { id: 'billing', label: 'POST /v1/billing/topup', summary: 'credit top-up via Stripe Checkout' },
+  { id: 'webhooks', label: 'GET /v1/webhooks/secret', summary: 'signing secret + verification guide' },
+];
+
+const chatSnippet = `curl https://api.godance.ai/v1/chat/completions \\
+  -H "Authorization: Bearer $GODANCE_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "model": "gpt-4o-mini",
+    "messages": [{"role": "user", "content": "Hello"}],
+    "stream": true
+  }'`;
+
+const imageSnippet = `curl https://api.godance.ai/v1/images/generations \\
+  -H "Authorization: Bearer $GODANCE_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "model": "flux-2-pro",
+    "prompt": "a lighthouse at dusk, watercolor",
+    "n": 1,
+    "webhook_url": "https://example.com/hooks/godance"
+  }'`;
+
+const acceptedSnippet = `HTTP/1.1 202 Accepted
+
+{
+  "job_id": "6f1c0b9e-2d4a-4c3b-9a57-0e8d4b2f7c11",
+  "status": "QUEUED",
+  "poll_url": "/v1/jobs/6f1c0b9e-2d4a-4c3b-9a57-0e8d4b2f7c11"
+}`;
+
 const verifySnippet = `import hmac, hashlib
 
 def verify(payload, header, secret):
@@ -23,8 +61,9 @@ def verify(payload, header, secret):
     <h1 class="text-4xl font-bold tracking-tight text-fg">Docs</h1>
     <p class="mt-4 text-fg-muted">
       Godance is a drop-in OpenAI-compatible REST API. If you've shipped against the OpenAI
-      SDK, you already know the shape of every endpoint below — same JSON, same error codes,
-      same streaming format.
+      SDK, chat completions work unchanged — same request JSON, same streaming format. Image
+      and video generation take OpenAI-shaped requests and run as async jobs; see
+      <a href="#openai-compat" class="underline" style="color: var(--color-primary)">OpenAI SDK compatibility</a>.
     </p>
 
     <h2 class="text-2xl font-bold mt-12 mb-4 text-fg">Get to first call in three steps</h2>
@@ -43,29 +82,239 @@ def verify(payload, header, secret):
 
     <h2 class="text-2xl font-bold mt-12 mb-4 text-fg">Endpoint reference</h2>
     <ul class="space-y-2 text-fg-muted">
-      <li><a href="/docs/chat-completions" class="underline" style="color: var(--color-primary)">POST /v1/chat/completions</a> — streaming + non-streaming</li>
-      <li><a href="/docs/images" class="underline" style="color: var(--color-primary)">POST /v1/images/generations</a> — sync + async (HQ models auto-promote)</li>
-      <li><a href="/docs/videos" class="underline" style="color: var(--color-primary)">POST /v1/videos/generations</a> — async-only, signed webhook</li>
-      <li><a href="/docs/jobs" class="underline" style="color: var(--color-primary)">GET /v1/jobs/&#123;id&#125;</a> — async job status</li>
-      <li><a href="/docs/keys" class="underline" style="color: var(--color-primary)">CRUD /v1/keys</a> — API key management</li>
-      <li><a href="/docs/billing" class="underline" style="color: var(--color-primary)">POST /v1/billing/topup</a> — credit top-up via Stripe Checkout</li>
-      <li><a href="/docs/webhooks" class="underline" style="color: var(--color-primary)">GET /v1/webhooks/secret</a> — signing secret + verification guide</li>
+      {endpoints.map(({ id, label, summary }) => (
+        <li><a href={`#${id}`} class="underline" style="color: var(--color-primary)">{label}</a> — {summary}</li>
+      ))}
     </ul>
 
-    <h2 class="text-2xl font-bold mt-12 mb-4 text-fg">Webhook signature verification</h2>
+    <!-- ===== Chat completions ===== -->
+    <h2 id="chat-completions" class="scroll-mt-24 text-2xl font-bold mt-16 mb-4 text-fg">POST /v1/chat/completions</h2>
+    <p class="text-fg-muted">
+      OpenAI's chat completions contract. Set <code class="code-chip">"stream": true</code>
+      for server-sent events; otherwise the response is a single JSON object.
+    </p>
+    <ul class="mt-4 space-y-2 text-fg-muted">
+      <li><code class="code-chip">model</code> (required) — any text model from the <a href="/models" class="underline" style="color: var(--color-primary)">model catalog</a>.</li>
+      <li><code class="code-chip">messages</code> (required) — array of objects with <code class="code-chip">role</code> and <code class="code-chip">content</code>; <code class="code-chip">content</code> is a plain string.</li>
+      <li><code class="code-chip">max_tokens</code>, <code class="code-chip">temperature</code> — optional.</li>
+      <li><code class="code-chip">stream</code> — optional, defaults to <code class="code-chip">false</code>.</li>
+    </ul>
+    <p class="mt-4 text-fg-muted">
+      Non-streaming returns <code class="code-chip">200</code> with a
+      <code class="code-chip">chat.completion</code> object
+      (<code class="code-chip">choices[].message</code>, <code class="code-chip">finish_reason</code>,
+      <code class="code-chip">usage</code>). Streaming returns
+      <code class="code-chip">text/event-stream</code>: one
+      <code class="code-chip">chat.completion.chunk</code> per event, then
+      <code class="code-chip">data: [DONE]</code>. Other OpenAI parameters
+      (<code class="code-chip">tools</code>, <code class="code-chip">top_p</code>,
+      <code class="code-chip">response_format</code>, …) aren't supported and are ignored.
+    </p>
+    <pre class="code-block mt-4"><code>{chatSnippet}</code></pre>
+
+    <!-- ===== Images ===== -->
+    <h2 id="images" class="scroll-mt-24 text-2xl font-bold mt-16 mb-4 text-fg">POST /v1/images/generations</h2>
+    <p class="text-fg-muted">
+      The request shape is OpenAI's. Every image model runs as an async job, so this endpoint
+      always answers <code class="code-chip">202 Accepted</code> with a
+      <code class="code-chip">job_id</code> — it never returns image data inline. Poll
+      <a href="#jobs" class="underline" style="color: var(--color-primary)"><code class="code-chip">GET /v1/jobs/&#123;id&#125;</code></a>
+      for the result, or pass <code class="code-chip">webhook_url</code> and receive a
+      <a href="#webhooks" class="underline" style="color: var(--color-primary)">signed POST</a>
+      when the images are ready.
+    </p>
+    <ul class="mt-4 space-y-2 text-fg-muted">
+      <li><code class="code-chip">model</code>, <code class="code-chip">prompt</code> (required).</li>
+      <li><code class="code-chip">size</code>, <code class="code-chip">n</code>, <code class="code-chip">style</code>, <code class="code-chip">quality</code> — optional, as in OpenAI's API; <code class="code-chip">n</code> defaults to 1.</li>
+      <li><code class="code-chip">webhook_url</code> — optional Godance extension; where to POST the completion event.</li>
+    </ul>
+    <p class="mt-4 text-fg-muted">
+      The full cost (per-image price × <code class="code-chip">n</code>) is reserved from your
+      balance when the job is accepted and refunded automatically if generation fails. An
+      insufficient balance returns <code class="code-chip">402</code>.
+    </p>
+    <pre class="code-block mt-4"><code>{imageSnippet}</code></pre>
+    <pre class="code-block mt-4"><code>{acceptedSnippet}</code></pre>
+
+    <!-- ===== Videos ===== -->
+    <h2 id="videos" class="scroll-mt-24 text-2xl font-bold mt-16 mb-4 text-fg">POST /v1/videos/generations</h2>
+    <p class="text-fg-muted">
+      Always async — video takes minutes, longer than an HTTP request should wait. The response
+      is the same <code class="code-chip">202</code> + <code class="code-chip">job_id</code> body
+      as for images; poll the job or pass <code class="code-chip">webhook_url</code>.
+    </p>
+    <ul class="mt-4 space-y-2 text-fg-muted">
+      <li><code class="code-chip">model</code>, <code class="code-chip">prompt</code> (required).</li>
+      <li><code class="code-chip">size</code> — optional output resolution.</li>
+      <li><code class="code-chip">seconds</code> — optional clip length, defaults to 5.</li>
+      <li><code class="code-chip">n</code> — optional number of clips, defaults to 1.</li>
+      <li><code class="code-chip">webhook_url</code> — optional; where to POST the completion event.</li>
+    </ul>
+    <p class="mt-4 text-fg-muted">
+      Cost is the model's per-second rate × <code class="code-chip">seconds</code> ×
+      <code class="code-chip">n</code>, reserved up front and refunded if generation fails.
+    </p>
+
+    <!-- ===== Jobs ===== -->
+    <h2 id="jobs" class="scroll-mt-24 text-2xl font-bold mt-16 mb-4 text-fg">GET /v1/jobs/&#123;id&#125;</h2>
+    <p class="text-fg-muted">
+      Returns one async job. <code class="code-chip">GET /v1/jobs</code> lists all of your jobs,
+      newest first. A job ID that isn't yours returns <code class="code-chip">404</code>.
+      Fields are camelCase:
+    </p>
+    <ul class="mt-4 space-y-2 text-fg-muted">
+      <li><code class="code-chip">status</code> — <code class="code-chip">QUEUED</code> → <code class="code-chip">RUNNING</code> → <code class="code-chip">DONE</code> or <code class="code-chip">FAILED</code>.</li>
+      <li><code class="code-chip">outputUrl</code> — set once <code class="code-chip">DONE</code>: a time-limited signed URL to the first output, so copy the file to your own storage. When <code class="code-chip">n</code> &gt; 1, the webhook payload lists every output.</li>
+      <li><code class="code-chip">errorMessage</code> — set when <code class="code-chip">FAILED</code>; the reserved credit is refunded.</li>
+      <li><code class="code-chip">estimatedCostCents</code>, <code class="code-chip">actualCostCents</code> — integer cents.</li>
+      <li><code class="code-chip">id</code>, <code class="code-chip">modality</code>, <code class="code-chip">provider</code>, <code class="code-chip">model</code>, <code class="code-chip">createdAt</code>, <code class="code-chip">startedAt</code>, <code class="code-chip">completedAt</code> — timestamps are ISO 8601.</li>
+    </ul>
+
+    <!-- ===== API keys ===== -->
+    <h2 id="keys" class="scroll-mt-24 text-2xl font-bold mt-16 mb-4 text-fg">CRUD /v1/keys</h2>
+    <p class="text-fg-muted">
+      Send your key as <code class="code-chip">Authorization: Bearer gd_live_…</code>.
+      Create keys in the dashboard or with these endpoints:
+    </p>
+    <ul class="mt-4 space-y-2 text-fg-muted">
+      <li>
+        <code class="code-chip">POST /v1/keys</code> with <code class="code-chip">name</code>
+        (required) and optional <code class="code-chip">scopes</code> →
+        <code class="code-chip">201</code> with <code class="code-chip">id</code>,
+        <code class="code-chip">name</code>, <code class="code-chip">prefix</code>,
+        <code class="code-chip">plaintext</code>, <code class="code-chip">createdAt</code>.
+        <code class="code-chip">plaintext</code> is the key itself and is returned only this once.
+      </li>
+      <li>
+        <code class="code-chip">GET /v1/keys</code> → your keys with
+        <code class="code-chip">id</code>, <code class="code-chip">name</code>,
+        <code class="code-chip">prefix</code>, <code class="code-chip">scopes</code>,
+        <code class="code-chip">active</code>, <code class="code-chip">createdAt</code>,
+        <code class="code-chip">lastUsedAt</code>, <code class="code-chip">expiresAt</code>.
+        Never includes the key.
+      </li>
+      <li>
+        <code class="code-chip">DELETE /v1/keys/&#123;id&#125;</code> → <code class="code-chip">204</code>;
+        the key stops working immediately. Unknown IDs return <code class="code-chip">404</code>.
+      </li>
+    </ul>
+    <p class="mt-4 text-fg-muted">
+      An unknown, inactive or expired key returns <code class="code-chip">401</code>. A key
+      restricted to an IP allowlist returns <code class="code-chip">403</code> from any other
+      address.
+    </p>
+
+    <!-- ===== Billing ===== -->
+    <h2 id="billing" class="scroll-mt-24 text-2xl font-bold mt-16 mb-4 text-fg">POST /v1/billing/topup</h2>
+    <p class="text-fg-muted">
+      Usage is paid from a prepaid credit balance. A top-up returns a hosted checkout URL;
+      the credit lands on your balance once the payment provider confirms the payment.
+    </p>
+    <ul class="mt-4 space-y-2 text-fg-muted">
+      <li>
+        <code class="code-chip">POST /v1/billing/topup</code> with
+        <code class="code-chip">amountCents</code> and optional
+        <code class="code-chip">save_card</code> → <code class="code-chip">201</code> with
+        <code class="code-chip">sessionId</code>, <code class="code-chip">checkoutUrl</code>,
+        <code class="code-chip">amountCents</code>. Send the user to
+        <code class="code-chip">checkoutUrl</code> (Stripe Checkout).
+        <code class="code-chip">save_card: true</code> keeps the card on file for auto-recharge.
+      </li>
+      <li>
+        <code class="code-chip">POST /v1/billing/nowpayments/topup</code> with
+        <code class="code-chip">amountCents</code> → same response; the checkout URL is a
+        NOWPayments page for paying in USDT.
+      </li>
+      <li>
+        <code class="code-chip">GET</code> / <code class="code-chip">PUT /v1/billing/auto-recharge</code>
+        with <code class="code-chip">enabled</code>, <code class="code-chip">threshold_cents</code>,
+        <code class="code-chip">topup_cents</code> — top up automatically when the balance falls
+        below the threshold. Needs a card saved with <code class="code-chip">save_card</code>
+        (<code class="code-chip">409</code> otherwise).
+      </li>
+    </ul>
+    <p class="mt-4 text-fg-muted">
+      An amount outside the allowed range returns <code class="code-chip">400</code>; the
+      error detail states the range.
+    </p>
+
+    <!-- ===== Webhooks ===== -->
+    <h2 id="webhooks" class="scroll-mt-24 text-2xl font-bold mt-16 mb-4 text-fg">GET /v1/webhooks/secret</h2>
+    <p class="text-fg-muted">
+      Image and video jobs submitted with a <code class="code-chip">webhook_url</code> get a
+      JSON POST to that URL when they complete. Each account has one signing secret:
+    </p>
+    <ul class="mt-4 space-y-2 text-fg-muted">
+      <li>
+        <code class="code-chip">GET /v1/webhooks/secret</code> →
+        <code class="code-chip">secret</code> (<code class="code-chip">whsec_…</code>) and
+        <code class="code-chip">header</code> (<code class="code-chip">X-Godance-Signature</code>).
+        The secret is created on first call.
+      </li>
+      <li>
+        <code class="code-chip">POST /v1/webhooks/secret/rotate</code> → a new secret. For the
+        next 24 hours deliveries are signed with both the new and the previous secret.
+      </li>
+    </ul>
+    <p class="mt-4 text-fg-muted">The delivery body carries:</p>
+    <ul class="mt-4 space-y-2 text-fg-muted">
+      <li><code class="code-chip">event</code> — <code class="code-chip">image.generation.completed</code> or <code class="code-chip">video.generation.completed</code>.</li>
+      <li><code class="code-chip">jobId</code>, <code class="code-chip">costCents</code>, <code class="code-chip">createdAt</code> (Unix seconds).</li>
+      <li><code class="code-chip">images</code> or <code class="code-chip">videos</code> — one object per output, each with a time-limited <code class="code-chip">url</code> (images also carry <code class="code-chip">revisedPrompt</code>).</li>
+    </ul>
+    <p class="mt-4 text-fg-muted">
+      Deliveries are sent once, on success, with a 10-second timeout and no retries. A failed
+      job sends no webhook — if one doesn't arrive, poll
+      <code class="code-chip">GET /v1/jobs/&#123;id&#125;</code>.
+    </p>
+
+    <h3 class="text-xl font-semibold mt-10 mb-4 text-fg">Webhook signature verification</h3>
     <p class="text-fg-muted">
       Outbound webhooks carry an <code class="code-chip">X-Godance-Signature</code>
       header in Stripe format: <code class="code-chip">t=&lt;unix&gt;,v1=&lt;hex&gt;[,v1=&lt;hex&gt;...]</code>.
-      During the 24-hour grace window after a secret rotation, two
+      Each <code class="code-chip">v1</code> is HMAC-SHA256 of
+      <code class="code-chip">&lt;t&gt;.&lt;raw body&gt;</code>, so verify against the raw
+      request body before parsing it. During the 24-hour grace window after a secret rotation, two
       <code class="code-chip">v1=</code> entries are included — verify against
       your stored secret and accept on ANY match.
     </p>
     <pre class="code-block mt-4"><code set:html={verifySnippet} /></pre>
 
+    <!-- ===== OpenAI SDK compatibility ===== -->
+    <h2 id="openai-compat" class="scroll-mt-24 text-2xl font-bold mt-16 mb-4 text-fg">OpenAI SDK compatibility</h2>
+    <p class="text-fg-muted">
+      Point the OpenAI SDK at <code class="code-chip">https://api.godance.ai/v1</code> and use
+      a Godance key as the API key.
+    </p>
+    <ul class="mt-4 space-y-2 text-fg-muted">
+      <li>
+        <strong class="text-fg">Works unchanged:</strong> chat completions, streaming and
+        non-streaming, and <code class="code-chip">GET /v1/models</code>. Model entries carry an
+        extra <code class="code-chip">godance</code> object (modality, pricing) that OpenAI
+        clients ignore.
+      </li>
+      <li>
+        <strong class="text-fg">Same request, different response:</strong> image and video
+        generation return <code class="code-chip">202</code> + <code class="code-chip">job_id</code>
+        instead of the finished output, so the SDK's typed result won't contain images. Call
+        these endpoints with a plain HTTP client (or your SDK's raw-response mode) and read
+        <code class="code-chip">job_id</code>.
+      </li>
+      <li>
+        <strong class="text-fg">Errors:</strong> non-2xx responses use RFC 7807
+        <code class="code-chip">application/problem+json</code> bodies
+        (<code class="code-chip">title</code>, <code class="code-chip">status</code>,
+        <code class="code-chip">detail</code>) rather than OpenAI's error object. Status codes
+        keep their usual meaning — <code class="code-chip">400</code> invalid request,
+        <code class="code-chip">401</code> bad key, <code class="code-chip">402</code> insufficient
+        credit or spending cap reached, <code class="code-chip">404</code> unknown model or job —
+        so SDKs still raise their usual status errors.
+      </li>
+    </ul>
+
     <p class="mt-12 text-sm text-fg-subtle">
-      Full reference docs land Session 11. Until then,
-      <a href="mailto:hello@godance.ai" class="underline" style="color: var(--color-primary)">email us</a>
-      with questions.
+      Questions?
+      <a href="mailto:hello@godance.ai" class="underline" style="color: var(--color-primary)">Email us</a>.
     </p>
   </section>
 </Layout>
