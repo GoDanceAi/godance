@@ -184,6 +184,13 @@ export interface GodanceModelExtension {
   pricing: ModelPricing;
 }
 
+// Routing presets (godance-fast/auto/quality). Each request resolves to a
+// concrete model and is billed at that model's price, so there is no pricing.
+export interface GodanceVirtualModelExtension {
+  virtual: true;
+  modality: GodanceModelExtension['modality'];
+}
+
 export interface ModelEntry {
   id: string;
   object: 'model';
@@ -191,9 +198,20 @@ export interface ModelEntry {
   godance: GodanceModelExtension;
 }
 
+export interface VirtualModelEntry {
+  id: string;
+  object: 'model';
+  owned_by: string;
+  godance: GodanceVirtualModelExtension;
+}
+
 export interface ModelListResponse {
   object: 'list';
-  data: ModelEntry[];
+  data: (ModelEntry | VirtualModelEntry)[];
+}
+
+export function isVirtualModel(m: ModelEntry | VirtualModelEntry): m is VirtualModelEntry {
+  return 'virtual' in m.godance && m.godance.virtual === true;
 }
 
 // ===== /v1/admin/** (admin console — mirror backend admin DTOs) =====

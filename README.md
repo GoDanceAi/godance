@@ -70,6 +70,11 @@ appreciated, not required.
 Issues and pull requests welcome. For substantial changes, open a
 discussion first so we can align on direction before code review.
 
+Every pull request runs CI (`.github/workflows/ci.yml`): the backend test
+suite (`mvn -B verify`) and production builds of `app/` and
+`marketing/`. To run the backend suite locally you need only Docker, Java
+21 and Maven; see [`backend/README.md`](backend/README.md#build--test).
+
 The regional allowlist (`backend/.../AlicloudProviderAllowlist`) and the
 billing / ledger code are the load-bearing safety surfaces — changes
 there need a test in the same PR.
