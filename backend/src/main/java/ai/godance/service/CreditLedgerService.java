@@ -112,6 +112,16 @@ public class CreditLedgerService {
         return true;
     }
 
+    /**
+     * True if the user already holds a ledger entry from {@code source} for
+     * the upstream object {@code sourceRef} (e.g. a Stripe Checkout Session
+     * id), whatever idempotency key it was written under.
+     */
+    @Transactional(readOnly = true)
+    public boolean hasEntryFrom(UUID userId, CreditSource source, String sourceRef) {
+        return ledger.existsByUserIdAndSourceAndSourceRef(userId, source, sourceRef);
+    }
+
     /** Authoritative balance via SUM (bypasses the denormalized cache). */
     @Transactional(readOnly = true)
     public long authoritativeBalance(UUID userId) {
