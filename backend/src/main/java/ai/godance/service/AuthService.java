@@ -69,10 +69,11 @@ public class AuthService {
     private final WebhookSigner webhooks;
     private final AuditLogService audit;
     private final MailService mail;
+    private final StripeCustomerEmailSync stripeEmailSync;
 
     public AuthService(UserRepository users, ApiKeyRepository apiKeys, PasswordEncoder passwords,
                        JwtService jwt, WebhookSigner webhooks, AuditLogService audit,
-                       MailService mail) {
+                       MailService mail, StripeCustomerEmailSync stripeEmailSync) {
         this.users = users;
         this.apiKeys = apiKeys;
         this.passwords = passwords;
@@ -80,6 +81,7 @@ public class AuthService {
         this.webhooks = webhooks;
         this.audit = audit;
         this.mail = mail;
+        this.stripeEmailSync = stripeEmailSync;
     }
 
     // noRollbackFor keeps the DENIED audit row. The duplicate check throws
@@ -153,7 +155,8 @@ public class AuthService {
      *
      * <p>For an address being added or changed to (see
      * {@link #requestEmailChange}), this is the point where it replaces the
-     * account's email.
+     * account's email, and where the account's Stripe customer is set to
+     * follow it ({@link StripeCustomerEmailSync}).
      */
     @Transactional
     public void verifyEmail(UUID userId, String token, String ipAddress) {
@@ -181,6 +184,7 @@ public class AuthService {
             }
             u.setEmail(u.getPendingEmail());
             u.setPendingEmail(null);
+            stripeEmailSync.syncAfterCommit(u);
         }
         u.setEmailVerified(true);
         u.setEmailVerificationToken(null);
@@ -339,6 +343,8 @@ public class AuthService {
         } else if (!u.isEmailVerified()) {
             released = u.getEmail();
             u.setEmail("released-" + u.getId() + User.SYNTHETIC_EMAIL_SUFFIX);
+            // Stripe receipts for this account must stop going to the address's owner.
+            stripeEmailSync.syncAfterCommit(u);
         } else {
             // A verified address has no outstanding token; refuse rather than guess.
             throw new ResponseStatusException(HttpStatus.CONFLICT,

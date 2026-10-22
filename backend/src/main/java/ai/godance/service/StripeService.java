@@ -14,9 +14,11 @@ import com.stripe.model.PaymentMethod;
 import com.stripe.model.checkout.Session;
 import com.stripe.net.Webhook;
 import com.stripe.param.CustomerCreateParams;
+import com.stripe.param.CustomerUpdateParams;
 import com.stripe.param.PaymentIntentCreateParams;
 import com.stripe.param.checkout.SessionCreateParams;
 import com.stripe.param.checkout.SessionRetrieveParams;
+import com.stripe.param.common.EmptyParam;
 
 import ai.godance.config.BillingProperties;
 import ai.godance.config.StripeProperties;
@@ -66,12 +68,41 @@ public class StripeService {
             return user.getStripeCustomerId();
         }
         CustomerCreateParams params = CustomerCreateParams.builder()
-                .setEmail(user.getEmail())
+                .setEmail(customerEmail(user))
                 .setName(user.getFullName())
                 .putMetadata(META_USER_ID, user.getId().toString())
                 .build();
         Customer customer = Customer.create(params);
         return customer.getId();
+    }
+
+    /**
+     * Set the customer's email, or clear it when {@code email} is null.
+     * Stripe sends receipts to this address and Checkout prefills it.
+     */
+    public void updateCustomerEmail(String customerId, String email) throws StripeException {
+        CustomerUpdateParams.Builder params = CustomerUpdateParams.builder();
+        if (email != null) {
+            params.setEmail(email);
+        } else {
+            params.setEmail(EmptyParam.EMPTY);
+        }
+        com.stripe.net.RequestOptions opts = com.stripe.net.RequestOptions.builder()
+                .setMaxNetworkRetries(2)
+                .build();
+        // Update by id, without a retrieve first.
+        Customer customer = new Customer();
+        customer.setId(customerId);
+        customer.update(params.build(), opts);
+    }
+
+    /**
+     * The email Stripe should hold for {@code user}: null for an account
+     * whose email is a placeholder (an X.com sign-in, or an address released
+     * to its owner), which no one receives mail at.
+     */
+    public static String customerEmail(User user) {
+        return user.hasSyntheticEmail() ? null : user.getEmail();
     }
 
     /**

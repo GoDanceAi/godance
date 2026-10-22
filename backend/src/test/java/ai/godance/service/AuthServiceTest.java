@@ -60,6 +60,7 @@ class AuthServiceTest {
     WebhookSigner webhooks;
     MailService mail;
     AuditLogService audit;
+    StripeCustomerEmailSync stripeEmailSync;
     // Real BCrypt (minimum cost) so stored hashes are checked for what they hash.
     final PasswordEncoder passwords = new BCryptPasswordEncoder(4);
     AuthService auth;
@@ -72,7 +73,8 @@ class AuthServiceTest {
         webhooks = mock(WebhookSigner.class);
         mail = mock(MailService.class);
         audit = mock(AuditLogService.class);
-        auth = new AuthService(users, apiKeys, passwords, jwt, webhooks, audit, mail);
+        stripeEmailSync = mock(StripeCustomerEmailSync.class);
+        auth = new AuthService(users, apiKeys, passwords, jwt, webhooks, audit, mail, stripeEmailSync);
         when(users.findByEmailVerificationToken(any())).thenReturn(Optional.empty());
         when(users.findByEmail(any())).thenReturn(Optional.empty());
         when(users.findByPasswordResetTokenHash(any())).thenReturn(Optional.empty());
@@ -112,6 +114,8 @@ class AuthServiceTest {
         assertThat(u.isEmailVerified()).isTrue();
         assertThat(u.getEmailVerificationToken()).isNull();
         verify(users).save(u);
+        // Same address as before, so nothing for Stripe.
+        verify(stripeEmailSync, never()).syncAfterCommit(any());
     }
 
     @Test
@@ -533,6 +537,7 @@ class AuthServiceTest {
         assertThat(u.isEmailVerified()).isTrue();
         assertThat(u.hasSyntheticEmail()).isFalse();
         verify(mail, never()).sendEmailChangedNotice(any(), any());
+        verify(stripeEmailSync).syncAfterCommit(u);
     }
 
     @Test
@@ -544,6 +549,7 @@ class AuthServiceTest {
         assertThat(u.getEmail()).isEqualTo("new@godance.test");
         assertThat(u.isEmailVerified()).isTrue();
         verify(mail).sendEmailChangedNotice("holder@godance.test", u);
+        verify(stripeEmailSync).syncAfterCommit(u);
     }
 
     @Test
@@ -567,6 +573,7 @@ class AuthServiceTest {
         assertThat(u.getEmail()).isEqualTo("x-42" + User.SYNTHETIC_EMAIL_SUFFIX);
         assertThat(u.isEmailVerified()).isFalse();
         verify(users, never()).save(any());
+        verify(stripeEmailSync, never()).syncAfterCommit(any());
     }
 
     // ---------- releaseEmail / sendReleaseLink ------------------------
@@ -587,6 +594,8 @@ class AuthServiceTest {
         verify(users).save(squatter);
         verify(audit).record(eq(AuditLogService.EVT_AUTH_EMAIL_RELEASE), eq(AuditOutcome.SUCCESS),
                 eq(squatter.getId()), any(), any());
+        // Its Stripe customer must stop sending receipts to the owner's address.
+        verify(stripeEmailSync).syncAfterCommit(squatter);
     }
 
     @Test
@@ -599,6 +608,7 @@ class AuthServiceTest {
         assertThat(u.getEmail()).isEqualTo("holder@godance.test");
         assertThat(u.isEmailVerified()).isTrue();
         assertThat(u.getEmailVerificationToken()).isNull();
+        verify(stripeEmailSync, never()).syncAfterCommit(any());
     }
 
     @Test

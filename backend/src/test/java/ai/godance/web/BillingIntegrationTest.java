@@ -1,12 +1,18 @@
 package ai.godance.web;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
+import static com.github.tomakehurst.wiremock.client.WireMock.equalTo;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
 import static com.github.tomakehurst.wiremock.client.WireMock.post;
+import static com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -638,5 +644,104 @@ class BillingIntegrationTest {
         // Existing customer id unchanged
         assertThat(users.findById(u.id()).orElseThrow().getStripeCustomerId())
                 .isEqualTo("cus_existing_999");
+    }
+
+    @Test
+    void topup_givenPlaceholderEmail_createsCustomerWithoutAnEmail() {
+        SignedUser u = signupAndAuth();
+        User user = users.findById(u.id()).orElseThrow();
+        user.setEmail("x-" + u.id() + User.SYNTHETIC_EMAIL_SUFFIX);
+        users.save(user);
+
+        stripeMock.stubFor(post(urlEqualTo("/v1/customers"))
+                .willReturn(aResponse().withStatus(200)
+                        .withHeader("content-type", "application/json")
+                        .withBody("{\"id\":\"cus_ph_" + u.id() + "\",\"object\":\"customer\",\"livemode\":false}")));
+        stripeMock.stubFor(post(urlEqualTo("/v1/checkout/sessions"))
+                .willReturn(aResponse().withStatus(200)
+                        .withHeader("content-type", "application/json")
+                        .withBody("""
+                                {"id":"cs_test_ph","object":"checkout.session","mode":"payment",
+                                 "url":"https://checkout.stripe.com/c/pay/cs_test_ph","livemode":false}
+                                """)));
+
+        http.post().uri("/v1/billing/topup")
+                .header("Authorization", u.bearer())
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("amountCents", 5_00L))
+                .exchange()
+                .expectStatus().isCreated();
+
+        var creates = stripeMock.findAll(postRequestedFor(urlEqualTo("/v1/customers")));
+        assertThat(creates).hasSize(1);
+        assertThat(creates.get(0).getBodyAsString()).contains("godance_user_id").doesNotContain("email");
+    }
+
+    // ===== The Stripe customer follows the account's email =============
+
+    /** Give the user a Stripe customer, and stub its update endpoint. */
+    private String seedStripeCustomer(User user) {
+        String customerId = "cus_email_" + user.getId();
+        user.setStripeCustomerId(customerId);
+        users.save(user);
+        stripeMock.stubFor(post(urlEqualTo("/v1/customers/" + customerId))
+                .willReturn(aResponse().withStatus(200)
+                        .withHeader("content-type", "application/json")
+                        .withBody("{\"id\":\"" + customerId + "\",\"object\":\"customer\",\"livemode\":false}")));
+        return customerId;
+    }
+
+    @Test
+    void verifyEmail_givenChangedAddressAndStripeCustomer_setsItOnTheCustomer() {
+        SignedUser u = signupAndAuth();
+        User user = users.findById(u.id()).orElseThrow();
+        // Past the signup email's one-minute resend cooldown.
+        user.setEmailVerificationSentAt(Instant.now().minus(Duration.ofMinutes(2)));
+        String customerId = seedStripeCustomer(user);
+        String newEmail = "moved-" + UUID.randomUUID() + "@godance.test";
+
+        http.post().uri("/v1/auth/email")
+                .header("Authorization", u.bearer())
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("email", newEmail, "currentPassword", "correct-horse-battery-staple"))
+                .exchange()
+                .expectStatus().isNoContent();
+        // Only pending so far: nothing for Stripe yet.
+        assertThat(stripeMock.findAll(postRequestedFor(urlEqualTo("/v1/customers/" + customerId))))
+                .isEmpty();
+
+        String token = users.findById(u.id()).orElseThrow().getEmailVerificationToken();
+        http.get().uri(b -> b.path("/v1/auth/verify").queryParam("token", token).build())
+                .header("Authorization", u.bearer())
+                .exchange()
+                .expectStatus().isNoContent();
+
+        // Quartz pushes it on its scheduler thread.
+        await().atMost(Duration.ofSeconds(10)).untilAsserted(() ->
+                stripeMock.verify(postRequestedFor(urlEqualTo("/v1/customers/" + customerId))
+                        .withRequestBody(equalTo(
+                                "email=" + URLEncoder.encode(newEmail, StandardCharsets.UTF_8)))));
+        await().atMost(Duration.ofSeconds(10)).untilAsserted(() ->
+                assertThat(auditFor(AuditLogService.EVT_BILLING_CUSTOMER_EMAIL_SYNC, u.id()))
+                        .extracting(AuditLogEntry::getOutcome).containsExactly(AuditOutcome.SUCCESS));
+    }
+
+    @Test
+    void releaseEmail_givenStripeCustomer_clearsTheCustomersEmail() {
+        SignedUser u = signupAndAuth();
+        User user = users.findById(u.id()).orElseThrow();
+        String customerId = seedStripeCustomer(user);
+        String token = user.getEmailVerificationToken();
+
+        // The address's owner releases it from this unverified account.
+        http.post().uri("/v1/auth/email/release")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("token", token))
+                .exchange()
+                .expectStatus().isNoContent();
+
+        await().atMost(Duration.ofSeconds(10)).untilAsserted(() ->
+                stripeMock.verify(postRequestedFor(urlEqualTo("/v1/customers/" + customerId))
+                        .withRequestBody(equalTo("email="))));
     }
 }

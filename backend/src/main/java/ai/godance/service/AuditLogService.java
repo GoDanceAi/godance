@@ -56,6 +56,8 @@ public class AuditLogService {
     public static final String EVT_BILLING_AUTORECHARGE_FAILED    = "billing.autorecharge.failed";
     /** A saved card dropped after an auto-recharge decline that means it can never be charged again. */
     public static final String EVT_BILLING_PAYMENT_METHOD_REMOVED = "billing.payment_method.removed";
+    /** The account's email pushed to its Stripe customer after it changed, or given up on. */
+    public static final String EVT_BILLING_CUSTOMER_EMAIL_SYNC = "billing.customer.email_sync";
     // Admin console (round 5)
     public static final String EVT_ADMIN_CREDIT_ADJUSTED = "admin.credit.adjusted";
     public static final String EVT_ADMIN_CATALOG_UPDATED = "admin.catalog.updated";
