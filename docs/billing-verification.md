@@ -301,7 +301,8 @@ codes decline the first payment too, so they can't be saved;
 
 After 2d, repeat 2a with `4242 4242 4242 4242` and `saveCard` true. The
 new card replaces the declined one: `stripe_payment_method_id` changes to
-the new `pm_…` and another `billing.payment_method.saved` row is written.
+the new `pm_…` and another `billing.payment_method.saved` row is written,
+naming the declined card in `replacedPaymentMethodId`.
 Re-enable (2b) and drive a charge (2c): the balance jumps by `topup_cents`,
 and the off-session PaymentIntent in the Stripe Dashboard is on the new
 card. A top-up without `saveCard` never changes the saved card.

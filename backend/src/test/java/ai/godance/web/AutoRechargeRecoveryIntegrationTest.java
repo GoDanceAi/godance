@@ -300,9 +300,15 @@ class AutoRechargeRecoveryIntegrationTest {
         cardTopUp(u, newSession, newCard, 10_00L, true);
         assertThat(user(u).getStripePaymentMethodId()).isEqualTo(newCard);
         assertThat(auditFor(AuditLogService.EVT_BILLING_PAYMENT_METHOD_SAVED, u.id()))
-                .anySatisfy(e -> assertThat(e.getEventDetail())
-                        .containsEntry("sessionId", newSession)
-                        .containsEntry("paymentMethodId", newCard));
+                .extracting(AuditLogEntry::getEventDetail)
+                .satisfiesExactlyInAnyOrder(
+                        first -> assertThat(first)
+                                .containsEntry("paymentMethodId", oldCard)
+                                .doesNotContainKey("replacedPaymentMethodId"),
+                        replacement -> assertThat(replacement)
+                                .containsEntry("sessionId", newSession)
+                                .containsEntry("paymentMethodId", newCard)
+                                .containsEntry("replacedPaymentMethodId", oldCard));
 
         // ... then re-enable.
         enableAutoRecharge(u).expectStatus().isOk();
@@ -355,6 +361,11 @@ class AutoRechargeRecoveryIntegrationTest {
 
         // ... until a save_card=true top-up saves a new one.
         cardTopUp(u, "cs_new_" + u.id(), newCard, 10_00L, true);
+        // The dead card was already dropped, so the new one replaces nothing.
+        assertThat(auditFor(AuditLogService.EVT_BILLING_PAYMENT_METHOD_SAVED, u.id()))
+                .filteredOn(e -> newCard.equals(e.getEventDetail().get("paymentMethodId")))
+                .singleElement()
+                .satisfies(e -> assertThat(e.getEventDetail()).doesNotContainKey("replacedPaymentMethodId"));
         enableAutoRecharge(u).expectStatus().isOk();
         assertThat(autoRecharge.chargeIfNeeded(u.id())).isEqualTo(Outcome.CHARGED);
         assertThat(chargedPaymentMethods()).containsExactly(deadCard, newCard);
@@ -382,7 +393,9 @@ class AutoRechargeRecoveryIntegrationTest {
 
         assertThat(user(u).getStripePaymentMethodId()).isEqualTo(savedCard);
         assertThat(auditFor(AuditLogService.EVT_BILLING_PAYMENT_METHOD_SAVED, u.id())).singleElement()
-                .satisfies(e -> assertThat(e.getEventDetail()).containsEntry("paymentMethodId", savedCard));
+                .satisfies(e -> assertThat(e.getEventDetail())
+                        .containsEntry("paymentMethodId", savedCard)
+                        .doesNotContainKey("replacedPaymentMethodId"));
         assertThat(user(u).getCreditBalanceCents()).isEqualTo(30_00L);
     }
 
