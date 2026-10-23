@@ -1,5 +1,7 @@
 package ai.godance.service;
 
+import java.util.List;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -37,8 +39,12 @@ public class StripeService {
     /** Stripe metadata key — also set on Checkout Sessions so webhooks can resolve the user. */
     public static final String META_USER_ID = "godance_user_id";
 
-    /** The only {@code PaymentMethod.type} auto-recharge saves and charges. */
-    public static final String PAYMENT_METHOD_TYPE_CARD = "card";
+    /**
+     * The {@code PaymentMethod.type}s auto-recharge saves and charges: card
+     * and Link (card-backed). Both settle by the time an off-session
+     * PaymentIntent confirms, so the charge can be credited at once.
+     */
+    public static final List<String> OFF_SESSION_PAYMENT_METHOD_TYPES = List.of("card", "link");
 
     private final StripeProperties stripe;
     private final BillingProperties billing;
@@ -118,7 +124,7 @@ public class StripeService {
      * the payment method's id and type, and whether the intent set it up
      * for off-session use. Returns null if the session has no payment
      * method (e.g., zero-amount session). The type is null if Stripe didn't
-     * expand the payment method; callers treat that as not-a-card.
+     * expand the payment method; callers treat that as not chargeable.
      */
     public CheckoutPaymentMethod retrieveCheckoutPaymentMethod(String sessionId) throws StripeException {
         SessionRetrieveParams params = SessionRetrieveParams.builder()
@@ -140,13 +146,17 @@ public class StripeService {
         return PaymentMethod.retrieve(paymentMethodId).getType();
     }
 
-    /** True for a card, including Apple Pay / Google Pay, which Stripe types as {@code card}. */
-    public static boolean isCard(String paymentMethodType) {
-        return PAYMENT_METHOD_TYPE_CARD.equals(paymentMethodType);
+    /**
+     * True if auto-recharge can charge this type off-session: a card
+     * (including Apple Pay / Google Pay, which Stripe types as
+     * {@code card}) or Link. False for bank debits and for null.
+     */
+    public static boolean chargeableOffSession(String paymentMethodType) {
+        return paymentMethodType != null && OFF_SESSION_PAYMENT_METHOD_TYPES.contains(paymentMethodType);
     }
 
     /**
-     * Charge a saved card off-session. Used by auto-recharge.
+     * Charge a saved card (or Link) off-session. Used by auto-recharge.
      * Throws {@link StripeException} for any decline / SCA-required / etc;
      * caller treats that as a hard failure and disables auto-recharge.
      */
@@ -159,11 +169,11 @@ public class StripeService {
                 .setPaymentMethod(paymentMethodId)
                 .setConfirm(true)
                 .setOffSession(true)
-                // Cards only. A bank debit (ACH, SEPA) confirms to "processing"
-                // and settles days later, which auto-recharge can't credit. With
-                // this list, Stripe rejects the request for any other saved type
-                // instead of starting the debit.
-                .addPaymentMethodType(PAYMENT_METHOD_TYPE_CARD)
+                // Cards and Link only. A bank debit (ACH, SEPA) confirms to
+                // "processing" and settles days later, which auto-recharge can't
+                // credit. With this list, Stripe rejects the request for any other
+                // saved type instead of starting the debit.
+                .addAllPaymentMethodType(OFF_SESSION_PAYMENT_METHOD_TYPES)
                 .build();
         com.stripe.net.RequestOptions opts = com.stripe.net.RequestOptions.builder()
                 .setIdempotencyKey(idempotencyKey)
@@ -188,8 +198,8 @@ public class StripeService {
      * off-session charges.
      */
     public record CheckoutPaymentMethod(String id, String type, boolean savedForOffSession) {
-        public boolean isCard() {
-            return StripeService.isCard(type);
+        public boolean chargeableOffSession() {
+            return StripeService.chargeableOffSession(type);
         }
     }
 }

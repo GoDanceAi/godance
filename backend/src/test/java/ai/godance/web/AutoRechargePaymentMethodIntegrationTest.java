@@ -57,10 +57,11 @@ import ai.godance.service.AutoRechargeService.Outcome;
 import ai.godance.web.dto.AuthDtos.AuthResponse;
 
 /**
- * Auto-recharge saves and charges cards only. A bank debit (ACH Direct
- * Debit {@code us_bank_account}, SEPA Debit {@code sepa_debit}) confirms
- * off-session to {@code processing} and settles days later, so charging
- * one would take the money without crediting it. Drives the Stripe
+ * Auto-recharge saves and charges cards and Link (card-backed) only. A bank
+ * debit (ACH Direct Debit {@code us_bank_account}, SEPA Debit
+ * {@code sepa_debit}) confirms off-session to {@code processing} and
+ * settles days later, so charging one would take the money without
+ * crediting it. Drives the Stripe
  * webhook (where the payment method is saved) and auto-recharge (where it
  * is charged) against WireMock as Stripe.
  */
@@ -281,10 +282,10 @@ class AutoRechargePaymentMethodIntegrationTest {
         return URLDecoder.decode(formOrUrl, StandardCharsets.UTF_8);
     }
 
-    // ---------- saving: only cards ---------------------------------------
+    // ---------- saving: only cards and Link -----------------------------
 
     @Test
-    void cardTopUp_savesCard_andAutoRechargeChargesItAsACardOnlyPaymentIntent() {
+    void cardTopUp_savesCard_andAutoRechargeChargesItAsACardOrLinkPaymentIntent() {
         SignedUser u = signup();
         String session = "cs_card_" + u.id();
         String card = "pm_card_" + u.id();
@@ -306,8 +307,50 @@ class AutoRechargePaymentMethodIntegrationTest {
         assertThat(paymentIntentRequests()).singleElement().satisfies(r ->
                 assertThat(decoded(r.getBodyAsString()))
                         .contains("payment_method=" + card, "off_session=true",
-                                "payment_method_types[0]=card")
-                        .doesNotContain("automatic_payment_methods"));
+                                "payment_method_types[0]=card", "payment_method_types[1]=link")
+                        .doesNotContain("payment_method_types[2]", "automatic_payment_methods"));
+    }
+
+    /** Link is card-backed and settles by the time the PaymentIntent confirms, like a card. */
+    @Test
+    void linkTopUp_savesLink_andAutoRechargeChargesIt() {
+        SignedUser u = signup();
+        String session = "cs_link_" + u.id();
+        String link = "pm_link_" + u.id();
+        stubCheckoutSession(session, link, "link");
+        stubPaymentMethod(link, "link");
+
+        completeTopUp(u, session, 20_00L, false);
+
+        assertThat(user(u).getStripePaymentMethodId()).isEqualTo(link);
+        assertThat(auditFor(AuditLogService.EVT_BILLING_PAYMENT_METHOD_REJECTED, u.id())).isEmpty();
+
+        enableAutoRecharge(u).expectStatus().isOk();
+        assertThat(autoRecharge.chargeIfNeeded(u.id())).isEqualTo(Outcome.CHARGED);
+
+        assertThat(user(u).getCreditBalanceCents()).isEqualTo(40_00L);
+        assertThat(paymentIntentRequests()).singleElement().satisfies(r ->
+                assertThat(decoded(r.getBodyAsString())).contains("payment_method=" + link));
+    }
+
+    /**
+     * A Link saved before bank debits were refused is still charged when
+     * auto-recharge fires — not dropped like a saved bank debit.
+     */
+    @Test
+    void chargeIfNeeded_givenSavedLink_chargesIt_andKeepsIt() {
+        SignedUser u = signup();
+        String link = "pm_saved_link_" + u.id();
+        seedAutoRechargeOn(u, link);
+        stubPaymentMethod(link, "link");
+
+        assertThat(autoRecharge.chargeIfNeeded(u.id())).isEqualTo(Outcome.CHARGED);
+
+        User refreshed = user(u);
+        assertThat(refreshed.getStripePaymentMethodId()).isEqualTo(link);
+        assertThat(refreshed.isAutoRechargeEnabled()).isTrue();
+        assertThat(refreshed.getCreditBalanceCents()).isEqualTo(100L + 2000L);
+        assertThat(auditFor(AuditLogService.EVT_BILLING_PAYMENT_METHOD_REJECTED, u.id())).isEmpty();
     }
 
     @ParameterizedTest
@@ -375,7 +418,7 @@ class AutoRechargePaymentMethodIntegrationTest {
                 .satisfies(e -> assertThat(e.getEventDetail()).containsEntry("paymentMethodType", "null"));
     }
 
-    // ---------- bank debits saved before cards-only ----------------------
+    // ---------- bank debits saved before they were refused --------------
 
     @ParameterizedTest
     @ValueSource(strings = {"us_bank_account", "sepa_debit"})
