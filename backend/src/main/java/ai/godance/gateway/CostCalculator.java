@@ -17,14 +17,26 @@ import ai.godance.gateway.ModelCatalog.ModelInfo;
  *   <li>{@link #actualCents}: HALF_UP — fair rounding at reconcile time.</li>
  * </ul>
  *
- * <p>Sub-cent requests (HALF_UP rounds to zero) are effectively free.
- * Documented as a v1 limitation in PROGRESS — the alternative is a
- * schema migration to store balances in microcents.
+ * <p>Every request with a non-zero cost bills at least
+ * {@link #MINIMUM_CHARGE_CENTS} (1¢). Without this floor a request whose
+ * marked-up cost is under half a cent rounded to zero and was free — at seed
+ * prices that was most short calls on the cheap models (spec risk R-06).
+ * The floor over-bills tiny requests by up to a cent; the fairer fix is a
+ * microcent ledger, tracked separately. Image and video already applied the
+ * same floor in their services.
+ *
+ * <p>Markup is applied in integer arithmetic (basis points), so no
+ * {@code double} touches the money path; the markup percent itself is a
+ * {@code double} only because that is how it is configured and published.
  */
 @Component
 public class CostCalculator {
 
     private static final long MICROCENTS_PER_CENT = 10_000L;
+    private static final long BASIS_POINTS = 10_000L;
+
+    /** Smallest charge for a request that cost anything at all. */
+    public static final long MINIMUM_CHARGE_CENTS = 1L;
 
     private final BillingProperties billing;
 
@@ -38,12 +50,15 @@ public class CostCalculator {
         return ceilDiv(microcents, MICROCENTS_PER_CENT);
     }
 
-    /** Reconciled actual cost — input + output tokens, HALF_UP cents rounding. */
+    /**
+     * Reconciled actual cost — input + output tokens, HALF_UP cents rounding,
+     * never below {@link #MINIMUM_CHARGE_CENTS} when the request cost anything.
+     */
     public long actualCents(ModelInfo model, int inputTokens, int outputTokens) {
         long microcents = withMarkup(model,
                 model.inputMicrocentsPer1k()  * inputTokens  / 1000
               + model.outputMicrocentsPer1k() * outputTokens / 1000);
-        return halfUpDiv(microcents, MICROCENTS_PER_CENT);
+        return withMinimumCharge(microcents, halfUpDiv(microcents, MICROCENTS_PER_CENT));
     }
 
     /** Image generation cost — per-image flat price × count + markup. */
@@ -61,8 +76,22 @@ public class CostCalculator {
         return halfUpDiv(microcents, MICROCENTS_PER_CENT);
     }
 
+    /**
+     * Applies the markup in integer arithmetic: the percent becomes basis
+     * points (12.5% → 1250 bp) once, then {@code microcents × (10000 + bp) / 10000}
+     * with HALF_UP rounding of the division. Equivalent to the former
+     * {@code Math.round(microcents * (1 + pct/100))} for every configured value,
+     * without a floating-point multiply on the amount.
+     */
     private long withMarkup(ModelInfo model, long microcents) {
-        return Math.round(microcents * (1.0 + markupPercent(model) / 100.0));
+        if (microcents <= 0) return 0;
+        long basisPoints = Math.round(markupPercent(model) * 100.0);
+        return halfUpDiv(microcents * (BASIS_POINTS + basisPoints), BASIS_POINTS);
+    }
+
+    /** A request that cost anything bills at least one cent. */
+    private static long withMinimumCharge(long microcents, long cents) {
+        return microcents > 0 ? Math.max(MINIMUM_CHARGE_CENTS, cents) : 0;
     }
 
     /**

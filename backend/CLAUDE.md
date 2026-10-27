@@ -80,7 +80,10 @@ scaffold and entity-porting plan.
   provider (Stripe `idempotency-key` header, NOWPayments `payment_id`)
 - Money is always in **integer cents** (`BigInteger` or `long`) — never
   `double`, never `BigDecimal` for arithmetic. Convert to display strings
-  only at the boundary.
+  only at the boundary. Markup is applied as integer basis points in
+  `CostCalculator`; a request that cost anything bills at least 1¢
+  (`CostCalculator.MINIMUM_CHARGE_CENTS`), because the ledger is in whole
+  cents and sub-cent requests used to round to free.
 
 ## When Stuck
 
