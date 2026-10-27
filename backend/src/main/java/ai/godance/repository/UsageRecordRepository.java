@@ -34,7 +34,12 @@ public interface UsageRecordRepository extends JpaRepository<UsageRecord, UUID> 
     // Native SQL for date_trunc; aliases are quoted so Postgres preserves
     // the camelCase that Spring Data's projection matching expects.
 
-    /** One row per calendar day (UTC) in [from, to): revenue vs provider cost. */
+    /**
+     * One row per calendar day (UTC) in [from, to): revenue vs provider cost.
+     * Sums the exact microcent columns (V15) and rounds once at the end, so
+     * fractions of a cent are no longer lost per row; rows written before V15
+     * fall back to their whole-cent values.
+     */
     interface DailyUsageRow {
         java.time.LocalDate getDay();
         long getRevenueCents();
@@ -44,8 +49,8 @@ public interface UsageRecordRepository extends JpaRepository<UsageRecord, UUID> 
 
     @Query(value = """
             SELECT CAST(date_trunc('day', recorded_at AT TIME ZONE 'UTC') AS date) AS "day",
-                   COALESCE(SUM(cost_cents), 0)                    AS "revenueCents",
-                   COALESCE(SUM(COALESCE(provider_cost_cents, 0)), 0) AS "costCents",
+                   CAST(COALESCE(ROUND(SUM(COALESCE(cost_microcents, cost_cents * 10000)) / 10000.0), 0) AS BIGINT) AS "revenueCents",
+                   CAST(COALESCE(ROUND(SUM(COALESCE(provider_cost_microcents, COALESCE(provider_cost_cents, 0) * 10000)) / 10000.0), 0) AS BIGINT) AS "costCents",
                    COUNT(*)                                        AS "requests"
             FROM usage_records
             WHERE recorded_at >= :from AND recorded_at < :to
@@ -63,8 +68,8 @@ public interface UsageRecordRepository extends JpaRepository<UsageRecord, UUID> 
 
     @Query(value = """
             SELECT model_name                                      AS "modelName",
-                   COALESCE(SUM(cost_cents), 0)                    AS "revenueCents",
-                   COALESCE(SUM(COALESCE(provider_cost_cents, 0)), 0) AS "costCents",
+                   CAST(COALESCE(ROUND(SUM(COALESCE(cost_microcents, cost_cents * 10000)) / 10000.0), 0) AS BIGINT) AS "revenueCents",
+                   CAST(COALESCE(ROUND(SUM(COALESCE(provider_cost_microcents, COALESCE(provider_cost_cents, 0) * 10000)) / 10000.0), 0) AS BIGINT) AS "costCents",
                    COUNT(*)                                        AS "requests"
             FROM usage_records
             WHERE recorded_at >= :from AND recorded_at < :to
@@ -86,7 +91,7 @@ public interface UsageRecordRepository extends JpaRepository<UsageRecord, UUID> 
     @Query(value = """
             SELECT u.user_id                    AS "userId",
                    us.email                     AS "email",
-                   COALESCE(SUM(u.cost_cents), 0) AS "revenueCents",
+                   CAST(COALESCE(ROUND(SUM(COALESCE(u.cost_microcents, u.cost_cents * 10000)) / 10000.0), 0) AS BIGINT) AS "revenueCents",
                    COUNT(*)                     AS "requests"
             FROM usage_records u
             JOIN users us ON us.id = u.user_id

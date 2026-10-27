@@ -81,9 +81,10 @@ scaffold and entity-porting plan.
 - Money is always in **integer cents** (`BigInteger` or `long`) — never
   `double`, never `BigDecimal` for arithmetic. Convert to display strings
   only at the boundary. Markup is applied as integer basis points in
-  `CostCalculator`; a request that cost anything bills at least 1¢
-  (`CostCalculator.MINIMUM_CHARGE_CENTS`), because the ledger is in whole
-  cents and sub-cent requests used to round to free.
+  `CostCalculator`. The ledger is in whole cents, so a request's exact
+  microcent cost is settled through `CreditLedgerService.settle`: full cents
+  are billed, the fraction carries on `users.pending_microcents` to the next
+  request (V15). Never round a cost to cents before settling it.
 
 ## When Stuck
 

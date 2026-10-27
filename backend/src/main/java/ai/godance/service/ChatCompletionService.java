@@ -156,11 +156,11 @@ public class ChatCompletionService {
                 }
                 int latencyMs = elapsedMs(startNanos);
 
-                long actualCents = calculator.actualCents(model,
+                long actualMicrocents = calculator.actualMicrocents(model,
                         response.usage().promptTokens(), response.usage().completionTokens());
-                ledger.reconcile(userId, estimateCents, actualCents, requestId);
-                usage.save(buildUsageRecord(userId, apiKeyId, model, response, actualCents,
-                        requestId, isFallback, latencyMs, CallOutcome.OK));
+                long billedCents = ledger.settle(userId, estimateCents, actualMicrocents, requestId);
+                usage.save(buildUsageRecord(userId, apiKeyId, model, response, billedCents,
+                        actualMicrocents, requestId, isFallback, latencyMs, CallOutcome.OK));
                 return response;
             } catch (RuntimeException upstreamErr) {
                 int latencyMs = elapsedMs(startNanos);
@@ -211,9 +211,10 @@ public class ChatCompletionService {
     }
 
     private UsageRecord buildUsageRecord(UUID userId, UUID apiKeyId, ModelInfo model,
-                                         ChatResponse response, long actualCents,
-                                         String requestId, boolean fallbackUsed,
-                                         int latencyMs, CallOutcome outcome) {
+                                         ChatResponse response, long billedCents,
+                                         long costMicrocents, String requestId,
+                                         boolean fallbackUsed, int latencyMs,
+                                         CallOutcome outcome) {
         long providerCostMicrocents =
                 model.inputMicrocentsPer1k()  * response.usage().promptTokens()     / 1000
               + model.outputMicrocentsPer1k() * response.usage().completionTokens() / 1000;
@@ -227,8 +228,10 @@ public class ChatCompletionService {
         r.setProvider(model.provider());
         r.setInputTokens(response.usage().promptTokens());
         r.setOutputTokens(response.usage().completionTokens());
-        r.setCostCents(actualCents);
+        r.setCostCents(billedCents);
+        r.setCostMicrocents(costMicrocents);
         r.setProviderCostCents(providerCostCents);
+        r.setProviderCostMicrocents(providerCostMicrocents);
         r.setRegion(asDomainRegion(gateway.region()));
         r.setCacheHit(false);
         r.setFallbackUsed(fallbackUsed);
@@ -481,12 +484,12 @@ public class ChatCompletionService {
             Usage usage = s.usage.get();
             try {
                 if (signal == SignalType.ON_COMPLETE && usage != null) {
-                    long actualCents = calculator.actualCents(served.model(),
+                    long actualMicrocents = calculator.actualMicrocents(served.model(),
                             usage.promptTokens(), usage.completionTokens());
-                    ledger.reconcile(s.userId, s.estimateCents, actualCents, s.requestId);
+                    long billedCents = ledger.settle(s.userId, s.estimateCents, actualMicrocents, s.requestId);
                     this.usage.save(buildStreamedUsageRecord(
-                            s.userId, s.apiKeyId, served.model(), usage, actualCents, s.requestId,
-                            served.fallbackUsed(), elapsedMs(served.startNanos()), CallOutcome.OK));
+                            s.userId, s.apiKeyId, served.model(), usage, billedCents, actualMicrocents,
+                            s.requestId, served.fallbackUsed(), elapsedMs(served.startNanos()), CallOutcome.OK));
                 } else if (signal == SignalType.ON_COMPLETE) {
                     // Stream completed but provider never emitted a usage block.
                     // Keep the pre-debit as the recorded cost; write a UsageRecord
@@ -494,6 +497,7 @@ public class ChatCompletionService {
                     log.warn("Stream {} completed without usage block; keeping pre-debit", s.requestId);
                     this.usage.save(buildStreamedUsageRecord(
                             s.userId, s.apiKeyId, served.model(), new Usage(0, 0, 0), s.estimateCents,
+                            s.estimateCents * CreditLedgerService.MICROCENTS_PER_CENT,
                             s.requestId, served.fallbackUsed(), elapsedMs(served.startNanos()),
                             CallOutcome.OK));
                 } else if (signal == SignalType.ON_ERROR && s.relayed.get()) {
@@ -522,9 +526,9 @@ public class ChatCompletionService {
     }
 
     private UsageRecord buildStreamedUsageRecord(UUID userId, UUID apiKeyId, ModelInfo model, Usage u,
-                                                 long actualCents, String requestId,
-                                                 boolean fallbackUsed, int latencyMs,
-                                                 CallOutcome outcome) {
+                                                 long billedCents, long costMicrocents,
+                                                 String requestId, boolean fallbackUsed,
+                                                 int latencyMs, CallOutcome outcome) {
         long providerCostMicrocents =
                 model.inputMicrocentsPer1k()  * u.promptTokens()     / 1000
               + model.outputMicrocentsPer1k() * u.completionTokens() / 1000;
@@ -538,8 +542,10 @@ public class ChatCompletionService {
         r.setProvider(model.provider());
         r.setInputTokens(u.promptTokens());
         r.setOutputTokens(u.completionTokens());
-        r.setCostCents(actualCents);
+        r.setCostCents(billedCents);
+        r.setCostMicrocents(costMicrocents);
         r.setProviderCostCents(providerCostCents);
+        r.setProviderCostMicrocents(providerCostMicrocents);
         r.setRegion(asDomainRegion(gateway.region()));
         r.setCacheHit(false);
         r.setFallbackUsed(fallbackUsed);

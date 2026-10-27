@@ -17,13 +17,11 @@ import ai.godance.gateway.ModelCatalog.ModelInfo;
  *   <li>{@link #actualCents}: HALF_UP — fair rounding at reconcile time.</li>
  * </ul>
  *
- * <p>Every request with a non-zero cost bills at least
- * {@link #MINIMUM_CHARGE_CENTS} (1¢). Without this floor a request whose
- * marked-up cost is under half a cent rounded to zero and was free — at seed
- * prices that was most short calls on the cheap models (spec risk R-06).
- * The floor over-bills tiny requests by up to a cent; the fairer fix is a
- * microcent ledger, tracked separately. Image and video already applied the
- * same floor in their services.
+ * <p>Chat settles through {@link #actualMicrocents}: the exact marked-up
+ * amount goes to {@code CreditLedgerService.settle}, which bills whole cents
+ * and carries the fraction to the user's next request. Before that, a
+ * request whose cost rounded below half a cent was free (spec risk R-06).
+ * {@link #actualCents} remains for callers that need a rounded figure.
  *
  * <p>Markup is applied in integer arithmetic (basis points), so no
  * {@code double} touches the money path; the markup percent itself is a
@@ -32,11 +30,8 @@ import ai.godance.gateway.ModelCatalog.ModelInfo;
 @Component
 public class CostCalculator {
 
-    private static final long MICROCENTS_PER_CENT = 10_000L;
+    public static final long MICROCENTS_PER_CENT = 10_000L;
     private static final long BASIS_POINTS = 10_000L;
-
-    /** Smallest charge for a request that cost anything at all. */
-    public static final long MINIMUM_CHARGE_CENTS = 1L;
 
     private final BillingProperties billing;
 
@@ -51,14 +46,18 @@ public class CostCalculator {
     }
 
     /**
-     * Reconciled actual cost — input + output tokens, HALF_UP cents rounding,
-     * never below {@link #MINIMUM_CHARGE_CENTS} when the request cost anything.
+     * Exact actual cost — input + output tokens with markup, in microcents.
+     * This is what the ledger settles; nothing is rounded here.
      */
-    public long actualCents(ModelInfo model, int inputTokens, int outputTokens) {
-        long microcents = withMarkup(model,
+    public long actualMicrocents(ModelInfo model, int inputTokens, int outputTokens) {
+        return withMarkup(model,
                 model.inputMicrocentsPer1k()  * inputTokens  / 1000
               + model.outputMicrocentsPer1k() * outputTokens / 1000);
-        return withMinimumCharge(microcents, halfUpDiv(microcents, MICROCENTS_PER_CENT));
+    }
+
+    /** Actual cost rounded HALF_UP to cents — a display figure, not what is billed. */
+    public long actualCents(ModelInfo model, int inputTokens, int outputTokens) {
+        return halfUpDiv(actualMicrocents(model, inputTokens, outputTokens), MICROCENTS_PER_CENT);
     }
 
     /** Image generation cost — per-image flat price × count + markup. */
@@ -87,11 +86,6 @@ public class CostCalculator {
         if (microcents <= 0) return 0;
         long basisPoints = Math.round(markupPercent(model) * 100.0);
         return halfUpDiv(microcents * (BASIS_POINTS + basisPoints), BASIS_POINTS);
-    }
-
-    /** A request that cost anything bills at least one cent. */
-    private static long withMinimumCharge(long microcents, long cents) {
-        return microcents > 0 ? Math.max(MINIMUM_CHARGE_CENTS, cents) : 0;
     }
 
     /**

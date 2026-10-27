@@ -56,4 +56,25 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     @Query("UPDATE User u SET u.creditBalanceCents = u.creditBalanceCents - :cost "
          + "WHERE u.id = :id AND u.creditBalanceCents >= :cost")
     int decrementBalanceIfSufficient(@Param("id") UUID id, @Param("cost") long cost);
+
+    /**
+     * Adds a request's exact cost to the user's fraction-of-a-cent carry and
+     * returns the new remainder (0..9999 microcents). One UPDATE, so two
+     * concurrent settlements for the same user serialise on the row and
+     * neither loses the other's fraction. The caller derives the cents to
+     * bill from the remainder; see {@code CreditLedgerService.settle}.
+     *
+     * <p>Written as a data-modifying CTE so JPA runs it as a query and hands
+     * back the RETURNING value; a plain {@code @Modifying} update could not.
+     */
+    @Query(value = """
+            WITH carried AS (
+                UPDATE users
+                   SET pending_microcents = (pending_microcents + :addMicrocents) % 10000
+                 WHERE id = :id
+             RETURNING pending_microcents
+            )
+            SELECT pending_microcents FROM carried
+            """, nativeQuery = true)
+    long carryMicrocents(@Param("id") UUID id, @Param("addMicrocents") long addMicrocents);
 }

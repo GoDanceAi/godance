@@ -259,7 +259,9 @@ public class VideoGenerationService {
         r.setInputTokens(0);
         r.setOutputTokens(duration * clips);     // seconds of video as the "output unit"
         r.setCostCents(actualCents);
+        r.setCostMicrocents(actualCents * 10_000);          // media bills whole cents up front
         r.setProviderCostCents(providerCostCents);
+        r.setProviderCostMicrocents(providerCostMicrocents);
         r.setRegion(gateway.region() == null ? Region.LOCAL : gateway.region());
         r.setCacheHit(false);
         r.setFallbackUsed(false);

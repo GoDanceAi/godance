@@ -46,25 +46,28 @@ class CostCalculatorTest {
     }
 
     @Test
-    void actualCents_subCent_billsMinimumOneCent() {
+    void actualCents_subCent_roundsToZero_butActualMicrocentsKeepsTheAmount() {
         // 500 in + 200 out for cheap: (500*150 + 200*600)/1k = 75 + 120 = 195 microcents
-        // × 1.05 = ~205 → HALF_UP /10000 → 0, floored to the 1¢ minimum charge (R-06)
-        assertThat(calc.actualCents(CHEAP_TEXT, 500, 200)).isEqualTo(CostCalculator.MINIMUM_CHARGE_CENTS);
+        // × 1.05 = 204.75 → HALF_UP 205 microcents. Rounded to cents that is 0 (display);
+        // the ledger settles the 205 microcents through the carry (R-06).
+        assertThat(calc.actualCents(CHEAP_TEXT, 500, 200)).isZero();
+        assertThat(calc.actualMicrocents(CHEAP_TEXT, 500, 200)).isEqualTo(205L);
     }
 
     @Test
-    void actualCents_seedPriceGpt4oMini_1kIn1kOut_isNoLongerFree() {
-        // The fidelity-assessment example: $0.15 / $0.60 per 1M → 150 + 600 = 750 microcents,
-        // × 1.05 = 787.5 → 0.079¢ → rounds to zero before the floor; bills 1¢ now.
-        assertThat(calc.actualCents(CHEAP_TEXT, 1_000, 1_000)).isEqualTo(1L);
+    void actualMicrocents_seedPriceGpt4oMini_1kIn1kOut_isTheAssessmentExample() {
+        // $0.15 / $0.60 per 1M → 150 + 600 = 750 microcents × 1.05 = 787.5 → HALF_UP 788 µ¢
+        // = $0.0000788, previously rounded to a free request.
+        assertThat(calc.actualMicrocents(CHEAP_TEXT, 1_000, 1_000)).isEqualTo(788L);
+        assertThat(calc.actualCents(CHEAP_TEXT, 1_000, 1_000)).isZero();
     }
 
     @Test
-    void actualCents_justUnderOneAndAHalfCents_stillRoundsHalfUpNotFloored() {
-        // 1000 in + 1000 out for expensive: 2500 + 10000 = 12_500 microcents × 1.05 = 13_125
-        // → 1.3125¢ → HALF_UP → 1. The floor must not change a legitimate rounding.
+    void actualCents_isHalfUpOfActualMicrocents() {
+        // 1000 in + 1000 out for expensive: 2500 + 10000 = 12_500 × 1.05 = 13_125 µ¢ → 1¢
+        assertThat(calc.actualMicrocents(EXPENSIVE_TEXT, 1_000, 1_000)).isEqualTo(13_125L);
         assertThat(calc.actualCents(EXPENSIVE_TEXT, 1_000, 1_000)).isEqualTo(1L);
-        // 2000 in + 1000 out: 5000 + 10000 = 15_000 × 1.05 = 15_750 → 1.575¢ → 2
+        // 2000 in + 1000 out: 15_000 × 1.05 = 15_750 µ¢ → 2¢
         assertThat(calc.actualCents(EXPENSIVE_TEXT, 2_000, 1_000)).isEqualTo(2L);
     }
 
