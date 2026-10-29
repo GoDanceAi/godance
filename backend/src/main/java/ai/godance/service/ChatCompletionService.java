@@ -148,20 +148,13 @@ public class ChatCompletionService {
 
             ChatRequest forAttempt = withModel(request, model.modelName());
             long startNanos = System.nanoTime();
+            ChatResponse response;
             try {
-                ChatResponse response = adapter.chat(normalize(forAttempt, model))
+                response = adapter.chat(normalize(forAttempt, model))
                         .block(UPSTREAM_BLOCK_TIMEOUT);
                 if (response == null) {
                     throw new IllegalStateException("upstream returned null response");
                 }
-                int latencyMs = elapsedMs(startNanos);
-
-                long actualMicrocents = calculator.actualMicrocents(model,
-                        response.usage().promptTokens(), response.usage().completionTokens());
-                long billedCents = ledger.settle(userId, estimateCents, actualMicrocents, requestId);
-                usage.save(buildUsageRecord(userId, apiKeyId, model, response, billedCents,
-                        actualMicrocents, requestId, isFallback, latencyMs, CallOutcome.OK));
-                return response;
             } catch (RuntimeException upstreamErr) {
                 int latencyMs = elapsedMs(startNanos);
                 CallOutcome outcome = classifyOutcome(upstreamErr);
@@ -169,7 +162,27 @@ public class ChatCompletionService {
                         i, modelName, requestId, outcome, latencyMs, upstreamErr.getMessage());
                 recordFailure(userId, apiKeyId, model, requestId, isFallback, latencyMs, outcome);
                 lastError = upstreamErr;
+                continue;
             }
+
+            // The upstream call succeeded and was paid for. A failure from here
+            // on is ours, so it must not call another provider (spec risk R-07):
+            // the caller still gets the completion. If settling fails, the
+            // pre-debited estimate stands as the charge; the error log names
+            // the request id for reconciliation.
+            int latencyMs = elapsedMs(startNanos);
+            try {
+                long actualMicrocents = calculator.actualMicrocents(model,
+                        response.usage().promptTokens(), response.usage().completionTokens());
+                long billedCents = ledger.settle(userId, estimateCents, actualMicrocents, requestId);
+                usage.save(buildUsageRecord(userId, apiKeyId, model, response, billedCents,
+                        actualMicrocents, requestId, isFallback, latencyMs, CallOutcome.OK));
+            } catch (RuntimeException settlementErr) {
+                log.error("Settlement failed for request {} after a successful upstream call to {}; "
+                        + "not retrying upstream: {}", requestId, modelName, settlementErr.getMessage(),
+                        settlementErr);
+            }
+            return response;
         }
 
         // Exhausted all attempts.
