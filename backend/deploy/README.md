@@ -90,8 +90,12 @@ curl -s https://api.godance.ai/healthz | jq
 ## Updating after a code change
 
 Pushes to `main` that touch `backend/**` auto-deploy via GitHub Actions
-(`.github/workflows/deploy.yml`): test → build image → push to GHCR →
-SSH-deploy here. No manual step needed.
+(`.github/workflows/deploy.yml`): test and OSV scan → build image → push to
+GHCR as `:<commit sha>` and `:latest` → SSH-deploy here. The deploy
+fast-forwards `/opt/godance` to the commit it built and runs that commit's
+image (`BACKEND_TAG=<sha>`). It passes only once `/healthz` reports that
+commit and `/actuator/health` (PostgreSQL and Redis included) is `UP`.
+No manual step needed.
 
 To deploy by hand (e.g. CI is down):
 
@@ -108,20 +112,20 @@ running with their volumes intact.
 
 ## Rolling back
 
-The `image: godance/backend:latest` tag is rewritten on every build.
-For a real rollback safety net, tag versions explicitly:
+Every build is in GHCR under its full commit sha. To go back to an earlier
+release, run its image:
 
 ```bash
-# Before deploy
-docker tag godance/backend:latest godance/backend:$(date +%Y%m%d-%H%M)
-
-# To roll back
-docker tag godance/backend:20260601-1200 godance/backend:latest
-docker compose -f deploy/docker-compose.prod.yml up -d backend
+cd /opt/godance/backend
+export BACKEND_TAG=<full sha of the release to go back to>
+docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env.prod pull backend
+docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env.prod up -d --no-build backend
+curl -s https://api.godance.ai/healthz | jq .git_sha    # the first 7 characters of that sha
 ```
 
-For more disciplined release management later, switch to a registry
-(GHCR / Docker Hub) and pin SHA-tagged images.
+Flyway migrations only move forward: an image older than the newest
+migration still starts, but check that release's migrations before rolling
+back across a schema change. The next push to `main` deploys forward again.
 
 ## Backups
 
