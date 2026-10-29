@@ -50,6 +50,13 @@ jobs:
       - name: mvn verify
         working-directory: backend
         run: mvn -B verify
+      # The same dependency scan the PR checks run (ci.yml), so a push to main
+      # that skipped a PR cannot release a build the PR gate would have stopped.
+      - name: OSV scan
+        working-directory: backend
+        run: |
+          mvn -B -q dependency:list -DoutputFile=target/deps.txt -DoutputAbsoluteArtifactFilename=false
+          python3 dev/osv-scan.py target/deps.txt
 
   build-and-push:
     needs: test
@@ -85,11 +92,12 @@ jobs:
         uses: appleboy/ssh-action@v1
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BACKEND_TAG: ${{ github.sha }}
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: GHCR_TOKEN
+          envs: GHCR_TOKEN,BACKEND_TAG
           script: |
             set -euo pipefail
             # The GHCR image is a private package — log in with the workflow's
@@ -97,8 +105,13 @@ jobs:
             # can fetch it, then log out.
             echo "$GHCR_TOKEN" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
             cd /opt/godance
-            git pull --ff-only
+            # Move to exactly the commit this run built, not to whatever main
+            # is by now, so the compose file and the image come from one revision.
+            git fetch --quiet origin main
+            git merge --ff-only "$BACKEND_TAG"
             cd backend
+            # Pins the compose image to this commit's build (:<sha>, not :latest).
+            export BACKEND_TAG
             # The droplet's connection to GHCR's blob storage occasionally
             # times out mid-pull. Retry with backoff (10/20/30/40s) before
             # failing; the running container is untouched until `up`.
@@ -116,12 +129,20 @@ jobs:
             docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env.prod up -d --no-build backend
             docker logout ghcr.io
             docker image prune -f
-      - name: Health check
+      # Passes only when the API serves this run's commit and its health,
+      # which covers PostgreSQL and Redis, is UP. Any 200 from /healthz used to
+      # pass, so a stale image or a down database still reported success.
+      - name: Verify the deployed revision
         run: |
-          for i in $(seq 1 20); do
-            if curl -fsS https://api.godance.ai/healthz >/dev/null; then
-              echo "healthz OK"; exit 0
+          want="${GITHUB_SHA::7}"
+          for i in $(seq 1 30); do
+            sha=$(curl -fsS https://api.godance.ai/healthz | jq -r .git_sha || true)
+            health=$(curl -fsS https://api.godance.ai/actuator/health | jq -r .status || true)
+            if [ "$sha" = "$want" ] && [ "$health" = "UP" ]; then
+              echo "serving $sha, health UP"; exit 0
             fi
-            echo "waiting for healthz ($i)…"; sleep 6
+            echo "waiting ($i): serving '${sha:-none}', health '${health:-none}', want $want"
+            sleep 6
           done
-          echo "healthz did not recover"; exit 1
+          echo "the API is not serving $want with health UP" >&2
+          exit 1

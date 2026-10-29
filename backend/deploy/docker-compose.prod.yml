@@ -36,8 +36,11 @@ services:
 
   backend:
     # Deploys pull this prebuilt image from GHCR (see .github/workflows/deploy.yml).
-    # The build: block is kept as a fallback for manual `up -d --build backend`.
-    image: ghcr.io/godanceai/godance-backend:latest
+    # BACKEND_TAG pins it to one commit's build; the deploy job sets it to the
+    # commit it built, and a rollback sets it to an earlier one. Unset, it
+    # falls back to :latest. The build: block is kept as a fallback for
+    # manual `up -d --build backend`.
+    image: ghcr.io/godanceai/godance-backend:${BACKEND_TAG:-latest}
     build:
       context: ..
       dockerfile: deploy/Dockerfile
