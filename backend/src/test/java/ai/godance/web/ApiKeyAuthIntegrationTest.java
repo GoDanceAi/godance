@@ -292,6 +292,44 @@ class ApiKeyAuthIntegrationTest {
                 .expectStatus().isOk();
     }
 
+    // ===== A disabled account loses access at once (S3) ===============
+
+    @Test
+    void session_givenOwnerDisabled_returns401() {
+        Account account = signupWithBalance(0);
+        http.get().uri("/v1/usage").header("Authorization", account.jwtBearer())
+                .exchange().expectStatus().isOk();
+
+        disable(account.userId());
+
+        http.get().uri("/v1/usage").header("Authorization", account.jwtBearer())
+                .exchange().expectStatus().isUnauthorized();
+    }
+
+    @Test
+    void chatCompletions_givenKeyOwnerDisabled_returns401_andNeverCallsProvider() {
+        Account account = signupWithBalance(100_00L);
+        CreateApiKeyResponse key = createKey(account.jwtBearer());
+        stubOpenAiSuccess();
+
+        disable(account.userId());
+
+        http.post().uri("/v1/chat/completions")
+                .header("Authorization", "Bearer " + key.plaintext())
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(chatRequest())
+                .exchange()
+                .expectStatus().isUnauthorized()
+                .expectBody().jsonPath("$.detail").isEqualTo("account is disabled");
+        assertThat(openAiMock.getAllServeEvents()).isEmpty();
+    }
+
+    private void disable(UUID userId) {
+        var user = users.findById(userId).orElseThrow();
+        user.setActive(false);
+        users.save(user);
+    }
+
     private void setAllowlist(UUID keyId, String... cidrs) {
         ApiKey entity = apiKeys.findById(keyId).orElseThrow();
         entity.setIpAllowlist(List.of(cidrs));
