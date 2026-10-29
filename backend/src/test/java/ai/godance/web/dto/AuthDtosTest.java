@@ -6,6 +6,7 @@ import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
 
+import ai.godance.domain.AgeStatus;
 import ai.godance.domain.User;
 import ai.godance.domain.UserRole;
 import ai.godance.web.dto.AuthDtos.MeResponse;
@@ -60,5 +61,31 @@ class AuthDtosTest {
 
         assertThat(me.hasEmail()).isFalse();
         assertThat(me.pendingEmail()).isEqualTo("added@godance.test");
+    }
+
+    @Test
+    void meResponseFrom_givenChildWaitingForConsent_expectsStatusAndMaskedParentEmail() {
+        User u = user("kid@godance.test");
+        u.setAgeStatus(AgeStatus.CONSENT_PENDING);
+        u.setParentEmail("parent@family.test");
+
+        MeResponse me = MeResponse.from(u);
+
+        assertThat(me.ageStatus()).isEqualTo(AgeStatus.CONSENT_PENDING);
+        assertThat(me.parentEmailMasked()).isEqualTo("p***@family.test");
+    }
+
+    @Test
+    void meResponseFrom_givenAdult_expectsAdultAndNoParentEmail() {
+        MeResponse me = MeResponse.from(user("someone@godance.test"));
+
+        assertThat(me.ageStatus()).isEqualTo(AgeStatus.ADULT);
+        assertThat(me.parentEmailMasked()).isNull();
+    }
+
+    @Test
+    void maskEmail_givenAddress_expectsFirstLetterAndDomainOnly() {
+        assertThat(AuthDtos.maskEmail("ada.lovelace@example.com")).isEqualTo("a***@example.com");
+        assertThat(AuthDtos.maskEmail("not-an-address")).isEqualTo("***");
     }
 }

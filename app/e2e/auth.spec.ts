@@ -10,13 +10,19 @@ test.describe('signup', () => {
     await page.getByLabel('Full name').fill('Ada Lovelace');
     await page.getByLabel('Email').fill('ada@example.com');
     await page.getByLabel('Password').fill(PASSWORD);
+    await page.getByLabel('Birth month').selectOption('December');
+    await page.getByLabel('Birth year').selectOption('1990');
+    // An adult is never asked for a parent.
+    await expect(page.getByLabel("Parent or guardian's email")).toHaveCount(0);
     await page.getByRole('button', { name: 'Create account' }).click();
 
     await expect(page).toHaveURL('/dashboard');
     await expect(page.getByRole('heading', { name: 'Hi, Ada.' })).toBeVisible();
     expect(await storedToken(page)).toBe('tok-signup');
     const [signup] = api.callsTo('POST', '/v1/auth/signup');
-    expect(signup.body).toEqual({ email: 'ada@example.com', password: PASSWORD, fullName: 'Ada Lovelace' });
+    expect(signup.body).toEqual({
+      email: 'ada@example.com', password: PASSWORD, fullName: 'Ada Lovelace', birthMonth: '1990-12',
+    });
     expect(signup.headers.authorization).toBeUndefined();
     expect(api.callsTo('GET', '/v1/auth/me')[0].headers.authorization).toBe('Bearer tok-signup');
   });
@@ -29,6 +35,8 @@ test.describe('signup', () => {
     await page.getByLabel('Full name').fill('Ada Lovelace');
     await page.getByLabel('Email').fill('ada@example.com');
     await page.getByLabel('Password').fill(PASSWORD);
+    await page.getByLabel('Birth month').selectOption('December');
+    await page.getByLabel('Birth year').selectOption('1990');
     await page.getByRole('button', { name: 'Create account' }).click();
 
     await expect(page.getByText('An account with this email already exists.')).toBeVisible();

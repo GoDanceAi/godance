@@ -51,11 +51,13 @@ public class BillingService {
     private final BillingProperties billing;
     private final MailService mail;
     private final AutoRechargeService autoRecharge;
+    private final ParentalConsentService parentalConsent;
 
     public BillingService(StripeService stripe, NowPaymentsService nowPayments,
                           CreditLedgerService ledger, UserRepository users,
                           AuditLogService audit, BillingProperties billing,
-                          MailService mail, AutoRechargeService autoRecharge) {
+                          MailService mail, AutoRechargeService autoRecharge,
+                          ParentalConsentService parentalConsent) {
         this.stripe = stripe;
         this.nowPayments = nowPayments;
         this.ledger = ledger;
@@ -64,6 +66,7 @@ public class BillingService {
         this.billing = billing;
         this.mail = mail;
         this.autoRecharge = autoRecharge;
+        this.parentalConsent = parentalConsent;
     }
 
     /**
@@ -116,6 +119,10 @@ public class BillingService {
      * the bank transfer is pending — on the later
      * {@code checkout.session.async_payment_succeeded}.
      * {@code checkout.session.async_payment_failed} never credits.
+     *
+     * <p>A parent's approving session ({@link StripeService#isParentalConsent})
+     * credits the child the same way, and the same paid events, and only
+     * they, also grant the child's account parental consent.
      */
     @Transactional
     public void handleWebhook(String payload, String sigHeader, String ip) {
@@ -267,6 +274,13 @@ public class BillingService {
                 : AuditLogService.EVT_BILLING_TOPUP_DUPLICATE;
         audit.record(evtType, AuditOutcome.SUCCESS, userId, ip, Map.of(
                 "amountCents", amount, "eventId", event.getId(), "sessionId", session.getId()));
+
+        if (StripeService.isParentalConsent(session)) {
+            // The parent's card paid: it is never saved on the child's account.
+            // Granting is a no-op once granted, so a duplicate delivery is safe.
+            parentalConsent.grantFromPayment(userId, session.getId(), event.getId(), amount, ip);
+            return;
+        }
 
         // If the session was created with setup_future_usage=off_session, the
         // PaymentIntent will have a payment_method we can charge later. Persist

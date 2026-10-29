@@ -63,6 +63,16 @@ export default function LoginPage() {
             <span className="ml-1">Continue with {p.label}</span>
           </button>
         ))}
+        {/* Social sign-in can create an account, so it carries the signup terms, and
+            attests the age: it never asks for a birth month or a parent. */}
+        <p className="pt-1 text-xs text-fg-subtle">
+          By continuing with Google, Apple or X, you agree to our{' '}
+          <a href="https://godance.ai/legal/terms" target="_blank" rel="noreferrer"
+             className="underline hover:text-fg">Terms</a> and{' '}
+          <a href="https://godance.ai/legal/privacy" target="_blank" rel="noreferrer"
+             className="underline hover:text-fg">Privacy Policy</a>{' '}
+          and confirm you are 16 or older.
+        </p>
       </div>
 
       <div className="my-6 flex items-center gap-3 text-xs text-fg-faint">

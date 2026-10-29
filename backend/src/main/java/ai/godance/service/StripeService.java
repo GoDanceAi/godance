@@ -41,6 +41,11 @@ public class StripeService {
     /** Stripe metadata key — also set on Checkout Sessions so webhooks can resolve the user. */
     public static final String META_USER_ID = "godance_user_id";
 
+    /** Checkout Session metadata key saying what a session is for; absent on a plain top-up. */
+    public static final String META_PURPOSE = "godance_purpose";
+    /** {@link #META_PURPOSE} of a parent's approval of a child's account. */
+    public static final String PURPOSE_PARENTAL_CONSENT = "parental_consent";
+
     /** The only {@code PaymentMethod.type} auto-recharge saves and charges. */
     public static final String PAYMENT_METHOD_TYPE_CARD = "card";
 
@@ -114,6 +119,55 @@ public class StripeService {
                     .build());
         }
         return Session.create(builder.build());
+    }
+
+    /**
+     * Build the Checkout Session a parent pays to approve a child's account
+     * ({@link ParentalConsentService}). It credits the CHILD's balance, as
+     * {@link #createTopUpCheckout} does, but the payer is the parent: no
+     * Stripe customer of the child's is used, {@code customer_email} is the
+     * parent's address, and the card is never saved for later charges.
+     * Cards only (Apple Pay and Google Pay count as cards): a card
+     * transaction is the verifiable-consent method, and a bank debit would
+     * leave the parent's approval hanging for days. Metadata
+     * {@link #META_PURPOSE} = {@link #PURPOSE_PARENTAL_CONSENT} is what
+     * makes the paid webhook grant consent. Nothing about the child but the
+     * opaque account id goes to Stripe.
+     */
+    public Session createParentalConsentCheckout(User child, String parentEmail, long amountCents,
+                                                 String successUrl, String cancelUrl) throws StripeException {
+        String childId = child.getId().toString();
+        SessionCreateParams params = SessionCreateParams.builder()
+                .setMode(SessionCreateParams.Mode.PAYMENT)
+                .setCustomerEmail(parentEmail)
+                .setSuccessUrl(successUrl)
+                .setCancelUrl(cancelUrl)
+                .setClientReferenceId(childId)
+                .putMetadata(META_USER_ID, childId)
+                .putMetadata(META_PURPOSE, PURPOSE_PARENTAL_CONSENT)
+                .addPaymentMethodType(SessionCreateParams.PaymentMethodType.CARD)
+                .setPaymentIntentData(SessionCreateParams.PaymentIntentData.builder()
+                        .putMetadata(META_USER_ID, childId)
+                        .putMetadata(META_PURPOSE, PURPOSE_PARENTAL_CONSENT)
+                        .build())
+                .addLineItem(SessionCreateParams.LineItem.builder()
+                        .setQuantity(1L)
+                        .setPriceData(SessionCreateParams.LineItem.PriceData.builder()
+                                .setCurrency(billing.currency())
+                                .setUnitAmount(amountCents)
+                                .setProductData(SessionCreateParams.LineItem.PriceData.ProductData.builder()
+                                        .setName("Godance credit: parent's approval of a child's account")
+                                        .build())
+                                .build())
+                        .build())
+                .build();
+        return Session.create(params);
+    }
+
+    /** True when a Checkout Session was created by {@link #createParentalConsentCheckout}. */
+    public static boolean isParentalConsent(Session session) {
+        return session.getMetadata() != null
+                && PURPOSE_PARENTAL_CONSENT.equals(session.getMetadata().get(META_PURPOSE));
     }
 
     /**

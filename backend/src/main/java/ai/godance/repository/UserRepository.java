@@ -16,7 +16,26 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     Optional<User> findByEmailVerificationToken(String token);
     Optional<User> findByPasswordResetTokenHash(String tokenHash);
     Optional<User> findByStripeCustomerId(String stripeCustomerId);
+    Optional<User> findByParentalConsentTokenHash(String tokenHash);
     boolean existsByEmail(String email);
+
+    /**
+     * Grants parental consent to a child's account that is still waiting
+     * for it, and ends the account's restricted sessions: the bumped
+     * session version makes every earlier JWT (the {@code PENDING_CONSENT}
+     * ones) fail, so the child signs in again with full access. One
+     * conditional UPDATE, so of two paid consent sessions for the same
+     * child only the first grants (returns 1); the other returns 0.
+     *
+     * <p>Flushes and clears the persistence context, so a {@code User}
+     * read afterwards in the same transaction reflects this update.
+     */
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("UPDATE User u SET u.ageStatus = ai.godance.domain.AgeStatus.CONSENT_GRANTED, "
+         + "u.parentalConsentAt = :now, u.parentalConsentTokenHash = NULL, "
+         + "u.sessionVersion = u.sessionVersion + 1, u.updatedAt = :now "
+         + "WHERE u.id = :id AND u.ageStatus = ai.godance.domain.AgeStatus.CONSENT_PENDING")
+    int grantParentalConsent(@Param("id") UUID id, @Param("now") java.time.Instant now);
 
     /**
      * The per-request JWT check in {@code SessionVersionJwtDecoder} — one
