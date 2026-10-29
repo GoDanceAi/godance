@@ -25,6 +25,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
+import ai.godance.domain.AgeStatus;
 import ai.godance.domain.AuditLogEntry;
 import ai.godance.domain.AuditOutcome;
 import ai.godance.domain.Conversation;
@@ -198,6 +199,24 @@ class DataRetentionIntegrationTest {
         assertThat(audit.findById(kept.getId())).isPresent();
     }
 
+    @Test
+    void run_givenChildAccountsAwaitingConsent_deletesThoseAskedOver30DaysAgoWithTheParentsEmail() {
+        UUID stale = newChild(AgeStatus.CONSENT_PENDING, daysAgo(31));
+        UUID recent = newChild(AgeStatus.CONSENT_PENDING, daysAgo(29));
+        UUID approved = newChild(AgeStatus.CONSENT_GRANTED, daysAgo(40));
+        AuditLogEntry staleRequest = auditRowFor(stale);
+        AuditLogEntry approvedRequest = auditRowFor(approved);
+
+        DataRetentionJob.Summary summary = DataRetentionJob.run(retention, Instant.now());
+
+        assertThat(summary.unapprovedChildAccountsDeleted()).isEqualTo(1);
+        assertThat(users.findById(stale)).isEmpty();
+        assertThat(audit.findById(staleRequest.getId())).isEmpty();   // it held the parent's email
+        assertThat(users.findById(recent)).isPresent();
+        assertThat(users.findById(approved)).isPresent();
+        assertThat(audit.findById(approvedRequest.getId())).isPresent();
+    }
+
     // ===== Helpers ======================================================
 
     private static Instant daysAgo(int days) {
@@ -283,6 +302,27 @@ class DataRetentionIntegrationTest {
         e.setEventType("test.retention");
         e.setOutcome(AuditOutcome.SUCCESS);
         e.setCreatedAt(createdAt);
+        return audit.save(e);
+    }
+
+    private UUID newChild(AgeStatus status, Instant consentRequestedAt) {
+        User u = new User();
+        u.setEmail("child-" + UUID.randomUUID() + "@godance.test");
+        u.setFullName("Child Tester");
+        u.setRole(UserRole.USER);
+        u.setAgeStatus(status);
+        u.setBirthMonth(java.time.LocalDate.now().minusYears(10).withDayOfMonth(1));
+        u.setParentEmail("parent-" + UUID.randomUUID() + "@godance.test");
+        u.setParentalConsentRequestedAt(consentRequestedAt);
+        return users.save(u).getId();
+    }
+
+    private AuditLogEntry auditRowFor(UUID userId) {
+        AuditLogEntry e = new AuditLogEntry();
+        e.setEventType("auth.parental_consent.requested");
+        e.setOutcome(AuditOutcome.SUCCESS);
+        e.setUserId(userId);
+        e.setCreatedAt(Instant.now());
         return audit.save(e);
     }
 }

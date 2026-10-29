@@ -12,8 +12,10 @@ import org.springframework.transaction.annotation.Transactional;
 import ai.godance.domain.AuditLogEntry;
 
 /**
- * The one way audit rows are ever deleted: the 365-day retention purge in
- * {@link ai.godance.service.DataRetentionService}. Kept apart from
+ * The only ways audit rows are ever deleted, both in
+ * {@link ai.godance.service.DataRetentionService}: the 365-day retention
+ * purge, and removing the rows of a child's account deleted because consent
+ * never came (they hold the parent's email). Kept apart from
  * {@link AuditLogEntryRepository} so that interface stays insert + read
  * and nothing else can delete or rewrite an audit row.
  */
@@ -30,4 +32,9 @@ public interface AuditLogRetentionRepository extends Repository<AuditLogEntry, U
                            LIMIT :limit)
             """, nativeQuery = true)
     int deleteCreatedBefore(@Param("cutoff") Instant cutoff, @Param("limit") int limit);
+
+    /** Deletes every audit row about these accounts. */
+    @Modifying
+    @Query(value = "DELETE FROM audit_logs WHERE user_id IN (:userIds)", nativeQuery = true)
+    int deleteForUsers(@Param("userIds") java.util.Collection<UUID> userIds);
 }

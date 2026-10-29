@@ -9,11 +9,13 @@ import java.util.function.IntUnaryOperator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import ai.godance.domain.GenerationJob;
 import ai.godance.repository.AuditLogRetentionRepository;
 import ai.godance.repository.ConversationRepository;
 import ai.godance.repository.GenerationJobRepository;
+import ai.godance.repository.UnapprovedChildRepository;
 import ai.godance.storage.ObjectStorageClient;
 
 /**
@@ -40,6 +42,8 @@ public class DataRetentionService {
     public static final Duration JOB_RETENTION = Duration.ofDays(90);
     public static final Duration ARCHIVED_CONVERSATION_RETENTION = Duration.ofDays(30);
     public static final Duration AUDIT_LOG_RETENTION = Duration.ofDays(365);
+    /** COPPA: how long a child's account waits for a parent's consent before it is deleted. */
+    public static final Duration UNAPPROVED_CHILD_RETENTION = Duration.ofDays(30);
 
     /** Jobs per batch; each job costs two object-storage listings and at most two deletes. */
     static final int JOB_BATCH = 100;
@@ -57,13 +61,16 @@ public class DataRetentionService {
     private final ConversationRepository conversations;
     private final AuditLogRetentionRepository auditRows;
     private final ObjectStorageClient storage;
+    private final UnapprovedChildRepository unapprovedChildren;
 
     public DataRetentionService(GenerationJobRepository jobs, ConversationRepository conversations,
-                                AuditLogRetentionRepository auditRows, ObjectStorageClient storage) {
+                                AuditLogRetentionRepository auditRows, ObjectStorageClient storage,
+                                UnapprovedChildRepository unapprovedChildren) {
         this.jobs = jobs;
         this.conversations = conversations;
         this.auditRows = auditRows;
         this.storage = storage;
+        this.unapprovedChildren = unapprovedChildren;
     }
 
     /** How many jobs a pass purged, and how many it could not (left for the next run). */
@@ -123,6 +130,21 @@ public class DataRetentionService {
     public int deleteExpiredAuditRows(Instant now) {
         Instant cutoff = now.minus(AUDIT_LOG_RETENTION);
         return deleteInBatches(limit -> auditRows.deleteCreatedBefore(cutoff, limit), "audit rows");
+    }
+
+    /**
+     * Deletes children's accounts whose parent has not given consent
+     * {@link #UNAPPROVED_CHILD_RETENTION} after it was last requested, with the
+     * parent's email and the audit rows that name it (COPPA: a child's and
+     * parent's details are deleted if consent doesn't come in a reasonable
+     * time). Such an account could only sign in and wait for consent.
+     */
+    @Transactional
+    public int deleteUnapprovedChildAccounts(Instant now) {
+        List<UUID> ids = unapprovedChildren.lockUnapprovedBefore(now.minus(UNAPPROVED_CHILD_RETENTION), ROW_BATCH);
+        if (ids.isEmpty()) return 0;
+        auditRows.deleteForUsers(ids);
+        return unapprovedChildren.deleteUnapproved(ids);
     }
 
     private static int deleteInBatches(IntUnaryOperator deleteBatch, String what) {

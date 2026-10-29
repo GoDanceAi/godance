@@ -29,16 +29,18 @@ public class DataRetentionJob implements Job {
     }
 
     /** What one pass did. */
-    record Summary(int jobsPurged, int jobsFailed, int conversationsDeleted, int auditRowsDeleted) { }
+    record Summary(int jobsPurged, int jobsFailed, int conversationsDeleted, int auditRowsDeleted,
+                   int unapprovedChildAccountsDeleted) { }
 
     /**
-     * One pass over all three rules. Each rule runs even when an earlier one
+     * One pass over all four rules. Each rule runs even when an earlier one
      * threw; whatever it left undone is picked up by the next run.
      */
     static Summary run(DataRetentionService retention, Instant now) {
         DataRetentionService.JobPurgeCount jobs = new DataRetentionService.JobPurgeCount(0, 0);
         int conversations = 0;
         int auditRows = 0;
+        int children = 0;
         try {
             jobs = retention.purgeExpiredJobs(now);
         } catch (RuntimeException e) {
@@ -54,11 +56,16 @@ public class DataRetentionJob implements Job {
         } catch (RuntimeException e) {
             log.error("DataRetentionJob: audit row delete failed", e);
         }
-        Summary summary = new Summary(jobs.purged(), jobs.failed(), conversations, auditRows);
+        try {
+            children = retention.deleteUnapprovedChildAccounts(now);
+        } catch (RuntimeException e) {
+            log.error("DataRetentionJob: unapproved child account delete failed", e);
+        }
+        Summary summary = new Summary(jobs.purged(), jobs.failed(), conversations, auditRows, children);
         log.info("DataRetentionJob: purged {} generation job(s) ({} could not be purged, retried next run), "
-                        + "deleted {} archived conversation(s) and {} audit row(s)",
+                        + "deleted {} archived conversation(s), {} audit row(s) and {} unapproved child account(s)",
                 summary.jobsPurged(), summary.jobsFailed(), summary.conversationsDeleted(),
-                summary.auditRowsDeleted());
+                summary.auditRowsDeleted(), summary.unapprovedChildAccountsDeleted());
         return summary;
     }
 }

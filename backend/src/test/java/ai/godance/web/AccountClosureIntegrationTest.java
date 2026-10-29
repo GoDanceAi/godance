@@ -160,6 +160,9 @@ class AccountClosureIntegrationTest {
         owner.setAutoRechargeEnabled(true);
         owner.setAutoRechargeThresholdCents(5_00L);
         owner.setAutoRechargeTopupCents(20_00L);
+        // A child's account approved by a parent: the birth month and parent's email must go too.
+        owner.setBirthMonth(java.time.LocalDate.now().minusYears(12).withDayOfMonth(1));
+        owner.setParentEmail("parent-" + UUID.randomUUID() + "@godance.test");
         users.save(owner);
         AutoRechargeAttempt attempt = new AutoRechargeAttempt();
         attempt.setUserId(userId);
@@ -221,6 +224,8 @@ class AccountClosureIntegrationTest {
         assertThat(closed.getEmail()).isEqualTo("closed-" + userId + "@closed.invalid");
         assertThat(closed.getFullName()).isEqualTo(AccountClosureService.CLOSED_FULL_NAME);
         assertThat(closed.getPasswordHash()).isNull();
+        assertThat(closed.getBirthMonth()).isNull();
+        assertThat(closed.getParentEmail()).isNull();
         assertThat(closed.getPendingEmail()).isNull();
         assertThat(closed.getEmailVerificationToken()).isNull();
         assertThat(closed.getPasswordResetTokenHash()).isNull();

@@ -159,6 +159,10 @@ public class AccountClosureService {
         u.setWebhookSigningSecret(null);
         u.setWebhookSigningSecretPrevious(null);
         u.setWebhookSigningSecretRotatedAt(null);
+        // A child's account: the birth month and the parent's email go too.
+        u.setBirthMonth(null);
+        u.setParentEmail(null);
+        u.setParentalConsentTokenHash(null);
         // The auto-recharge cron does not look at is_active; this is what stops it charging.
         u.setAutoRechargeEnabled(false);
         u.setStripePaymentMethodId(null);
