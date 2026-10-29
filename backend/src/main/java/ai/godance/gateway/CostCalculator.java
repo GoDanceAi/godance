@@ -17,14 +17,21 @@ import ai.godance.gateway.ModelCatalog.ModelInfo;
  *   <li>{@link #actualCents}: HALF_UP — fair rounding at reconcile time.</li>
  * </ul>
  *
- * <p>Sub-cent requests (HALF_UP rounds to zero) are effectively free.
- * Documented as a v1 limitation in PROGRESS — the alternative is a
- * schema migration to store balances in microcents.
+ * <p>Chat settles through {@link #actualMicrocents}: the exact marked-up
+ * amount goes to {@code CreditLedgerService.settle}, which bills whole cents
+ * and carries the fraction to the user's next request. Before that, a
+ * request whose cost rounded below half a cent was free (spec risk R-06).
+ * {@link #actualCents} remains for callers that need a rounded figure.
+ *
+ * <p>Markup is applied in integer arithmetic (basis points), so no
+ * {@code double} touches the money path; the markup percent itself is a
+ * {@code double} only because that is how it is configured and published.
  */
 @Component
 public class CostCalculator {
 
-    private static final long MICROCENTS_PER_CENT = 10_000L;
+    public static final long MICROCENTS_PER_CENT = 10_000L;
+    private static final long BASIS_POINTS = 10_000L;
 
     private final BillingProperties billing;
 
@@ -38,12 +45,19 @@ public class CostCalculator {
         return ceilDiv(microcents, MICROCENTS_PER_CENT);
     }
 
-    /** Reconciled actual cost — input + output tokens, HALF_UP cents rounding. */
-    public long actualCents(ModelInfo model, int inputTokens, int outputTokens) {
-        long microcents = withMarkup(model,
+    /**
+     * Exact actual cost — input + output tokens with markup, in microcents.
+     * This is what the ledger settles; nothing is rounded here.
+     */
+    public long actualMicrocents(ModelInfo model, int inputTokens, int outputTokens) {
+        return withMarkup(model,
                 model.inputMicrocentsPer1k()  * inputTokens  / 1000
               + model.outputMicrocentsPer1k() * outputTokens / 1000);
-        return halfUpDiv(microcents, MICROCENTS_PER_CENT);
+    }
+
+    /** Actual cost rounded HALF_UP to cents — a display figure, not what is billed. */
+    public long actualCents(ModelInfo model, int inputTokens, int outputTokens) {
+        return halfUpDiv(actualMicrocents(model, inputTokens, outputTokens), MICROCENTS_PER_CENT);
     }
 
     /** Image generation cost — per-image flat price × count + markup. */
@@ -61,8 +75,17 @@ public class CostCalculator {
         return halfUpDiv(microcents, MICROCENTS_PER_CENT);
     }
 
+    /**
+     * Applies the markup in integer arithmetic: the percent becomes basis
+     * points (12.5% → 1250 bp) once, then {@code microcents × (10000 + bp) / 10000}
+     * with HALF_UP rounding of the division. Equivalent to the former
+     * {@code Math.round(microcents * (1 + pct/100))} for every configured value,
+     * without a floating-point multiply on the amount.
+     */
     private long withMarkup(ModelInfo model, long microcents) {
-        return Math.round(microcents * (1.0 + markupPercent(model) / 100.0));
+        if (microcents <= 0) return 0;
+        long basisPoints = Math.round(markupPercent(model) * 100.0);
+        return halfUpDiv(microcents * (BASIS_POINTS + basisPoints), BASIS_POINTS);
     }
 
     /**

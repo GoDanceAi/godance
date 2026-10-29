@@ -312,7 +312,9 @@ public class ImageGenerationService {
         r.setInputTokens(0);
         r.setOutputTokens(imageCount);   // count of images returned
         r.setCostCents(actualCents);
+        r.setCostMicrocents(actualCents * 10_000);          // media bills whole cents up front
         r.setProviderCostCents(providerCostCents);
+        r.setProviderCostMicrocents(providerCostMicrocents);
         r.setRegion(gateway.region() == null ? Region.LOCAL : gateway.region());
         r.setCacheHit(false);
         r.setFallbackUsed(false);

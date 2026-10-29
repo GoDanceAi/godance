@@ -192,6 +192,41 @@ public class CreditLedgerService {
         return true;
     }
 
+    /** Microcents in one cent; the carry on {@code users.pending_microcents} stays below this. */
+    static final long MICROCENTS_PER_CENT = 10_000L;
+
+    /**
+     * Settle a request's exact cost against its pre-debited estimate.
+     *
+     * <p>The ledger is in whole cents, so the fraction of a cent a request
+     * costs is carried on the user ({@code users.pending_microcents}) and
+     * billed once it adds up to a full cent. Three 4,000-microcent requests
+     * bill 0, 0 and 1 cent and leave a 2,000-microcent carry. Nothing is
+     * rounded away any more (spec risk R-06).
+     *
+     * @return the cents actually billed for this request, which the caller
+     *         records as the usage row's {@code cost_cents}
+     */
+    @Transactional
+    public long settle(UUID userId, long estimateCents, long actualMicrocents, String requestId) {
+        long billedCents = carryAndBill(userId, actualMicrocents);
+        reconcile(userId, estimateCents, billedCents, requestId);
+        return billedCents;
+    }
+
+    /**
+     * Adds the amount to the user's carry and returns how many whole cents
+     * that released. The repository returns only the new remainder {@code r};
+     * the previous carry is recovered as {@code (r - amount) mod 10000}, which
+     * is unique because a carry is always in {@code [0, 10000)}.
+     */
+    private long carryAndBill(UUID userId, long actualMicrocents) {
+        if (actualMicrocents <= 0) return 0;
+        long remainder = users.carryMicrocents(userId, actualMicrocents);
+        long previousCarry = Math.floorMod(remainder - actualMicrocents, MICROCENTS_PER_CENT);
+        return (previousCarry + actualMicrocents) / MICROCENTS_PER_CENT;
+    }
+
     /**
      * After upstream call, settle the difference between estimate and actual.
      * <ul>

@@ -49,6 +49,13 @@ public class User {
     @Column(name = "credit_balance_cents", nullable = false)
     private long creditBalanceCents = 0L;
 
+    /**
+     * Fraction of a cent (0..9999 microcents) carried from settled requests
+     * to the next one. Changed only by {@code UserRepository.carryMicrocents}.
+     */
+    @Column(name = "pending_microcents", nullable = false)
+    private long pendingMicrocents = 0L;
+
     @Column(name = "daily_credit_cap_cents")
     private Long dailyCreditCapCents;
 
@@ -169,6 +176,9 @@ public class User {
 
     public long getCreditBalanceCents() { return creditBalanceCents; }
     public void setCreditBalanceCents(long creditBalanceCents) { this.creditBalanceCents = creditBalanceCents; }
+
+    public long getPendingMicrocents() { return pendingMicrocents; }
+    public void setPendingMicrocents(long pendingMicrocents) { this.pendingMicrocents = pendingMicrocents; }
 
     public Long getDailyCreditCapCents() { return dailyCreditCapCents; }
     public void setDailyCreditCapCents(Long dailyCreditCapCents) { this.dailyCreditCapCents = dailyCreditCapCents; }

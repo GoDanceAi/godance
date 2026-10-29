@@ -65,6 +65,55 @@ class CreditLedgerServiceTest {
         assertThat(ledger.authoritativeBalance(user.getId())).isEqualTo(10_00L);
     }
 
+    // ===== settle: fractions of a cent carry to the next request (R-06) =====
+
+    @Test
+    void settle_subCentRequests_carryUntilAFullCentThenBillOnce() {
+        ledger.topUp(user.getId(), 10_00L, CreditSource.STRIPE, "ch_s", "evt_settle_1", null);
+        // Each request pre-debits a 1¢ estimate and settles 4,000 µ¢ (0.4¢).
+        assertThat(ledger.preDebit(user.getId(), 1L, "req_s1")).isTrue();
+        assertThat(ledger.settle(user.getId(), 1L, 4_000L, "req_s1")).isZero();
+        assertThat(ledger.preDebit(user.getId(), 1L, "req_s2")).isTrue();
+        assertThat(ledger.settle(user.getId(), 1L, 4_000L, "req_s2")).isZero();
+        assertThat(ledger.preDebit(user.getId(), 1L, "req_s3")).isTrue();
+        assertThat(ledger.settle(user.getId(), 1L, 4_000L, "req_s3")).isEqualTo(1L);
+
+        User refreshed = users.findById(user.getId()).orElseThrow();
+        // 12,000 µ¢ of usage: 1¢ billed, 2,000 µ¢ carried; the two 1¢ estimates refunded.
+        assertThat(refreshed.getCreditBalanceCents()).isEqualTo(10_00L - 1L);
+        assertThat(refreshed.getPendingMicrocents()).isEqualTo(2_000L);
+        assertThat(ledger.authoritativeBalance(user.getId())).isEqualTo(10_00L - 1L);
+    }
+
+    @Test
+    void settle_multiCentRequest_billsWholeCentsAndCarriesTheRest() {
+        ledger.topUp(user.getId(), 10_00L, CreditSource.STRIPE, "ch_s2", "evt_settle_2", null);
+        assertThat(ledger.preDebit(user.getId(), 2L, "req_big")).isTrue();
+        // 2.75¢ actual against a 2¢ estimate: bills 2¢ now, carries 7,500 µ¢.
+        assertThat(ledger.settle(user.getId(), 2L, 27_500L, "req_big")).isEqualTo(2L);
+        User refreshed = users.findById(user.getId()).orElseThrow();
+        assertThat(refreshed.getCreditBalanceCents()).isEqualTo(10_00L - 2L);
+        assertThat(refreshed.getPendingMicrocents()).isEqualTo(7_500L);
+
+        // Next request of 0.3¢ tips the carry over: bills 1¢, carries 500 µ¢.
+        assertThat(ledger.preDebit(user.getId(), 1L, "req_tip")).isTrue();
+        assertThat(ledger.settle(user.getId(), 1L, 3_000L, "req_tip")).isEqualTo(1L);
+        refreshed = users.findById(user.getId()).orElseThrow();
+        assertThat(refreshed.getCreditBalanceCents()).isEqualTo(10_00L - 3L);
+        assertThat(refreshed.getPendingMicrocents()).isEqualTo(500L);
+        assertThat(ledger.authoritativeBalance(user.getId())).isEqualTo(10_00L - 3L);
+    }
+
+    @Test
+    void settle_zeroCost_refundsTheWholeEstimate_andLeavesCarryUntouched() {
+        ledger.topUp(user.getId(), 5_00L, CreditSource.STRIPE, "ch_s3", "evt_settle_3", null);
+        assertThat(ledger.preDebit(user.getId(), 1L, "req_zero")).isTrue();
+        assertThat(ledger.settle(user.getId(), 1L, 0L, "req_zero")).isZero();
+        User refreshed = users.findById(user.getId()).orElseThrow();
+        assertThat(refreshed.getCreditBalanceCents()).isEqualTo(5_00L);
+        assertThat(refreshed.getPendingMicrocents()).isZero();
+    }
+
     @Test
     void debit_givenSufficientBalance_succeedsAndWritesNegativeLedgerEntry() {
         ledger.topUp(user.getId(), 20_00L, CreditSource.STRIPE, "ch_a", "evt_dbg_1", null);

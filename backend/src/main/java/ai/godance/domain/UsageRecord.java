@@ -52,6 +52,14 @@ public class UsageRecord {
     @Column(name = "provider_cost_cents")
     private Long providerCostCents;
 
+    /** Exact marked-up cost in microcents; {@code costCents} is what the carry billed. */
+    @Column(name = "cost_microcents")
+    private Long costMicrocents;
+
+    /** Exact provider list cost in microcents, no markup. */
+    @Column(name = "provider_cost_microcents")
+    private Long providerCostMicrocents;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "region", nullable = false)
     private Region region;
@@ -111,6 +119,12 @@ public class UsageRecord {
 
     public Long getProviderCostCents() { return providerCostCents; }
     public void setProviderCostCents(Long providerCostCents) { this.providerCostCents = providerCostCents; }
+
+    public Long getCostMicrocents() { return costMicrocents; }
+    public void setCostMicrocents(Long costMicrocents) { this.costMicrocents = costMicrocents; }
+
+    public Long getProviderCostMicrocents() { return providerCostMicrocents; }
+    public void setProviderCostMicrocents(Long providerCostMicrocents) { this.providerCostMicrocents = providerCostMicrocents; }
 
     public Region getRegion() { return region; }
     public void setRegion(Region region) { this.region = region; }

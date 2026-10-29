@@ -151,14 +151,20 @@ class ChatCompletionIntegrationTest {
         assertThat(out.usage().promptTokens()).isEqualTo(1000);
         assertThat(out.usage().completionTokens()).isEqualTo(500);
 
-        // gpt-4o at 1000 prompt + 500 completion = 7500 microcents × 1.05 = 7875 → 1¢ actual.
-        // Estimate covered (input only ≈ 1¢), so balance moved from $100.00 → $99.99.
-        long balance = users.findById(u.id()).orElseThrow().getCreditBalanceCents();
-        assertThat(balance).isEqualTo(100_00L - 1L);
+        // gpt-4o at 1000 prompt + 500 completion = 7500 microcents × 1.05 = 7875 µ¢ (0.79¢).
+        // The 1¢ input-only estimate was pre-debited; settlement bills whole cents only,
+        // so 0¢ is billed now, the estimate is refunded, and 7875 µ¢ carry to the next
+        // request (V15, spec R-06). Balance is back at $100.00 with the fraction on the user.
+        var refreshed = users.findById(u.id()).orElseThrow();
+        assertThat(refreshed.getCreditBalanceCents()).isEqualTo(100_00L);
+        assertThat(refreshed.getPendingMicrocents()).isEqualTo(7_875L);
 
         var records = usage.findByUserIdAndRecordedAtGreaterThanEqual(u.id(),
                 java.time.Instant.now().minusSeconds(60));
         assertThat(records).hasSize(1);
+        assertThat(records.get(0).getCostCents()).isZero();
+        assertThat(records.get(0).getCostMicrocents()).isEqualTo(7_875L);
+        assertThat(records.get(0).getProviderCostMicrocents()).isEqualTo(7_500L);
         assertThat(records.get(0).getOutcome()).isEqualTo(CallOutcome.OK);
         assertThat(records.get(0).getLatencyMs()).isNotNull();
     }
@@ -282,10 +288,11 @@ class ChatCompletionIntegrationTest {
         try { Thread.sleep(500); } catch (InterruptedException ignored) { }
 
         // 1200 in + 600 out for gpt-4o (2500/10000 microcents per 1k) = 9000 microcents
-        // × 1.05 markup = 9450 → HALF_UP /10000 = 1¢. Estimate was 1¢ → reconcile no-op.
-        long balance = users.findById(u.id()).orElseThrow().getCreditBalanceCents();
-        assertThat(balance).isLessThanOrEqualTo(100_00L);
-        assertThat(balance).isGreaterThanOrEqualTo(100_00L - 5);   // generous bound for rounding
+        // × 1.05 markup = 9450 µ¢: under a cent, so 0¢ billed, the 1¢ estimate refunded
+        // and 9450 µ¢ carried on the user (V15).
+        var refreshed = users.findById(u.id()).orElseThrow();
+        assertThat(refreshed.getCreditBalanceCents()).isEqualTo(100_00L);
+        assertThat(refreshed.getPendingMicrocents()).isEqualTo(9_450L);
     }
 
     // Note: query-param token auth is wired in SecurityConfig

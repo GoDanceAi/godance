@@ -80,7 +80,11 @@ scaffold and entity-porting plan.
   provider (Stripe `idempotency-key` header, NOWPayments `payment_id`)
 - Money is always in **integer cents** (`BigInteger` or `long`) — never
   `double`, never `BigDecimal` for arithmetic. Convert to display strings
-  only at the boundary.
+  only at the boundary. Markup is applied as integer basis points in
+  `CostCalculator`. The ledger is in whole cents, so a request's exact
+  microcent cost is settled through `CreditLedgerService.settle`: full cents
+  are billed, the fraction carries on `users.pending_microcents` to the next
+  request (V15). Never round a cost to cents before settling it.
 
 ## When Stuck
 

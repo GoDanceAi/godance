@@ -46,10 +46,46 @@ class CostCalculatorTest {
     }
 
     @Test
-    void actualCents_subCent_roundsToZero() {
+    void actualCents_subCent_roundsToZero_butActualMicrocentsKeepsTheAmount() {
         // 500 in + 200 out for cheap: (500*150 + 200*600)/1k = 75 + 120 = 195 microcents
-        // × 1.05 = ~205 → HALF_UP /10000 → 0
+        // × 1.05 = 204.75 → HALF_UP 205 microcents. Rounded to cents that is 0 (display);
+        // the ledger settles the 205 microcents through the carry (R-06).
         assertThat(calc.actualCents(CHEAP_TEXT, 500, 200)).isZero();
+        assertThat(calc.actualMicrocents(CHEAP_TEXT, 500, 200)).isEqualTo(205L);
+    }
+
+    @Test
+    void actualMicrocents_seedPriceGpt4oMini_1kIn1kOut_isTheAssessmentExample() {
+        // $0.15 / $0.60 per 1M → 150 + 600 = 750 microcents × 1.05 = 787.5 → HALF_UP 788 µ¢
+        // = $0.0000788, previously rounded to a free request.
+        assertThat(calc.actualMicrocents(CHEAP_TEXT, 1_000, 1_000)).isEqualTo(788L);
+        assertThat(calc.actualCents(CHEAP_TEXT, 1_000, 1_000)).isZero();
+    }
+
+    @Test
+    void actualCents_isHalfUpOfActualMicrocents() {
+        // 1000 in + 1000 out for expensive: 2500 + 10000 = 12_500 × 1.05 = 13_125 µ¢ → 1¢
+        assertThat(calc.actualMicrocents(EXPENSIVE_TEXT, 1_000, 1_000)).isEqualTo(13_125L);
+        assertThat(calc.actualCents(EXPENSIVE_TEXT, 1_000, 1_000)).isEqualTo(1L);
+        // 2000 in + 1000 out: 15_000 × 1.05 = 15_750 µ¢ → 2¢
+        assertThat(calc.actualCents(EXPENSIVE_TEXT, 2_000, 1_000)).isEqualTo(2L);
+    }
+
+    @Test
+    void withMarkup_fractionalPercent_usesIntegerBasisPoints() {
+        // 12.5% override on 1_000_000 microcents (100¢): 1_125_000 → 112.5¢ → HALF_UP 113
+        ModelInfo m = ModelInfo.text("frac", Provider.OPENAI, Modality.TEXT,
+                1_000_000L, 0L, 4096, 12.5);
+        assertThat(calc.actualCents(m, 1_000, 0)).isEqualTo(113L);
+        // and the pre-debit estimate ceils the same marked-up amount
+        assertThat(calc.estimateInputCents(m, 1_000)).isEqualTo(113L);
+    }
+
+    @Test
+    void withMarkup_largeVideoAmount_doesNotOverflow() {
+        // 400_000 µ¢/s (= $0.40/s) × 600 s × 10 clips = 2.4e9 µ¢ × 1.12 = 2.688e9 µ¢ = 268_800¢
+        ModelInfo vid = ModelInfo.video("long", Provider.OPENAI, 400_000L, null);
+        assertThat(calc.videoCostCents(vid, 600, 10)).isEqualTo(268_800L);
     }
 
     @Test

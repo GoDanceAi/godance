@@ -197,8 +197,11 @@ class RoutingChatCompletionIntegrationTest {
             assertThat(r.isFallbackUsed()).isFalse();
         });
 
-        // Balance moved (routed call was billed against the concrete model).
-        assertThat(users.findById(u.id()).orElseThrow().getCreditBalanceCents()).isLessThan(100_00L);
+        // Billed against the concrete model: 7875 µ¢ is under a cent, so the balance
+        // stays $100.00 and the fraction carries on the user (V15, R-06).
+        var refreshed = users.findById(u.id()).orElseThrow();
+        assertThat(refreshed.getCreditBalanceCents()).isEqualTo(100_00L);
+        assertThat(refreshed.getPendingMicrocents()).isEqualTo(7_875L);
     }
 
     // ===== Virtual id resolves (streaming) ============================
@@ -266,8 +269,11 @@ class RoutingChatCompletionIntegrationTest {
         assertThat(out.model()).isEqualTo("gpt-4o");
         assertThat(out.usage().promptTokens()).isEqualTo(1000);
 
-        // Same billing as baseline happy path: $100.00 -> $99.99.
-        assertThat(users.findById(u.id()).orElseThrow().getCreditBalanceCents()).isEqualTo(100_00L - 1L);
+        // Same billing as the baseline happy path: 7875 µ¢ is under a cent, so the
+        // balance stays $100.00 and the fraction carries on the user (V15, R-06).
+        var refreshed = users.findById(u.id()).orElseThrow();
+        assertThat(refreshed.getCreditBalanceCents()).isEqualTo(100_00L);
+        assertThat(refreshed.getPendingMicrocents()).isEqualTo(7_875L);
 
         // A direct call emits NO routing-decision log (passthrough, policyId null).
         assertThat(loggedRoutingFor("gpt-4o")).isFalse();
