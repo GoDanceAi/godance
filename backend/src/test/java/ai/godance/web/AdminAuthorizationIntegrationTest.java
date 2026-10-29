@@ -148,7 +148,7 @@ class AdminAuthorizationIntegrationTest {
     }
 
     @Test
-    void filter_givenDeactivatedAccount_returns403() {
+    void filter_givenDeactivatedAccount_returns401() {
         String bearer = signUpVerified(DEACTIVATED_ADMIN);
         http.get().uri("/v1/admin/me")
                 .header("Authorization", bearer)
@@ -159,10 +159,12 @@ class AdminAuthorizationIntegrationTest {
         u.setActive(false);
         users.save(u);
 
+        // A disabled account's session ends at the JWT check, before the admin
+        // guard runs, so the answer is 401 rather than the guard's 403.
         http.get().uri("/v1/admin/me")
                 .header("Authorization", bearer)
                 .exchange()
-                .expectStatus().isForbidden();
+                .expectStatus().isUnauthorized();
     }
 
     @Test

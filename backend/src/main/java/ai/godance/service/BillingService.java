@@ -15,6 +15,7 @@ import org.springframework.web.server.ResponseStatusException;
 import com.stripe.exception.SignatureVerificationException;
 import com.stripe.exception.StripeException;
 import com.stripe.model.Event;
+import com.stripe.model.PaymentIntent;
 import com.stripe.model.checkout.Session;
 
 import ai.godance.config.BillingProperties;
@@ -35,6 +36,7 @@ public class BillingService {
     private static final String EVENT_CHECKOUT_COMPLETED = "checkout.session.completed";
     private static final String EVENT_ASYNC_PAYMENT_SUCCEEDED = "checkout.session.async_payment_succeeded";
     private static final String EVENT_ASYNC_PAYMENT_FAILED = "checkout.session.async_payment_failed";
+    private static final String EVENT_PAYMENT_INTENT_SUCCEEDED = "payment_intent.succeeded";
     private static final Set<String> CHECKOUT_EVENTS = Set.of(
             EVENT_CHECKOUT_COMPLETED, EVENT_ASYNC_PAYMENT_SUCCEEDED, EVENT_ASYNC_PAYMENT_FAILED);
     /** Checkout Session {@code payment_status} values (the third is {@code no_payment_required}). */
@@ -48,11 +50,12 @@ public class BillingService {
     private final AuditLogService audit;
     private final BillingProperties billing;
     private final MailService mail;
+    private final AutoRechargeService autoRecharge;
 
     public BillingService(StripeService stripe, NowPaymentsService nowPayments,
                           CreditLedgerService ledger, UserRepository users,
                           AuditLogService audit, BillingProperties billing,
-                          MailService mail) {
+                          MailService mail, AutoRechargeService autoRecharge) {
         this.stripe = stripe;
         this.nowPayments = nowPayments;
         this.ledger = ledger;
@@ -60,6 +63,7 @@ public class BillingService {
         this.audit = audit;
         this.billing = billing;
         this.mail = mail;
+        this.autoRecharge = autoRecharge;
     }
 
     /**
@@ -125,6 +129,9 @@ public class BillingService {
         }
 
         String type = event.getType();
+        if (EVENT_PAYMENT_INTENT_SUCCEEDED.equals(type) && reconcileAutoRecharge(event)) {
+            return;
+        }
         if (!CHECKOUT_EVENTS.contains(type)) {
             // Stripe will keep retrying on non-2xx, so explicitly succeed on
             // unknown events. We log for visibility but don't error.
@@ -179,6 +186,38 @@ public class BillingService {
      * through to deserializeUnsafe() — Stripe themselves recommend this
      * for the skew case.
      */
+    /**
+     * Credits an auto-recharge charge that succeeded at Stripe while its
+     * attempt is still PENDING here: the process crashed, the database
+     * rolled back, or Stripe's answer never arrived (spec risk R-04). The
+     * next charge run would find it too; this settles it at once. False
+     * for a PaymentIntent with no attempt id, such as Checkout's, which its
+     * checkout.session events credit.
+     */
+    private boolean reconcileAutoRecharge(Event event) {
+        var deser = event.getDataObjectDeserializer();
+        Object data = deser.getObject().orElse(null);
+        if (data == null) {
+            try {
+                data = deser.deserializeUnsafe();
+            } catch (com.stripe.exception.EventDataObjectDeserializationException e) {
+                log.warn("{} deserialize failed (eventId={}): {}", event.getType(), event.getId(), e.getMessage());
+                return false;
+            }
+        }
+        if (!(data instanceof PaymentIntent pi) || pi.getMetadata() == null) return false;
+        String attemptId = pi.getMetadata().get(StripeService.ATTEMPT_METADATA_KEY);
+        if (attemptId == null) return false;
+        try {
+            autoRecharge.reconcileAttempt(UUID.fromString(attemptId));
+        } catch (IllegalArgumentException notOurs) {
+            return false;
+        }
+        log.info("stripe webhook {} eventId={} reconciled auto-recharge attempt {}",
+                event.getType(), event.getId(), attemptId);
+        return true;
+    }
+
     private Session checkoutSession(Event event, String ip) {
         var deser = event.getDataObjectDeserializer();
         Session session = (Session) deser.getObject().orElse(null);
