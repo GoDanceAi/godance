@@ -90,7 +90,7 @@ public class VideoGenerationService {
      * Processing continues on a bounded-elastic worker; client polls
      * {@code GET /v1/jobs/{id}} or receives a signed webhook POST.
      */
-    public UUID submit(UUID userId, VideoRequest request, String webhookUrl) {
+    public UUID submit(UUID userId, UUID apiKeyId, VideoRequest request, String webhookUrl) {
         webhookDestinations.requireAllowed(webhookUrl);   // before any charge (spec risk R-02)
         ModelInfo model = requireVideoModel(request);
         int duration = request.durationSeconds() == null
@@ -100,21 +100,21 @@ public class VideoGenerationService {
         String requestId = "vid_" + UUID.randomUUID().toString().replace("-", "").substring(0, 24);
 
         GenerationJob job = newJob(userId, model, request, duration, cost, requestId, webhookUrl);
-        if (!settlement.accept(job)) {
+        if (!settlement.accept(job, apiKeyId)) {
             throw new ResponseStatusException(HttpStatus.PAYMENT_REQUIRED,
                     "insufficient credit; top up via /v1/billing/topup");
         }
 
         // The pre-debit and the job row are committed together; if this worker
         // dies, GenerationJobSweepJob fails and refunds the job once its lease runs out.
-        Mono.fromRunnable(() -> runJob(job, userId, model, request, duration, clips, webhookUrl))
+        Mono.fromRunnable(() -> runJob(job, userId, apiKeyId, model, request, duration, clips, webhookUrl))
                 .subscribeOn(Schedulers.boundedElastic())
                 .subscribe();
 
         return job.getId();
     }
 
-    private void runJob(GenerationJob job, UUID userId, ModelInfo model, VideoRequest request,
+    private void runJob(GenerationJob job, UUID userId, UUID apiKeyId, ModelInfo model, VideoRequest request,
                         int duration, int clips, String webhookUrl) {
         long cost = job.getEstimatedCostCents();
         VideoProviderAdapter adapter;
@@ -150,7 +150,7 @@ public class VideoGenerationService {
         try {
             uploaded = uploadAll(job.getId(), upstream);
             completed = settlement.complete(job, uploaded.isEmpty() ? null : uploaded.get(0).url(), cost,
-                    buildUsageRecord(userId, model, cost, job.getRequestId(), duration, clips));
+                    buildUsageRecord(userId, apiKeyId, model, cost, job.getRequestId(), duration, clips));
         } catch (RuntimeException e) {
             log.warn("Video job {} could not be finalised: {}", job.getId(), e.getMessage());
             settlement.fail(job, "finalize: " + e.getMessage(), "video result could not be stored");
@@ -243,14 +243,14 @@ public class VideoGenerationService {
         return job;
     }
 
-    private UsageRecord buildUsageRecord(UUID userId, ModelInfo model, long actualCents,
+    private UsageRecord buildUsageRecord(UUID userId, UUID apiKeyId, ModelInfo model, long actualCents,
                                          String requestId, int duration, int clips) {
         long providerCostMicrocents = model.perSecondMicrocents() * duration * clips;
         long providerCostCents = (providerCostMicrocents + 5_000) / 10_000;
 
         UsageRecord r = new UsageRecord();
         r.setUserId(userId);
-        r.setApiKeyId(null);
+        r.setApiKeyId(apiKeyId);   // so per-key caps count media spend (spec risk R-10)
         r.setModality(model.modality());
         r.setModelName(model.modelName());
         r.setProvider(model.provider());

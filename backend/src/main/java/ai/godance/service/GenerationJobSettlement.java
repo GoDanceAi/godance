@@ -3,6 +3,7 @@ package ai.godance.service;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -42,12 +43,14 @@ public class GenerationJobSettlement {
     }
 
     /**
-     * Pre-debits the job's estimate and saves the QUEUED job, together. False
-     * (and nothing saved) when the balance can't cover the estimate.
+     * Pre-debits the job's estimate, holding it against the caller's spending
+     * caps, and saves the QUEUED job, together. False (and nothing saved)
+     * when the balance can't cover the estimate; a cap breach throws 402.
+     * {@code apiKeyId} is null for a signed-in session.
      */
     @Transactional
-    public boolean accept(GenerationJob job) {
-        if (!ledger.preDebit(job.getUserId(), job.getEstimatedCostCents(), job.getRequestId())) {
+    public boolean accept(GenerationJob job, UUID apiKeyId) {
+        if (!ledger.preDebit(job.getUserId(), apiKeyId, job.getEstimatedCostCents(), job.getRequestId())) {
             return false;
         }
         job.setStatus(JobStatus.QUEUED);

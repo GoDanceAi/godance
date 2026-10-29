@@ -51,7 +51,7 @@ public class SpendingLimitFilter {
                 .then(Mono.defer(() -> chain.filter(exchange)))
                 .onErrorResume(SpendingLimitService.SpendingLimitExceededException.class,
                         ex -> ProblemResponse.write(exchange, HttpStatus.PAYMENT_REQUIRED,
-                                ex.getMessage()));
+                                ex.getReason()));
     }
 
     /**

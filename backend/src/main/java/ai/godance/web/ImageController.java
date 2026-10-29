@@ -42,6 +42,7 @@ public class ImageController {
             @Valid @RequestBody ImageGenerationRequest req,
             @AuthenticationPrincipal Jwt jwt) {
         UUID userId = JwtService.userIdFromSubject(jwt.getSubject());
+        UUID apiKeyId = apiKeyId(jwt);
         ImageRequest domain = toDomain(req);
 
         // Auto-promote to async if the model requires it (e.g. gpt-image-1-hd
@@ -49,16 +50,22 @@ public class ImageController {
         boolean forceAsync = service.requiresAsyncFor(domain);
         if (Boolean.TRUE.equals(req.async()) || forceAsync) {
             return Mono.fromCallable(() ->
-                            service.executeAsync(userId, domain, req.webhookUrl()))
+                            service.executeAsync(userId, apiKeyId, domain, req.webhookUrl()))
                     .subscribeOn(Schedulers.boundedElastic())
                     .map(jobId -> ResponseEntity.accepted()
                             .<Object>body(AsyncJobAcknowledged.forJob(jobId)));
         }
 
-        return Mono.fromCallable(() -> service.execute(userId, domain))
+        return Mono.fromCallable(() -> service.execute(userId, apiKeyId, domain))
                 .subscribeOn(Schedulers.boundedElastic())
                 .map(result -> ResponseEntity.status(HttpStatus.OK)
                         .<Object>body(ImageGenerationResponse.from(result)));
+    }
+
+    /** The API key id when the caller authenticated with an API key; null for a JWT session. */
+    private static UUID apiKeyId(Jwt jwt) {
+        String claim = jwt.getClaimAsString("api_key_id");
+        return claim == null ? null : UUID.fromString(claim);
     }
 
     private static ImageRequest toDomain(ImageGenerationRequest req) {

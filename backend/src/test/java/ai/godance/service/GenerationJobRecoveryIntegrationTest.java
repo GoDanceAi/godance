@@ -136,7 +136,7 @@ class GenerationJobRecoveryIntegrationTest {
     void sweep_givenOpenJobPastItsLease_failsItAndRefundsOnce() {
         Signed u = signupWithBalance(100_00L);
         GenerationJob job = job(u.id(), 500L, "img_" + UUID.randomUUID(), Instant.now().minusSeconds(60));
-        assertThat(settlement.accept(job)).isTrue();
+        assertThat(settlement.accept(job, null)).isTrue();
         assertThat(settlement.start(job)).isTrue();
         assertThat(balance(u.id())).isEqualTo(100_00L - 500L);
 
@@ -153,7 +153,7 @@ class GenerationJobRecoveryIntegrationTest {
     void sweep_givenOpenJobInsideItsLease_leavesItRunning() {
         Signed u = signupWithBalance(100_00L);
         GenerationJob job = job(u.id(), 500L, "img_" + UUID.randomUUID(), Instant.now().plus(Duration.ofMinutes(10)));
-        settlement.accept(job);
+        settlement.accept(job, null);
 
         GenerationJobSweepJob.sweep(settlement);
 
@@ -191,7 +191,7 @@ class GenerationJobRecoveryIntegrationTest {
     void complete_afterTheSweepEndedTheJob_isANoOp() {
         Signed u = signupWithBalance(100_00L);
         GenerationJob job = job(u.id(), 500L, "img_" + UUID.randomUUID(), Instant.now().minusSeconds(60));
-        settlement.accept(job);
+        settlement.accept(job, null);
         settlement.start(job);
         GenerationJobSweepJob.sweep(settlement);
 

@@ -188,6 +188,19 @@ class SpendingLimitIntegrationTest {
     }
 
     @Test
+    void chatCompletions_capHeldByAnInFlightRequest_returns402_withoutCallingUpstream() {
+        UUID userId = signupWithBalance();
+        setDailyCap(userId, 1L);
+        // Another request is in flight and holds the whole cap; nothing has completed yet.
+        ledger.preDebit(userId, 1L, "in-flight-" + UUID.randomUUID());
+        stubOpenAiSuccess();
+
+        callChat(login(userId)).expectStatus().isEqualTo(402);
+
+        assertThat(openAiMock.getAllServeEvents()).isEmpty();
+    }
+
+    @Test
     void chatCompletions_priorPeriodUsage_doesNotCount_capResets() {
         UUID userId = signupWithBalance();
         setDailyCap(userId, 10_00L);
