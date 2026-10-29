@@ -10,6 +10,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import ai.godance.service.AutoRechargeCronJob;
+import ai.godance.service.GenerationJobSweepJob;
 import ai.godance.service.pricing.PricingRefreshCronJob;
 
 /**
@@ -71,6 +72,31 @@ public class QuartzJobsConfig {
         return TriggerBuilder.newTrigger()
                 .forJob(pricingRefreshCronJobDetail)
                 .withIdentity("pricingRefreshCronTrigger")
+                .withSchedule(CronScheduleBuilder.cronSchedule(cron)
+                        .inTimeZone(java.util.TimeZone.getTimeZone("UTC"))
+                        .withMisfireHandlingInstructionDoNothing())
+                .build();
+    }
+
+    @Bean
+    JobDetail generationJobSweepJobDetail() {
+        return JobBuilder.newJob(GenerationJobSweepJob.class)
+                .withIdentity("generationJobSweepJob")
+                .storeDurably()
+                .build();
+    }
+
+    /**
+     * Every two minutes by default: an abandoned media job is refunded within
+     * a couple of minutes of its lease running out (spec risks R-03, R-05).
+     */
+    @Bean
+    Trigger generationJobSweepTrigger(
+            JobDetail generationJobSweepJobDetail,
+            @Value("${godance.scheduling.job-sweep-cron:0 */2 * * * ?}") String cron) {
+        return TriggerBuilder.newTrigger()
+                .forJob(generationJobSweepJobDetail)
+                .withIdentity("generationJobSweepTrigger")
                 .withSchedule(CronScheduleBuilder.cronSchedule(cron)
                         .inTimeZone(java.util.TimeZone.getTimeZone("UTC"))
                         .withMisfireHandlingInstructionDoNothing())
