@@ -1,6 +1,7 @@
 import { Navigate, useLocation } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import { useAuth } from '../lib/auth';
+import ParentConsentWaiting from './ParentConsentWaiting';
 
 /**
  * Gate for authenticated routes. While the initial /me check is in flight
@@ -22,6 +23,12 @@ export default function ProtectedRoute({ children }: { children: ReactNode }) {
     // Preserve the intended destination (query included, e.g. /verify-email?token=…)
     // so /login can redirect back after auth.
     return <Navigate to="/login" replace state={{ from: location.pathname + location.search }} />;
+  }
+
+  // A child's account waiting for a parent's approval: its session reaches
+  // nothing else, so every signed-in page shows the waiting screen.
+  if (user.ageStatus === 'CONSENT_PENDING') {
+    return <ParentConsentWaiting />;
   }
 
   return <>{children}</>;

@@ -32,6 +32,12 @@ public class AuditLogService {
     public static final String EVT_AUTH_EMAIL_RELEASE = "auth.email.release";
     public static final String EVT_AUTH_EMAIL_RELEASE_LINK = "auth.email.release_link";
     public static final String EVT_AUTH_OAUTH_LOGIN   = "auth.oauth.login";
+    /** A consent request emailed to a child's parent: at signup, or resent. */
+    public static final String EVT_AUTH_PARENTAL_CONSENT_REQUESTED = "auth.parental_consent.requested";
+    /** The parent opened the link and started the approving Checkout Session. */
+    public static final String EVT_AUTH_PARENTAL_CONSENT_CHECKOUT  = "auth.parental_consent.checkout";
+    /** The parent's payment cleared: the child's account has full access. */
+    public static final String EVT_AUTH_PARENTAL_CONSENT_GRANTED   = "auth.parental_consent.granted";
     public static final String EVT_API_KEY_CREATED    = "apikey.created";
     public static final String EVT_API_KEY_DELETED    = "apikey.deleted";
     public static final String EVT_BILLING_TOPUP_INTENT      = "billing.topup.intent";

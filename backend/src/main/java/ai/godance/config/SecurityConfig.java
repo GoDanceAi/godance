@@ -37,6 +37,7 @@ import com.nimbusds.jose.jwk.source.ImmutableSecret;
 
 import ai.godance.repository.UserRepository;
 import ai.godance.security.ApiKeyAuthFilter;
+import ai.godance.security.JwtService;
 import ai.godance.security.OAuthLoginFailureHandler;
 import ai.godance.security.OAuthLoginNonce;
 import ai.godance.security.OAuthLoginSuccessHandler;
@@ -67,6 +68,12 @@ public class SecurityConfig {
     /** Authorities a signed-in session's JWT carries ({@code scope} = the user's role). */
     private static final String SESSION_USER = "SCOPE_USER";
     private static final String SESSION_ADMIN = "SCOPE_ADMIN";
+    /**
+     * A child's account waiting for a parent's consent carries this instead
+     * of its role ({@link JwtService#PENDING_CONSENT_SCOPE}). Admitted on
+     * the two routes the waiting screen uses and nowhere else.
+     */
+    private static final String SESSION_PENDING_CONSENT = JwtService.PENDING_CONSENT_AUTHORITY;
 
     @Bean
     PasswordEncoder passwordEncoder() {
@@ -160,6 +167,18 @@ public class SecurityConfig {
                         // owner has no session on that account.
                         .pathMatchers(HttpMethod.POST,
                                 "/v1/auth/email/release", "/v1/auth/email/release-link").permitAll()
+                        // Parental consent: the token emailed to the parent is the
+                        // proof, and the parent has no account.
+                        .pathMatchers(HttpMethod.GET, "/v1/auth/parental-consent").permitAll()
+                        .pathMatchers(HttpMethod.POST, "/v1/auth/parental-consent/checkout").permitAll()
+                        // A child's account waiting for that consent may read its
+                        // own profile (to show the waiting screen) and re-send the
+                        // email to the parent. Nothing else: the rules below admit
+                        // SESSION_USER / SESSION_ADMIN / API keys only.
+                        .pathMatchers(HttpMethod.GET, "/v1/auth/me")
+                                .hasAnyAuthority(SESSION_USER, SESSION_ADMIN, SESSION_PENDING_CONSENT)
+                        .pathMatchers(HttpMethod.POST, "/v1/auth/parental-consent/resend")
+                                .hasAuthority(SESSION_PENDING_CONSENT)
                         // Public read-only: model catalog (model picker) and
                         // provider status board (marketing /status page).
                         .pathMatchers(HttpMethod.GET, "/v1/models", "/v1/status").permitAll()

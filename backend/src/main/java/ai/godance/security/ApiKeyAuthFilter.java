@@ -10,6 +10,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.ReactiveSecurityContextHolder;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -77,14 +78,25 @@ public class ApiKeyAuthFilter {
     /**
      * 403 for a caller the authorization rules refuse, as problem+json. An
      * API key reaches the model API only, so a key on any other route is
-     * told to sign in instead.
+     * told to sign in instead. A child's account waiting for a parent's
+     * consent is told that.
      */
     public static Mono<Void> accessDenied(ServerWebExchange exchange, AccessDeniedException denied) {
         String header = exchange.getRequest().getHeaders().getFirst(HttpHeaders.AUTHORIZATION);
-        String detail = isApiKeyToken(header)
-                ? "API keys can call the model API only; sign in to manage the account."
-                : "Access denied.";
-        return ProblemResponse.write(exchange, HttpStatus.FORBIDDEN, detail);
+        if (isApiKeyToken(header)) {
+            return ProblemResponse.write(exchange, HttpStatus.FORBIDDEN,
+                    "API keys can call the model API only; sign in to manage the account.");
+        }
+        return exchange.getPrincipal()
+                .map(principal -> principal instanceof Authentication auth
+                        && auth.getAuthorities().stream().anyMatch(
+                                a -> JwtService.PENDING_CONSENT_AUTHORITY.equals(a.getAuthority())))
+                .defaultIfEmpty(false)
+                .flatMap(pendingConsent -> ProblemResponse.write(exchange, HttpStatus.FORBIDDEN,
+                        pendingConsent
+                                ? "This account is waiting for a parent's approval. We emailed them "
+                                        + "a link; once they approve, sign in again."
+                                : "Access denied."));
     }
 
     public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {

@@ -13,6 +13,7 @@ import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 import org.springframework.stereotype.Service;
 
 import ai.godance.config.JwtProperties;
+import ai.godance.domain.AgeStatus;
 import ai.godance.domain.User;
 
 /**
@@ -26,6 +27,17 @@ public class JwtService {
 
     /** The user's {@code session_version} at issue time. */
     public static final String SESSION_VERSION_CLAIM = "session_version";
+
+    /**
+     * The {@code scope} of a child's account waiting for a parent's
+     * approval, in place of the role. It becomes the authority
+     * {@code SCOPE_PENDING_CONSENT}, which {@code SecurityConfig} admits
+     * only where the waiting screen needs it. Granting consent bumps the
+     * session version, so these tokens stop working then.
+     */
+    public static final String PENDING_CONSENT_SCOPE = "PENDING_CONSENT";
+    /** The authority a {@link #PENDING_CONSENT_SCOPE} token grants. */
+    public static final String PENDING_CONSENT_AUTHORITY = "SCOPE_" + PENDING_CONSENT_SCOPE;
 
     private final JwtEncoder encoder;
     private final JwtProperties props;
@@ -45,12 +57,19 @@ public class JwtService {
                 .expiresAt(exp)
                 .subject(user.getId().toString())
                 .claim("email", user.getEmail())
-                .claim("scope", user.getRole().name())   // SimpleGrantedAuthority → "SCOPE_USER" / "SCOPE_ADMIN"
+                .claim("scope", scopeFor(user))   // SimpleGrantedAuthority → "SCOPE_USER" / "SCOPE_ADMIN" / ...
                 .claim(SESSION_VERSION_CLAIM, user.getSessionVersion())
                 .build();
         JwsHeader header = JwsHeader.with(MacAlgorithm.HS256).build();
         String token = encoder.encode(JwtEncoderParameters.from(header, claims)).getTokenValue();
         return new IssuedToken(token, exp);
+    }
+
+    /** The role, unless the account is a child's still waiting for a parent's consent. */
+    static String scopeFor(User user) {
+        return user.getAgeStatus() == AgeStatus.CONSENT_PENDING
+                ? PENDING_CONSENT_SCOPE
+                : user.getRole().name();
     }
 
     /** Convenience: caller already authenticated, returns the {@code sub} as UUID. */

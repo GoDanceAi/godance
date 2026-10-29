@@ -50,6 +50,8 @@ export function makeUser(overrides: Partial<MeResponse> = {}): MeResponse {
     dailyCreditCapCents: null,
     monthlyCreditCapCents: null,
     createdAt: '2026-10-01T00:00:00Z',
+    ageStatus: 'ADULT',
+    parentEmailMasked: null,
     ...overrides,
   };
 }

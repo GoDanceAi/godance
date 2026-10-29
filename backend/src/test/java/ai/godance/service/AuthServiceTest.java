@@ -72,7 +72,8 @@ class AuthServiceTest {
         webhooks = mock(WebhookSigner.class);
         mail = mock(MailService.class);
         audit = mock(AuditLogService.class);
-        auth = new AuthService(users, apiKeys, passwords, jwt, webhooks, audit, mail);
+        auth = new AuthService(users, apiKeys, passwords, jwt, webhooks, audit, mail,
+                mock(ParentalConsentService.class));
         when(users.findByEmailVerificationToken(any())).thenReturn(Optional.empty());
         when(users.findByEmail(any())).thenReturn(Optional.empty());
         when(users.findByPasswordResetTokenHash(any())).thenReturn(Optional.empty());

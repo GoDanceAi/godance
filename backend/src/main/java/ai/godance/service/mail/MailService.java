@@ -1,5 +1,6 @@
 package ai.godance.service.mail;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 
@@ -10,10 +11,12 @@ import org.springframework.stereotype.Service;
 import ai.godance.config.AdminProperties;
 import ai.godance.domain.ModelChangeProposal;
 import ai.godance.domain.User;
+import ai.godance.service.ParentalNotice;
 
 /**
  * The transactional email templates (the four from brief 02, plus
- * topup-payment-failed and password-reset), inline — subject + text +
+ * topup-payment-failed, password-reset and the two parental-consent
+ * emails), inline — subject + text +
  * minimal HTML, no template engine. Call sites inject this facade and
  * never touch the {@link EmailSender} directly. Links point at the SPA
  * ({@link MailProperties#appBaseUrl()}).
@@ -120,6 +123,105 @@ public class MailService {
         } catch (Exception e) {
             log.error("password-reset build/send failed for {}: {}", user.getId(), e.getMessage());
         }
+    }
+
+    /**
+     * parental-consent-request — to the parent address a child under 16
+     * gave at signup. Carries the direct notice ({@link ParentalNotice})
+     * and the single-use approval link; {@code token} is the plaintext,
+     * only its hash is stored. The approval itself happens on the page the
+     * link opens (a paid top-up on the child's account).
+     */
+    public void sendParentalConsentRequest(User child, String token, Duration linkLifetime) {
+        try {
+            String to = child.getParentEmail();
+            String link = props.appBaseUrl() + "/parent-consent?token=" + token;
+            String name = firstName(child);
+            ParentalNotice notice = ParentalNotice.CURRENT;
+            long days = linkLifetime.toDays();
+            String stubLine = "Parental consent URL for " + to + ": " + link;
+
+            StringBuilder text = new StringBuilder(stubLine).append("\n\n")
+                    .append("Hello,\n\n")
+                    .append(name).append(" signed up for Godance, an app that answers questions and\n")
+                    .append("makes images and videos with AI, and gave us your email address as their\n")
+                    .append("parent or guardian. We use it only to ask for your consent.\n\n")
+                    .append("Because they are a child, Godance needs your consent before it collects or\n")
+                    .append("uses their personal information. Until you approve, their account is locked\n")
+                    .append("and they can't use it.\n\n")
+                    .append("WHAT GODANCE COLLECTS\n");
+            StringBuilder items = new StringBuilder();
+            for (String item : notice.collected()) {
+                text.append("- ").append(item).append('\n');
+                items.append("<li>").append(escape(item)).append("</li>");
+            }
+            text.append(notice.notStored()).append("\n\n")
+                    .append("WHO ELSE SEES IT\n")
+                    .append(notice.sharing()).append("\n")
+                    .append(notice.noSale()).append("\n\n")
+                    .append("YOUR CHOICES\n")
+                    .append(notice.parentRights()).append("\n")
+                    .append("Full privacy policy: ").append(notice.privacyPolicyUrl()).append("\n\n")
+                    .append("HOW TO APPROVE\n")
+                    .append("Open the link at the top of this email. You approve by adding credit to\n")
+                    .append(name).append("'s account with your own card, an amount you choose. The card\n")
+                    .append("payment is how we confirm that a parent is approving. The link works once,\n")
+                    .append("for ").append(days).append(" days.\n\n")
+                    .append("Not your child, or you don't approve? Ignore this email and the account stays\n")
+                    .append("locked. To have it deleted, email ").append(notice.contactEmail()).append(".\n");
+
+            String html = "<p>Hello,</p>"
+                    + "<p>" + escape(name) + " signed up for Godance, an app that answers questions and "
+                    + "makes images and videos with AI, and gave us your email address as their parent "
+                    + "or guardian. We use it only to ask for your consent.</p>"
+                    + "<p>Because they are a child, Godance needs your consent before it collects or uses "
+                    + "their personal information. Until you approve, their account is locked and they "
+                    + "can't use it.</p>"
+                    + "<h3>What Godance collects</h3><ul>" + items + "</ul>"
+                    + "<p>" + escape(notice.notStored()) + "</p>"
+                    + "<h3>Who else sees it</h3>"
+                    + "<p>" + escape(notice.sharing()) + "</p>"
+                    + "<p>" + escape(notice.noSale()) + "</p>"
+                    + "<h3>Your choices</h3>"
+                    + "<p>" + escape(notice.parentRights()) + " Read the full "
+                    + "<a href=\"" + escape(notice.privacyPolicyUrl()) + "\">privacy policy</a>.</p>"
+                    + "<h3>How to approve</h3>"
+                    + "<p><a href=\"" + escape(link) + "\">Open the approval page</a>. You approve by "
+                    + "adding credit to " + escape(name) + "'s account with your own card, an amount you "
+                    + "choose. The card payment is how we confirm that a parent is approving. The link "
+                    + "works once, for " + days + " days.</p>"
+                    + "<p>Not your child, or you don't approve? Ignore this email and the account stays "
+                    + "locked. To have it deleted, email " + escape(notice.contactEmail()) + ".</p>";
+            sender.send(List.of(to), "Your child asked to use Godance: your consent is needed",
+                    text.toString(), html);
+        } catch (Exception e) {
+            log.error("parental-consent-request build/send failed for {}: {}", child.getId(), e.getMessage());
+        }
+    }
+
+    /** parental-consent-granted — to the child, once the parent's payment has cleared. */
+    public void sendParentalConsentGranted(User child) {
+        try {
+            String login = props.appBaseUrl() + "/login";
+            String stubLine = "Parental consent granted for " + child.getEmail();
+            String text = stubLine + "\n\n"
+                    + "Hi " + firstName(child) + ",\n\n"
+                    + "Your parent approved your Godance account, so it's ready to use.\n"
+                    + "Sign in again to start: " + login + "\n\n"
+                    + "We've also sent you a link to confirm your email address.\n";
+            String html = "<p>Hi " + escape(firstName(child)) + ",</p>"
+                    + "<p>Your parent approved your Godance account, so it's ready to use. "
+                    + "<a href=\"" + escape(login) + "\">Sign in again</a> to start.</p>"
+                    + "<p>We've also sent you a link to confirm your email address.</p>";
+            sender.send(List.of(child.getEmail()), "Your Godance account is ready", text, html);
+        } catch (Exception e) {
+            log.error("parental-consent-granted build/send failed for {}: {}", child.getId(), e.getMessage());
+        }
+    }
+
+    private static String firstName(User u) {
+        String full = u.getFullName() == null ? "" : u.getFullName().strip();
+        return full.isEmpty() ? "Your child" : full.split("\\s+", 2)[0];
     }
 
     /**

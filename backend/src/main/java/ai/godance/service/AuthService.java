@@ -6,6 +6,9 @@ import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.YearMonth;
+import java.time.ZoneOffset;
 import java.util.Base64;
 import java.util.HexFormat;
 import java.util.Map;
@@ -18,6 +21,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import ai.godance.domain.AgeStatus;
 import ai.godance.domain.AuditOutcome;
 import ai.godance.domain.User;
 import ai.godance.domain.UserRole;
@@ -69,10 +73,11 @@ public class AuthService {
     private final WebhookSigner webhooks;
     private final AuditLogService audit;
     private final MailService mail;
+    private final ParentalConsentService parentalConsent;
 
     public AuthService(UserRepository users, ApiKeyRepository apiKeys, PasswordEncoder passwords,
                        JwtService jwt, WebhookSigner webhooks, AuditLogService audit,
-                       MailService mail) {
+                       MailService mail, ParentalConsentService parentalConsent) {
         this.users = users;
         this.apiKeys = apiKeys;
         this.passwords = passwords;
@@ -80,13 +85,28 @@ public class AuthService {
         this.webhooks = webhooks;
         this.audit = audit;
         this.mail = mail;
+        this.parentalConsent = parentalConsent;
     }
 
+    /**
+     * Create a password account. With a {@code birthMonth} that makes the
+     * person under {@link ParentalConsentService#CONSENT_AGE}, a parent's
+     * email is required, the account starts
+     * {@link AgeStatus#CONSENT_PENDING} (its JWT has the restricted scope),
+     * and the parent, not the child, gets the first email. Without a birth
+     * month (API clients) the account is an adult's: accepting the Terms
+     * attests the age.
+     */
     // noRollbackFor keeps the DENIED audit row. The duplicate check throws
     // before the user is saved, so the audit row is the only write it commits.
     @Transactional(noRollbackFor = ResponseStatusException.class)
     public AuthResponse signup(SignupRequest req, String ipAddress) {
         String email = req.email().trim().toLowerCase();
+        Instant now = Instant.now();
+        YearMonth birthMonth = parseBirthMonth(req.birthMonth(), now);
+        boolean child = birthMonth != null
+                && ParentalConsentService.needsConsent(birthMonth, LocalDate.ofInstant(now, ZoneOffset.UTC));
+        String parentEmail = child ? requireParentEmail(req.parentEmail(), email) : null;
         if (users.existsByEmail(email)) {
             audit.record(AuditLogService.EVT_AUTH_SIGNUP, AuditOutcome.DENIED,
                     null, ipAddress, Map.of("email", email, "reason", "duplicate"));
@@ -101,14 +121,26 @@ public class AuthService {
         u.setActive(true);
         u.setEmailVerified(false);
         u.setEmailVerificationToken(randomToken());
-        u.setEmailVerificationSentAt(Instant.now());
+        u.setBirthMonth(birthMonth == null ? null : birthMonth.atDay(1));
+        String consentToken = null;
+        if (child) {
+            // The verification link needs a full session to open, so it is
+            // sent once a parent has approved (ParentalConsentService).
+            consentToken = parentalConsent.requestConsent(u, parentEmail, now);
+        } else {
+            u.setEmailVerificationSentAt(now);
+        }
         users.save(u);
 
-        // Mail failures are swallowed inside MailService — a failed send must not fail signup.
-        mail.sendVerificationEmail(u);
-
         audit.record(AuditLogService.EVT_AUTH_SIGNUP, AuditOutcome.SUCCESS,
-                u.getId(), ipAddress, Map.of("email", email));
+                u.getId(), ipAddress, Map.of("email", email, "ageStatus", u.getAgeStatus().name()));
+
+        // Mail failures are swallowed inside MailService — a failed send must not fail signup.
+        if (child) {
+            parentalConsent.sendRequest(u, consentToken, ipAddress, "signup");
+        } else {
+            mail.sendVerificationEmail(u);
+        }
 
         IssuedToken issued = jwt.issueFor(u);
         return AuthResponse.bearer(issued.token(), issued.expiresAt());
@@ -463,6 +495,39 @@ public class AuthService {
         return AuthResponse.bearer(issued.token(), issued.expiresAt());
     }
 
+    /** {@code YYYY-MM} (format checked by the DTO), or null when not given. Not in the future. */
+    private static YearMonth parseBirthMonth(String raw, Instant now) {
+        if (raw == null || raw.isBlank()) return null;
+        YearMonth month = YearMonth.parse(raw.trim());
+        if (month.isAfter(YearMonth.from(now.atZone(ZoneOffset.UTC)))) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Your birth month can't be in the future.");
+        }
+        if (month.getYear() < 1900) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Check the year you were born.");
+        }
+        return month;
+    }
+
+    /** A child's parent's address: required, real, and not the child's own. */
+    private static String requireParentEmail(String raw, String childEmail) {
+        String parent = raw == null ? "" : raw.trim().toLowerCase();
+        if (parent.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Enter a parent's or guardian's email address. We need their approval "
+                            + "before you can use Godance.");
+        }
+        if (parent.equals(childEmail)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Your parent's or guardian's email address must be different from yours.");
+        }
+        if (parent.endsWith(User.SYNTHETIC_EMAIL_SUFFIX)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Enter an email address your parent or guardian can receive mail at.");
+        }
+        return parent;
+    }
+
     @Transactional(readOnly = true)
     public User loadById(UUID id) {
         return users.findById(id).orElseThrow(() ->
@@ -480,7 +545,7 @@ public class AuthService {
         return Base64.getUrlEncoder().withoutPadding().encodeToString(raw);
     }
 
-    /** What {@code users.password_reset_token_hash} stores for a reset token. */
+    /** What {@code users.password_reset_token_hash} (and the parental-consent token hash) stores. */
     static String sha256Hex(String token) {
         try {
             byte[] digest = MessageDigest.getInstance("SHA-256")
