@@ -1,5 +1,8 @@
 package ai.godance.service;
 
+import java.time.Instant;
+import java.util.UUID;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -15,6 +18,7 @@ import com.stripe.model.checkout.Session;
 import com.stripe.net.Webhook;
 import com.stripe.param.CustomerCreateParams;
 import com.stripe.param.PaymentIntentCreateParams;
+import com.stripe.param.PaymentIntentListParams;
 import com.stripe.param.checkout.SessionCreateParams;
 import com.stripe.param.checkout.SessionRetrieveParams;
 
@@ -145,13 +149,19 @@ public class StripeService {
         return PAYMENT_METHOD_TYPE_CARD.equals(paymentMethodType);
     }
 
+    /** PaymentIntent metadata key naming the auto-recharge attempt that created it. */
+    public static final String ATTEMPT_METADATA_KEY = "auto_recharge_attempt_id";
+
     /**
-     * Charge a saved card off-session. Used by auto-recharge.
-     * Throws {@link StripeException} for any decline / SCA-required / etc;
-     * caller treats that as a hard failure and disables auto-recharge.
+     * Charge a saved card off-session. Used by auto-recharge; the attempt id
+     * goes on the PaymentIntent as metadata so the charge can be found again
+     * ({@link #findPaymentIntentForAttempt}). Throws {@link StripeException}
+     * for any decline / SCA-required / network failure; the caller decides
+     * which of those are definite.
      */
     public PaymentIntent chargeOffSession(String stripeCustomerId, String paymentMethodId,
-                                          long amountCents, String idempotencyKey) throws StripeException {
+                                          long amountCents, String idempotencyKey,
+                                          UUID attemptId) throws StripeException {
         PaymentIntentCreateParams params = PaymentIntentCreateParams.builder()
                 .setAmount(amountCents)
                 .setCurrency(billing.currency())
@@ -164,11 +174,37 @@ public class StripeService {
                 // this list, Stripe rejects the request for any other saved type
                 // instead of starting the debit.
                 .addPaymentMethodType(PAYMENT_METHOD_TYPE_CARD)
+                .putMetadata(ATTEMPT_METADATA_KEY, attemptId.toString())
                 .build();
         com.stripe.net.RequestOptions opts = com.stripe.net.RequestOptions.builder()
                 .setIdempotencyKey(idempotencyKey)
                 .build();
         return PaymentIntent.create(params, opts);
+    }
+
+    /**
+     * The PaymentIntent an auto-recharge attempt created, or null when Stripe
+     * has none. Lists the customer's PaymentIntents from five minutes before
+     * the attempt on and matches the attempt id in their metadata. A list
+     * read is consistent, unlike Stripe's search, so null means the charge
+     * never reached Stripe.
+     */
+    public PaymentIntent findPaymentIntentForAttempt(String stripeCustomerId, UUID attemptId,
+                                                     Instant attemptCreatedAt) throws StripeException {
+        PaymentIntentListParams params = PaymentIntentListParams.builder()
+                .setCustomer(stripeCustomerId)
+                .setCreated(PaymentIntentListParams.Created.builder()
+                        .setGte(attemptCreatedAt.minusSeconds(300).getEpochSecond())
+                        .build())
+                .setLimit(100L)
+                .build();
+        String wanted = attemptId.toString();
+        for (PaymentIntent pi : PaymentIntent.list(params).autoPagingIterable()) {
+            if (pi.getMetadata() != null && wanted.equals(pi.getMetadata().get(ATTEMPT_METADATA_KEY))) {
+                return pi;
+            }
+        }
+        return null;
     }
 
     /**
