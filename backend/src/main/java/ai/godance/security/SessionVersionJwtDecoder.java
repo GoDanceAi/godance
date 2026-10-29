@@ -23,6 +23,10 @@ import reactor.core.scheduler.Schedulers;
  * JWT held by whoever had the account before the reset could mint a new
  * API key or read the new webhook signing secret straight away.
  *
+ * <p>A disabled account ({@code is_active = false}) fails the same way, so
+ * suspending a user ends their sessions on the next request, not when the
+ * tokens expire.
+ *
  * <p>Costs one primary-key lookup per JWT-authenticated request. API-key
  * requests never reach a JWT decoder ({@link ApiKeyAuthFilter}).
  */
@@ -51,7 +55,7 @@ public class SessionVersionJwtDecoder implements ReactiveJwtDecoder {
             throw new BadJwtException("token subject is not a user id");
         }
         int current = users.findSessionVersionById(userId)
-                .orElseThrow(() -> new BadJwtException("token user no longer exists"));
+                .orElseThrow(() -> new BadJwtException("token user no longer exists or is disabled"));
         if (JwtService.sessionVersionOf(jwt) != current) {
             throw new BadJwtException("session has been revoked; sign in again");
         }

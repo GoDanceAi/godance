@@ -20,6 +20,7 @@ import org.springframework.web.server.WebFilterChain;
 
 import ai.godance.domain.ApiKey;
 import ai.godance.repository.ApiKeyRepository;
+import ai.godance.repository.UserRepository;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
@@ -59,10 +60,12 @@ public class ApiKeyAuthFilter {
 
     private final ApiKeyRepository apiKeys;
     private final ApiKeyMinter minter;
+    private final UserRepository users;
 
-    public ApiKeyAuthFilter(ApiKeyRepository apiKeys, ApiKeyMinter minter) {
+    public ApiKeyAuthFilter(ApiKeyRepository apiKeys, ApiKeyMinter minter, UserRepository users) {
         this.apiKeys = apiKeys;
         this.minter = minter;
+        this.users = users;
     }
 
     /** True when the bearer token is a Godance API key (vs. a JWT). */
@@ -109,6 +112,10 @@ public class ApiKeyAuthFilter {
             throw new ApiKeyAuthException(HttpStatus.UNAUTHORIZED, "API key has expired");
         }
         enforceIpAllowlist(key, clientIp);
+        // A disabled account's keys stop working at once, without revoking each one.
+        if (!users.existsByIdAndActiveTrue(key.getUserId())) {
+            throw new ApiKeyAuthException(HttpStatus.UNAUTHORIZED, "account is disabled");
+        }
         key.setLastUsedAt(Instant.now());
         apiKeys.save(key);
         return toAuthentication(key);

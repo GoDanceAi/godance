@@ -12,14 +12,12 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.server.ResponseStatusException;
 
 import tools.jackson.databind.ObjectMapper;
 
 import ai.godance.domain.GenerationJob;
-import ai.godance.domain.JobStatus;
 import ai.godance.domain.Region;
 import ai.godance.domain.UsageRecord;
 import ai.godance.gateway.CostCalculator;
@@ -29,8 +27,6 @@ import ai.godance.gateway.ImageProviderAdapter;
 import ai.godance.gateway.ImageProviderGateway;
 import ai.godance.gateway.ModelCatalog;
 import ai.godance.gateway.ModelCatalog.ModelInfo;
-import ai.godance.repository.GenerationJobRepository;
-import ai.godance.repository.UsageRecordRepository;
 import ai.godance.security.WebhookSigner;
 import ai.godance.storage.ObjectStorageClient;
 import reactor.core.publisher.Mono;
@@ -44,30 +40,34 @@ import reactor.core.scheduler.Schedulers;
  *   <li>Cost is per-image flat; pre-debit covers the whole job up front
  *       (image gen has no "estimated then reconciled" gap — cost is
  *       determined by image count, which is known at request time).</li>
- *   <li>Insert {@link GenerationJob} row in {@code QUEUED} state for
- *       audit/observability.</li>
+ *   <li>Insert the {@link GenerationJob} row in {@code QUEUED} state in the
+ *       same transaction as the pre-debit ({@link GenerationJobSettlement#accept}).</li>
  *   <li>Dispatch via {@link ImageProviderGateway} (Alicloud allowlist
  *       re-check happens here).</li>
  *   <li>Upstream {@code .block(timeout)} — synchronous from controller's
  *       view since we're already on a bounded-elastic worker.</li>
  *   <li>Upload bytes to our bucket; presigned URLs are returned.</li>
  *   <li>On success: {@code DONE} status + UsageRecord + optional webhook callback.</li>
- *   <li>On failure: refund + {@code FAILED} status + audit.</li>
+ *   <li>On failure, including storing the result: refund + {@code FAILED} status.</li>
  * </ol>
+ *
+ * <p>Every status change goes through {@link GenerationJobSettlement}, so a
+ * job ends exactly once even if {@link GenerationJobSweepJob} reaches it
+ * first (spec risks R-03, R-05).
  */
 @Service
 public class ImageGenerationService {
 
     private static final Logger log = LoggerFactory.getLogger(ImageGenerationService.class);
     private static final Duration UPSTREAM_BLOCK_TIMEOUT = Duration.ofMinutes(6);  // covers Flux poll-timeout
+    /** Longest a live worker can hold a job: the upstream wait plus time to store the result. */
+    private static final Duration LEASE = UPSTREAM_BLOCK_TIMEOUT.plusMinutes(10);
     private static final Duration WEBHOOK_TIMEOUT = Duration.ofSeconds(10);
 
     private final ModelCatalog catalog;
     private final CostCalculator calculator;
     private final ImageProviderGateway gateway;
-    private final CreditLedgerService ledger;
-    private final UsageRecordRepository usage;
-    private final GenerationJobRepository jobs;
+    private final GenerationJobSettlement settlement;
     private final ObjectStorageClient storage;
     private final ObjectMapper json;
     private final WebhookSigner webhookSigner;
@@ -75,17 +75,14 @@ public class ImageGenerationService {
     private final WebClient webhookClient;
 
     public ImageGenerationService(ModelCatalog catalog, CostCalculator calculator,
-                                  ImageProviderGateway gateway, CreditLedgerService ledger,
-                                  UsageRecordRepository usage, GenerationJobRepository jobs,
+                                  ImageProviderGateway gateway, GenerationJobSettlement settlement,
                                   ObjectStorageClient storage, ObjectMapper json,
                                   WebhookSigner webhookSigner,
                                   WebhookDestinations webhookDestinations) {
         this.catalog = catalog;
         this.calculator = calculator;
         this.gateway = gateway;
-        this.ledger = ledger;
-        this.usage = usage;
-        this.jobs = jobs;
+        this.settlement = settlement;
         this.storage = storage;
         this.json = json;
         this.webhookSigner = webhookSigner;
@@ -125,19 +122,12 @@ public class ImageGenerationService {
     public UUID executeAsync(UUID userId, ImageRequest request, String webhookUrl) {
         webhookDestinations.requireAllowed(webhookUrl);   // before any charge (spec risk R-02)
         ModelInfo model = requireModel(request);
-        int count = request.n() == null ? 1 : request.n();
-        long cost = Math.max(1L, calculator.imageCostCents(model, count));
-        String requestId = newRequestId();
+        GenerationJob job = acceptJob(userId, model, request, webhookUrl);
 
-        if (!ledger.preDebit(userId, cost, requestId)) {
-            throw new ResponseStatusException(HttpStatus.PAYMENT_REQUIRED,
-                    "insufficient credit; top up via /v1/billing/topup");
-        }
-        GenerationJob job = createJob(userId, model, request, cost, webhookUrl);
-
-        // Kick off async processing — the pre-debit + GenerationJob row are
-        // already committed, so even if the worker crashes the audit trail exists.
-        Mono.fromRunnable(() -> runJob(job, userId, model, request, cost, requestId, webhookUrl))
+        // Kick off async processing. The pre-debit and the job row are already
+        // committed together; if this worker dies, GenerationJobSweepJob fails
+        // and refunds the job once its lease runs out.
+        Mono.fromRunnable(() -> runJob(job, userId, model, request, webhookUrl))
                 .subscribeOn(Schedulers.boundedElastic())
                 .subscribe();
 
@@ -146,30 +136,37 @@ public class ImageGenerationService {
 
     private ImageResult executeInternal(UUID userId, ImageRequest request, String webhookUrl) {
         ModelInfo model = requireModel(request);
+        GenerationJob job = acceptJob(userId, model, request, webhookUrl);
+        return runJob(job, userId, model, request, webhookUrl);
+    }
+
+    /** Builds the job and accepts it: pre-debit and QUEUED row in one transaction, or 402. */
+    private GenerationJob acceptJob(UUID userId, ModelInfo model, ImageRequest request, String webhookUrl) {
         int count = request.n() == null ? 1 : request.n();
         long cost = Math.max(1L, calculator.imageCostCents(model, count));
-        String requestId = newRequestId();
-
-        if (!ledger.preDebit(userId, cost, requestId)) {
+        GenerationJob job = newJob(userId, model, request, cost, newRequestId(), webhookUrl);
+        if (!settlement.accept(job)) {
             throw new ResponseStatusException(HttpStatus.PAYMENT_REQUIRED,
                     "insufficient credit; top up via /v1/billing/topup");
         }
-        GenerationJob job = createJob(userId, model, request, cost, webhookUrl);
-        return runJob(job, userId, model, request, cost, requestId, webhookUrl);
+        return job;
     }
 
     private ImageResult runJob(GenerationJob job, UUID userId, ModelInfo model,
-                               ImageRequest request, long cost, String requestId, String webhookUrl) {
+                               ImageRequest request, String webhookUrl) {
+        long cost = job.getEstimatedCostCents();
         ImageProviderAdapter adapter;
         try {
             adapter = gateway.dispatch(model);
         } catch (RuntimeException e) {
-            failJob(job, "gateway dispatch: " + e.getMessage());
-            ledger.refundEstimate(userId, cost, requestId, "gateway dispatch failed");
+            settlement.fail(job, "gateway dispatch: " + e.getMessage(), "gateway dispatch failed");
             throw e;
         }
 
-        markRunning(job);
+        if (!settlement.start(job)) {
+            throw new ResponseStatusException(HttpStatus.GATEWAY_TIMEOUT,
+                    "image job expired before it started");
+        }
 
         List<GeneratedImage> upstream;
         try {
@@ -180,19 +177,34 @@ public class ImageGenerationService {
         } catch (RuntimeException e) {
             log.warn("Image upstream {} failed for job {}: {}",
                     model.provider(), job.getId(), e.getMessage());
-            failJob(job, "upstream: " + e.getMessage());
-            ledger.refundEstimate(userId, cost, requestId, "image upstream failed");
+            settlement.fail(job, "upstream: " + e.getMessage(), "image upstream failed");
             throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
                     "image provider error: " + e.getMessage());
         }
 
-        List<UploadedImage> uploaded = uploadAll(job.getId(), upstream);
-        completeJob(job, uploaded, cost);
-        usage.save(buildUsageRecord(userId, model, request, cost, requestId, upstream.size()));
+        // The provider has delivered. Storing the result and ending the job DONE
+        // share one guard: a failure here ends the job FAILED and refunded, never
+        // RUNNING with the pre-debit kept (spec risk R-05). The first image's URL
+        // goes into output_url; the rest live under images/<jobId>/.
+        List<UploadedImage> uploaded;
+        boolean completed;
+        try {
+            uploaded = uploadAll(job.getId(), upstream);
+            completed = settlement.complete(job, uploaded.isEmpty() ? null : uploaded.get(0).url(), cost,
+                    buildUsageRecord(userId, model, request, cost, job.getRequestId(), upstream.size()));
+        } catch (RuntimeException e) {
+            log.warn("Image job {} could not be finalised: {}", job.getId(), e.getMessage());
+            settlement.fail(job, "finalize: " + e.getMessage(), "image result could not be stored");
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "image result could not be stored");
+        }
+        if (!completed) {
+            // The sweep ended this job while it ran and has already refunded it.
+            throw new ResponseStatusException(HttpStatus.GATEWAY_TIMEOUT,
+                    "image job expired before it finished");
+        }
 
         ImageResult result = new ImageResult(job.getId(), uploaded, cost,
-                job.getCompletedAt() != null ? job.getCompletedAt().toEpochMilli() / 1000
-                                             : Instant.now().getEpochSecond());
+                job.getCompletedAt().toEpochMilli() / 1000);
         if (webhookUrl != null && !webhookUrl.isBlank()) {
             fireWebhook(userId, webhookUrl, result);
         }
@@ -254,9 +266,9 @@ public class ImageGenerationService {
         return model;
     }
 
-    @Transactional
-    public GenerationJob createJob(UUID userId, ModelInfo model, ImageRequest request,
-                                   long costCents, String webhookUrl) {
+    /** The job row, not yet saved; {@link GenerationJobSettlement#accept} saves it with the pre-debit. */
+    private GenerationJob newJob(UUID userId, ModelInfo model, ImageRequest request,
+                                 long costCents, String requestId, String webhookUrl) {
         GenerationJob job = new GenerationJob();
         job.setUserId(userId);
         job.setModality(model.modality());
@@ -269,38 +281,11 @@ public class ImageGenerationService {
         if (request.style() != null) prompt.put("style", request.style());
         if (request.quality() != null) prompt.put("quality", request.quality());
         job.setPrompt(prompt);
-        job.setStatus(JobStatus.QUEUED);
         job.setEstimatedCostCents(costCents);
+        job.setRequestId(requestId);
+        job.setLeaseExpiresAt(Instant.now().plus(LEASE));
         job.setWebhookUrl(webhookUrl);
-        return jobs.save(job);
-    }
-
-    @Transactional
-    public void markRunning(GenerationJob job) {
-        job.setStatus(JobStatus.RUNNING);
-        job.setStartedAt(Instant.now());
-        jobs.save(job);
-    }
-
-    @Transactional
-    public void completeJob(GenerationJob job, List<UploadedImage> uploaded, long actualCost) {
-        job.setStatus(JobStatus.DONE);
-        job.setActualCostCents(actualCost);
-        if (!uploaded.isEmpty()) {
-            // First image's URL goes into output_url; the rest live on disk under
-            // images/<jobId>/. Listing endpoint can enumerate via storage.
-            job.setOutputUrl(uploaded.get(0).url());
-        }
-        job.setCompletedAt(Instant.now());
-        jobs.save(job);
-    }
-
-    @Transactional
-    public void failJob(GenerationJob job, String error) {
-        job.setStatus(JobStatus.FAILED);
-        job.setErrorMessage(error);
-        job.setCompletedAt(Instant.now());
-        jobs.save(job);
+        return job;
     }
 
     private UsageRecord buildUsageRecord(UUID userId, ModelInfo model, ImageRequest request,

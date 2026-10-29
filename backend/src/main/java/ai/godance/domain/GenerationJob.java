@@ -72,6 +72,14 @@ public class GenerationJob {
     @Column(name = "completed_at")
     private Instant completedAt;
 
+    /** Ledger request id of the pre-debit; the refund key is {@code refund-<requestId>}. Null on pre-V16 rows. */
+    @Column(name = "request_id")
+    private String requestId;
+
+    /** Latest time a live worker can still hold the job; an open job past it is swept. Null on pre-V16 rows. */
+    @Column(name = "lease_expires_at")
+    private Instant leaseExpiresAt;
+
     @PrePersist
     void onCreate() {
         if (createdAt == null) createdAt = Instant.now();
@@ -121,6 +129,12 @@ public class GenerationJob {
 
     public Instant getCompletedAt() { return completedAt; }
     public void setCompletedAt(Instant completedAt) { this.completedAt = completedAt; }
+
+    public String getRequestId() { return requestId; }
+    public void setRequestId(String requestId) { this.requestId = requestId; }
+
+    public Instant getLeaseExpiresAt() { return leaseExpiresAt; }
+    public void setLeaseExpiresAt(Instant leaseExpiresAt) { this.leaseExpiresAt = leaseExpiresAt; }
 
     @Override
     public boolean equals(Object o) {

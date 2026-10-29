@@ -18,9 +18,16 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     Optional<User> findByStripeCustomerId(String stripeCustomerId);
     boolean existsByEmail(String email);
 
-    /** The per-request JWT check in {@code SessionVersionJwtDecoder} — one column, by primary key. */
-    @Query("SELECT u.sessionVersion FROM User u WHERE u.id = :id")
+    /**
+     * The per-request JWT check in {@code SessionVersionJwtDecoder} — one
+     * column, by primary key. Empty for a disabled account as well as a
+     * missing one, so disabling an account ends its sessions at once.
+     */
+    @Query("SELECT u.sessionVersion FROM User u WHERE u.id = :id AND u.active = true")
     Optional<Integer> findSessionVersionById(@Param("id") UUID id);
+
+    /** The per-request API-key check in {@code ApiKeyAuthFilter}: does the key's owner still have access? */
+    boolean existsByIdAndActiveTrue(UUID id);
 
     /** Admin console user search — case-insensitive email substring, newest first. */
     List<User> findByEmailContainingIgnoreCaseOrderByCreatedAtDesc(
