@@ -44,12 +44,15 @@ public class CreditLedgerService {
      * have to stand up Quartz; (b) future profile flags may disable it.
      */
     private final java.util.Optional<AutoRechargeTrigger> autoRecharge;
+    private final SpendingLimitService spendingLimits;
 
     public CreditLedgerService(CreditLedgerRepository ledger, UserRepository users,
-                               java.util.Optional<AutoRechargeTrigger> autoRecharge) {
+                               java.util.Optional<AutoRechargeTrigger> autoRecharge,
+                               SpendingLimitService spendingLimits) {
         this.ledger = ledger;
         this.users = users;
         this.autoRecharge = autoRecharge;
+        this.spendingLimits = spendingLimits;
     }
 
     public enum TopUpResult { APPLIED, DUPLICATE }
@@ -175,11 +178,24 @@ public class CreditLedgerService {
      */
     @Transactional
     public boolean preDebit(UUID userId, long estimateCents, String requestId) {
+        return preDebit(userId, null, estimateCents, requestId);
+    }
+
+    /**
+     * {@link #preDebit(UUID, long, String)} for a caller that may be an API
+     * key. The balance update locks the user's row; the estimate is then held
+     * against the user's and the key's spending caps in the same transaction
+     * (spec risk R-10), and a cap breach rolls the debit back with a 402
+     * ({@link SpendingLimitService.SpendingLimitExceededException}).
+     */
+    @Transactional
+    public boolean preDebit(UUID userId, UUID apiKeyId, long estimateCents, String requestId) {
         if (estimateCents <= 0) {
             throw new IllegalArgumentException("estimate must be positive; got " + estimateCents);
         }
         int updated = users.decrementBalanceIfSufficient(userId, estimateCents);
         if (updated == 0) return false;
+        spendingLimits.reserve(userId, apiKeyId, estimateCents, requestId);
         CreditLedger entry = new CreditLedger();
         entry.setUserId(userId);
         entry.setDeltaCents(-estimateCents);
@@ -287,6 +303,7 @@ public class CreditLedgerService {
     /** Refund the entire pre-debit (used when the upstream call fails). */
     @Transactional
     public void refundEstimate(UUID userId, long estimateCents, String requestId, String reason) {
+        spendingLimits.release(requestId);
         if (estimateCents <= 0) return;
         topUp(userId, estimateCents, CreditSource.ADJUSTMENT, requestId,
                 "refund-" + requestId, "full refund: " + reason);

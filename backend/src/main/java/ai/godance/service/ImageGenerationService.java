@@ -97,8 +97,8 @@ public class ImageGenerationService {
      * Synchronous image gen: blocks on upstream + upload, returns the
      * fully-resolved URLs. Use for OpenAI-compat clients.
      */
-    public ImageResult execute(UUID userId, ImageRequest request) {
-        return executeInternal(userId, request, null);
+    public ImageResult execute(UUID userId, UUID apiKeyId, ImageRequest request) {
+        return executeInternal(userId, apiKeyId, request, null);
     }
 
     /**
@@ -119,40 +119,41 @@ public class ImageGenerationService {
      * bounded-elastic worker. Client polls {@code GET /v1/jobs/{id}}
      * or receives a POST at {@code webhookUrl} on completion.
      */
-    public UUID executeAsync(UUID userId, ImageRequest request, String webhookUrl) {
+    public UUID executeAsync(UUID userId, UUID apiKeyId, ImageRequest request, String webhookUrl) {
         webhookDestinations.requireAllowed(webhookUrl);   // before any charge (spec risk R-02)
         ModelInfo model = requireModel(request);
-        GenerationJob job = acceptJob(userId, model, request, webhookUrl);
+        GenerationJob job = acceptJob(userId, apiKeyId, model, request, webhookUrl);
 
         // Kick off async processing. The pre-debit and the job row are already
         // committed together; if this worker dies, GenerationJobSweepJob fails
         // and refunds the job once its lease runs out.
-        Mono.fromRunnable(() -> runJob(job, userId, model, request, webhookUrl))
+        Mono.fromRunnable(() -> runJob(job, userId, apiKeyId, model, request, webhookUrl))
                 .subscribeOn(Schedulers.boundedElastic())
                 .subscribe();
 
         return job.getId();
     }
 
-    private ImageResult executeInternal(UUID userId, ImageRequest request, String webhookUrl) {
+    private ImageResult executeInternal(UUID userId, UUID apiKeyId, ImageRequest request, String webhookUrl) {
         ModelInfo model = requireModel(request);
-        GenerationJob job = acceptJob(userId, model, request, webhookUrl);
-        return runJob(job, userId, model, request, webhookUrl);
+        GenerationJob job = acceptJob(userId, apiKeyId, model, request, webhookUrl);
+        return runJob(job, userId, apiKeyId, model, request, webhookUrl);
     }
 
     /** Builds the job and accepts it: pre-debit and QUEUED row in one transaction, or 402. */
-    private GenerationJob acceptJob(UUID userId, ModelInfo model, ImageRequest request, String webhookUrl) {
+    private GenerationJob acceptJob(UUID userId, UUID apiKeyId, ModelInfo model, ImageRequest request,
+                                    String webhookUrl) {
         int count = request.n() == null ? 1 : request.n();
         long cost = Math.max(1L, calculator.imageCostCents(model, count));
         GenerationJob job = newJob(userId, model, request, cost, newRequestId(), webhookUrl);
-        if (!settlement.accept(job)) {
+        if (!settlement.accept(job, apiKeyId)) {
             throw new ResponseStatusException(HttpStatus.PAYMENT_REQUIRED,
                     "insufficient credit; top up via /v1/billing/topup");
         }
         return job;
     }
 
-    private ImageResult runJob(GenerationJob job, UUID userId, ModelInfo model,
+    private ImageResult runJob(GenerationJob job, UUID userId, UUID apiKeyId, ModelInfo model,
                                ImageRequest request, String webhookUrl) {
         long cost = job.getEstimatedCostCents();
         ImageProviderAdapter adapter;
@@ -191,7 +192,7 @@ public class ImageGenerationService {
         try {
             uploaded = uploadAll(job.getId(), upstream);
             completed = settlement.complete(job, uploaded.isEmpty() ? null : uploaded.get(0).url(), cost,
-                    buildUsageRecord(userId, model, request, cost, job.getRequestId(), upstream.size()));
+                    buildUsageRecord(userId, apiKeyId, model, request, cost, job.getRequestId(), upstream.size()));
         } catch (RuntimeException e) {
             log.warn("Image job {} could not be finalised: {}", job.getId(), e.getMessage());
             settlement.fail(job, "finalize: " + e.getMessage(), "image result could not be stored");
@@ -288,14 +289,14 @@ public class ImageGenerationService {
         return job;
     }
 
-    private UsageRecord buildUsageRecord(UUID userId, ModelInfo model, ImageRequest request,
+    private UsageRecord buildUsageRecord(UUID userId, UUID apiKeyId, ModelInfo model, ImageRequest request,
                                          long actualCents, String requestId, int imageCount) {
         long providerCostMicrocents = model.perImageMicrocents() * imageCount;
         long providerCostCents = (providerCostMicrocents + 5_000) / 10_000;
 
         UsageRecord r = new UsageRecord();
         r.setUserId(userId);
-        r.setApiKeyId(null);
+        r.setApiKeyId(apiKeyId);   // so per-key caps count media spend (spec risk R-10)
         r.setModality(model.modality());
         r.setModelName(model.modelName());
         r.setProvider(model.provider());

@@ -44,8 +44,15 @@ public class VideoController {
         VideoRequest domain = new VideoRequest(
                 req.model(), req.prompt(), req.size(), req.seconds(), req.n());
 
-        return Mono.fromCallable(() -> service.submit(userId, domain, req.webhookUrl()))
+        UUID apiKeyId = apiKeyId(jwt);
+        return Mono.fromCallable(() -> service.submit(userId, apiKeyId, domain, req.webhookUrl()))
                 .subscribeOn(Schedulers.boundedElastic())
                 .map(jobId -> ResponseEntity.accepted().body(AsyncJobAcknowledged.forJob(jobId)));
+    }
+
+    /** The API key id when the caller authenticated with an API key; null for a JWT session. */
+    private static UUID apiKeyId(Jwt jwt) {
+        String claim = jwt.getClaimAsString("api_key_id");
+        return claim == null ? null : UUID.fromString(claim);
     }
 }

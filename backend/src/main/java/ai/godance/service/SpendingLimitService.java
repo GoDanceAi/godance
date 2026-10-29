@@ -1,17 +1,23 @@
 package ai.godance.service;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.YearMonth;
 import java.time.ZoneOffset;
 import java.util.UUID;
 
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
 import ai.godance.domain.ApiKey;
+import ai.godance.domain.SpendHold;
 import ai.godance.domain.User;
 import ai.godance.repository.ApiKeyRepository;
+import ai.godance.repository.SpendHoldRepository;
 import ai.godance.repository.UserRepository;
 import ai.godance.repository.UsageRecordRepository;
 import ai.godance.service.mail.MailService;
@@ -35,6 +41,12 @@ import ai.godance.service.mail.MailService;
  *       columns.</li>
  * </ul>
  *
+ * <p>The check above runs before the request, on completed spend only. The
+ * hard guarantee is {@link #reserve}: inside the pre-debit transaction a
+ * capped account's request holds its estimate, and is refused if completed
+ * spend, other requests' open holds and this estimate together pass a cap
+ * (spec risk R-10).
+ *
  * Deliberately separate from {@code CreditLedgerService} — caps gate
  * requests; the ledger moves money. This does not touch the ledger.
  */
@@ -44,18 +56,81 @@ public class SpendingLimitService {
     private static final ZoneOffset UTC = ZoneOffset.UTC;
     /** Soft-warning threshold, as a percentage of the cap. */
     private static final int SOFT_PERCENT = 80;
+    /** Longest a hold counts: past any request's lifetime, so a lost request can't block an account. */
+    static final Duration HOLD_TTL = Duration.ofHours(1);
 
     private final UserRepository users;
     private final ApiKeyRepository apiKeys;
     private final UsageRecordRepository usage;
     private final MailService mail;
+    private final SpendHoldRepository holds;
 
     public SpendingLimitService(UserRepository users, ApiKeyRepository apiKeys,
-                                UsageRecordRepository usage, MailService mail) {
+                                UsageRecordRepository usage, MailService mail,
+                                SpendHoldRepository holds) {
         this.users = users;
         this.apiKeys = apiKeys;
         this.usage = usage;
         this.mail = mail;
+        this.holds = holds;
+    }
+
+    /**
+     * Holds a request's estimate against the caller's caps (spec risk R-10).
+     *
+     * <p>Runs inside the pre-debit transaction, after the balance update has
+     * locked the user's row, so requests from one account reserve one at a
+     * time and each sees the others' holds. A hold counts until the
+     * request's usage row exists or the request is refunded ({@link #release}),
+     * and for {@link #HOLD_TTL} at most. An account with no cap, on the user
+     * or on the key, writes no hold.
+     *
+     * @throws SpendingLimitExceededException when completed spend, open holds
+     *         and this estimate together would pass a hard cap
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void reserve(UUID userId, UUID apiKeyId, long cents, String requestId) {
+        User user = users.findById(userId).orElse(null);
+        ApiKey key = (apiKeyId != null) ? apiKeys.findById(apiKeyId).orElse(null) : null;
+        boolean userCapped = hasCap(user, true) || hasCap(user, false);
+        boolean keyCapped = hasCap(key, true) || hasCap(key, false);
+        if (!userCapped && !keyCapped) return;
+
+        Instant now = Instant.now();
+        Instant holdsSince = now.minus(HOLD_TTL);
+        Instant dayStart = LocalDate.now(UTC).atStartOfDay(UTC).toInstant();
+        Instant monthStart = YearMonth.now(UTC).atDay(1).atStartOfDay(UTC).toInstant();
+        holds.deleteClosedForUser(userId, holdsSince);
+
+        if (userCapped) {
+            long held = holds.sumOpenForUser(userId, holdsSince);
+            reserveCheck("daily spending cap", user.getDailyCreditCapCents(),
+                    () -> usage.sumCostCentsForUserSince(userId, dayStart), held, cents);
+            reserveCheck("monthly spending cap", user.getMonthlyCreditCapCents(),
+                    () -> usage.sumCostCentsForUserSince(userId, monthStart), held, cents);
+        }
+        if (keyCapped) {
+            long held = holds.sumOpenForApiKey(apiKeyId, holdsSince);
+            reserveCheck("API-key daily spending cap", key.getDailyCreditCapCents(),
+                    () -> usage.sumCostCentsForApiKeySince(apiKeyId, dayStart), held, cents);
+            reserveCheck("API-key monthly spending cap", key.getMonthlyCreditCapCents(),
+                    () -> usage.sumCostCentsForApiKeySince(apiKeyId, monthStart), held, cents);
+        }
+
+        SpendHold hold = new SpendHold();
+        hold.setRequestId(requestId);
+        hold.setUserId(userId);
+        hold.setApiKeyId(apiKeyId);
+        hold.setCents(cents);
+        holds.save(hold);
+    }
+
+    /** Ends a refunded request's hold. A request with no hold is a no-op. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void release(String requestId) {
+        if (holds.existsById(requestId)) {
+            holds.deleteById(requestId);
+        }
     }
 
     /**
@@ -144,6 +219,18 @@ public class SpendingLimitService {
         }
     }
 
+    /** Refuses the estimate when spent + held + estimate would pass the cap; reads spend only for a set cap. */
+    private static void reserveCheck(String label, Long capCents, java.util.function.LongSupplier spent,
+                                     long heldCents, long estimateCents) {
+        if (capCents == null || capCents <= 0) return;
+        long committed = spent.getAsLong() + heldCents;
+        if (committed + estimateCents > capCents) {
+            throw new SpendingLimitExceededException(
+                    label + " would be exceeded (" + committed + " of " + capCents
+                    + " cents used or held; this request needs up to " + estimateCents + ")");
+        }
+    }
+
     /** 80% threshold without floating point: spent/cap ≥ 0.8 ⇔ spent*100 ≥ cap*80. */
     private static boolean softCrossed(Long capCents, long spentCents) {
         return capCents != null && capCents > 0
@@ -160,10 +247,14 @@ public class SpendingLimitService {
         mail.sendSpendWarning(toEmail, subject, period, spentCents, capCents);
     }
 
-    /** Thrown on a hard-cap (100%) breach; the spending-limit filter maps it to 402. */
-    public static final class SpendingLimitExceededException extends RuntimeException {
+    /**
+     * Thrown on a hard-cap breach. A 402 wherever it surfaces: the
+     * spending-limit filter writes it itself, and from a controller (a
+     * reservation refused at pre-debit) WebFlux renders the status.
+     */
+    public static final class SpendingLimitExceededException extends ResponseStatusException {
         public SpendingLimitExceededException(String message) {
-            super(message);
+            super(HttpStatus.PAYMENT_REQUIRED, message);
         }
     }
 }

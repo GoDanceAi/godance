@@ -108,7 +108,7 @@ public class ChatCompletionService {
         long estimateCents = Math.max(1L,
                 calculator.estimateInputCents(primary, estimatedInputTokens));
 
-        if (!ledger.preDebit(userId, estimateCents, requestId)) {
+        if (!ledger.preDebit(userId, apiKeyId, estimateCents, requestId)) {
             throw new ResponseStatusException(HttpStatus.PAYMENT_REQUIRED,
                     "insufficient credit; top up via /v1/billing/topup");
         }
@@ -375,7 +375,13 @@ public class ChatCompletionService {
         long estimateCents = Math.max(1L,
                 calculator.estimateInputCents(primary, estimatedInputTokens));
 
-        if (!ledger.preDebit(userId, estimateCents, requestId)) {
+        boolean debited;
+        try {
+            debited = ledger.preDebit(userId, apiKeyId, estimateCents, requestId);
+        } catch (ResponseStatusException capReached) {
+            return Flux.error(capReached);
+        }
+        if (!debited) {
             return Flux.error(new ResponseStatusException(HttpStatus.PAYMENT_REQUIRED,
                     "insufficient credit; top up via /v1/billing/topup"));
         }

@@ -37,6 +37,7 @@ import ai.godance.domain.JobStatus;
 import ai.godance.repository.GenerationJobRepository;
 import ai.godance.repository.UserRepository;
 import ai.godance.service.CreditLedgerService;
+import ai.godance.web.dto.ApiKeyDtos.CreateApiKeyResponse;
 import ai.godance.web.dto.AuthDtos.AuthResponse;
 import ai.godance.web.dto.ImageDtos.AsyncJobAcknowledged;
 import ai.godance.web.dto.ImageDtos.JobView;
@@ -107,6 +108,7 @@ class ImageGenerationIntegrationTest {
     @Autowired UserRepository users;
     @Autowired CreditLedgerService ledger;
     @Autowired GenerationJobRepository jobs;
+    @Autowired ai.godance.repository.UsageRecordRepository usage;
 
     @BeforeEach
     void reset() {
@@ -205,6 +207,28 @@ class ImageGenerationIntegrationTest {
         // gpt-image-2: 53 000 µ¢ × 1.12 (12% image markup) = 59 360 µ¢ → HALF_UP /10 000 = 6¢.
         assertThat(done.actualCostCents()).isEqualTo(6L);
         awaitBalance(u.id(), 100_00L - 6L);
+    }
+
+    @Test
+    void generate_withApiKey_recordsTheKeyOnTheUsageRow() throws Exception {
+        Signed u = signupWithBalance(100_00L);
+        stubOneB64Image(openAiMock, "/v1/images/generations");
+        CreateApiKeyResponse key = http.post().uri("/v1/keys")
+                .header("Authorization", u.bearer())
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("name", "media-key"))
+                .exchange()
+                .expectStatus().isCreated()
+                .expectBody(CreateApiKeyResponse.class).returnResult().getResponseBody();
+
+        AsyncJobAcknowledged ack = submitImage("Bearer " + key.plaintext(),
+                Map.of("model", "gpt-image-2", "prompt", "A cat on a key", "n", 1));
+        JobView done = pollUntilTerminal(ack.jobId(), u.bearer());
+
+        assertThat(done.status()).isEqualTo(JobStatus.DONE);
+        // Per-key caps sum usage by api_key_id, so media spend must carry the key (spec risk R-10).
+        assertThat(usage.findByUserIdAndRecordedAtGreaterThanEqual(u.id(), java.time.Instant.now().minusSeconds(60)))
+                .singleElement().satisfies(r -> assertThat(r.getApiKeyId()).isEqualTo(key.id()));
     }
 
     // ===== Job lifecycle — Volcengine Ark Seedream ====================
