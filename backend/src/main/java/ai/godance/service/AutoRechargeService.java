@@ -1,5 +1,6 @@
 package ai.godance.service;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Set;
@@ -7,19 +8,23 @@ import java.util.UUID;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import com.stripe.exception.ApiConnectionException;
 import com.stripe.exception.CardException;
 import com.stripe.exception.StripeException;
 import com.stripe.model.PaymentIntent;
 
 import ai.godance.config.BillingProperties;
 import ai.godance.domain.AuditOutcome;
+import ai.godance.domain.AutoRechargeAttempt;
 import ai.godance.domain.CreditSource;
 import ai.godance.domain.User;
+import ai.godance.repository.AutoRechargeAttemptRepository;
 import ai.godance.repository.UserRepository;
 import ai.godance.service.CreditLedgerService.TopUpResult;
 import ai.godance.service.mail.MailService;
@@ -62,22 +67,34 @@ public class AutoRechargeService {
     private static final Set<String> UNRECOVERABLE_CARD_CODES = Set.of(
             "expired_card", "lost_card", "stolen_card", "pickup_card");
 
+    /**
+     * How long a PENDING attempt with no PaymentIntent at Stripe is left
+     * alone: longer than the SDK's request timeout, so the first request
+     * can't still be in flight when the attempt is retired.
+     */
+    static final Duration UNCONFIRMED_GRACE = Duration.ofMinutes(5);
+
     private final UserRepository users;
     private final CreditLedgerService ledger;
     private final StripeService stripe;
     private final AuditLogService audit;
     private final BillingProperties billing;
     private final MailService mail;
+    private final AutoRechargeAttemptRepository attempts;
+    private final AutoRechargeAttempts attemptLog;
 
     public AutoRechargeService(UserRepository users, CreditLedgerService ledger,
                                StripeService stripe, AuditLogService audit,
-                               BillingProperties billing, MailService mail) {
+                               BillingProperties billing, MailService mail,
+                               AutoRechargeAttemptRepository attempts, AutoRechargeAttempts attemptLog) {
         this.users = users;
         this.ledger = ledger;
         this.stripe = stripe;
         this.audit = audit;
         this.billing = billing;
         this.mail = mail;
+        this.attempts = attempts;
+        this.attemptLog = attemptLog;
     }
 
     @Transactional(readOnly = true)
@@ -149,15 +166,25 @@ public class AutoRechargeService {
 
     /**
      * Charge the saved card if auto-recharge is enabled and the balance is
-     * still below the configured threshold. Idempotent on best-effort —
-     * concurrent calls for the same user with overlapping wall-clock minutes
-     * share the same Stripe idempotency key. Returns the outcome for caller
-     * visibility (debit-trigger doesn't care; the cron logs the count).
+     * still below the configured threshold, and credit the ledger exactly
+     * once for each charge (spec risk R-04).
      *
-     * <p>Hard failure policy: any {@link StripeException} disables
-     * auto-recharge in the same transaction. The user has to re-enable
-     * (which presumably means updating their card first via a new
-     * interactive top-up). This matches "disable after 1 hard fail".
+     * <p>An {@link AutoRechargeAttempt} is committed before the charge is
+     * sent; its id is the Stripe idempotency key and the PaymentIntent's
+     * metadata. The credit and the attempt's resolution commit together, so
+     * a crash or rollback after the charge leaves the attempt PENDING. A
+     * PENDING attempt is settled before anything new is charged: from the
+     * next run here, or from the {@code payment_intent.succeeded} webhook
+     * ({@link #reconcileAttempt}), by finding its PaymentIntent. One that
+     * never reached Stripe is retired after {@link #UNCONFIRMED_GRACE}.
+     *
+     * <p>When Stripe's answer is unknown (a network failure, a 5xx, a 429)
+     * nothing is disabled: the attempt stays PENDING and the outcome is
+     * {@link Outcome#RETRY_LATER}. Any definite {@link StripeException} is a
+     * hard failure and disables auto-recharge in the same transaction. The
+     * user has to re-enable (which presumably means updating their card
+     * first via a new interactive top-up). This matches "disable after 1
+     * hard fail".
      *
      * <p>A saved payment method that isn't a card is never charged: it is
      * dropped and auto-recharge is disabled the same way, before any
@@ -165,6 +192,14 @@ public class AutoRechargeService {
      */
     @Transactional
     public Outcome chargeIfNeeded(UUID userId) {
+        AutoRechargeAttempt pending = attempts
+                .findByUserIdAndStatus(userId, AutoRechargeAttempt.Status.PENDING).orElse(null);
+        if (pending != null) {
+            Outcome resumed = resume(pending);
+            if (resumed != null) return resumed;
+            // The pending attempt never reached Stripe and was retired; charge afresh.
+        }
+
         User u = users.findById(userId).orElse(null);
         if (u == null || !u.isAutoRechargeEnabled())   return Outcome.SKIPPED_DISABLED;
         if (u.getStripePaymentMethodId() == null)      return Outcome.SKIPPED_NO_PM;
@@ -173,7 +208,6 @@ public class AutoRechargeService {
         if (threshold == null || topup == null)        return Outcome.SKIPPED_NO_CONFIG;
         if (u.getCreditBalanceCents() >= threshold)    return Outcome.SKIPPED_ABOVE_THRESHOLD;
 
-        String idem = idempotencyKey(u, topup);
         try {
             // Users who enabled before cards-only was enforced may have a bank
             // debit saved. chargeOffSession only accepts cards too, but drop
@@ -183,34 +217,136 @@ public class AutoRechargeService {
                 dropNonCardPaymentMethod(u, pmType, null);
                 return hardFail(u, "payment_method.type=" + pmType + ": auto-recharge needs a card");
             }
-            PaymentIntent pi = stripe.chargeOffSession(
-                    u.getStripeCustomerId(), u.getStripePaymentMethodId(), topup, idem);
-            // Stripe returned without throwing — status should be "succeeded".
-            // "requires_action" (SCA) for off-session charges throws StripeException;
-            // anything else non-succeeded we treat as hard fail.
-            if (!"succeeded".equals(pi.getStatus())) {
-                return hardFail(u, "payment_intent.status=" + pi.getStatus());
-            }
-            // Idempotency key combines userId + PI id — defends against the
-            // (unlikely-but-possible) case where Stripe reuses a PI id across
-            // users, and keeps tests with shared stubs honest.
-            String ledgerIdem = "autorecharge-" + userId + "-" + pi.getId();
-            TopUpResult result = ledger.topUp(
-                    userId, topup, CreditSource.STRIPE, pi.getId(), ledgerIdem,
-                    "Auto-recharge $" + (topup / 100.0));
-            audit.record(AuditLogService.EVT_BILLING_AUTORECHARGE_FIRED, AuditOutcome.SUCCESS,
-                    userId, null, Map.of(
-                            "topupCents", topup,
-                            "paymentIntentId", pi.getId(),
-                            "ledger", result.name()));
-            return Outcome.CHARGED;
         } catch (StripeException e) {
+            if (isOutcomeUnknown(e)) {
+                log.warn("auto-recharge for user {}: Stripe unavailable ({}); will retry", userId, e.getMessage());
+                return Outcome.RETRY_LATER;
+            }
+            return hardFail(u, e.getCode() == null ? e.getMessage() : e.getCode() + ": " + e.getMessage());
+        }
+
+        AutoRechargeAttempt attempt;
+        try {
+            attempt = attemptLog.begin(userId, topup);
+        } catch (DataIntegrityViolationException anotherRunHasOne) {
+            return Outcome.SKIPPED_IN_PROGRESS;
+        }
+        return charge(u, attempt);
+    }
+
+    /**
+     * Credits the charge a PENDING attempt made. Called from the
+     * {@code payment_intent.succeeded} webhook; does nothing for an attempt
+     * that is unknown or already resolved.
+     */
+    @Transactional
+    public void reconcileAttempt(UUID attemptId) {
+        attempts.findById(attemptId)
+                .filter(a -> a.getStatus() == AutoRechargeAttempt.Status.PENDING)
+                .ifPresent(this::resume);
+    }
+
+    /** Sends the attempt's charge and settles it, unless Stripe's answer is unknown. */
+    private Outcome charge(User u, AutoRechargeAttempt attempt) {
+        PaymentIntent pi;
+        try {
+            pi = stripe.chargeOffSession(u.getStripeCustomerId(), u.getStripePaymentMethodId(),
+                    attempt.getAmountCents(), attempt.idempotencyKey(), attempt.getId());
+        } catch (StripeException e) {
+            if (isOutcomeUnknown(e)) {
+                // The card may have been charged. The attempt stays PENDING, so
+                // the next run finds the charge instead of making another.
+                log.warn("auto-recharge attempt {} for user {}: outcome unknown ({}); will reconcile",
+                        attempt.getId(), u.getId(), e.getMessage());
+                return Outcome.RETRY_LATER;
+            }
             String declineCode = e instanceof CardException card ? card.getDeclineCode() : null;
             if (isUnrecoverableCardCode(e.getCode()) || isUnrecoverableCardCode(declineCode)) {
                 dropUnrecoverableCard(u, e.getCode(), declineCode);
             }
-            return hardFail(u, e.getCode() == null ? e.getMessage() : e.getCode() + ": " + e.getMessage());
+            String reason = e.getCode() == null ? e.getMessage() : e.getCode() + ": " + e.getMessage();
+            resolve(attempt, AutoRechargeAttempt.Status.FAILED, null, reason);
+            return hardFail(u, reason);
         }
+        return settle(u, attempt, pi);
+    }
+
+    /**
+     * Credits a succeeded PaymentIntent once and resolves the attempt with
+     * it, in the caller's transaction; any other status is a hard failure.
+     */
+    private Outcome settle(User u, AutoRechargeAttempt attempt, PaymentIntent pi) {
+        // "requires_action" (SCA) for off-session charges throws StripeException;
+        // anything else non-succeeded we treat as hard fail.
+        if (!"succeeded".equals(pi.getStatus())) {
+            String reason = "payment_intent.status=" + pi.getStatus();
+            resolve(attempt, AutoRechargeAttempt.Status.FAILED, pi.getId(), reason);
+            return hardFail(u, reason);
+        }
+        // Idempotency key combines userId + PI id — defends against the
+        // (unlikely-but-possible) case where Stripe reuses a PI id across
+        // users, and keeps tests with shared stubs honest.
+        String ledgerIdem = "autorecharge-" + u.getId() + "-" + pi.getId();
+        TopUpResult result = ledger.topUp(
+                u.getId(), attempt.getAmountCents(), CreditSource.STRIPE, pi.getId(), ledgerIdem,
+                "Auto-recharge $" + (attempt.getAmountCents() / 100.0));
+        resolve(attempt, AutoRechargeAttempt.Status.SUCCEEDED, pi.getId(), null);
+        audit.record(AuditLogService.EVT_BILLING_AUTORECHARGE_FIRED, AuditOutcome.SUCCESS,
+                u.getId(), null, Map.of(
+                        "topupCents", attempt.getAmountCents(),
+                        "paymentIntentId", pi.getId(),
+                        "attemptId", attempt.getId().toString(),
+                        "ledger", result.name()));
+        return Outcome.CHARGED;
+    }
+
+    /**
+     * Settles a PENDING attempt from what Stripe holds for it. Returns null
+     * when Stripe has no charge for it and none can still arrive: the attempt
+     * is then retired and the caller may make a new one.
+     */
+    private Outcome resume(AutoRechargeAttempt attempt) {
+        User u = users.findById(attempt.getUserId()).orElse(null);
+        if (u == null || u.getStripeCustomerId() == null) {
+            return Outcome.RETRY_LATER;
+        }
+        PaymentIntent pi;
+        try {
+            pi = stripe.findPaymentIntentForAttempt(
+                    u.getStripeCustomerId(), attempt.getId(), attempt.getCreatedAt());
+        } catch (StripeException e) {
+            log.warn("auto-recharge attempt {}: could not look up its charge ({}); will retry",
+                    attempt.getId(), e.getMessage());
+            return Outcome.RETRY_LATER;
+        }
+        if (pi != null) {
+            return settle(u, attempt, pi);
+        }
+        if (attempt.getCreatedAt().isAfter(Instant.now().minus(UNCONFIRMED_GRACE))) {
+            return Outcome.RETRY_LATER;   // the first request may still be in flight
+        }
+        attemptLog.retire(attempt.getId(), "no charge reached Stripe");
+        return null;
+    }
+
+    private void resolve(AutoRechargeAttempt attempt, AutoRechargeAttempt.Status status,
+                         String paymentIntentId, String failureReason) {
+        attempt.setStatus(status);
+        attempt.setPaymentIntentId(paymentIntentId);
+        attempt.setFailureReason(failureReason);
+        attempt.setResolvedAt(Instant.now());
+        attempts.save(attempt);
+    }
+
+    /**
+     * True when Stripe may not have answered for the request: the network
+     * failed, Stripe answered 5xx, or it asked us to slow down (429). None
+     * of these says the card was declined, so none disables auto-recharge.
+     */
+    static boolean isOutcomeUnknown(StripeException e) {
+        if (e instanceof ApiConnectionException) return true;
+        Integer status = e.getStatusCode();
+        return status != null && (status >= 500 || status == 429);
     }
 
     private static boolean isUnrecoverableCardCode(String code) {
@@ -266,16 +402,6 @@ public class AutoRechargeService {
     }
 
     /**
-     * Stripe idempotency key. Floored to the minute so the debit-trigger
-     * and the cron safety net can't double-charge if they race within the
-     * same window.
-     */
-    private static String idempotencyKey(User u, long topup) {
-        long minute = Instant.now().getEpochSecond() / 60;
-        return "autorecharge-" + u.getId() + "-" + topup + "-" + minute;
-    }
-
-    /**
      * 409: the saved payment method isn't a card. {@link #enable} drops the
      * method before throwing this, and that must not roll back.
      */
@@ -289,6 +415,10 @@ public class AutoRechargeService {
 
     public enum Outcome {
         CHARGED,
+        /** Nothing settled now; Stripe's answer is unknown or unavailable. The next run settles it. */
+        RETRY_LATER,
+        /** Another run holds this user's pending attempt. */
+        SKIPPED_IN_PROGRESS,
         SKIPPED_DISABLED,
         SKIPPED_NO_PM,
         SKIPPED_NO_CONFIG,
