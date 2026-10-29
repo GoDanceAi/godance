@@ -64,6 +64,10 @@ import reactor.core.publisher.Mono;
         RateLimitProperties.class})
 public class SecurityConfig {
 
+    /** Authorities a signed-in session's JWT carries ({@code scope} = the user's role). */
+    private static final String SESSION_USER = "SCOPE_USER";
+    private static final String SESSION_ADMIN = "SCOPE_ADMIN";
+
     @Bean
     PasswordEncoder passwordEncoder() {
         // Cost 12 — ~250ms per hash on commodity hardware. Tune up if/when we move to dedicated auth boxes.
@@ -162,8 +166,18 @@ public class SecurityConfig {
                         // Stripe (and any future) provider webhooks — authenticated by
                         // signature, not by JWT. Handler MUST reject bad signatures.
                         .pathMatchers(HttpMethod.POST, "/v1/billing/webhooks/**").permitAll()
-                        // Anything else needs a valid bearer token.
-                        .anyExchange().authenticated())
+                        // The model API: a signed-in session or an API key.
+                        .pathMatchers(HttpMethod.POST, "/v1/chat/completions",
+                                "/v1/images/generations", "/v1/videos/generations")
+                                .hasAnyAuthority(SESSION_USER, SESSION_ADMIN, ApiKeyAuthFilter.API_KEY_AUTHORITY)
+                        .pathMatchers(HttpMethod.GET, "/v1/jobs", "/v1/jobs/*", "/v1/usage")
+                                .hasAnyAuthority(SESSION_USER, SESSION_ADMIN, ApiKeyAuthFilter.API_KEY_AUTHORITY)
+                        // Everything else (keys, billing, webhook secret, conversations,
+                        // account) needs a signed-in session. Deny by default, so a
+                        // leaked key can't mint a key that outlives it, read the webhook
+                        // secret or turn on auto-recharge (spec risk R-01).
+                        .anyExchange().hasAnyAuthority(SESSION_USER, SESSION_ADMIN))
+                .exceptionHandling(e -> e.accessDeniedHandler(ApiKeyAuthFilter::accessDenied))
                 // API-key auth runs before the JWT bearer filter; on success it
                 // installs a Jwt-principal so downstream controllers stay agnostic
                 // to whether the caller used a JWT or an API key.

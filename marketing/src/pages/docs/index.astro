@@ -175,6 +175,9 @@ def verify(payload, header, secret):
     <h2 id="keys" class="scroll-mt-24 text-2xl font-bold mt-16 mb-4 text-fg">CRUD /v1/keys</h2>
     <p class="text-fg-muted">
       Send your key as <code class="code-chip">Authorization: Bearer gd_live_…</code>.
+      A key calls the model API only: chat completions, image and video generations,
+      jobs and usage. Everything else, these endpoints included, needs a signed-in
+      session; a key gets <code class="code-chip">403</code> there.
       Create keys in the dashboard or with these endpoints:
     </p>
     <ul class="mt-4 space-y-2 text-fg-muted">
