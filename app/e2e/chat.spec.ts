@@ -69,8 +69,7 @@ test.describe('chat', () => {
     await expect(page.getByPlaceholder('Ask anything')).toBeEnabled();
   });
 
-  // Bug: streamChat drops the problem+json body on errors, so the user sees "HTTP 402" instead of the API's reason.
-  test.fixme('a 402 shows the reason the API gives', async ({ page, api }) => {
+  test('a 402 shows the reason the API gives', async ({ page, api }) => {
     await openChat(page, api);
     api.on('POST', '/v1/chat/completions', problem(402, 'insufficient credit; top up via /v1/billing/topup'));
 
@@ -103,8 +102,7 @@ test.describe('chat', () => {
     }
   });
 
-  // Bug: ChatPage never aborts its stream on unmount, so leaving mid-reply keeps the paid request running.
-  test.fixme('leaving the page mid-stream closes the connection', async ({ page, api }) => {
+  test('leaving the page mid-stream closes the connection', async ({ page, api }) => {
     const live = await startLiveStream();
     try {
       await openChat(page, api);

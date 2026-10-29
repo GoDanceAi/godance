@@ -91,7 +91,15 @@ export async function* streamChat(path: string, body: unknown, signal?: AbortSig
     throw new ApiError(401, 'unauthorized');
   }
   if (!res.ok || !res.body) {
-    throw new ApiError(res.status, `HTTP ${res.status}`);
+    // Same problem+json reading as apiFetch, so a 402 says why.
+    let detail = `HTTP ${res.status}`;
+    try {
+      const problem = (await res.json()) as { detail?: string; title?: string };
+      detail = problem.detail || problem.title || detail;
+    } catch {
+      /* non-JSON body — keep the default */
+    }
+    throw new ApiError(res.status, detail);
   }
 
   const reader = res.body.getReader();
