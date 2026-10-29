@@ -48,9 +48,13 @@ jobs:
         working-directory: app
         env:
           VITE_API_URL: https://api.godance.ai
+        # Lint and audit as ci.yml does, so a push that skipped a PR can't
+        # release what the PR gate would have stopped.
         run: |
           npm ci
+          npm run lint
           npm run build
+          npm audit --audit-level=high
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
         with:
@@ -76,7 +80,9 @@ jobs:
           PUBLIC_API_BASE: https://api.godance.ai
         run: |
           npm ci
+          npm run lint
           npm run build
+          npm audit --audit-level=high
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
         with:

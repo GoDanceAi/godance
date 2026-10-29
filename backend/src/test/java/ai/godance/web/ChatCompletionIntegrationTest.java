@@ -7,6 +7,10 @@ import static com.github.tomakehurst.wiremock.client.WireMock.post;
 import static com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.awaitility.Awaitility.await;
 
 import java.time.Duration;
@@ -25,6 +29,7 @@ import org.springframework.boot.testcontainers.service.connection.ServiceConnect
 import org.springframework.http.MediaType;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.reactive.server.WebTestClient;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -73,7 +78,8 @@ class ChatCompletionIntegrationTest {
     @Autowired WebTestClient http;
     @Autowired UserRepository users;
     @Autowired UsageRecordRepository usage;
-    @Autowired CreditLedgerService ledger;
+    // A spy so one test can make settlement fail; every other test uses the real methods.
+    @MockitoSpyBean CreditLedgerService ledger;
 
     @BeforeEach
     void reset() {
@@ -303,6 +309,36 @@ class ChatCompletionIntegrationTest {
     // header. No POST-with-query-param test, by design.
 
     // ===== Fallback chain =============================================
+
+    // ===== Local settlement failure (spec risk R-07) ===================
+
+    @Test
+    void chatCompletions_settlementFailsAfterUpstreamSuccess_returnsCompletion_andNeverCallsFallback() {
+        Signed u = signupWithBalance(100_00L);
+        openAiMock.stubFor(post(urlEqualTo("/v1/chat/completions"))
+                .willReturn(aResponse().withStatus(200)
+                        .withHeader("content-type", "application/json")
+                        .withBody(openAiSuccessBody(50, 25))));
+        doThrow(new IllegalStateException("ledger unavailable"))
+                .when(ledger).settle(eq(u.id()), anyLong(), anyLong(), anyString());
+
+        ChatCompletionResponse out = http.post().uri("/v1/chat/completions")
+                .header("Authorization", u.bearer())
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(request("gpt-4o", "Hello settlement"))
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody(ChatCompletionResponse.class).returnResult().getResponseBody();
+
+        assertThat(out.choices().get(0).message().content()).isEqualTo("Hello!");
+        // gpt-4o falls back to gpt-4o-mini, but a local failure must not trigger it.
+        openAiMock.verify(1, postRequestedFor(urlEqualTo("/v1/chat/completions")));
+        // The pre-debited estimate stands as the charge ...
+        assertThat(users.findById(u.id()).orElseThrow().getCreditBalanceCents()).isLessThan(100_00L);
+        // ... and no provider-failure row was recorded for a provider that succeeded.
+        assertThat(usage.findByUserIdAndRecordedAtGreaterThanEqual(u.id(),
+                java.time.Instant.now().minusSeconds(60))).isEmpty();
+    }
 
     @Test
     void chatCompletions_primaryFails_fallbackSucceeds_setsFallbackUsedFlag() {

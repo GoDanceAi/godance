@@ -12,14 +12,12 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.server.ResponseStatusException;
 
 import tools.jackson.databind.ObjectMapper;
 
 import ai.godance.domain.GenerationJob;
-import ai.godance.domain.JobStatus;
 import ai.godance.domain.Modality;
 import ai.godance.domain.Region;
 import ai.godance.domain.UsageRecord;
@@ -30,8 +28,6 @@ import ai.godance.gateway.VideoDtos.GeneratedVideo;
 import ai.godance.gateway.VideoDtos.VideoRequest;
 import ai.godance.gateway.VideoProviderAdapter;
 import ai.godance.gateway.VideoProviderGateway;
-import ai.godance.repository.GenerationJobRepository;
-import ai.godance.repository.UsageRecordRepository;
 import ai.godance.security.WebhookSigner;
 import ai.godance.storage.ObjectStorageClient;
 import reactor.core.publisher.Mono;
@@ -45,21 +41,26 @@ import reactor.core.scheduler.Schedulers;
  *
  * <p>Cost is per-second × clip-count × markup, computed up-front from
  * the request (no reconcile pass — duration is the client's contract).
+ *
+ * <p>Every status change goes through {@link GenerationJobSettlement}: the
+ * job row and its pre-debit are written together, and the job ends exactly
+ * once, DONE with its usage row or FAILED with a refund, even if
+ * {@link GenerationJobSweepJob} reaches it first (spec risks R-03, R-05).
  */
 @Service
 public class VideoGenerationService {
 
     private static final Logger log = LoggerFactory.getLogger(VideoGenerationService.class);
     private static final Duration UPSTREAM_BLOCK_TIMEOUT = Duration.ofMinutes(15);
+    /** Longest a live worker can hold a job: the upstream wait plus time to store the result. */
+    private static final Duration LEASE = UPSTREAM_BLOCK_TIMEOUT.plusMinutes(10);
     private static final Duration WEBHOOK_TIMEOUT = Duration.ofSeconds(10);
     private static final int DEFAULT_DURATION_SECONDS = 5;
 
     private final ModelCatalog catalog;
     private final CostCalculator calculator;
     private final VideoProviderGateway gateway;
-    private final CreditLedgerService ledger;
-    private final UsageRecordRepository usage;
-    private final GenerationJobRepository jobs;
+    private final GenerationJobSettlement settlement;
     private final ObjectStorageClient storage;
     private final ObjectMapper json;
     private final WebhookSigner webhookSigner;
@@ -67,17 +68,14 @@ public class VideoGenerationService {
     private final WebClient webhookClient;
 
     public VideoGenerationService(ModelCatalog catalog, CostCalculator calculator,
-                                  VideoProviderGateway gateway, CreditLedgerService ledger,
-                                  UsageRecordRepository usage, GenerationJobRepository jobs,
+                                  VideoProviderGateway gateway, GenerationJobSettlement settlement,
                                   ObjectStorageClient storage, ObjectMapper json,
                                   WebhookSigner webhookSigner,
                                   WebhookDestinations webhookDestinations) {
         this.catalog = catalog;
         this.calculator = calculator;
         this.gateway = gateway;
-        this.ledger = ledger;
-        this.usage = usage;
-        this.jobs = jobs;
+        this.settlement = settlement;
         this.storage = storage;
         this.json = json;
         this.webhookSigner = webhookSigner;
@@ -101,14 +99,15 @@ public class VideoGenerationService {
         long cost = Math.max(1L, calculator.videoCostCents(model, duration, clips));
         String requestId = "vid_" + UUID.randomUUID().toString().replace("-", "").substring(0, 24);
 
-        if (!ledger.preDebit(userId, cost, requestId)) {
+        GenerationJob job = newJob(userId, model, request, duration, cost, requestId, webhookUrl);
+        if (!settlement.accept(job)) {
             throw new ResponseStatusException(HttpStatus.PAYMENT_REQUIRED,
                     "insufficient credit; top up via /v1/billing/topup");
         }
-        GenerationJob job = createJob(userId, model, request, duration, cost, webhookUrl);
 
-        Mono.fromRunnable(() -> runJob(job, userId, model, request, duration, clips, cost,
-                        requestId, webhookUrl))
+        // The pre-debit and the job row are committed together; if this worker
+        // dies, GenerationJobSweepJob fails and refunds the job once its lease runs out.
+        Mono.fromRunnable(() -> runJob(job, userId, model, request, duration, clips, webhookUrl))
                 .subscribeOn(Schedulers.boundedElastic())
                 .subscribe();
 
@@ -116,16 +115,19 @@ public class VideoGenerationService {
     }
 
     private void runJob(GenerationJob job, UUID userId, ModelInfo model, VideoRequest request,
-                        int duration, int clips, long cost, String requestId, String webhookUrl) {
+                        int duration, int clips, String webhookUrl) {
+        long cost = job.getEstimatedCostCents();
         VideoProviderAdapter adapter;
         try {
             adapter = gateway.dispatch(model);
         } catch (RuntimeException e) {
-            failJob(job, "gateway dispatch: " + e.getMessage());
-            ledger.refundEstimate(userId, cost, requestId, "video gateway dispatch failed");
+            settlement.fail(job, "gateway dispatch: " + e.getMessage(), "video gateway dispatch failed");
             return;
         }
-        markRunning(job);
+        if (!settlement.start(job)) {
+            log.warn("Video job {} ended before its worker started; not running it", job.getId());
+            return;
+        }
 
         List<GeneratedVideo> upstream;
         try {
@@ -136,14 +138,28 @@ public class VideoGenerationService {
         } catch (RuntimeException e) {
             log.warn("Video upstream {} failed for job {}: {}",
                     model.provider(), job.getId(), e.getMessage());
-            failJob(job, "upstream: " + e.getMessage());
-            ledger.refundEstimate(userId, cost, requestId, "video upstream failed");
+            settlement.fail(job, "upstream: " + e.getMessage(), "video upstream failed");
             return;
         }
 
-        List<UploadedVideo> uploaded = uploadAll(job.getId(), upstream);
-        completeJob(job, uploaded, cost);
-        usage.save(buildUsageRecord(userId, model, cost, requestId, duration, clips));
+        // The provider has delivered. Storing the result and ending the job DONE
+        // share one guard: a failure here ends the job FAILED and refunded, never
+        // RUNNING with the pre-debit kept (spec risk R-05).
+        List<UploadedVideo> uploaded;
+        boolean completed;
+        try {
+            uploaded = uploadAll(job.getId(), upstream);
+            completed = settlement.complete(job, uploaded.isEmpty() ? null : uploaded.get(0).url(), cost,
+                    buildUsageRecord(userId, model, cost, job.getRequestId(), duration, clips));
+        } catch (RuntimeException e) {
+            log.warn("Video job {} could not be finalised: {}", job.getId(), e.getMessage());
+            settlement.fail(job, "finalize: " + e.getMessage(), "video result could not be stored");
+            return;
+        }
+        if (!completed) {
+            log.warn("Video job {} was ended by the sweep while it ran; its result is dropped", job.getId());
+            return;
+        }
 
         if (webhookUrl != null && !webhookUrl.isBlank()) {
             fireWebhook(userId, webhookUrl, job.getId(), uploaded, cost);
@@ -206,9 +222,9 @@ public class VideoGenerationService {
         return model;
     }
 
-    @Transactional
-    public GenerationJob createJob(UUID userId, ModelInfo model, VideoRequest request,
-                                   int duration, long costCents, String webhookUrl) {
+    /** The job row, not yet saved; {@link GenerationJobSettlement#accept} saves it with the pre-debit. */
+    private GenerationJob newJob(UUID userId, ModelInfo model, VideoRequest request, int duration,
+                                 long costCents, String requestId, String webhookUrl) {
         GenerationJob job = new GenerationJob();
         job.setUserId(userId);
         job.setModality(model.modality());
@@ -220,34 +236,11 @@ public class VideoGenerationService {
         if (request.size() != null) prompt.put("size", request.size());
         if (request.n() != null) prompt.put("n", request.n());
         job.setPrompt(prompt);
-        job.setStatus(JobStatus.QUEUED);
         job.setEstimatedCostCents(costCents);
+        job.setRequestId(requestId);
+        job.setLeaseExpiresAt(Instant.now().plus(LEASE));
         job.setWebhookUrl(webhookUrl);
-        return jobs.save(job);
-    }
-
-    @Transactional
-    public void markRunning(GenerationJob job) {
-        job.setStatus(JobStatus.RUNNING);
-        job.setStartedAt(Instant.now());
-        jobs.save(job);
-    }
-
-    @Transactional
-    public void completeJob(GenerationJob job, List<UploadedVideo> uploaded, long cost) {
-        job.setStatus(JobStatus.DONE);
-        job.setActualCostCents(cost);
-        if (!uploaded.isEmpty()) job.setOutputUrl(uploaded.get(0).url());
-        job.setCompletedAt(Instant.now());
-        jobs.save(job);
-    }
-
-    @Transactional
-    public void failJob(GenerationJob job, String error) {
-        job.setStatus(JobStatus.FAILED);
-        job.setErrorMessage(error);
-        job.setCompletedAt(Instant.now());
-        jobs.save(job);
+        return job;
     }
 
     private UsageRecord buildUsageRecord(UUID userId, ModelInfo model, long actualCents,
