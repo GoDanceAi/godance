@@ -34,7 +34,9 @@ public record ParentalNotice(
                     "The IP addresses of the devices they use",
                     "Usage and billing records: which AI models they used, when, and what it cost",
                     "The prompts they write for images and videos, kept for 90 days"),
-            "Chat text is not stored: the Godance app sends it to get an answer and does not keep it.",
+            "The Godance app doesn't keep chat text: it sends it to get an answer and then discards it. "
+                    + "If your child uses another app built on Godance that saves conversations, those are kept "
+                    + "until deleted and removed for good 30 days later.",
             "To produce answers, images and videos, what your child types is sent to third-party "
                     + "AI model providers, the companies that run the models.",
             "Godance does not sell your child's data and does not use it for advertising.",

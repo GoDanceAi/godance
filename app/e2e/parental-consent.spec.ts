@@ -32,7 +32,7 @@ const VIEW: ParentalConsentView = {
       'Usage and billing records: which AI models they used, when, and what it cost',
       'The prompts they write for images and videos, kept for 90 days',
     ],
-    notStored: 'Chat text is not stored: the Godance app sends it to get an answer and does not keep it.',
+    notStored: "The Godance app doesn't keep chat text: it sends it to get an answer and then discards it. If your child uses another app built on Godance that saves conversations, those are kept until deleted and removed for good 30 days later.",
     sharing: 'To produce answers, images and videos, what your child types is sent to third-party AI model providers, the companies that run the models.',
     noSale: "Godance does not sell your child's data and does not use it for advertising.",
     parentRights: "You can review or delete your child's data, or withdraw your consent, at any time by emailing hello@godance.ai.",
@@ -150,7 +150,7 @@ test.describe('parent consent page', () => {
     await expect(page.getByRole('heading', { name: "Approve Kim's Godance account" })).toBeVisible();
     await expect(page.getByText('Kim (k***@example.com) signed up for Godance')).toBeVisible();
     await expect(page.getByText('kept for 90 days')).toBeVisible();
-    await expect(page.getByText('Chat text is not stored')).toBeVisible();
+    await expect(page.getByText("The Godance app doesn't keep chat text")).toBeVisible();
     await expect(page.getByText('third-party AI model providers')).toBeVisible();
     await expect(page.getByText('does not sell your child')).toBeVisible();
     await expect(page.getByText('by emailing hello@godance.ai')).toBeVisible();
