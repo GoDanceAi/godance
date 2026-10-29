@@ -14,6 +14,8 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webtestclient.autoconfigure.AutoConfigureWebTestClient;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -247,6 +249,32 @@ class ImageGenerationIntegrationTest {
     }
 
     // ===== Failure modes ==============================================
+
+    // ===== webhook_url destinations (spec risk R-02) ==================
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "http://example.com/hook",
+            "https://127.0.0.1/hook",
+            "https://localhost:8080/hook",
+            "https://169.254.169.254/latest/meta-data",
+            "https://10.0.0.5/hook",
+            "https://[::1]/hook",
+            "not a url"})
+    void generate_nonPublicWebhookUrl_returns400_andChargesNothing(String webhookUrl) {
+        Signed u = signupWithBalance(100_00L);
+
+        http.post().uri("/v1/images/generations")
+                .header("Authorization", u.bearer())
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("model", "gpt-image-2", "prompt", "x", "n", 1, "webhook_url", webhookUrl))
+                .exchange()
+                .expectStatus().isBadRequest();
+
+        assertThat(users.findById(u.id()).orElseThrow().getCreditBalanceCents()).isEqualTo(100_00L);
+        assertThat(jobs.findByUserIdOrderByCreatedAtDesc(u.id())).isEmpty();
+        assertThat(openAiMock.getAllServeEvents()).isEmpty();
+    }
 
     @Test
     void generate_zeroBalance_returns402_andDoesNotCallUpstream() {

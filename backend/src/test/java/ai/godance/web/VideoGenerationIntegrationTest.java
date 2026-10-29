@@ -92,6 +92,8 @@ class VideoGenerationIntegrationTest {
         r.add("godance.object-storage.secret-key",  MINIO::getPassword);
         r.add("godance.object-storage.bucket",      () -> "godance-test");
         r.add("godance.object-storage.path-style-access", () -> "true");
+        // The signed-callback test delivers to a local WireMock receiver.
+        r.add("godance.webhooks.allow-private-destinations", () -> "true");
     }
 
     @Autowired WebTestClient http;

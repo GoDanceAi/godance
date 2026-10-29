@@ -63,13 +63,15 @@ public class VideoGenerationService {
     private final ObjectStorageClient storage;
     private final ObjectMapper json;
     private final WebhookSigner webhookSigner;
+    private final WebhookDestinations webhookDestinations;
     private final WebClient webhookClient;
 
     public VideoGenerationService(ModelCatalog catalog, CostCalculator calculator,
                                   VideoProviderGateway gateway, CreditLedgerService ledger,
                                   UsageRecordRepository usage, GenerationJobRepository jobs,
                                   ObjectStorageClient storage, ObjectMapper json,
-                                  WebhookSigner webhookSigner) {
+                                  WebhookSigner webhookSigner,
+                                  WebhookDestinations webhookDestinations) {
         this.catalog = catalog;
         this.calculator = calculator;
         this.gateway = gateway;
@@ -79,7 +81,8 @@ public class VideoGenerationService {
         this.storage = storage;
         this.json = json;
         this.webhookSigner = webhookSigner;
-        this.webhookClient = WebClient.builder().build();
+        this.webhookDestinations = webhookDestinations;
+        this.webhookClient = webhookDestinations.client();
     }
 
     public record UploadedVideo(String url, String storageKey) { }
@@ -90,6 +93,7 @@ public class VideoGenerationService {
      * {@code GET /v1/jobs/{id}} or receives a signed webhook POST.
      */
     public UUID submit(UUID userId, VideoRequest request, String webhookUrl) {
+        webhookDestinations.requireAllowed(webhookUrl);   // before any charge (spec risk R-02)
         ModelInfo model = requireVideoModel(request);
         int duration = request.durationSeconds() == null
                 ? DEFAULT_DURATION_SECONDS : request.durationSeconds();
@@ -162,6 +166,7 @@ public class VideoGenerationService {
                              List<UploadedVideo> videos, long cost) {
         Mono.fromRunnable(() -> {
                     try {
+                        webhookDestinations.requireAllowed(url);
                         Map<String, Object> payload = Map.of(
                                 "event", "video.generation.completed",
                                 "jobId", jobId,
