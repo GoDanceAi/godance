@@ -13,10 +13,13 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webtestclient.autoconfigure.AutoConfigureWebTestClient;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -37,9 +40,9 @@ import ai.godance.web.dto.ApiKeyDtos.CreateApiKeyResponse;
 import ai.godance.web.dto.AuthDtos.AuthResponse;
 
 /**
- * End-to-end coverage of API-key request authentication and the per-key
- * IP allowlist, driving the real {@code /v1/chat/completions} endpoint
- * with an API key in place of a JWT.
+ * End-to-end coverage of API-key request authentication, the per-key
+ * IP allowlist, and the rule that a key reaches the model API only,
+ * driving the real endpoints with an API key in place of a JWT.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.MOCK)
 @AutoConfigureWebTestClient
@@ -208,6 +211,85 @@ class ApiKeyAuthIntegrationTest {
                 .expectStatus().isForbidden();
 
         assertThat(openAiMock.getAllServeEvents()).isEmpty();
+    }
+
+    // ===== Account routes need a signed-in session (spec risk R-01) ======
+
+    @ParameterizedTest
+    @CsvSource({
+            "POST,   /v1/keys",
+            "GET,    /v1/keys",
+            "DELETE, /v1/keys/00000000-0000-0000-0000-000000000000",
+            "GET,    /v1/webhooks/secret",
+            "POST,   /v1/webhooks/secret/rotate",
+            "GET,    /v1/billing/auto-recharge",
+            "PUT,    /v1/billing/auto-recharge",
+            "POST,   /v1/billing/topup",
+            "POST,   /v1/billing/nowpayments/topup",
+            "GET,    /v1/conversations",
+            "GET,    /v1/auth/me"})
+    void accountRoute_givenApiKey_returns403(String method, String path) {
+        Account account = signupWithBalance(0);
+        CreateApiKeyResponse key = createKey(account.jwtBearer());
+
+        http.method(HttpMethod.valueOf(method)).uri(path)
+                .header("Authorization", "Bearer " + key.plaintext())
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("name", "sibling"))
+                .exchange()
+                .expectStatus().isForbidden()
+                .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON)
+                .expectBody().jsonPath("$.detail")
+                        .isEqualTo("API keys can call the model API only; sign in to manage the account.");
+    }
+
+    @Test
+    void createKey_givenApiKey_returns403AndMintsNoSiblingKey() {
+        Account account = signupWithBalance(0);
+        CreateApiKeyResponse key = createKey(account.jwtBearer());
+
+        http.post().uri("/v1/keys")
+                .header("Authorization", "Bearer " + key.plaintext())
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("name", "sibling"))
+                .exchange()
+                .expectStatus().isForbidden();
+
+        assertThat(apiKeys.findByUserId(account.userId())).hasSize(1);
+    }
+
+    @Test
+    void chatCompletions_givenKeyRevokedBySession_returns401() {
+        Account account = signupWithBalance(100_00L);
+        CreateApiKeyResponse key = createKey(account.jwtBearer());
+
+        http.delete().uri("/v1/keys/{id}", key.id())
+                .header("Authorization", account.jwtBearer())
+                .exchange()
+                .expectStatus().isNoContent();
+
+        http.post().uri("/v1/chat/completions")
+                .header("Authorization", "Bearer " + key.plaintext())
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(chatRequest())
+                .exchange()
+                .expectStatus().isUnauthorized();
+        assertThat(openAiMock.getAllServeEvents()).isEmpty();
+    }
+
+    @Test
+    void usageAndJobs_givenApiKey_return200() {
+        Account account = signupWithBalance(0);
+        CreateApiKeyResponse key = createKey(account.jwtBearer());
+
+        http.get().uri("/v1/usage")
+                .header("Authorization", "Bearer " + key.plaintext())
+                .exchange()
+                .expectStatus().isOk();
+        http.get().uri("/v1/jobs")
+                .header("Authorization", "Bearer " + key.plaintext())
+                .exchange()
+                .expectStatus().isOk();
     }
 
     private void setAllowlist(UUID keyId, String... cidrs) {

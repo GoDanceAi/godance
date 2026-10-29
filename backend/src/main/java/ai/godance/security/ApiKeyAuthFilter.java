@@ -9,6 +9,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.server.reactive.ServerHttpRequest;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.ReactiveSecurityContextHolder;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -46,6 +47,13 @@ public class ApiKeyAuthFilter {
     /** Claim on the installed principal naming the key; absent on a signed-in session's JWT. */
     public static final String API_KEY_ID_CLAIM = "api_key_id";
 
+    /**
+     * The only authority an API-key principal holds. A signed-in session
+     * carries {@code SCOPE_USER} or {@code SCOPE_ADMIN} instead, and
+     * {@code SecurityConfig} admits this one on the model API alone.
+     */
+    public static final String API_KEY_AUTHORITY = "SCOPE_API_KEY";
+
     private static final String API_KEY_PREFIX = "gd_live_";
     private static final String BEARER = "Bearer ";
 
@@ -61,6 +69,19 @@ public class ApiKeyAuthFilter {
     public static boolean isApiKeyToken(String authorizationHeader) {
         String raw = bearerToken(authorizationHeader);
         return raw != null && raw.startsWith(API_KEY_PREFIX);
+    }
+
+    /**
+     * 403 for a caller the authorization rules refuse, as problem+json. An
+     * API key reaches the model API only, so a key on any other route is
+     * told to sign in instead.
+     */
+    public static Mono<Void> accessDenied(ServerWebExchange exchange, AccessDeniedException denied) {
+        String header = exchange.getRequest().getHeaders().getFirst(HttpHeaders.AUTHORIZATION);
+        String detail = isApiKeyToken(header)
+                ? "API keys can call the model API only; sign in to manage the account."
+                : "Access denied.";
+        return ProblemResponse.write(exchange, HttpStatus.FORBIDDEN, detail);
     }
 
     public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
@@ -146,11 +167,11 @@ public class ApiKeyAuthFilter {
                 .issuedAt(now)
                 .expiresAt(now.plusSeconds(60))
                 .subject(key.getUserId().toString())
-                .claim("scope", "USER")
+                .claim("scope", "API_KEY")
                 .claim(API_KEY_ID_CLAIM, key.getId().toString())
                 .build();
         return new JwtAuthenticationToken(principal,
-                List.of(new SimpleGrantedAuthority("SCOPE_USER")),
+                List.of(new SimpleGrantedAuthority(API_KEY_AUTHORITY)),
                 key.getUserId().toString());
     }
 

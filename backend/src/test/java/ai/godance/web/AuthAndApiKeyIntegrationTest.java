@@ -402,7 +402,8 @@ class AuthAndApiKeyIntegrationTest {
                 .expectStatus().isCreated()
                 .expectBody(CreateApiKeyResponse.class).returnResult().getResponseBody()
                 .plaintext();
-        http.get().uri("/v1/auth/me").header("Authorization", "Bearer " + oldApiKey)
+        // An API key reaches the model API only, so probe it there.
+        http.get().uri("/v1/usage").header("Authorization", "Bearer " + oldApiKey)
                 .exchange().expectStatus().isOk();
         http.get().uri("/v1/webhooks/secret").header("Authorization", oldBearer)
                 .exchange().expectStatus().isOk();
@@ -424,7 +425,7 @@ class AuthAndApiKeyIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(Map.of("name", "after-reset"))
                 .exchange().expectStatus().isUnauthorized();
-        http.get().uri("/v1/auth/me").header("Authorization", "Bearer " + oldApiKey)
+        http.get().uri("/v1/usage").header("Authorization", "Bearer " + oldApiKey)
                 .exchange().expectStatus().isUnauthorized();
         http.post().uri("/v1/auth/login")
                 .contentType(MediaType.APPLICATION_JSON)
