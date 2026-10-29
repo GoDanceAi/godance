@@ -71,13 +71,15 @@ public class ImageGenerationService {
     private final ObjectStorageClient storage;
     private final ObjectMapper json;
     private final WebhookSigner webhookSigner;
+    private final WebhookDestinations webhookDestinations;
     private final WebClient webhookClient;
 
     public ImageGenerationService(ModelCatalog catalog, CostCalculator calculator,
                                   ImageProviderGateway gateway, CreditLedgerService ledger,
                                   UsageRecordRepository usage, GenerationJobRepository jobs,
                                   ObjectStorageClient storage, ObjectMapper json,
-                                  WebhookSigner webhookSigner) {
+                                  WebhookSigner webhookSigner,
+                                  WebhookDestinations webhookDestinations) {
         this.catalog = catalog;
         this.calculator = calculator;
         this.gateway = gateway;
@@ -87,7 +89,8 @@ public class ImageGenerationService {
         this.storage = storage;
         this.json = json;
         this.webhookSigner = webhookSigner;
-        this.webhookClient = WebClient.builder().build();
+        this.webhookDestinations = webhookDestinations;
+        this.webhookClient = webhookDestinations.client();
     }
 
     public record ImageResult(UUID jobId, List<UploadedImage> images, long costCents, long createdAt) { }
@@ -120,6 +123,7 @@ public class ImageGenerationService {
      * or receives a POST at {@code webhookUrl} on completion.
      */
     public UUID executeAsync(UUID userId, ImageRequest request, String webhookUrl) {
+        webhookDestinations.requireAllowed(webhookUrl);   // before any charge (spec risk R-02)
         ModelInfo model = requireModel(request);
         int count = request.n() == null ? 1 : request.n();
         long cost = Math.max(1L, calculator.imageCostCents(model, count));
@@ -210,6 +214,7 @@ public class ImageGenerationService {
     private void fireWebhook(UUID userId, String url, ImageResult result) {
         Mono.fromRunnable(() -> {
                     try {
+                        webhookDestinations.requireAllowed(url);
                         Map<String, Object> payload = Map.of(
                                 "event", "image.generation.completed",
                                 "jobId", result.jobId(),
