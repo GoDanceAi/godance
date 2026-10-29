@@ -15,6 +15,14 @@
 # Only Caddy publishes ports to the host (80 + 443).
 # =====================================================================
 
+# Every service's container log is capped: json-file rotates at 50 MB and
+# keeps 5 files, so each service holds at most 250 MB of logs on disk.
+x-logging: &bounded-logs
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "5"
+
 services:
   caddy:
     image: caddy:2-alpine
@@ -33,6 +41,7 @@ services:
       backend:
         condition: service_healthy
     networks: [godance]
+    logging: *bounded-logs
 
   backend:
     # Deploys pull this prebuilt image from GHCR (see .github/workflows/deploy.yml).
@@ -58,6 +67,7 @@ services:
       redis:
         condition: service_healthy
     networks: [godance]
+    logging: *bounded-logs
     # backend is reachable only via caddy — no host port published.
 
   postgres:
@@ -75,6 +85,7 @@ services:
       timeout: 3s
       retries: 5
     networks: [godance]
+    logging: *bounded-logs
 
   redis:
     image: redis:7-alpine
@@ -88,6 +99,7 @@ services:
       timeout: 3s
       retries: 5
     networks: [godance]
+    logging: *bounded-logs
 
 volumes:
   postgres_data:           # Postgres data — back this up.

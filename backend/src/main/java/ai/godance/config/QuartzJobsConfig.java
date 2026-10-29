@@ -10,6 +10,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import ai.godance.service.AutoRechargeCronJob;
+import ai.godance.service.DataRetentionJob;
 import ai.godance.service.GenerationJobSweepJob;
 import ai.godance.service.pricing.PricingRefreshCronJob;
 
@@ -97,6 +98,31 @@ public class QuartzJobsConfig {
         return TriggerBuilder.newTrigger()
                 .forJob(generationJobSweepJobDetail)
                 .withIdentity("generationJobSweepTrigger")
+                .withSchedule(CronScheduleBuilder.cronSchedule(cron)
+                        .inTimeZone(java.util.TimeZone.getTimeZone("UTC"))
+                        .withMisfireHandlingInstructionDoNothing())
+                .build();
+    }
+
+    @Bean
+    JobDetail dataRetentionJobDetail() {
+        return JobBuilder.newJob(DataRetentionJob.class)
+                .withIdentity("dataRetentionJob")
+                .storeDurably()
+                .build();
+    }
+
+    /**
+     * 03:30 UTC daily by default: between the auto-recharge (03:00) and
+     * pricing-refresh (04:00) runs, and well clear of the 02:00 backup.
+     */
+    @Bean
+    Trigger dataRetentionTrigger(
+            JobDetail dataRetentionJobDetail,
+            @Value("${godance.scheduling.data-retention-cron:0 30 3 * * ?}") String cron) {
+        return TriggerBuilder.newTrigger()
+                .forJob(dataRetentionJobDetail)
+                .withIdentity("dataRetentionTrigger")
                 .withSchedule(CronScheduleBuilder.cronSchedule(cron)
                         .inTimeZone(java.util.TimeZone.getTimeZone("UTC"))
                         .withMisfireHandlingInstructionDoNothing())

@@ -84,6 +84,10 @@ public class ConversationService {
         return saved;
     }
 
+    /**
+     * Archives the conversation. {@link DataRetentionJob} deletes it, with
+     * its messages, 30 days after archiving.
+     */
     @Transactional
     public void archive(UUID userId, UUID conversationId) {
         Conversation c = requireOwned(userId, conversationId);

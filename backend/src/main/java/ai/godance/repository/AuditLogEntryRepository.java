@@ -14,6 +14,9 @@ import ai.godance.domain.AuditLogEntry;
  * against this table"). Do not add update methods here; extend
  * {@code Repository<>} (not {@code JpaRepository<>}) intentionally so
  * delete/update can't be invoked through this interface.
+ *
+ * <p>Rows are deleted only by the 365-day retention purge, through
+ * {@link AuditLogRetentionRepository}.
  */
 public interface AuditLogEntryRepository extends Repository<AuditLogEntry, UUID> {
 

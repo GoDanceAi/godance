@@ -20,7 +20,7 @@ import com.github.dockerjava.api.exception.NotFoundException;
  * minutes) and kept for later runs. The {@code localhost/} registry prefix
  * means Docker never tries to pull it from a remote registry.
  */
-final class MinioTestImage {
+public final class MinioTestImage {
 
     private static final Logger log = LoggerFactory.getLogger(MinioTestImage.class);
 
@@ -29,7 +29,7 @@ final class MinioTestImage {
 
     private MinioTestImage() { }
 
-    static DockerImageName get() {
+    public static DockerImageName get() {
         if (!presentLocally()) {
             log.info("{} not found locally; building it from dev/minio/Dockerfile (first run only, takes a few minutes)", TAG);
             new ImageFromDockerfile(TAG, false)

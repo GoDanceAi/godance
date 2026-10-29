@@ -29,6 +29,8 @@ godance:
     providers-health-initial-delay: PT24H
     # Tests run GenerationJobSweepJob.sweep(...) themselves; the cron never fires.
     job-sweep-cron: "0 0 0 1 1 ? 2099"
+    # Tests run DataRetentionJob.run(...) themselves; the cron never fires.
+    data-retention-cron: "0 0 0 1 1 ? 2099"
   # Integration suites share one Redis whose counters outlive a test class and
   # a run, so a limit tripped by one suite could fail another. Off here;
   # AuthRateLimitIntegrationTest turns them back on with its own limits.
