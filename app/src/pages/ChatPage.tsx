@@ -84,6 +84,9 @@ export default function ChatPage() {
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
+  // Leaving the page ends a stream in progress, so the request stops running.
+  useEffect(() => () => abortRef.current?.abort(), []);
+
   // Effective model: a preset resolves to its bound id; Advanced uses the
   // explicitly chosen one. Either way the request always carries a real id.
   const model = activePreset ? (presets[activePreset] || advancedModel) : advancedModel;

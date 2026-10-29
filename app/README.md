@@ -33,8 +33,13 @@ side has CORS open in dev via Spring Security defaults for the
 ```bash
 npm run build         # tsc -b && vite build → ./dist/
 npm run preview       # serve ./dist on http://localhost:4173
-npm run lint          # tsc -b: typecheck src/ and vite.config.ts, no emit
+npm run lint          # tsc -b: typecheck src/, vite.config.ts and e2e/, no emit
+npm run test:e2e      # Playwright browser journeys, desktop + mobile, API mocked
 ```
+
+`test:e2e` builds the app into `dist-e2e/` with `VITE_API_URL=http://api.test`, a
+fake origin that every spec mocks with `page.route` (helpers in `e2e/mock-api.ts`),
+so it needs no backend. First run: `npx playwright install chromium`.
 
 ## Deploy to Cloudflare Pages
 
