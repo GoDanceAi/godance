@@ -145,6 +145,40 @@ export interface MeResponse {
   dailyCreditCapCents: number | null;
   monthlyCreditCapCents: number | null;
   createdAt: string;
+  // CONSENT_PENDING: a child's account waiting for a parent's approval. Its
+  // session reaches /v1/auth/me and the consent resend only.
+  ageStatus: AgeStatus;
+  parentEmailMasked: string | null; // where the consent request went, masked; null for adults
+}
+
+export type AgeStatus = 'ADULT' | 'CONSENT_PENDING' | 'CONSENT_GRANTED';
+
+/** GET /v1/auth/parental-consent: what the parent's consent page shows. */
+export interface ParentalConsentView {
+  childFirstName: string;
+  childEmailMasked: string;
+  minTopupCents: number;
+  maxTopupCents: number;
+  currency: string;
+  expiresAt: string;
+  notice: ParentalNotice;
+}
+
+/** The direct notice to the parent; the same text the email carries. */
+export interface ParentalNotice {
+  collected: string[];
+  notStored: string;
+  sharing: string;
+  noSale: string;
+  parentRights: string;
+  contactEmail: string;
+  privacyPolicyUrl: string;
+}
+
+export interface TopUpResponse {
+  sessionId: string;
+  checkoutUrl: string;
+  amountCents: number;
 }
 
 export interface AuthResponse {

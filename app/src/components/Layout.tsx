@@ -27,7 +27,7 @@ export default function Layout({ children }: Props) {
             <LogoLockup size={18} />
           </Link>
 
-          {user && (
+          {user && user.ageStatus !== 'CONSENT_PENDING' && (
             <nav className="hidden md:flex items-center gap-1">
               <NavLink to="/dashboard" className={linkClass}>Dashboard</NavLink>
               <NavLink to="/chat" className={linkClass}>Chat</NavLink>

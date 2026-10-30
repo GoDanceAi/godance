@@ -3,20 +3,31 @@ package ai.godance.web.dto;
 import java.time.Instant;
 import java.util.UUID;
 
+import ai.godance.domain.AgeStatus;
 import ai.godance.domain.User;
 import ai.godance.domain.UserRole;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 public final class AuthDtos {
 
     private AuthDtos() { }
 
+    /**
+     * {@code birthMonth} ({@code YYYY-MM}) is optional here: the web app
+     * always asks, but an API client that leaves it out is treated as an
+     * adult attesting their age by accepting the Terms. Anyone under 16
+     * must give {@code parentEmail}, a parent's or guardian's address that
+     * differs from their own; it is ignored for everyone else.
+     */
     public record SignupRequest(
             @Email @NotBlank String email,
             @NotBlank @Size(min = 12, max = 128) String password,
-            @NotBlank @Size(max = 255) String fullName
+            @NotBlank @Size(max = 255) String fullName,
+            @Pattern(regexp = "\\d{4}-(0[1-9]|1[0-2])", message = "must be YYYY-MM") String birthMonth,
+            @Email @Size(max = 320) String parentEmail
     ) { }
 
     public record LoginRequest(
@@ -69,7 +80,10 @@ public final class AuthDtos {
      * it or offer to verify it. {@code pendingEmail} is an address the
      * user has asked to add or change to and not yet verified, or null.
      * {@code hasPassword} tells clients whether a change of email will
-     * ask for the current password.
+     * ask for the current password. {@code ageStatus} is
+     * {@code CONSENT_PENDING} while a child's account waits for a parent's
+     * approval; {@code parentEmailMasked} then says (masked) where the
+     * request went, and is null for an adult.
      */
     public record MeResponse(
             UUID id,
@@ -83,7 +97,9 @@ public final class AuthDtos {
             long creditBalanceCents,
             Long dailyCreditCapCents,
             Long monthlyCreditCapCents,
-            Instant createdAt
+            Instant createdAt,
+            AgeStatus ageStatus,
+            String parentEmailMasked
     ) {
         public static MeResponse from(User u) {
             return new MeResponse(
@@ -98,7 +114,20 @@ public final class AuthDtos {
                     u.getCreditBalanceCents(),
                     u.getDailyCreditCapCents(),
                     u.getMonthlyCreditCapCents(),
-                    u.getCreatedAt());
+                    u.getCreatedAt(),
+                    u.getAgeStatus(),
+                    u.getParentEmail() == null ? null : maskEmail(u.getParentEmail()));
         }
+    }
+
+    /**
+     * An address with most of its local part hidden, {@code p***@example.com},
+     * to show someone where an email went without spelling the address out.
+     */
+    public static String maskEmail(String email) {
+        if (email == null) return null;
+        int at = email.indexOf('@');
+        if (at <= 0) return "***";
+        return email.charAt(0) + "***" + email.substring(at);
     }
 }
