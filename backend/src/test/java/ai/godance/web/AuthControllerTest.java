@@ -10,6 +10,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -20,8 +21,10 @@ import org.springframework.mock.web.server.MockServerWebExchange;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.server.ResponseStatusException;
 
+import ai.godance.config.SecurityProperties;
 import ai.godance.security.ApiKeyAuthFilter;
 import ai.godance.security.AuthRateLimits;
+import ai.godance.security.SessionCookies;
 import ai.godance.service.AuthService;
 import ai.godance.web.dto.AuthDtos.ChangeEmailRequest;
 import ai.godance.web.dto.AuthDtos.ReleaseLinkRequest;
@@ -48,7 +51,8 @@ class AuthControllerTest {
     void setUp() {
         auth = mock(AuthService.class);
         rateLimits = mock(AuthRateLimits.class);
-        controller = new AuthController(auth, rateLimits);
+        controller = new AuthController(auth, rateLimits, new SessionCookies(
+                new SecurityProperties(List.of("http://localhost:5173"), false)));
         exchange = MockServerWebExchange.from(MockServerHttpRequest.post("/v1/auth/email"));
     }
 

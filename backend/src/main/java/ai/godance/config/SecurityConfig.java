@@ -41,6 +41,8 @@ import ai.godance.security.JwtService;
 import ai.godance.security.OAuthLoginFailureHandler;
 import ai.godance.security.OAuthLoginNonce;
 import ai.godance.security.OAuthLoginSuccessHandler;
+import ai.godance.security.SessionCookieFilter;
+import ai.godance.security.SessionCookies;
 import ai.godance.security.SessionVersionJwtDecoder;
 import ai.godance.security.SpendingLimitFilter;
 import reactor.core.publisher.Mono;
@@ -104,7 +106,7 @@ public class SecurityConfig {
         cfg.setAllowedOrigins(new java.util.ArrayList<>(props.corsAllowedOrigins()));
         cfg.setAllowedMethods(new java.util.ArrayList<>(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")));
         cfg.setAllowedHeaders(new java.util.ArrayList<>(List.of(
-                "Authorization", "Content-Type", "Accept",
+                "Authorization", "Content-Type", "Accept", SessionCookies.CLIENT_HEADER,
                 "X-Godance-Signature", "Stripe-Signature", "x-nowpayments-sig")));
         // Retry-After accompanies the auth endpoints' 429s; it is not CORS-safelisted.
         cfg.setExposedHeaders(new java.util.ArrayList<>(List.of("X-Godance-Signature", "Retry-After")));
@@ -134,16 +136,20 @@ public class SecurityConfig {
     }
 
     /**
-     * Primary API chain — JWT bearer tokens, Godance API keys, and
-     * spending-cap enforcement on the billable endpoints.
+     * Primary API chain — the web app's session cookie, JWT bearer tokens,
+     * Godance API keys, and spending-cap enforcement on the billable
+     * endpoints.
      */
     @Bean
     @Order(2)
     SecurityWebFilterChain securityFilterChain(ServerHttpSecurity http,
-            ApiKeyAuthFilter apiKeyAuthFilter, SpendingLimitFilter spendingLimitFilter,
+            ApiKeyAuthFilter apiKeyAuthFilter, SessionCookieFilter sessionCookieFilter,
+            SpendingLimitFilter spendingLimitFilter,
             ai.godance.security.AdminAuthorizationFilter adminAuthorizationFilter) {
         return http
                 // CORS is handled by the standalone CorsWebFilter bean above.
+                // Spring's CSRF tokens are off: SessionCookieFilter guards the
+                // one credential a browser attaches on its own.
                 .csrf(ServerHttpSecurity.CsrfSpec::disable)
                 .httpBasic(ServerHttpSecurity.HttpBasicSpec::disable)
                 .formLogin(ServerHttpSecurity.FormLoginSpec::disable)
@@ -179,6 +185,10 @@ public class SecurityConfig {
                                 .hasAnyAuthority(SESSION_USER, SESSION_ADMIN, SESSION_PENDING_CONSENT)
                         .pathMatchers(HttpMethod.POST, "/v1/auth/parental-consent/resend")
                                 .hasAuthority(SESSION_PENDING_CONSENT)
+                        // Any signed-in session may end itself or move into the
+                        // cookie. Not an API key: it must never mint a session.
+                        .pathMatchers(HttpMethod.POST, "/v1/auth/logout", "/v1/auth/session")
+                                .hasAnyAuthority(SESSION_USER, SESSION_ADMIN, SESSION_PENDING_CONSENT)
                         // Public read-only: model catalog (model picker) and
                         // provider status board (marketing /status page).
                         .pathMatchers(HttpMethod.GET, "/v1/models", "/v1/status").permitAll()
@@ -201,6 +211,9 @@ public class SecurityConfig {
                 // installs a Jwt-principal so downstream controllers stay agnostic
                 // to whether the caller used a JWT or an API key.
                 .addFilterBefore(apiKeyAuthFilter::filter, SecurityWebFiltersOrder.AUTHENTICATION)
+                // The session cookie the same way, and only without an
+                // Authorization header, so the two filters never both act.
+                .addFilterBefore(sessionCookieFilter::filter, SecurityWebFiltersOrder.AUTHENTICATION)
                 // Admin allowlist guard on /v1/admin/** — fails closed. Loads the
                 // caller's account and checks its current, verified email; refuses
                 // API-key principals.
