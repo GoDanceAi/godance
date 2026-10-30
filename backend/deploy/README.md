@@ -13,12 +13,17 @@ deploy/
 ├── Dockerfile               Multi-stage backend image
 ├── docker-compose.prod.yml  Compose stack: caddy + backend + postgres + redis
 ├── backup.sh                Daily Postgres backup → DO Spaces
+├── encrypt-at-rest.md       Docker's data on an encrypted Volume
 └── README.md                This file
 ```
 
 ## Prerequisites
 
 - A DigitalOcean droplet, Ubuntu 24.04, 4 GB RAM minimum.
+- A 50 GiB DigitalOcean Volume holding Docker's data. A droplet's own disk
+  is not encrypted at rest; a Volume is. Set it up with
+  [encrypt-at-rest.md](encrypt-at-rest.md#a-new-droplet) before the first
+  `docker compose up`.
 - Public DNS A record `api.godance.ai → <droplet IP>`.
 - Ports 22 (SSH from your IP), 80, 443 open in the droplet firewall.
 - Real values for every variable in `.env.prod.template`.
@@ -136,7 +141,8 @@ The data that matters lives in two named volumes:
 
 `backup.sh` runs a daily logical `pg_dump`, gzips it, uploads it to
 `s3://$OBJECT_STORAGE_BUCKET/db-backups/`, and prunes dumps older than
-14 days (local + remote).
+14 days (local + remote). The local copies go to `LOCAL_DIR`, set below to
+the encrypted Volume.
 
 Install once on the droplet:
 
@@ -147,12 +153,13 @@ apt-get install -y unzip
 curl -fsSL https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o /tmp/awscliv2.zip
 cd /tmp && unzip -oq awscliv2.zip && ./aws/install --update && cd -
 
-/opt/godance/backend/deploy/backup.sh        # run once to verify it works
+LOCAL_DIR=/mnt/godance_data/backups /opt/godance/backend/deploy/backup.sh   # run once to verify it works
 
 # Daily cron at 02:00 UTC. PATH is set explicitly — cron.d jobs run with a
 # minimal PATH that excludes /usr/local/bin, where `aws` is installed.
 cat >/etc/cron.d/godance-backup <<'EOF'
 PATH=/usr/local/bin:/usr/bin:/bin
+LOCAL_DIR=/mnt/godance_data/backups
 0 2 * * * root /opt/godance/backend/deploy/backup.sh >> /var/log/godance-backup.log 2>&1
 EOF
 ```
