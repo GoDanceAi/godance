@@ -9,6 +9,7 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 import java.time.Instant;
 import java.util.List;
@@ -19,11 +20,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
-import ai.godance.config.AdminProperties;
 import ai.godance.domain.ModelChangeProposal;
 import ai.godance.domain.ProposalStatus;
 import ai.godance.domain.ProposalType;
 import ai.godance.domain.User;
+import ai.godance.domain.UserRole;
+import ai.godance.repository.UserRepository;
 
 /**
  * Template contracts: first text line stays [email-stub]-verbatim, the
@@ -33,18 +35,18 @@ import ai.godance.domain.User;
 class MailServiceTest {
 
     EmailSender sender;
-    AdminProperties admin;
+    UserRepository users;
     MailService mail;
 
     @BeforeEach
     void setUp() {
         sender = mock(EmailSender.class);
-        admin = new AdminProperties();
-        admin.setEmails(List.of("ops@godance.ai"));
+        users = mock(UserRepository.class);
+        when(users.findActiveVerifiedEmailsByRole(UserRole.ADMIN)).thenReturn(List.of("ops@godance.ai"));
         // Trailing slash on purpose: links must not come out as "//verify-email".
         MailProperties props = new MailProperties(MailProperties.DUMMY_API_KEY,
                 "Godance <noreply@godance.ai>", "https://api.resend.com", "https://app.godance.test/");
-        mail = new MailService(sender, admin, props);
+        mail = new MailService(sender, users, props);
     }
 
     private String captureHtml() {
@@ -178,7 +180,7 @@ class MailServiceTest {
     }
 
     @Test
-    void sendPricingProposalsDigest_givenPendingAndAllowlist_expectsOneEmailWithProposalLines() {
+    void sendPricingProposalsDigest_givenPendingAndAnAdmin_expectsOneEmailWithProposalLines() {
         ModelChangeProposal p = new ModelChangeProposal();
         p.setType(ProposalType.PRICE_CHANGE);
         p.setModelName("gpt-4o");
@@ -193,8 +195,8 @@ class MailServiceTest {
     }
 
     @Test
-    void sendPricingProposalsDigest_givenEmptyAllowlist_expectsNoSend() {
-        admin.setEmails(List.of());
+    void sendPricingProposalsDigest_givenNoAdmin_expectsNoSend() {
+        when(users.findActiveVerifiedEmailsByRole(UserRole.ADMIN)).thenReturn(List.of());
 
         ModelChangeProposal p = new ModelChangeProposal();
         p.setType(ProposalType.NEW_MODEL);

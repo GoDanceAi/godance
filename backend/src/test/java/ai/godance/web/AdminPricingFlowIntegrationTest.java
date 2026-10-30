@@ -28,6 +28,7 @@ import ai.godance.domain.PriceField;
 import ai.godance.domain.ProposalStatus;
 import ai.godance.domain.ProposalType;
 import ai.godance.domain.User;
+import ai.godance.domain.UserRole;
 import ai.godance.gateway.ModelCatalog;
 import ai.godance.repository.ModelChangeProposalRepository;
 import ai.godance.repository.UserRepository;
@@ -35,9 +36,9 @@ import ai.godance.repository.UserTwoFactorRepository;
 import ai.godance.web.dto.AuthDtos.AuthResponse;
 
 /**
- * Operator-allowlist enforcement on {@code /v1/admin/pricing/**} plus
- * the approve-flow's effect on the live catalog. Two account fixtures:
- * one whose email is in {@code godance.admin.emails}, one whose isn't.
+ * Role enforcement on {@code /v1/admin/pricing/**} plus the approve-flow's
+ * effect on the live catalog. Two account fixtures: one that holds ADMIN,
+ * one that doesn't.
  *
  * <p>The non-admin's request lands in {@link
  * ai.godance.security.AdminAuthorizationFilter} and is rejected as
@@ -55,7 +56,6 @@ class AdminPricingFlowIntegrationTest {
 
     @DynamicPropertySource
     static void props(DynamicPropertyRegistry r) {
-        r.add("godance.admin.emails", () -> "admin@godance.test");
         r.add("godance.pricing.refresh-cron", () -> "0 0 0 1 1 ? 2099");
     }
 
@@ -76,13 +76,13 @@ class AdminPricingFlowIntegrationTest {
 
     @BeforeEach
     void seedAccounts() {
-        // Admin email must match the allowlist exactly. Signup-or-login so
-        // the @BeforeEach is idempotent across tests in this class.
+        // Signup-or-login so the @BeforeEach is idempotent across tests in
+        // this class.
         adminBearer = signUpOrLogIn("admin@godance.test");
-        markEmailVerified("admin@godance.test");
+        makeAdmin("admin@godance.test");
         TwoFactorFixture.turnOn(twoFactors, users.findByEmail("admin@godance.test").orElseThrow().getId());
         // Non-admin uses a fresh random local-part each test to dodge the
-        // signup-uniqueness check; the allowlist still rejects them.
+        // signup-uniqueness check; it holds no role, so the gate rejects it.
         userBearer  = signUpOrLogIn("user-" + java.util.UUID.randomUUID() + "@godance.test");
     }
 
@@ -203,12 +203,13 @@ class AdminPricingFlowIntegrationTest {
     }
 
     /**
-     * Admin access needs the account's email verified. Password signup
-     * leaves it unverified, so mark it directly instead of following the
-     * emailed link.
+     * Admin access needs the role and a verified email. Password signup
+     * gives neither, so set both directly instead of going through an
+     * existing admin and the emailed link.
      */
-    private void markEmailVerified(String email) {
+    private void makeAdmin(String email) {
         User u = users.findByEmail(email).orElseThrow();
+        u.setRole(UserRole.ADMIN);
         u.setEmailVerified(true);
         users.save(u);
     }

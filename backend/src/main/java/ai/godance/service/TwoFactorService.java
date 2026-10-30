@@ -36,7 +36,7 @@ import ai.godance.web.dto.TwoFactorDtos.StatusResponse;
 
 /**
  * Two-factor sign-in with an authenticator app (TOTP, RFC 6238), for any
- * account, password or social. It is optional except for admins, whom
+ * account, password or social. It is optional except for staff, whom
  * {@link ai.godance.security.AdminAuthorizationFilter} refuses without it.
  *
  * <p>With 2FA on, nothing that proves only the first factor may issue a

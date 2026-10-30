@@ -77,6 +77,8 @@ public class AuditLogService {
     public static final String EVT_ADMIN_ACCOUNT_CLOSED = "admin.account.closed";
     /** An operator turned off an account's 2FA for an owner who could not. */
     public static final String EVT_ADMIN_TWO_FACTOR_RESET = "admin.two_factor.reset";
+    /** An account's role was granted or revoked; {@code userId} is the account, the actor is in the detail. */
+    public static final String EVT_ADMIN_ROLE_CHANGED = "admin.role.changed";
 
     private final AuditLogEntryRepository repo;
 

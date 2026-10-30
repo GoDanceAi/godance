@@ -1,5 +1,5 @@
 -- =====================================================================
--- Godance V21 — two-factor sign-in (TOTP, RFC 6238).
+-- Godance V22 — two-factor sign-in (TOTP, RFC 6238).
 --
 -- One row per account that has started enrolling. Its own table, not
 -- columns on users: users is saved whole by many unrelated writers, and a

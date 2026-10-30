@@ -147,10 +147,10 @@ godance:
   binancepay:
     enabled:     ${BINANCE_PAY_ENABLED:false}    # v1.1 rail — flagged off until merchant KYC clears
   admin:
-    # Operator allowlist for /v1/admin/** endpoints. Single-tenant, so we
-    # match on the caller's account email — no is_admin column on users.
-    # The account must have verified that email; API keys never pass.
-    # Comma-separated in env; empty default = fail-closed.
+    # First-admin bootstrap, read at startup only while no active, verified
+    # account holds ADMIN. Access to /v1/admin/** comes from users.role, which
+    # an admin changes in the console; see ai.godance.service.admin.AdminBootstrap.
+    # Comma-separated in env; empty default = nobody is promoted.
     emails: ${GODANCE_ADMIN_EMAILS:}
   mail:
     # Transactional email via Resend. The dummy default keeps dev/CI on the

@@ -308,7 +308,7 @@ test.describe('the admin console', () => {
     await api.signIn();
     mockAccount(api, account);
     api.on('GET', '/v1/admin/me', () => (account.twoFactorEnabled
-      ? { json: { email: 'ada@example.com' } }
+      ? { json: { email: 'ada@example.com', role: 'ADMIN' } }
       : NEEDS_2FA))
       .on('GET', '/v1/admin/pricing/proposals', { json: [] })
       .on('GET', '/v1/auth/2fa', { json: { enabled: true, recoveryCodesRemaining: 10 } })
@@ -336,7 +336,7 @@ test.describe('the admin console', () => {
 
     await expect.poll(() => api.callsTo('GET', '/v1/admin/me').length).toBeGreaterThan(1);
     await page.goto('/admin/proposals');
-    await expect(page.getByText('operator console')).toBeVisible();
+    await expect(page.getByText('admin console')).toBeVisible();
   });
 
   test('a plain user is still bounced to the dashboard', async ({ page, api }) => {
@@ -362,9 +362,9 @@ test.describe('operator reset', () => {
     createdAt: '2026-10-01T00:00:00Z',
   };
 
-  async function openOwner(page: Page, api: MockApi) {
+  async function openOwner(page: Page, api: MockApi, role = 'ADMIN') {
     await api.signIn(makeUser({ twoFactorEnabled: true }));
-    api.on('GET', '/v1/admin/me', { json: { email: 'ada@example.com' } })
+    api.on('GET', '/v1/admin/me', { json: { email: 'ada@example.com', role } })
       .on('GET', '/v1/admin/users', { json: { users: [OWNER] } })
       .on('GET', `/v1/admin/users/${OWNER.id}/ledger`, { json: { entries: [], page: 0, totalPages: 0, totalEntries: 0 } });
     await page.goto('/admin/users');
@@ -387,6 +387,13 @@ test.describe('operator reset', () => {
     await expect(page.getByRole('status')).toContainText('The owner has been emailed.');
     expect(dialogs[0]).toContain('owner@example.com');
     expect(api.callsTo('POST', `/v1/admin/users/${OWNER.id}/2fa/reset`)).toHaveLength(1);
+  });
+
+  test('only an admin is offered it', async ({ page, api }) => {
+    await openOwner(page, api, 'FINANCE');
+
+    await expect(page.getByRole('heading', { name: 'owner@example.com' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Reset two-factor sign-in' })).toHaveCount(0);
   });
 
   test('declining the prompt sends nothing', async ({ page, api }) => {

@@ -15,7 +15,7 @@ import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 
 /**
- * An account's two-factor state (V21). {@code enabledAt} is null while
+ * An account's two-factor state (V22). {@code enabledAt} is null while
  * enrolment waits for its first code; 2FA is on once it is set.
  */
 @Entity

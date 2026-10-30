@@ -18,6 +18,7 @@ import ai.godance.domain.AuditOutcome;
 import ai.godance.domain.GenerationJob;
 import ai.godance.domain.JobStatus;
 import ai.godance.domain.User;
+import ai.godance.domain.UserRole;
 import ai.godance.repository.ApiKeyRepository;
 import ai.godance.repository.ConversationRepository;
 import ai.godance.repository.GenerationJobRepository;
@@ -40,7 +41,7 @@ import ai.godance.repository.UserTwoFactorRepository;
  *       password-reset tokens, the webhook signing secrets, and the
  *       two-factor secret and recovery codes;</li>
  *   <li>disables the account and bumps its session version, so its JWTs
- *       fail at once, and deletes its API keys;</li>
+ *       fail at once, drops any staff role, and deletes its API keys;</li>
  *   <li>turns auto-recharge off and forgets the saved payment method, so the
  *       card is never charged again;</li>
  *   <li>deletes every conversation and its messages;</li>
@@ -152,7 +153,9 @@ public class AccountClosureService {
                 new ResponseStatusException(HttpStatus.NOT_FOUND, "user not found"));
         String closedEmail = closedEmail(userId);
         boolean alreadyClosed = closedEmail.equals(u.getEmail()) && !u.isActive();
+        UserRole heldRole = u.getRole();
 
+        u.setRole(UserRole.USER);
         u.setEmail(closedEmail);
         u.setPendingEmail(null);
         u.setFullName(CLOSED_FULL_NAME);
@@ -183,6 +186,7 @@ public class AccountClosureService {
         Map<String, Object> detail = new LinkedHashMap<>();
         detail.put("actorUserId", actorId == null ? null : actorId.toString());
         detail.put("alreadyClosed", alreadyClosed);
+        detail.put("role", heldRole.name());
         detail.put("apiKeysDeleted", keys);
         detail.put("oauthIdentitiesDeleted", links);
         detail.put("conversationsDeleted", convs);

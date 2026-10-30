@@ -16,6 +16,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.ArgumentMatchers;
 import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -25,8 +27,6 @@ import org.springframework.boot.webtestclient.autoconfigure.AutoConfigureWebTest
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.reactive.server.WebTestClient;
 import org.springframework.test.web.reactive.server.WebTestClient.ResponseSpec;
@@ -42,6 +42,7 @@ import ai.godance.domain.AuditLogEntry;
 import ai.godance.domain.AuditOutcome;
 import ai.godance.domain.OAuthProvider;
 import ai.godance.domain.User;
+import ai.godance.domain.UserRole;
 import ai.godance.domain.UserTwoFactor;
 import ai.godance.repository.AuditLogEntryRepository;
 import ai.godance.repository.UserRepository;
@@ -82,12 +83,6 @@ class TwoFactorIntegrationTest {
 
     private static final String PASSWORD = "correct-horse-battery-staple";
     private static final String WRONG_CODE = "000000";
-    private static final String ADMIN_EMAIL = "two-factor-admin@godance.test";
-
-    @DynamicPropertySource
-    static void props(DynamicPropertyRegistry r) {
-        r.add("godance.admin.emails", () -> ADMIN_EMAIL);
-    }
 
     @Autowired WebTestClient http;
     @Autowired UserRepository users;
@@ -631,9 +626,23 @@ class TwoFactorIntegrationTest {
         assertThat(twoFactors.existsByUserIdAndEnabledAtIsNotNull(p.id)).isTrue();
     }
 
+    @ParameterizedTest
+    @EnumSource(value = UserRole.class, names = {"SUPPORT", "FINANCE", "ADMIN"})
+    void staff_withoutTwoFactor_areRefusedWithTheCodeWhateverTheirRole(UserRole role) {
+        Person staff = signUpVerified();
+        grant(staff.id, role);
+
+        http.get().uri("/v1/admin/me")
+                .header(HttpHeaders.AUTHORIZATION, staff.bearer)
+                .exchange()
+                .expectStatus().isForbidden()
+                .expectBody().jsonPath("$.code").isEqualTo(AdminAuthorizationFilter.TWO_FACTOR_REQUIRED_CODE);
+    }
+
     @Test
     void admin_withoutTwoFactor_isRefusedUntilEnrolledThroughTheRealFlow() {
-        Person admin = signUpVerified(ADMIN_EMAIL);
+        Person admin = signUpVerified();
+        grant(admin.id, UserRole.ADMIN);
 
         http.get().uri("/v1/admin/me")
                 .header(HttpHeaders.AUTHORIZATION, admin.bearer)
@@ -650,7 +659,7 @@ class TwoFactorIntegrationTest {
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + on.session().accessToken())
                 .exchange()
                 .expectStatus().isOk()
-                .expectBody().jsonPath("$.email").isEqualTo(ADMIN_EMAIL);
+                .expectBody().jsonPath("$.email").isEqualTo(admin.email);
 
         // Turning 2FA off closes the console again.
         disable("Bearer " + on.session().accessToken(), PASSWORD, liveCode(admin.id))
@@ -786,18 +795,18 @@ class TwoFactorIntegrationTest {
 
     // ===== Helpers =======================================================
 
-    /** A session on the allowlisted admin account, signing up on first use. */
+    /** A session on a new account holding ADMIN, with the two-factor sign-in staff need. */
     private String adminSession() {
-        User existing = users.findByEmail(ADMIN_EMAIL).orElse(null);
-        if (existing == null) {
-            Person admin = signUpVerified(ADMIN_EMAIL);
-            TwoFactorFixture.turnOn(twoFactors, admin.id);
-            return admin.bearer;
-        }
-        twoFactors.deleteById(existing.getId());
-        String bearer = "Bearer " + login(ADMIN_EMAIL, PASSWORD).accessToken();
-        TwoFactorFixture.turnOn(twoFactors, existing.getId());
-        return bearer;
+        Person admin = signUpVerified();
+        grant(admin.id, UserRole.ADMIN);
+        TwoFactorFixture.turnOn(twoFactors, admin.id);
+        return admin.bearer;
+    }
+
+    private void grant(UUID userId, UserRole role) {
+        User u = users.findById(userId).orElseThrow();
+        u.setRole(role);
+        users.save(u);
     }
 
     private void assertNotified(UUID userId, TwoFactorNotice notice, int times) {
