@@ -55,7 +55,7 @@ public class AuthController {
         return rateLimits.signup(ip)
                 .then(Mono.fromCallable(() -> auth.signup(req, ip))
                         .subscribeOn(Schedulers.boundedElastic()))
-                .map(session -> ResponseEntity.status(HttpStatus.CREATED).body(startSession(session, exchange)));
+                .map(session -> ResponseEntity.status(HttpStatus.CREATED).body(sessionCookies.start(exchange, session)));
     }
 
     @PostMapping("/login")
@@ -65,7 +65,7 @@ public class AuthController {
         return rateLimits.login(ip, req.email())
                 .then(Mono.fromCallable(() -> auth.login(req, ip))
                         .subscribeOn(Schedulers.boundedElastic()))
-                .map(session -> startSession(session, exchange));
+                .map(session -> sessionCookies.start(exchange, session));
     }
 
     /**
@@ -88,7 +88,7 @@ public class AuthController {
      * first loads an app that uses the cookie ({@code lib/legacy-session.ts}).
      * The same JWT with the same expiry: reissuing would let a stolen token
      * renew itself for ever. Goes away once no client gets a token in the
-     * response ({@link #startSession}).
+     * response ({@link SessionCookies#start}).
      */
     @PostMapping("/session")
     public Mono<ResponseEntity<Void>> adoptSession(@AuthenticationPrincipal Jwt jwt, ServerWebExchange exchange) {
@@ -193,18 +193,6 @@ public class AuthController {
         return Mono.fromCallable(() -> auth.loadById(userId))
                 .subscribeOn(Schedulers.boundedElastic())
                 .map(MeResponse::from);
-    }
-
-    /**
-     * Set the cookie for a new session. A client using the cookie gets no
-     * token in the body. Every other client does, as it always has: the app
-     * bundles still open when this shipped, and scripts.
-     */
-    private AuthResponse startSession(AuthResponse session, ServerWebExchange exchange) {
-        sessionCookies.set(exchange.getResponse(), session.accessToken(), session.expiresAt());
-        return SessionCookies.isCookieClient(exchange.getRequest())
-                ? AuthResponse.cookie(session.expiresAt())
-                : session;
     }
 
     /**

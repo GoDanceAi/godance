@@ -9,8 +9,10 @@ import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.http.server.reactive.ServerHttpResponse;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
+import org.springframework.web.server.ServerWebExchange;
 
 import ai.godance.config.SecurityProperties;
+import ai.godance.web.dto.AuthDtos.AuthResponse;
 
 /**
  * The web app's session: the Godance JWT in an {@code HttpOnly} cookie, so
@@ -55,6 +57,16 @@ public class SessionCookies {
     public String read(ServerHttpRequest request) {
         HttpCookie cookie = request.getCookies().getFirst(name);
         return cookie == null || !StringUtils.hasText(cookie.getValue()) ? null : cookie.getValue();
+    }
+
+    /**
+     * Start {@code session} and return the response body for it. A client
+     * using the cookie gets no token in the body. Every other client does,
+     * as it always has.
+     */
+    public AuthResponse start(ServerWebExchange exchange, AuthResponse session) {
+        set(exchange.getResponse(), session.accessToken(), session.expiresAt());
+        return isCookieClient(exchange.getRequest()) ? AuthResponse.cookie(session.expiresAt()) : session;
     }
 
     /** Hand the browser this session. The cookie lives exactly as long as the token. */
