@@ -2,6 +2,7 @@ package ai.godance.web;
 
 import java.util.UUID;
 
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -12,11 +13,13 @@ import org.springframework.web.server.ServerWebExchange;
 
 import ai.godance.security.JwtService;
 import ai.godance.service.AccountClosureService;
+import ai.godance.service.TwoFactorService;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
 /**
- * Account closure on the owner's request, run by an operator. Under
+ * What an operator does to an account on its owner's request: closing it,
+ * or resetting its two-factor sign-in. Under
  * {@code /v1/admin/**}, so {@link ai.godance.security.AdminAuthorizationFilter}
  * admits only a signed-in session of an active, verified, allowlisted
  * account; API keys and everyone else get 403.
@@ -26,9 +29,11 @@ import reactor.core.scheduler.Schedulers;
 public class AdminAccountController {
 
     private final AccountClosureService closure;
+    private final TwoFactorService twoFactor;
 
-    public AdminAccountController(AccountClosureService closure) {
+    public AdminAccountController(AccountClosureService closure, TwoFactorService twoFactor) {
         this.closure = closure;
+        this.twoFactor = twoFactor;
     }
 
     /** Closes the account. Safe to repeat; a repeat retries any media that could not be deleted. */
@@ -41,6 +46,19 @@ public class AdminAccountController {
         String ip = clientIp(exchange);
         return Mono.fromCallable(() -> closure.close(id, actorId, ip))
                 .subscribeOn(Schedulers.boundedElastic());
+    }
+
+    /** For an owner who can't turn 2FA off themselves; see {@link TwoFactorService#resetByOperator}. */
+    @PostMapping("/users/{id}/2fa/reset")
+    public Mono<ResponseEntity<Void>> resetTwoFactor(
+            @PathVariable("id") UUID id,
+            @AuthenticationPrincipal Jwt jwt,
+            ServerWebExchange exchange) {
+        UUID actorId = JwtService.userIdFromSubject(jwt.getSubject());
+        String ip = clientIp(exchange);
+        return Mono.fromRunnable(() -> twoFactor.resetByOperator(id, actorId, ip))
+                .subscribeOn(Schedulers.boundedElastic())
+                .then(Mono.just(ResponseEntity.noContent().build()));
     }
 
     private static String clientIp(ServerWebExchange exchange) {

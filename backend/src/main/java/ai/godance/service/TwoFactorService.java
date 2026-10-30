@@ -21,12 +21,15 @@ import org.springframework.web.server.ResponseStatusException;
 import ai.godance.domain.AuditOutcome;
 import ai.godance.domain.User;
 import ai.godance.domain.UserTwoFactor;
+import ai.godance.repository.UserRepository;
 import ai.godance.repository.UserTwoFactorRepository;
 import ai.godance.security.JwtService;
 import ai.godance.security.JwtService.IssuedToken;
 import ai.godance.security.KeyVault;
 import ai.godance.security.RateLimitExceededException;
 import ai.godance.security.Totp;
+import ai.godance.service.mail.MailService;
+import ai.godance.service.mail.MailService.TwoFactorNotice;
 import ai.godance.web.dto.AuthDtos.AuthResponse;
 import ai.godance.web.dto.TwoFactorDtos.EnrolResponse;
 import ai.godance.web.dto.TwoFactorDtos.StatusResponse;
@@ -53,6 +56,10 @@ import ai.godance.web.dto.TwoFactorDtos.StatusResponse;
  * spend one code twice or undercount failures. The callers are marked
  * {@code noRollbackFor}: a refused code must still commit its count and its
  * audit row.
+ *
+ * <p>A password reset leaves 2FA on, so it no longer evicts a thief who
+ * enrolled on the account. The owner is emailed about every change to their
+ * second factor, and {@link #resetByOperator} is the way back in.
  */
 @Service
 public class TwoFactorService {
@@ -77,16 +84,20 @@ public class TwoFactorService {
     private static final SecureRandom RNG = new SecureRandom();
 
     private final UserTwoFactorRepository twoFactors;
+    private final UserRepository users;
     private final KeyVault vault;
     private final JwtService jwt;
     private final AuditLogService audit;
+    private final MailService mail;
 
-    public TwoFactorService(UserTwoFactorRepository twoFactors, KeyVault vault,
-                            JwtService jwt, AuditLogService audit) {
+    public TwoFactorService(UserTwoFactorRepository twoFactors, UserRepository users, KeyVault vault,
+                            JwtService jwt, AuditLogService audit, MailService mail) {
         this.twoFactors = twoFactors;
+        this.users = users;
         this.vault = vault;
         this.jwt = jwt;
         this.audit = audit;
+        this.mail = mail;
     }
 
     @Transactional(readOnly = true)
@@ -159,6 +170,7 @@ public class TwoFactorService {
         twoFactors.save(row);
 
         audit.record(AuditLogService.EVT_AUTH_2FA_ENABLED, AuditOutcome.SUCCESS, userId, ipAddress, null);
+        notifyOwner(userId, TwoFactorNotice.ENABLED);
         return plain;
     }
 
@@ -175,6 +187,9 @@ public class TwoFactorService {
         String method = spendCode(row, code, ipAddress, AuditLogService.EVT_AUTH_2FA_VERIFY);
         audit.record(AuditLogService.EVT_AUTH_2FA_VERIFY, AuditOutcome.SUCCESS, userId, ipAddress, Map.of(
                 "method", method, "recoveryCodesRemaining", row.getRecoveryCodeHashes().size()));
+        if (METHOD_RECOVERY.equals(method)) {
+            notifyOwner(userId, TwoFactorNotice.RECOVERY_CODE_USED);
+        }
         return method;
     }
 
@@ -188,6 +203,30 @@ public class TwoFactorService {
         twoFactors.delete(row);
         audit.record(AuditLogService.EVT_AUTH_2FA_DISABLED, AuditOutcome.SUCCESS, userId, ipAddress,
                 Map.of("method", method));
+        notifyOwner(userId, TwoFactorNotice.DISABLED);
+    }
+
+    /**
+     * Turn 2FA off for an owner who can't: they lost their device and their
+     * recovery codes, or a thief enrolled on their account. Whoever runs
+     * this has checked who is asking, out of band. Every session ends, as
+     * any of them may be the thief's, and the owner is told.
+     */
+    @Transactional
+    public void resetByOperator(UUID userId, UUID actorId, String ipAddress) {
+        User u = users.findById(userId).orElseThrow(() ->
+                new ResponseStatusException(HttpStatus.NOT_FOUND, "user not found"));
+        UserTwoFactor row = twoFactors.findForUpdate(userId)
+                .filter(r -> r.getEnabledAt() != null)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT,
+                        "Two-factor sign-in is not on for this account."));
+        twoFactors.delete(row);
+        u.setSessionVersion(u.getSessionVersion() + 1);
+        users.save(u);
+
+        audit.record(AuditLogService.EVT_ADMIN_TWO_FACTOR_RESET, AuditOutcome.SUCCESS, userId, ipAddress,
+                Map.of("actorUserId", actorId.toString()));
+        mail.sendTwoFactorNotice(u, TwoFactorNotice.RESET_BY_SUPPORT);
     }
 
     @Transactional(readOnly = true)
@@ -235,6 +274,7 @@ public class TwoFactorService {
         audit.record(auditEvent, AuditOutcome.FAILURE, row.getUserId(), ipAddress,
                 Map.of("reason", "bad-code", "locked", lock));
         if (lock) {
+            notifyOwner(row.getUserId(), TwoFactorNotice.LOCKED);
             return new RateLimitExceededException(LOCKOUT);
         }
         return new ResponseStatusException(HttpStatus.FORBIDDEN,
@@ -270,6 +310,10 @@ public class TwoFactorService {
         }
         row.setRecoveryCodeHashes(remaining);
         return true;
+    }
+
+    private void notifyOwner(UUID userId, TwoFactorNotice notice) {
+        users.findById(userId).ifPresent(u -> mail.sendTwoFactorNotice(u, notice));
     }
 
     /** People type codes with spaces, dashes or in lower case. */

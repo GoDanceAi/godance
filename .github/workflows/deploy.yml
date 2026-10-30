@@ -110,15 +110,15 @@ jobs:
             git fetch --quiet origin main
             git merge --ff-only "$BACKEND_TAG"
             cd backend
-            # The backend refuses to boot without these, and `up` below replaces
-            # the running container with nothing to fall back to. Stop here while
-            # the old one is still serving. Each comes from deploy/.env.prod.template.
-            for required in KEY_VAULT_KEY; do
-              if ! grep "^$required=." deploy/.env.prod | grep -qv REPLACE_ME; then
-                echo "$required is not set in deploy/.env.prod; see deploy/README.md" >&2
-                exit 1
-              fi
-            done
+            # The backend refuses to boot without this key, and `up` below replaces
+            # the running container with nothing to fall back to. Stop here, while
+            # the old one is still serving, unless it decodes to the 32 bytes the
+            # backend wants. This also refuses the template's placeholder.
+            key=$(grep '^KEY_VAULT_KEY=' deploy/.env.prod | cut -d= -f2- || true)
+            if [ "$(printf '%s' "$key" | base64 -d 2>/dev/null | wc -c)" -ne 32 ]; then
+              echo "KEY_VAULT_KEY in deploy/.env.prod must be 32 bytes in Base64; see deploy/README.md" >&2
+              exit 1
+            fi
             # Pins the compose image to this commit's build (:<sha>, not :latest).
             export BACKEND_TAG
             # The droplet's connection to GHCR's blob storage occasionally

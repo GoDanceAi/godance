@@ -347,3 +347,66 @@ test.describe('the admin console', () => {
     await expect(page).toHaveURL('/dashboard');
   });
 });
+
+test.describe('operator reset', () => {
+  const OWNER = {
+    id: '00000000-0000-4000-8000-000000000002',
+    email: 'owner@example.com',
+    fullName: 'Owner',
+    role: 'USER',
+    active: true,
+    creditBalanceCents: 0,
+    apiKeyCount: 0,
+    dailyCreditCapCents: null,
+    monthlyCreditCapCents: null,
+    createdAt: '2026-10-01T00:00:00Z',
+  };
+
+  async function openOwner(page: Page, api: MockApi) {
+    await api.signIn(makeUser({ twoFactorEnabled: true }));
+    api.on('GET', '/v1/admin/me', { json: { email: 'ada@example.com' } })
+      .on('GET', '/v1/admin/users', { json: { users: [OWNER] } })
+      .on('GET', `/v1/admin/users/${OWNER.id}/ledger`, { json: { entries: [], page: 0, totalPages: 0, totalEntries: 0 } });
+    await page.goto('/admin/users');
+    await page.getByPlaceholder('email or user UUID…').fill('owner@example.com');
+    await page.getByRole('button', { name: 'Search' }).click();
+    await page.getByText('owner@example.com').first().click();
+  }
+
+  test('asks first, then says it is done', async ({ page, api }) => {
+    api.on('POST', `/v1/admin/users/${OWNER.id}/2fa/reset`, { status: 204 });
+    await openOwner(page, api);
+    const dialogs: string[] = [];
+    page.on('dialog', (dialog) => {
+      dialogs.push(dialog.message());
+      void dialog.accept();
+    });
+
+    await page.getByRole('button', { name: 'Reset two-factor sign-in' }).click();
+
+    await expect(page.getByRole('status')).toContainText('The owner has been emailed.');
+    expect(dialogs[0]).toContain('owner@example.com');
+    expect(api.callsTo('POST', `/v1/admin/users/${OWNER.id}/2fa/reset`)).toHaveLength(1);
+  });
+
+  test('declining the prompt sends nothing', async ({ page, api }) => {
+    await openOwner(page, api);
+    page.on('dialog', (dialog) => void dialog.dismiss());
+
+    await page.getByRole('button', { name: 'Reset two-factor sign-in' }).click();
+
+    await expect(page.getByRole('button', { name: 'Reset two-factor sign-in' })).toBeEnabled();
+    expect(api.callsTo('POST', `/v1/admin/users/${OWNER.id}/2fa/reset`)).toEqual([]);
+  });
+
+  test('an account without two-factor shows the reason', async ({ page, api }) => {
+    api.on('POST', `/v1/admin/users/${OWNER.id}/2fa/reset`,
+      problem(409, 'Two-factor sign-in is not on for this account.'));
+    await openOwner(page, api);
+    page.on('dialog', (dialog) => void dialog.accept());
+
+    await page.getByRole('button', { name: 'Reset two-factor sign-in' }).click();
+
+    await expect(page.getByRole('status')).toContainText('not on for this account');
+  });
+});

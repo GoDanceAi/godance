@@ -75,6 +75,8 @@ public class AuditLogService {
     public static final String EVT_ADMIN_CATALOG_UPDATED = "admin.catalog.updated";
     /** An operator closed an account on its owner's request (anonymised, data deleted, billing kept). */
     public static final String EVT_ADMIN_ACCOUNT_CLOSED = "admin.account.closed";
+    /** An operator turned off an account's 2FA for an owner who could not. */
+    public static final String EVT_ADMIN_TWO_FACTOR_RESET = "admin.two_factor.reset";
 
     private final AuditLogEntryRepository repo;
 

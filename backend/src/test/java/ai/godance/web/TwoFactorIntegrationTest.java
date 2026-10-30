@@ -16,6 +16,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentMatchers;
+import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
@@ -25,8 +27,12 @@ import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.reactive.server.WebTestClient;
 import org.springframework.test.web.reactive.server.WebTestClient.ResponseSpec;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.server.ResponseStatusException;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -46,6 +52,8 @@ import ai.godance.security.Totp;
 import ai.godance.service.AuditLogService;
 import ai.godance.service.AuthService;
 import ai.godance.service.OAuthLoginService;
+import ai.godance.service.mail.MailService;
+import ai.godance.service.mail.MailService.TwoFactorNotice;
 import ai.godance.web.dto.ApiKeyDtos.CreateApiKeyResponse;
 import ai.godance.web.dto.AuthDtos.AuthResponse;
 import ai.godance.web.dto.AuthDtos.MeResponse;
@@ -89,6 +97,8 @@ class TwoFactorIntegrationTest {
     @Autowired JdbcTemplate jdbc;
     @Autowired AuthService auth;
     @Autowired OAuthLoginService oauthLogin;
+    @Autowired PlatformTransactionManager txManager;
+    @MockitoSpyBean MailService mail;
 
     // ===== Enrolment =====================================================
 
@@ -651,7 +661,149 @@ class TwoFactorIntegrationTest {
                 .expectStatus().isForbidden();
     }
 
+    // ===== The owner is told =============================================
+
+    @Test
+    void enable_tellsTheOwner() {
+        Person p = withTwoFactor();
+
+        assertNotified(p.id, TwoFactorNotice.ENABLED, 1);
+    }
+
+    @Test
+    void disable_tellsTheOwner() {
+        Person p = withTwoFactor();
+
+        disable(p.bearer, PASSWORD, liveCode(p.id)).expectStatus().isNoContent();
+
+        assertNotified(p.id, TwoFactorNotice.DISABLED, 1);
+    }
+
+    @Test
+    void verify_givenRecoveryCode_tellsTheOwnerButNotForAnAuthenticatorCode() {
+        Person p = withTwoFactor();
+        String challenge = "Bearer " + login(p.email, PASSWORD).twoFactorToken();
+
+        verify(challenge, liveCode(p.id)).expectStatus().isOk();
+        assertNotified(p.id, TwoFactorNotice.RECOVERY_CODE_USED, 0);
+
+        verify(challenge, p.recoveryCodes.get(0)).expectStatus().isOk();
+        assertNotified(p.id, TwoFactorNotice.RECOVERY_CODE_USED, 1);
+    }
+
+    @Test
+    void verify_givenLockout_tellsTheOwnerOnce() {
+        Person p = withTwoFactor();
+        String challenge = "Bearer " + login(p.email, PASSWORD).twoFactorToken();
+
+        for (int i = 0; i < 7; i++) {
+            verify(challenge, WRONG_CODE);
+        }
+
+        assertNotified(p.id, TwoFactorNotice.LOCKED, 1);
+    }
+
+    // ===== Operator reset ================================================
+
+    @Test
+    void operatorReset_endsTwoFactorAndEverySessionAuditsAndTellsTheOwner() {
+        Person owner = withTwoFactor();
+        String thiefSession = login(owner.email, PASSWORD).twoFactorToken();
+        String admin = adminSession();
+
+        http.post().uri("/v1/admin/users/" + owner.id + "/2fa/reset")
+                .header(HttpHeaders.AUTHORIZATION, admin)
+                .exchange()
+                .expectStatus().isNoContent();
+
+        assertThat(twoFactors.findById(owner.id)).isEmpty();
+        me(owner.bearer).expectStatus().isUnauthorized();
+        verify("Bearer " + thiefSession, WRONG_CODE).expectStatus().isUnauthorized();
+        assertThat(login(owner.email, PASSWORD).accessToken()).isNotNull();
+        assertThat(auditRows(AuditLogService.EVT_ADMIN_TWO_FACTOR_RESET, owner.id))
+                .singleElement().satisfies(row -> assertThat(row.getEventDetail()).containsKey("actorUserId"));
+        assertNotified(owner.id, TwoFactorNotice.RESET_BY_SUPPORT, 1);
+    }
+
+    @Test
+    void operatorReset_givenNonAdmin_isRefusedAndChangesNothing() {
+        Person owner = withTwoFactor();
+        Person stranger = withTwoFactor();
+
+        http.post().uri("/v1/admin/users/" + owner.id + "/2fa/reset")
+                .header(HttpHeaders.AUTHORIZATION, stranger.bearer)
+                .exchange()
+                .expectStatus().isForbidden();
+        http.post().uri("/v1/admin/users/" + owner.id + "/2fa/reset")
+                .header(HttpHeaders.AUTHORIZATION, owner.bearer)
+                .exchange()
+                .expectStatus().isForbidden();
+
+        assertThat(twoFactors.existsByUserIdAndEnabledAtIsNotNull(owner.id)).isTrue();
+    }
+
+    @Test
+    void operatorReset_givenTwoFactorOffOrUnknownUser_saysSo() {
+        Person plain = signUpVerified();
+        String admin = adminSession();
+
+        http.post().uri("/v1/admin/users/" + plain.id + "/2fa/reset")
+                .header(HttpHeaders.AUTHORIZATION, admin)
+                .exchange()
+                .expectStatus().isEqualTo(409);
+        http.post().uri("/v1/admin/users/" + UUID.randomUUID() + "/2fa/reset")
+                .header(HttpHeaders.AUTHORIZATION, admin)
+                .exchange()
+                .expectStatus().isNotFound();
+    }
+
+    // ===== Stale writes ==================================================
+
+    @Test
+    void staleCopyOfTheUsersRow_cannotRestoreEndedSessionsOrUndoABalanceChange() {
+        Person p = signUpVerified();
+        enrol(p.bearer).expectStatus().isOk();
+        String code = liveCode(p.id);
+        TransactionTemplate requiresNew = new TransactionTemplate(txManager);
+        requiresNew.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+
+        // Any request that saves the row, such as a webhook secret rotation,
+        // holding its copy while 2FA goes on and a debit lands.
+        new TransactionTemplate(txManager).executeWithoutResult(status -> {
+            User stale = users.findById(p.id).orElseThrow();
+            enable(p.bearer, code).expectStatus().isOk();
+            requiresNew.executeWithoutResult(inner -> jdbc.update(
+                    "UPDATE users SET credit_balance_cents = credit_balance_cents + 500 WHERE id = ?", p.id));
+            stale.setWebhookSigningSecret("whsec_saved_by_the_stale_copy");
+            users.save(stale);
+        });
+
+        me(p.bearer).expectStatus().isUnauthorized();
+        User row = users.findById(p.id).orElseThrow();
+        assertThat(row.getCreditBalanceCents()).isEqualTo(500);
+        assertThat(row.getWebhookSigningSecret()).isEqualTo("whsec_saved_by_the_stale_copy");
+    }
+
     // ===== Helpers =======================================================
+
+    /** A session on the allowlisted admin account, signing up on first use. */
+    private String adminSession() {
+        User existing = users.findByEmail(ADMIN_EMAIL).orElse(null);
+        if (existing == null) {
+            Person admin = signUpVerified(ADMIN_EMAIL);
+            TwoFactorFixture.turnOn(twoFactors, admin.id);
+            return admin.bearer;
+        }
+        twoFactors.deleteById(existing.getId());
+        String bearer = "Bearer " + login(ADMIN_EMAIL, PASSWORD).accessToken();
+        TwoFactorFixture.turnOn(twoFactors, existing.getId());
+        return bearer;
+    }
+
+    private void assertNotified(UUID userId, TwoFactorNotice notice, int times) {
+        Mockito.verify(mail, Mockito.times(times)).sendTwoFactorNotice(
+                ArgumentMatchers.argThat(u -> userId.equals(u.getId())), ArgumentMatchers.eq(notice));
+    }
 
     private record Person(String email, UUID id, String bearer, List<String> recoveryCodes) { }
 
