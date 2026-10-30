@@ -19,19 +19,20 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import ai.godance.domain.User;
+import ai.godance.domain.UserRole;
 import ai.godance.repository.CreditLedgerRepository;
 import ai.godance.repository.UserRepository;
 import ai.godance.web.dto.ApiKeyDtos.CreateApiKeyResponse;
 import ai.godance.web.dto.AuthDtos.AuthResponse;
 
 /**
- * Who {@link ai.godance.security.AdminAuthorizationFilter} lets onto
- * {@code /v1/admin/**}: an active account whose current email is verified
- * and allowlisted, over a JWT session. The JWT {@code email} claim alone
- * is never enough — it is unverified at signup and a snapshot afterwards.
+ * Which accounts {@link ai.godance.security.AdminAuthorizationFilter} lets
+ * onto {@code /v1/admin/**}: an active account with a verified email that
+ * holds a role, over a JWT session. {@link AdminRolesIntegrationTest}
+ * covers which role reaches which route.
  *
- * <p>Each test signs up its own allowlisted address: the tests share one
- * database and an address can be registered only once.
+ * <p>Each test signs up its own address: the tests share one database and
+ * an address can be registered only once.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.MOCK)
 @AutoConfigureWebTestClient
@@ -42,17 +43,11 @@ class AdminAuthorizationIntegrationTest {
     @ServiceConnection
     static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16");
 
-    private static final String UNVERIFIED_ADMIN = "unverified-admin@godance.test";
-    private static final String VERIFIED_ADMIN = "verified-admin@godance.test";
-    private static final String RENAMED_ADMIN = "renamed-admin@godance.test";
-    private static final String PROMOTED_ADMIN = "promoted-admin@godance.test";
-    private static final String DEACTIVATED_ADMIN = "deactivated-admin@godance.test";
-    private static final String KEYED_ADMIN = "keyed-admin@godance.test";
+    private static final String ALLOWLISTED = "allowlisted@godance.test";
 
     @DynamicPropertySource
     static void props(DynamicPropertyRegistry r) {
-        r.add("godance.admin.emails", () -> String.join(",", UNVERIFIED_ADMIN, VERIFIED_ADMIN,
-                RENAMED_ADMIN, PROMOTED_ADMIN, DEACTIVATED_ADMIN, KEYED_ADMIN));
+        r.add("godance.admin.emails", () -> ALLOWLISTED);
         r.add("godance.pricing.refresh-cron", () -> "0 0 0 1 1 ? 2099");
     }
 
@@ -61,11 +56,11 @@ class AdminAuthorizationIntegrationTest {
     @Autowired CreditLedgerRepository ledger;
 
     @Test
-    void filter_givenUnverifiedAccountWithAllowlistedEmail_returns403() {
-        // Anyone can sign up with an allowlisted address its owner hasn't registered yet.
-        String bearer = signUp(UNVERIFIED_ADMIN);
-        User squatter = users.findByEmail(UNVERIFIED_ADMIN).orElseThrow();
-        assertThat(squatter.isEmailVerified()).isFalse();
+    void filter_givenUnverifiedAdmin_returns403() {
+        String email = freshEmail();
+        String bearer = signUp(email);
+        User admin = hold(email, UserRole.ADMIN);
+        assertThat(admin.isEmailVerified()).isFalse();
 
         http.get().uri("/v1/admin/me")
                 .header("Authorization", bearer)
@@ -73,18 +68,20 @@ class AdminAuthorizationIntegrationTest {
                 .expectStatus().isForbidden()
                 .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON);
 
-        http.post().uri("/v1/admin/users/" + squatter.getId() + "/credit-adjust")
+        http.post().uri("/v1/admin/users/" + admin.getId() + "/credit-adjust")
                 .header("Authorization", bearer)
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(Map.of("amountCents", 999_99, "note", "self-serve credit"))
                 .exchange()
                 .expectStatus().isForbidden();
-        assertThat(ledger.sumDeltaForUser(squatter.getId())).isZero();
+        assertThat(ledger.sumDeltaForUser(admin.getId())).isZero();
     }
 
     @Test
-    void filter_givenVerifiedAccountWithAllowlistedEmail_passes() {
-        String bearer = signUp(VERIFIED_ADMIN);
+    void filter_givenAdminVerifiesEmail_passesWithoutAFreshLogin() {
+        String email = freshEmail();
+        String bearer = signUp(email);
+        hold(email, UserRole.ADMIN);
         http.get().uri("/v1/admin/me")
                 .header("Authorization", bearer)
                 .exchange()
@@ -93,7 +90,7 @@ class AdminAuthorizationIntegrationTest {
         // Verify through the real link flow. The token issued at signup is
         // reused: the filter reads the account, not a claim, so it needs no
         // fresh login to pick up the verification.
-        String token = users.findByEmail(VERIFIED_ADMIN).orElseThrow().getEmailVerificationToken();
+        String token = users.findByEmail(email).orElseThrow().getEmailVerificationToken();
         http.get().uri(b -> b.path("/v1/auth/verify").queryParam("token", token).build())
                 .header("Authorization", bearer)
                 .exchange()
@@ -104,22 +101,15 @@ class AdminAuthorizationIntegrationTest {
                 .exchange()
                 .expectStatus().isOk()
                 .expectBody()
-                .jsonPath("$.email").isEqualTo(VERIFIED_ADMIN);
+                .jsonPath("$.email").isEqualTo(email)
+                .jsonPath("$.role").isEqualTo("ADMIN");
     }
 
     @Test
-    void filter_givenEmailClaimAllowlistedButCurrentEmailNot_returns403() {
-        String bearer = signUpVerified(RENAMED_ADMIN);
-        http.get().uri("/v1/admin/me")
-                .header("Authorization", bearer)
-                .exchange()
-                .expectStatus().isOk();
-
-        // The account moves off the allowlisted address; the outstanding
-        // JWT still carries it in its email claim until it expires.
-        User u = users.findByEmail(RENAMED_ADMIN).orElseThrow();
-        u.setEmail("renamed-" + UUID.randomUUID() + "@godance.test");
-        users.save(u);
+    void filter_givenVerifiedAccountOnTheAllowlist_returns403() {
+        // The bootstrap runs at startup, before this account existed. From
+        // then on the list opens nothing.
+        String bearer = signUpVerified(ALLOWLISTED);
 
         http.get().uri("/v1/admin/me")
                 .header("Authorization", bearer)
@@ -128,15 +118,17 @@ class AdminAuthorizationIntegrationTest {
     }
 
     @Test
-    void me_givenEmailClaimStaleAndCurrentEmailAllowlisted_returnsCurrentEmail() {
-        String original = "promoted-" + UUID.randomUUID() + "@godance.test";
+    void me_givenEmailClaimStale_returnsCurrentEmail() {
+        String original = freshEmail();
         String bearer = signUpVerified(original);
+        hold(original, UserRole.SUPPORT);
 
-        // The account now holds a verified, allowlisted address; the claim
-        // still says the old one. Admin handlers see the address the filter
-        // checked, never the claim.
+        // The role stays with the account when its address changes; the
+        // claim still says the old one. Admin handlers see the account's
+        // current address, never the claim.
+        String current = freshEmail();
         User u = users.findByEmail(original).orElseThrow();
-        u.setEmail(PROMOTED_ADMIN);
+        u.setEmail(current);
         users.save(u);
 
         http.get().uri("/v1/admin/me")
@@ -144,18 +136,20 @@ class AdminAuthorizationIntegrationTest {
                 .exchange()
                 .expectStatus().isOk()
                 .expectBody()
-                .jsonPath("$.email").isEqualTo(PROMOTED_ADMIN);
+                .jsonPath("$.email").isEqualTo(current);
     }
 
     @Test
     void filter_givenDeactivatedAccount_returns401() {
-        String bearer = signUpVerified(DEACTIVATED_ADMIN);
+        String email = freshEmail();
+        String bearer = signUpVerified(email);
+        hold(email, UserRole.ADMIN);
         http.get().uri("/v1/admin/me")
                 .header("Authorization", bearer)
                 .exchange()
                 .expectStatus().isOk();
 
-        User u = users.findByEmail(DEACTIVATED_ADMIN).orElseThrow();
+        User u = users.findByEmail(email).orElseThrow();
         u.setActive(false);
         users.save(u);
 
@@ -169,7 +163,9 @@ class AdminAuthorizationIntegrationTest {
 
     @Test
     void filter_givenApiKeyOfVerifiedAdmin_returns403() {
-        String jwtBearer = signUpVerified(KEYED_ADMIN);
+        String email = freshEmail();
+        String jwtBearer = signUpVerified(email);
+        hold(email, UserRole.ADMIN);
         http.get().uri("/v1/admin/me")
                 .header("Authorization", jwtBearer)
                 .exchange()
@@ -192,6 +188,10 @@ class AdminAuthorizationIntegrationTest {
 
     // ===== Helpers ======================================================
 
+    private static String freshEmail() {
+        return "gate-" + UUID.randomUUID() + "@godance.test";
+    }
+
     private String signUp(String email) {
         AuthResponse resp = http.post().uri("/v1/auth/signup")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -211,5 +211,11 @@ class AdminAuthorizationIntegrationTest {
         u.setEmailVerified(true);
         users.save(u);
         return bearer;
+    }
+
+    private User hold(String email, UserRole role) {
+        User u = users.findByEmail(email).orElseThrow();
+        u.setRole(role);
+        return users.save(u);
     }
 }

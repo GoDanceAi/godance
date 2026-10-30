@@ -6,13 +6,24 @@ import {
   type AdminLedgerPage,
   type AdminUserSearchResponse,
   type AdminUserView,
+  type UserRole,
 } from '../../lib/api';
-import { formatCents } from '../../lib/auth';
+import { useAdmin } from '../../lib/admin';
+import { formatCents, useAuth } from '../../lib/auth';
 
 // Support console: find a user by email or UUID, inspect balance / caps /
-// ledger, and apply a manual credit adjustment (audited server-side).
+// ledger, and, with the role for it, apply a manual credit adjustment or
+// change the user's role (both audited server-side).
+
+const ROLES: { role: UserRole; description: string }[] = [
+  { role: 'USER', description: 'no console access' },
+  { role: 'SUPPORT', description: 'reads the console' },
+  { role: 'FINANCE', description: 'reads, adjusts credit' },
+  { role: 'ADMIN', description: 'everything, including roles' },
+];
 
 export default function UsersPage() {
+  const { role } = useAdmin();
   const [q, setQ] = useState('');
   const [results, setResults] = useState<AdminUserView[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -37,8 +48,8 @@ export default function UsersPage() {
   return (
     <div>
       <p className="text-sm text-fg-muted">
-        Look up a user by email (substring) or UUID, inspect their ledger, and adjust credit.
-        Every adjustment is written to the audit log.
+        Look up a user by email (substring) or UUID and inspect their ledger.
+        {role !== 'SUPPORT' && ' Every credit adjustment is written to the audit log.'}
       </p>
 
       <form
@@ -114,11 +125,81 @@ export default function UsersPage() {
   );
 }
 
+function RoleCard({ user, onUserUpdated }: {
+  user: AdminUserView;
+  onUserUpdated: (u: AdminUserView) => void;
+}) {
+  const { user: me } = useAuth();
+  const [draft, setDraft] = useState<UserRole>(user.role);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (me?.id === user.id) {
+    return (
+      <div className="mt-6 card">
+        <p className="text-sm font-semibold text-fg">Role</p>
+        <p className="mt-1 text-xs text-fg-subtle">
+          {user.role}. You can't change your own role; ask another admin.
+        </p>
+      </div>
+    );
+  }
+
+  const save = async () => {
+    const ok = window.confirm(
+      `Change ${user.email} from ${user.role} to ${draft}?\n` +
+      'They are signed out everywhere and get the new role at their next login.');
+    if (!ok) return;
+    setBusy(true);
+    setError(null);
+    try {
+      onUserUpdated(await apiFetch<AdminUserView>(`/v1/admin/users/${user.id}/role`, {
+        method: 'PUT',
+        json: { role: draft },
+      }));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.detail || err.message : 'Role change failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-6 card">
+      <p className="text-sm font-semibold text-fg">Role</p>
+      <p className="mt-1 text-xs text-fg-subtle">
+        Takes effect on their next request, signs them out, and lands in the audit log.
+      </p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <select
+          aria-label="Role"
+          className="input flex-1 min-w-[15rem]"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value as UserRole)}
+        >
+          {ROLES.map((r) => (
+            <option key={r.role} value={r.role}>{r.role} — {r.description}</option>
+          ))}
+        </select>
+        <button
+          className="btn btn-primary btn-sm"
+          disabled={busy || draft === user.role}
+          onClick={() => void save()}
+        >
+          {busy ? 'Saving…' : 'Save role'}
+        </button>
+      </div>
+      {error && <p className="mt-2 text-xs text-danger">{error}</p>}
+    </div>
+  );
+}
+
 function UserDrawer({ user, onClose, onUserUpdated }: {
   user: AdminUserView;
   onClose: () => void;
   onUserUpdated: (u: AdminUserView) => void;
 }) {
+  const { role } = useAdmin();
   const [ledger, setLedger] = useState<AdminLedgerPage | null>(null);
   const [page, setPage] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -211,47 +292,51 @@ function UserDrawer({ user, onClose, onUserUpdated }: {
           </div>
         </dl>
 
+        {role === 'ADMIN' && <RoleCard user={user} onUserUpdated={onUserUpdated} />}
+
         {/* Credit adjust */}
-        <div className="mt-6 card">
-          <p className="text-sm font-semibold text-fg">Adjust credit</p>
-          <p className="mt-1 text-xs text-fg-subtle">
-            Positive credits, negative debits (may push the balance below zero). Note is required
-            and lands in the audit log.
-          </p>
-          <div className="mt-3 flex gap-2">
-            <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-fg-subtle">$</span>
+        {role !== 'SUPPORT' && (
+          <div className="mt-6 card">
+            <p className="text-sm font-semibold text-fg">Adjust credit</p>
+            <p className="mt-1 text-xs text-fg-subtle">
+              Positive credits, negative debits (may push the balance below zero). Note is required
+              and lands in the audit log.
+            </p>
+            <div className="mt-3 flex gap-2">
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-fg-subtle">$</span>
+                <input
+                  type="number"
+                  step="0.01"
+                  className="input w-28 pl-7 tabular-nums"
+                  placeholder="±0.00"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                />
+              </div>
               <input
-                type="number"
-                step="0.01"
-                className="input w-28 pl-7 tabular-nums"
-                placeholder="±0.00"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
+                className="input flex-1"
+                placeholder="reason (required)"
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
               />
             </div>
-            <input
-              className="input flex-1"
-              placeholder="reason (required)"
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-            />
+            {validAdjust && (
+              <p className="mt-2 text-xs text-fg-muted tabular-nums">
+                Resulting balance: <strong className="text-fg">{formatCents(user.creditBalanceCents + amountCents)}</strong>
+              </p>
+            )}
+            <button
+              className="btn btn-primary btn-sm mt-3"
+              disabled={!validAdjust || busy}
+              onClick={() => void adjust()}
+            >
+              {busy ? 'Applying…' : 'Apply adjustment'}
+            </button>
+            {done && <p className="mt-2 text-xs" style={{ color: 'var(--color-success-fg)' }}>{done}</p>}
           </div>
-          {validAdjust && (
-            <p className="mt-2 text-xs text-fg-muted tabular-nums">
-              Resulting balance: <strong className="text-fg">{formatCents(user.creditBalanceCents + amountCents)}</strong>
-            </p>
-          )}
-          <button
-            className="btn btn-primary btn-sm mt-3"
-            disabled={!validAdjust || busy}
-            onClick={() => void adjust()}
-          >
-            {busy ? 'Applying…' : 'Apply adjustment'}
-          </button>
-          {done && <p className="mt-2 text-xs" style={{ color: 'var(--color-success-fg)' }}>{done}</p>}
-          {error && <p className="mt-2 text-xs text-danger">{error}</p>}
-        </div>
+        )}
+        {error && <p className="mt-2 text-xs text-danger">{error}</p>}
 
         {/* Ledger */}
         <div className="mt-6">

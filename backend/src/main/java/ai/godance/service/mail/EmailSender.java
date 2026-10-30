@@ -12,8 +12,8 @@ public interface EmailSender {
 
     /**
      * Send one email. {@code to} carries one recipient for user-facing
-     * mail and the whole operator allowlist for the pricing digest (one
-     * email per run, not one per admin).
+     * mail and every admin for the pricing digest (one email per run, not
+     * one per admin).
      */
     void send(List<String> to, String subject, String textBody, String htmlBody);
 }

@@ -1,7 +1,9 @@
 package ai.godance.config;
 
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.List;
+import java.util.stream.Stream;
 
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
@@ -35,6 +37,7 @@ import org.springframework.web.cors.reactive.UrlBasedCorsConfigurationSource;
 
 import com.nimbusds.jose.jwk.source.ImmutableSecret;
 
+import ai.godance.domain.UserRole;
 import ai.godance.repository.UserRepository;
 import ai.godance.security.ApiKeyAuthFilter;
 import ai.godance.security.JwtService;
@@ -67,15 +70,25 @@ import reactor.core.publisher.Mono;
         RateLimitProperties.class})
 public class SecurityConfig {
 
-    /** Authorities a signed-in session's JWT carries ({@code scope} = the user's role). */
-    private static final String SESSION_USER = "SCOPE_USER";
-    private static final String SESSION_ADMIN = "SCOPE_ADMIN";
+    /**
+     * Authorities a signed-in session's JWT carries ({@code scope} = the
+     * user's role). Staff are customers too, so every role is here: what
+     * tells the roles apart under {@code /v1/admin/**} is
+     * {@link ai.godance.security.AdminAuthorizationFilter}.
+     */
+    private static final String[] SESSION = Arrays.stream(UserRole.values())
+            .map(role -> "SCOPE_" + role.name())
+            .toArray(String[]::new);
     /**
      * A child's account waiting for a parent's consent carries this instead
      * of its role ({@link JwtService#PENDING_CONSENT_SCOPE}). Admitted on
      * the two routes the waiting screen uses and nowhere else.
      */
     private static final String SESSION_PENDING_CONSENT = JwtService.PENDING_CONSENT_AUTHORITY;
+
+    private static String[] sessionOr(String authority) {
+        return Stream.concat(Arrays.stream(SESSION), Stream.of(authority)).toArray(String[]::new);
+    }
 
     @Bean
     PasswordEncoder passwordEncoder() {
@@ -180,15 +193,15 @@ public class SecurityConfig {
                         // A child's account waiting for that consent may read its
                         // own profile (to show the waiting screen) and re-send the
                         // email to the parent. Nothing else: the rules below admit
-                        // SESSION_USER / SESSION_ADMIN / API keys only.
+                        // SESSION / API keys only.
                         .pathMatchers(HttpMethod.GET, "/v1/auth/me")
-                                .hasAnyAuthority(SESSION_USER, SESSION_ADMIN, SESSION_PENDING_CONSENT)
+                                .hasAnyAuthority(sessionOr(SESSION_PENDING_CONSENT))
                         .pathMatchers(HttpMethod.POST, "/v1/auth/parental-consent/resend")
                                 .hasAuthority(SESSION_PENDING_CONSENT)
                         // Any signed-in session may end itself or move into the
                         // cookie. Not an API key: it must never mint a session.
                         .pathMatchers(HttpMethod.POST, "/v1/auth/logout", "/v1/auth/session")
-                                .hasAnyAuthority(SESSION_USER, SESSION_ADMIN, SESSION_PENDING_CONSENT)
+                                .hasAnyAuthority(sessionOr(SESSION_PENDING_CONSENT))
                         // Public read-only: model catalog (model picker) and
                         // provider status board (marketing /status page).
                         .pathMatchers(HttpMethod.GET, "/v1/models", "/v1/status").permitAll()
@@ -198,14 +211,14 @@ public class SecurityConfig {
                         // The model API: a signed-in session or an API key.
                         .pathMatchers(HttpMethod.POST, "/v1/chat/completions",
                                 "/v1/images/generations", "/v1/videos/generations")
-                                .hasAnyAuthority(SESSION_USER, SESSION_ADMIN, ApiKeyAuthFilter.API_KEY_AUTHORITY)
+                                .hasAnyAuthority(sessionOr(ApiKeyAuthFilter.API_KEY_AUTHORITY))
                         .pathMatchers(HttpMethod.GET, "/v1/jobs", "/v1/jobs/*", "/v1/usage")
-                                .hasAnyAuthority(SESSION_USER, SESSION_ADMIN, ApiKeyAuthFilter.API_KEY_AUTHORITY)
+                                .hasAnyAuthority(sessionOr(ApiKeyAuthFilter.API_KEY_AUTHORITY))
                         // Everything else (keys, billing, webhook secret, conversations,
                         // account) needs a signed-in session. Deny by default, so a
                         // leaked key can't mint a key that outlives it, read the webhook
                         // secret or turn on auto-recharge (spec risk R-01).
-                        .anyExchange().hasAnyAuthority(SESSION_USER, SESSION_ADMIN))
+                        .anyExchange().hasAnyAuthority(SESSION))
                 .exceptionHandling(e -> e.accessDeniedHandler(ApiKeyAuthFilter::accessDenied))
                 // API-key auth runs before the JWT bearer filter; on success it
                 // installs a Jwt-principal so downstream controllers stay agnostic
@@ -214,9 +227,9 @@ public class SecurityConfig {
                 // The session cookie the same way, and only without an
                 // Authorization header, so the two filters never both act.
                 .addFilterBefore(sessionCookieFilter::filter, SecurityWebFiltersOrder.AUTHENTICATION)
-                // Admin allowlist guard on /v1/admin/** — fails closed. Loads the
-                // caller's account and checks its current, verified email; refuses
-                // API-key principals.
+                // Role gate on /v1/admin/** — deny by default. Checks the caller's
+                // account against the roles the matched route declares; refuses
+                // API-key principals and routes that declare none.
                 .addFilterAfter(adminAuthorizationFilter::filter, SecurityWebFiltersOrder.AUTHORIZATION)
                 // Spending caps are checked after authorization, before the controller.
                 .addFilterAfter(spendingLimitFilter::filter, SecurityWebFiltersOrder.AUTHORIZATION)
