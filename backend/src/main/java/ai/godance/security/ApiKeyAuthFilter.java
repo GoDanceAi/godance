@@ -51,7 +51,7 @@ public class ApiKeyAuthFilter {
 
     /**
      * The only authority an API-key principal holds. A signed-in session
-     * carries {@code SCOPE_USER} or {@code SCOPE_ADMIN} instead, and
+     * carries its role's {@code SCOPE_} authority instead, and
      * {@code SecurityConfig} admits this one on the model API alone.
      */
     public static final String API_KEY_AUTHORITY = "SCOPE_API_KEY";

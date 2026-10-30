@@ -67,6 +67,8 @@ public class AuditLogService {
     public static final String EVT_ADMIN_CATALOG_UPDATED = "admin.catalog.updated";
     /** An operator closed an account on its owner's request (anonymised, data deleted, billing kept). */
     public static final String EVT_ADMIN_ACCOUNT_CLOSED = "admin.account.closed";
+    /** An account's role was granted or revoked; {@code userId} is the account, the actor is in the detail. */
+    public static final String EVT_ADMIN_ROLE_CHANGED = "admin.role.changed";
 
     private final AuditLogEntryRepository repo;
 

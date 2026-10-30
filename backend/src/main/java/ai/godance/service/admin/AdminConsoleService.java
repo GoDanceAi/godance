@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 
@@ -20,6 +21,7 @@ import org.springframework.web.server.ResponseStatusException;
 import ai.godance.domain.AuditOutcome;
 import ai.godance.domain.CreditLedger;
 import ai.godance.domain.User;
+import ai.godance.domain.UserRole;
 import ai.godance.repository.ApiKeyRepository;
 import ai.godance.repository.CreditLedgerRepository;
 import ai.godance.repository.UsageRecordRepository;
@@ -31,9 +33,9 @@ import ai.godance.service.CreditLedgerService;
  * Blocking core of the admin console's user + overview surface
  * ({@code /v1/admin/users/**}, {@code /v1/admin/usage/summary}).
  * Controllers wrap calls in {@code Mono.fromCallable} per the existing
- * admin-controller pattern; the allowlist gate is
+ * admin-controller pattern; the role gate is
  * {@link ai.godance.security.AdminAuthorizationFilter} — nothing here
- * re-checks admin status.
+ * re-checks the caller's role.
  */
 @Service
 public class AdminConsoleService {
@@ -42,6 +44,8 @@ public class AdminConsoleService {
     public static final int SEARCH_LIMIT = 20;
     public static final int LEDGER_PAGE_SIZE = 20;
     private static final int TOP_N = 5;
+    /** Stands in for the acting admin on a role the bootstrap granted. */
+    private static final String BOOTSTRAP_ACTOR = "bootstrap:GODANCE_ADMIN_EMAILS";
 
     private final UserRepository users;
     private final ApiKeyRepository apiKeys;
@@ -167,6 +171,78 @@ public class AdminConsoleService {
                 new LedgerEntryView(entry.getId(), entry.getDeltaCents(),
                         entry.getSource().name(), entry.getSourceRef(), entry.getNote(),
                         entry.getOccurredAt()));
+    }
+
+    // ===== Roles ========================================================
+
+    /**
+     * Grants {@code role} to an account, or revokes its role by setting
+     * {@link UserRole#USER}. Takes effect on the account's next request:
+     * see {@link UserRepository#changeRole}.
+     *
+     * <p>Nobody can change their own role. Only an admin reaches this, so
+     * an admin always remains after a change: the last one can't be
+     * demoted. Two admins demoting each other at the same instant is the
+     * one way around that; {@link AdminBootstrap} recovers from it.
+     *
+     * <p>Setting the role an account already holds does nothing: no session
+     * ends and no audit row is written.
+     */
+    @Transactional
+    public UserView changeRole(UUID userId, UserRole role, UUID actorId, String actorEmail, String ip) {
+        if (role == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "role is required");
+        }
+        if (userId.equals(actorId)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "you cannot change your own role");
+        }
+        User u = requireUser(userId);
+        if (u.getRole() == role) {
+            return toView(u);
+        }
+        if (role != UserRole.USER && !(u.isActive() && u.isEmailVerified())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "a staff role needs an active account with a verified email");
+        }
+        if (!applyRole(u, role, actorEmail, actorId, ip)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "the role just changed; reload and try again");
+        }
+        return toView(requireUser(userId));
+    }
+
+    /**
+     * Makes the accounts behind {@code emails} admins if no account can act
+     * as one; otherwise does nothing. Returns the emails it promoted.
+     */
+    @Transactional
+    public List<String> bootstrapAdmins(List<String> emails) {
+        List<String> lowerCased = emails.stream()
+                .filter(e -> e != null && !e.isBlank())
+                .map(e -> e.trim().toLowerCase(Locale.ROOT))
+                .toList();
+        if (lowerCased.isEmpty() || users.existsByRoleAndActiveTrueAndEmailVerifiedTrue(UserRole.ADMIN)) {
+            return List.of();
+        }
+        List<String> promoted = new ArrayList<>();
+        for (User u : users.findActiveVerifiedByLowerEmailIn(lowerCased)) {
+            if (applyRole(u, UserRole.ADMIN, BOOTSTRAP_ACTOR, null, null)) promoted.add(u.getEmail());
+        }
+        return promoted;
+    }
+
+    /** The role change and its audit row, in the caller's transaction. False if another change got there first. */
+    private boolean applyRole(User u, UserRole role, String actorEmail, UUID actorId, String ip) {
+        if (users.changeRole(u.getId(), u.getRole(), role, Instant.now()) == 0) {
+            return false;
+        }
+        Map<String, Object> detail = new HashMap<>();
+        detail.put("adminEmail", actorEmail);
+        detail.put("actorUserId", actorId == null ? null : actorId.toString());
+        detail.put("targetUserId", u.getId().toString());
+        detail.put("fromRole", u.getRole().name());
+        detail.put("toRole", role.name());
+        audit.record(AuditLogService.EVT_ADMIN_ROLE_CHANGED, AuditOutcome.SUCCESS, u.getId(), ip, detail);
+        return true;
     }
 
     // ===== Overview =====================================================

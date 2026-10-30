@@ -47,7 +47,7 @@ export default function App() {
           <Route path="/settings"  element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
 
           {/* Admin console — nav + routes render only after /v1/admin/me
-              returns 200; the server-side allowlist stays the real gate. */}
+              returns 200; the server-side role gate stays the real one. */}
           <Route path="/admin" element={<ProtectedRoute><AdminLayout /></ProtectedRoute>}>
             <Route index element={<Navigate to="/admin/proposals" replace />} />
             <Route path="proposals" element={<ProposalsPage />} />

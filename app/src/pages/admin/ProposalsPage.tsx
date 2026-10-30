@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { apiFetch, ApiError, type AdminProposal, type AdminProposalListResponse } from '../../lib/api';
+import { useAdmin } from '../../lib/admin';
 
 // Pricing staging lane: the daily refresh cron stages PRICE_CHANGE /
 // NEW_MODEL proposals; the operator approves or rejects them here.
@@ -22,6 +23,7 @@ function age(iso: string): string {
 }
 
 export default function ProposalsPage() {
+  const canDecide = useAdmin().role === 'ADMIN';
   const [proposals, setProposals] = useState<AdminProposal[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
@@ -117,20 +119,24 @@ export default function ProposalsPage() {
                 </td>
                 <td className="px-4 py-3 text-fg-muted tabular-nums">{age(p.detectedAt)}</td>
                 <td className="px-4 py-3 text-right whitespace-nowrap">
-                  <button
-                    className="btn btn-sm btn-primary"
-                    disabled={busyId === p.id}
-                    onClick={() => void decide(p, 'approve')}
-                  >
-                    Approve
-                  </button>
-                  <button
-                    className="btn btn-sm btn-danger ml-2"
-                    disabled={busyId === p.id}
-                    onClick={() => void decide(p, 'reject')}
-                  >
-                    Reject
-                  </button>
+                  {canDecide && (
+                    <>
+                      <button
+                        className="btn btn-sm btn-primary"
+                        disabled={busyId === p.id}
+                        onClick={() => void decide(p, 'approve')}
+                      >
+                        Approve
+                      </button>
+                      <button
+                        className="btn btn-sm btn-danger ml-2"
+                        disabled={busyId === p.id}
+                        onClick={() => void decide(p, 'reject')}
+                      >
+                        Reject
+                      </button>
+                    </>
+                  )}
                 </td>
               </tr>
             ))}

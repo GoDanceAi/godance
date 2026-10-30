@@ -139,7 +139,7 @@ export interface MeResponse {
   pendingEmail: string | null; // address being added or changed to, until verified
   hasPassword: boolean;      // true: changing the email asks for the current password
   fullName: string;
-  role: 'USER' | 'ADMIN';
+  role: UserRole;
   emailVerified: boolean;
   creditBalanceCents: number;
   dailyCreditCapCents: number | null;
@@ -152,6 +152,9 @@ export interface MeResponse {
 }
 
 export type AgeStatus = 'ADULT' | 'CONSENT_PENDING' | 'CONSENT_GRANTED';
+
+// Each role adds to the one before it. Which reaches what is enforced by the API.
+export type UserRole = 'USER' | 'SUPPORT' | 'FINANCE' | 'ADMIN';
 
 /** GET /v1/auth/parental-consent: what the parent's consent page shows. */
 export interface ParentalConsentView {
@@ -263,6 +266,7 @@ export function isVirtualModel(m: ModelEntry | VirtualModelEntry): m is VirtualM
 
 export interface AdminMeResponse {
   email: string;
+  role: UserRole;
 }
 
 export interface AdminProposal {
@@ -325,7 +329,7 @@ export interface AdminUserView {
   id: string;
   email: string;
   fullName: string;
-  role: 'USER' | 'ADMIN';
+  role: UserRole;
   active: boolean;
   creditBalanceCents: number;
   dailyCreditCapCents: number | null;

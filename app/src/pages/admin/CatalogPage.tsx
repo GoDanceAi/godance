@@ -7,6 +7,7 @@ import {
   type AdminPriceHistoryEntry,
   type AdminPriceHistoryResponse,
 } from '../../lib/api';
+import { useAdmin } from '../../lib/admin';
 
 // Model catalog management: enable/disable, per-model markup override,
 // price history on expand. Prices are microcents/1k tokens (text) or
@@ -25,6 +26,7 @@ function priceSummary(m: AdminCatalogModel): string {
 }
 
 export default function CatalogPage() {
+  const canEdit = useAdmin().role === 'ADMIN';
   const [models, setModels] = useState<AdminCatalogModel[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
@@ -143,6 +145,7 @@ export default function CatalogPage() {
                         min={0}
                         step={0.5}
                         className="input w-20 !py-1 text-xs tabular-nums"
+                        disabled={!canEdit}
                         value={markupDraft[m.id] ?? String(m.effectiveMarkupPercent)}
                         onChange={(e) => setMarkupDraft((d) => ({ ...d, [m.id]: e.target.value }))}
                       />
@@ -170,13 +173,15 @@ export default function CatalogPage() {
                     </span>
                   </td>
                   <td className="px-4 py-3 text-right">
-                    <button
-                      className={`btn btn-sm ${m.enabled ? 'btn-danger' : 'btn-secondary'}`}
-                      disabled={busyId === m.id}
-                      onClick={() => void patch(m, { enabled: !m.enabled })}
-                    >
-                      {m.enabled ? 'Disable' : 'Enable'}
-                    </button>
+                    {canEdit && (
+                      <button
+                        className={`btn btn-sm ${m.enabled ? 'btn-danger' : 'btn-secondary'}`}
+                        disabled={busyId === m.id}
+                        onClick={() => void patch(m, { enabled: !m.enabled })}
+                      >
+                        {m.enabled ? 'Disable' : 'Enable'}
+                      </button>
+                    )}
                   </td>
                 </tr>
                 {expandedId === m.id && (

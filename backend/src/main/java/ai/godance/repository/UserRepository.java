@@ -38,6 +38,35 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     int grantParentalConsent(@Param("id") UUID id, @Param("now") java.time.Instant now);
 
     /**
+     * Moves an account from role {@code from} to {@code to} and ends its
+     * sessions: the bumped session version makes every earlier JWT, each
+     * carrying the old role in its {@code scope}, fail on its next request.
+     * One conditional UPDATE, so it returns 0 if another change got there
+     * first, and writing no other column can't overwrite a balance changed
+     * in the meantime.
+     *
+     * <p>Flushes and clears the persistence context, so a {@code User}
+     * read afterwards in the same transaction reflects this update.
+     */
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("UPDATE User u SET u.role = :to, u.sessionVersion = u.sessionVersion + 1, u.updatedAt = :now "
+         + "WHERE u.id = :id AND u.role = :from")
+    int changeRole(@Param("id") UUID id, @Param("from") ai.godance.domain.UserRole from,
+                   @Param("to") ai.godance.domain.UserRole to, @Param("now") java.time.Instant now);
+
+    /** Can anyone act as {@code role}? The same conditions the admin gate applies. */
+    boolean existsByRoleAndActiveTrueAndEmailVerifiedTrue(ai.godance.domain.UserRole role);
+
+    /** Accounts the admin gate would admit, by lower-cased email. */
+    @Query("SELECT u FROM User u WHERE lower(u.email) IN :emails AND u.active = true AND u.emailVerified = true")
+    List<User> findActiveVerifiedByLowerEmailIn(@Param("emails") List<String> emails);
+
+    /** Where to reach the accounts that can act as {@code role}. */
+    @Query("SELECT u.email FROM User u WHERE u.role = :role AND u.active = true AND u.emailVerified = true "
+         + "ORDER BY u.email")
+    List<String> findActiveVerifiedEmailsByRole(@Param("role") ai.godance.domain.UserRole role);
+
+    /**
      * The per-request JWT check in {@code SessionVersionJwtDecoder} — one
      * column, by primary key. Empty for a disabled account as well as a
      * missing one, so disabling an account ends its sessions at once.

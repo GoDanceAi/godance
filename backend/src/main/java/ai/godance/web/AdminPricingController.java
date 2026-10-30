@@ -18,17 +18,19 @@ import org.springframework.web.server.ResponseStatusException;
 
 import ai.godance.domain.ModelChangeProposal;
 import ai.godance.domain.ProposalStatus;
+import ai.godance.domain.UserRole;
 import ai.godance.repository.ModelChangeProposalRepository;
 import ai.godance.security.AdminAuthorizationFilter;
+import ai.godance.security.AdminRoles;
 import ai.godance.service.admin.AdminCatalogService;
 import ai.godance.service.pricing.ProposalApprovalService;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
 /**
- * Operator-only API for the pricing staging lane. Reachable only via
- * an authenticated session whose account has a verified email on the
- * {@code godance.admin.emails} allowlist — see
+ * Staff API for the pricing staging lane. Reachable only via an
+ * authenticated session whose account has a verified email and a role the
+ * route declares with {@link AdminRoles} — see
  * {@link AdminAuthorizationFilter}, which also supplies that email as
  * the reviewer recorded on approvals and catalog edits.
  *
@@ -52,6 +54,7 @@ public class AdminPricingController {
     }
 
     @GetMapping("/proposals")
+    @AdminRoles({UserRole.SUPPORT, UserRole.FINANCE, UserRole.ADMIN})
     public Mono<ProposalListResponse> list(@RequestParam(value = "status", required = false) String status) {
         List<ModelChangeProposal> rows = status == null || status.isBlank()
                 ? proposals.findAllByOrderByDetectedAtDesc()
@@ -60,12 +63,14 @@ public class AdminPricingController {
     }
 
     @PostMapping("/proposals/{id}/approve")
+    @AdminRoles(UserRole.ADMIN)
     public Mono<ProposalView> approve(@PathVariable("id") Long id,
             @RequestAttribute(AdminAuthorizationFilter.ADMIN_EMAIL_ATTRIBUTE) String reviewer) {
         return Mono.fromCallable(() -> approval.approve(id, reviewer)).map(AdminPricingController::toView);
     }
 
     @PostMapping("/proposals/{id}/reject")
+    @AdminRoles(UserRole.ADMIN)
     public Mono<ProposalView> reject(@PathVariable("id") Long id,
             @RequestAttribute(AdminAuthorizationFilter.ADMIN_EMAIL_ATTRIBUTE) String reviewer) {
         return Mono.fromCallable(() -> approval.reject(id, reviewer)).map(AdminPricingController::toView);
@@ -74,12 +79,14 @@ public class AdminPricingController {
     // ===== Catalog management (admin console, round 5) =================
 
     @GetMapping("/models")
+    @AdminRoles({UserRole.SUPPORT, UserRole.FINANCE, UserRole.ADMIN})
     public Mono<CatalogListResponse> listModels() {
         return Mono.fromCallable(() -> new CatalogListResponse(catalog.listModels()))
                 .subscribeOn(Schedulers.boundedElastic());
     }
 
     @PatchMapping("/models/{id}")
+    @AdminRoles(UserRole.ADMIN)
     public Mono<AdminCatalogService.CatalogModelView> updateModel(
             @PathVariable("id") Long id,
             @RequestBody ModelUpdateRequest body,
@@ -90,6 +97,7 @@ public class AdminPricingController {
     }
 
     @GetMapping("/models/{id}/history")
+    @AdminRoles({UserRole.SUPPORT, UserRole.FINANCE, UserRole.ADMIN})
     public Mono<PriceHistoryResponse> priceHistory(@PathVariable("id") Long id) {
         return Mono.fromCallable(() -> new PriceHistoryResponse(catalog.priceHistory(id)))
                 .subscribeOn(Schedulers.boundedElastic());

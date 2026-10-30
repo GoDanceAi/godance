@@ -40,6 +40,7 @@ import ai.godance.domain.Provider;
 import ai.godance.domain.Region;
 import ai.godance.domain.UsageRecord;
 import ai.godance.domain.User;
+import ai.godance.domain.UserRole;
 import ai.godance.repository.AuditLogEntryRepository;
 import ai.godance.repository.AutoRechargeAttemptRepository;
 import ai.godance.repository.ConversationMessageRepository;
@@ -88,7 +89,6 @@ class AccountClosureIntegrationTest {
 
     @DynamicPropertySource
     static void props(DynamicPropertyRegistry r) {
-        r.add("godance.admin.emails", () -> ADMIN);
         r.add("godance.pricing.refresh-cron", () -> "0 0 0 1 1 ? 2099");
         r.add("godance.object-storage.endpoint",          MINIO::getS3URL);
         r.add("godance.object-storage.access-key",        MINIO::getUserName);
@@ -137,6 +137,7 @@ class AccountClosureIntegrationTest {
     void signInAdmin() {
         adminBearer = signUpOrLogIn(ADMIN);
         User admin = users.findByEmail(ADMIN).orElseThrow();
+        admin.setRole(UserRole.ADMIN);
         admin.setEmailVerified(true);
         users.save(admin);
         adminId = admin.getId();
@@ -323,6 +324,23 @@ class AccountClosureIntegrationTest {
         // The estimate comes back, as the sweep would have refunded it.
         assertThat(users.findById(userId).orElseThrow().getCreditBalanceCents()).isEqualTo(100_00L);
         assertThat(ledger.sumDeltaForUser(userId)).isEqualTo(100_00L);
+    }
+
+    @Test
+    void close_givenStaffAccount_dropsTheRoleAndRecordsIt() {
+        String email = "staff-" + UUID.randomUUID() + "@godance.test";
+        signUpOrLogIn(email);
+        User staff = users.findByEmail(email).orElseThrow();
+        staff.setRole(UserRole.FINANCE);
+        users.save(staff);
+
+        closeAs(adminBearer, staff.getId()).expectStatus().isOk();
+
+        assertThat(users.findById(staff.getId()).orElseThrow().getRole()).isEqualTo(UserRole.USER);
+        AuditLogEntry row = audit.findByEventType(AuditLogService.EVT_ADMIN_ACCOUNT_CLOSED).stream()
+                .filter(r -> staff.getId().equals(r.getUserId()))
+                .findFirst().orElseThrow();
+        assertThat(row.getEventDetail()).containsEntry("role", "FINANCE");
     }
 
     // ===== Who may close ================================================
