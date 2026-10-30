@@ -65,6 +65,8 @@ public class AuditLogService {
     // Admin console (round 5)
     public static final String EVT_ADMIN_CREDIT_ADJUSTED = "admin.credit.adjusted";
     public static final String EVT_ADMIN_CATALOG_UPDATED = "admin.catalog.updated";
+    /** An operator closed an account on its owner's request (anonymised, data deleted, billing kept). */
+    public static final String EVT_ADMIN_ACCOUNT_CLOSED = "admin.account.closed";
 
     private final AuditLogEntryRepository repo;
 

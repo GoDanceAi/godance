@@ -18,4 +18,12 @@ public interface ObjectStorageClient {
 
     /** Delete an object. Idempotent — no error if the key doesn't exist. */
     void delete(String key);
+
+    /**
+     * Delete every object whose key starts with {@code prefix} and return how
+     * many there were; 0 when there are none. Unlike {@link #delete}, a
+     * failure throws, so a caller never records a deletion that did not
+     * happen. A blank prefix is refused: it would match the whole bucket.
+     */
+    int deletePrefix(String prefix);
 }

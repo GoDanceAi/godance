@@ -80,6 +80,13 @@ public class GenerationJob {
     @Column(name = "lease_expires_at")
     private Instant leaseExpiresAt;
 
+    /**
+     * When the job's media was deleted and its prompt and URLs redacted (V20);
+     * null until then. Read-only here: only {@code GenerationJobRepository.redactPurged} writes it.
+     */
+    @Column(name = "purged_at", insertable = false, updatable = false)
+    private Instant purgedAt;
+
     @PrePersist
     void onCreate() {
         if (createdAt == null) createdAt = Instant.now();
@@ -135,6 +142,8 @@ public class GenerationJob {
 
     public Instant getLeaseExpiresAt() { return leaseExpiresAt; }
     public void setLeaseExpiresAt(Instant leaseExpiresAt) { this.leaseExpiresAt = leaseExpiresAt; }
+
+    public Instant getPurgedAt() { return purgedAt; }
 
     @Override
     public boolean equals(Object o) {
