@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Link, NavLink, useNavigate } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import { useAuth, formatCents } from '../lib/auth';
@@ -11,9 +12,16 @@ export default function Layout({ children }: Props) {
   const { isAdmin } = useAdmin();
   const navigate = useNavigate();
 
-  const handleLogout = () => {
-    logout();
-    navigate('/login');
+  const [logoutFailed, setLogoutFailed] = useState(false);
+
+  const handleLogout = async () => {
+    setLogoutFailed(false);
+    try {
+      await logout();
+      navigate('/login');
+    } catch {
+      setLogoutFailed(true);
+    }
   };
 
   const linkClass = ({ isActive }: { isActive: boolean }) =>
@@ -46,11 +54,16 @@ export default function Layout({ children }: Props) {
               </span>
               <ThemeToggle compact />
               <button
-                onClick={handleLogout}
+                onClick={() => void handleLogout()}
                 className="text-sm font-medium text-fg-muted hover:text-fg transition-colors"
               >
                 Log out
               </button>
+              {logoutFailed && (
+                <span role="alert" className="text-sm text-danger">
+                  Couldn't log out. Try again.
+                </span>
+              )}
             </div>
           ) : (
             <div className="flex items-center gap-3">

@@ -1,5 +1,5 @@
 import type { ParentalConsentView } from '../src/lib/api';
-import { authResponse, expect, makeUser, problem, storedToken, test } from './mock-api';
+import { SESSION_COOKIE, expect, makeUser, problem, sessionCleared, sessionStarted, sessionToken, test } from './mock-api';
 
 const PASSWORD = 'correct-horse-battery';
 // Twelve this year, whatever year the suite runs in.
@@ -43,7 +43,7 @@ const VIEW: ParentalConsentView = {
 
 test.describe('signup under 16', () => {
   test('asks for a parent’s email, says why, and lands on the waiting screen', async ({ page, api }) => {
-    api.on('POST', '/v1/auth/signup', { status: 201, json: authResponse('tok-kid') }).mockUser(WAITING_KID);
+    api.on('POST', '/v1/auth/signup', sessionStarted('tok-kid', 201)).mockUser(WAITING_KID);
 
     await page.goto('/signup');
     await page.getByLabel('Full name').fill('Kim Lee');
@@ -61,7 +61,7 @@ test.describe('signup under 16', () => {
     await expect(page.getByRole('heading', { name: "Waiting for your parent's approval" })).toBeVisible();
     await expect(page).toHaveURL('/dashboard');
     await expect(page.getByText('p***@family.test')).toBeVisible();
-    expect(await storedToken(page)).toBe('tok-kid');
+    expect(await sessionToken(page)).toBe('tok-kid');
     expect(api.callsTo('POST', '/v1/auth/signup')[0].body).toEqual({
       email: 'kim@example.com',
       password: PASSWORD,
@@ -110,7 +110,7 @@ test.describe('waiting for a parent', () => {
 
     await expect(page.getByRole('status')).toContainText('Sent a new link');
     const [resend] = api.callsTo('POST', '/v1/auth/parental-consent/resend');
-    expect(resend.headers.authorization).toBe('Bearer e2e-session-token');
+    expect(resend.headers.cookie).toBe(`${SESSION_COOKIE}=e2e-session-token`);
   });
 
   test('a resend too soon shows the server’s reason', async ({ page, api }) => {
@@ -126,12 +126,13 @@ test.describe('waiting for a parent', () => {
 
   test('signing out goes to /login', async ({ page, api }) => {
     await api.signIn(WAITING_KID);
+    api.on('POST', '/v1/auth/logout', sessionCleared());
 
     await page.goto('/dashboard');
     await page.getByRole('main').getByRole('button', { name: 'Sign out' }).click();
 
     await expect(page).toHaveURL('/login');
-    expect(await storedToken(page)).toBeNull();
+    expect(await sessionToken(page)).toBeNull();
   });
 });
 
@@ -165,7 +166,7 @@ test.describe('parent consent page', () => {
     await expect(page.getByRole('heading', { name: 'Test checkout' })).toBeVisible();
     const [view] = api.callsTo('GET', '/v1/auth/parental-consent');
     expect(view.query.get('token')).toBe('pc-valid');
-    expect(view.headers.authorization).toBeUndefined();
+    expect(view.headers.cookie).toBeUndefined();
     const [checkout] = api.callsTo('POST', '/v1/auth/parental-consent/checkout');
     expect(checkout.body).toEqual({ token: 'pc-valid', amountCents: 25_00 });
     expect(checkout.headers.authorization).toBeUndefined();
@@ -224,7 +225,7 @@ test.describe('parent consent page', () => {
     await page.goto('/parent-consent?status=approved');
 
     await expect(page.getByRole('heading', { name: "Thank you. You've approved the account." })).toBeVisible();
-    expect(api.calls).toHaveLength(0);
+    expect(api.calls.filter((call) => call.path !== '/v1/auth/me')).toHaveLength(0);
   });
 
   test('back from a cancelled checkout, it says nothing was paid', async ({ page }) => {

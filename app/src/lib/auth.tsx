@@ -1,19 +1,20 @@
-import { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
   apiFetch,
-  TOKEN_KEY,
+  ApiError,
+  SESSION_CALL,
   UNAUTHORIZED_EVENT,
-  type AuthResponse,
   type MeResponse,
 } from './api';
+import { adoptLegacySession } from './legacy-session';
 
 interface AuthContextValue {
   user: MeResponse | null;
   loading: boolean;                  // true on first mount while we hydrate /me
   login: (email: string, password: string) => Promise<void>;
   signup: (input: SignupInput) => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;       // rejects, still signed in, if the API couldn't be reached
   refresh: () => Promise<void>;      // re-fetch /me (after a top-up etc.)
 }
 
@@ -30,29 +31,29 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<MeResponse | null>(null);
-  const [loading, setLoading] = useState<boolean>(!!localStorage.getItem(TOKEN_KEY));
+  const [loading, setLoading] = useState<boolean>(true);
+  const latestRefresh = useRef(0);
 
   const refresh = useCallback(async () => {
+    // Every page load asks, so a slow first answer of "signed out" can land
+    // after a sign-in: only the latest call may set the user.
+    const call = ++latestRefresh.current;
     try {
-      const me = await apiFetch<MeResponse>('/v1/auth/me');
-      setUser(me);
+      const me = await apiFetch<MeResponse>('/v1/auth/me', { auth: false, credentials: 'include' });
+      if (call === latestRefresh.current) setUser(me);
     } catch {
-      setUser(null);
+      if (call === latestRefresh.current) setUser(null);
     } finally {
-      setLoading(false);
+      if (call === latestRefresh.current) setLoading(false);
     }
   }, []);
 
-  // Hydrate on first mount if there's already a stored token.
+  // Hydrate on first mount. Page script can't see the cookie, so only the API can say.
   useEffect(() => {
-    if (localStorage.getItem(TOKEN_KEY)) {
-      void refresh();
-    } else {
-      setLoading(false);
-    }
+    void adoptLegacySession().then(refresh);
   }, [refresh]);
 
-  // Listen for backend 401s (token expired, revoked, etc.) — clear local state.
+  // Listen for backend 401s (session expired, revoked, etc.) — clear local state.
   useEffect(() => {
     const handler = () => setUser(null);
     window.addEventListener(UNAUTHORIZED_EVENT, handler);
@@ -60,27 +61,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const login = useCallback(async (email: string, password: string) => {
-    const resp = await apiFetch<AuthResponse>('/v1/auth/login', {
-      method: 'POST',
-      auth: false,
-      json: { email, password },
-    });
-    localStorage.setItem(TOKEN_KEY, resp.accessToken);
+    await apiFetch('/v1/auth/login', { ...SESSION_CALL, json: { email, password } });
     await refresh();
   }, [refresh]);
 
   const signup = useCallback(async (input: SignupInput) => {
-    const resp = await apiFetch<AuthResponse>('/v1/auth/signup', {
-      method: 'POST',
-      auth: false,
-      json: input,
-    });
-    localStorage.setItem(TOKEN_KEY, resp.accessToken);
+    await apiFetch('/v1/auth/signup', { ...SESSION_CALL, json: input });
     await refresh();
   }, [refresh]);
 
-  const logout = useCallback(() => {
-    localStorage.removeItem(TOKEN_KEY);
+  const logout = useCallback(async () => {
+    // Only the API can remove an HttpOnly cookie, so a failed call leaves the
+    // session alive and must not look signed out. A 401 means it already ended.
+    try {
+      await apiFetch('/v1/auth/logout', { method: 'POST', auth: false, credentials: 'include' });
+    } catch (err) {
+      if (!(err instanceof ApiError && err.status === 401)) throw err;
+    }
     setUser(null);
   }, []);
 

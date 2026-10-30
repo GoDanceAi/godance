@@ -16,11 +16,12 @@ export default function LoginPage() {
   const { login } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const state = location.state as { from?: string; oauthError?: string } | null;
+  const state = location.state as { from?: string; oauthError?: string; notice?: string } | null;
   const redirectTo = state?.from ?? '/dashboard';
   // Navigation state, not the query string, so a crafted link can't put
-  // words in this error line; only OAuthCallbackPage sets it.
+  // words in these lines; only OAuthCallbackPage and ResetPasswordPage set them.
   const oauthError = state?.oauthError ?? null;
+  const notice = state?.notice ?? null;
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -82,6 +83,7 @@ export default function LoginPage() {
       </div>
 
       <form onSubmit={onSubmit} className="space-y-4">
+        {notice && <p role="status" className="text-sm text-fg-muted">{notice}</p>}
         <Field label="Email" type="email" value={email} onChange={setEmail} autoComplete="email" required />
         <Field label="Password" type="password" value={password} onChange={setPassword} autoComplete="current-password" required />
         <p className="text-right text-xs">

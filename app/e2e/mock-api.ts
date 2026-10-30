@@ -1,9 +1,13 @@
 import { test as base, expect, type Page, type Route } from '@playwright/test';
-import type { AuthResponse, MeResponse } from '../src/lib/api';
-import { API_ORIGIN } from './api-origin';
+import type { MeResponse } from '../src/lib/api';
+import { API_ORIGIN, APP_HOST } from './api-origin';
 
-// Mirrors src/lib/api.ts, which can't be imported at runtime here (import.meta.env).
-export const TOKEN_KEY = 'godance.token';
+// Production's cookie (backend SessionCookies), set and read by the real browser.
+export const SESSION_COOKIE = '__Host-godance_session';
+const COOKIE_ATTRIBUTES = 'HttpOnly; Secure; SameSite=Strict; Path=/';
+
+// Mirrors src/lib/legacy-session.ts, which can't be imported at runtime here (import.meta.env).
+export const LEGACY_TOKEN_KEY = 'godance.token';
 
 export interface ApiCall {
   method: string;
@@ -18,6 +22,7 @@ export interface Reply {
   json?: unknown;
   body?: string;
   contentType?: string;
+  setCookie?: string;
 }
 
 /** A reply, or a function of the call; a function may also answer the route itself and return nothing. */
@@ -32,8 +37,18 @@ export function problem(status: number, detail: string): Reply {
   };
 }
 
-export function authResponse(accessToken: string): AuthResponse {
-  return { accessToken, tokenType: 'Bearer', expiresAt: '2030-01-01T00:00:00Z' };
+/** The API's answer to a sign-in by the app: the cookie, and no token anywhere page script can reach. */
+export function sessionStarted(token: string, status = 200): Reply {
+  return {
+    status,
+    json: { accessToken: null, tokenType: 'Cookie', expiresAt: '2030-01-01T00:00:00Z' },
+    setCookie: `${SESSION_COOKIE}=${token}; ${COOKIE_ATTRIBUTES}; Max-Age=3600`,
+  };
+}
+
+/** The API's answer that ends the browser's session: the cookie removed. */
+export function sessionCleared(status = 204): Reply {
+  return { status, setCookie: `${SESSION_COOKIE}=; ${COOKIE_ATTRIBUTES}; Max-Age=0` };
 }
 
 export function makeUser(overrides: Partial<MeResponse> = {}): MeResponse {
@@ -67,14 +82,17 @@ export class MockApi {
   readonly unhandled: string[] = [];
   private handlers: { method: string; path: string | RegExp; respond: Responder }[] = [];
 
-  constructor(private readonly page: Page) {}
+  constructor(private readonly page: Page) {
+    // The app asks on every load; with no session the API says so.
+    this.on('GET', '/v1/auth/me', problem(401, 'Unauthorized'));
+  }
 
   async install(): Promise<void> {
     // Nothing reaches the network but the app server: fonts and any other
     // third-party request are aborted. Registered first, so the API route
     // and any route a test adds take precedence.
     await this.page.route(
-      (url) => !['127.0.0.1', 'localhost'].includes(url.hostname) && url.origin !== API_ORIGIN,
+      (url) => ![APP_HOST, '127.0.0.1', 'localhost'].includes(url.hostname) && url.origin !== API_ORIGIN,
       (route) => route.abort(),
     );
     await this.page.route(`${API_ORIGIN}/**`, (route) => this.handle(route));
@@ -89,24 +107,40 @@ export class MockApi {
     return this.calls.filter((c) => c.method === method && matches(path, c.path));
   }
 
-  /** Answer /me (and the admin probe, as a plain user) for `user`, as the API does: only with a token. */
+  /** Answer /me (and the admin probe, as a plain user) for `user`, as the API does: only with the cookie. */
   mockUser(user: MeResponse = makeUser()): this {
     return this.on('GET', '/v1/auth/me', (call) =>
-        call.headers.authorization ? { json: user } : problem(401, 'Unauthorized'))
+        call.headers.cookie?.includes(`${SESSION_COOKIE}=`) ? { json: user } : problem(401, 'Unauthorized'))
       .on('GET', '/v1/admin/me', problem(403, 'Forbidden'));
   }
 
-  /**
-   * Start the page signed in: the token is in localStorage before the app
-   * boots (once per tab, so a later reload sees whatever the app left).
-   */
+  /** Start the page signed in: the session cookie is in the browser before the app boots. */
   async signIn(user: MeResponse = makeUser(), token = 'e2e-session-token'): Promise<void> {
     this.mockUser(user);
+    await this.page.context().addCookies([{
+      name: SESSION_COOKIE,
+      value: token,
+      // https: the DevTools protocol refuses a Secure cookie set against http,
+      // though the browser accepts one from *.localhost.
+      url: API_ORIGIN.replace('http:', 'https:'),
+      httpOnly: true,
+      secure: true,
+      sameSite: 'Strict',
+    }]);
+  }
+
+  /** A browser signed in before the cookie existed: the token is in localStorage until the app moves it. */
+  async seedLegacyToken(token: string): Promise<void> {
     await this.page.addInitScript(([key, value]) => {
       if (sessionStorage.getItem('e2e.seeded')) return;
       sessionStorage.setItem('e2e.seeded', '1');
       localStorage.setItem(key, value);
-    }, [TOKEN_KEY, token]);
+    }, [LEGACY_TOKEN_KEY, token]);
+  }
+
+  /** End the session from the API's side, as a version bump or expiry does: the browser still holds the cookie until told. */
+  rejectSession(path: string, method = 'GET'): this {
+    return this.on(method, path, { ...problem(401, 'Token expired'), setCookie: sessionCleared().setCookie });
   }
 
   private async handle(route: Route): Promise<void> {
@@ -146,10 +180,16 @@ function matches(pattern: string | RegExp, path: string): boolean {
 
 async function fulfil(route: Route, reply: Reply): Promise<void> {
   const hasJson = reply.json !== undefined;
+  const origin = route.request().headers().origin ?? '';
   await route.fulfill({
     status: reply.status ?? 200,
-    // Cross-origin from the app; Playwright answers the CORS preflight itself.
-    headers: { 'access-control-allow-origin': '*' },
+    // Cross-origin from the app, with credentials, so as the API answers: the
+    // exact origin, never `*`. Playwright answers the CORS preflight itself.
+    headers: {
+      'access-control-allow-origin': origin,
+      'access-control-allow-credentials': 'true',
+      ...(reply.setCookie ? { 'set-cookie': reply.setCookie } : {}),
+    },
     contentType: reply.contentType ?? (hasJson ? 'application/json' : undefined),
     body: hasJson ? JSON.stringify(reply.json) : reply.body ?? '',
   });
@@ -171,7 +211,16 @@ export const test = base.extend<{ api: MockApi }>({
 
 export { expect };
 
-/** The session token the app holds, read from the page. */
-export function storedToken(page: Page): Promise<string | null> {
-  return page.evaluate((key) => localStorage.getItem(key), TOKEN_KEY);
+/** The session token in the browser's cookie jar, or null. Page script can't read it: see {@link readableToken}. */
+export async function sessionToken(page: Page): Promise<string | null> {
+  const cookies = await page.context().cookies(API_ORIGIN);
+  return cookies.find((c) => c.name === SESSION_COOKIE)?.value ?? null;
+}
+
+/** Everything page script could read a session from: both must stay empty. */
+export function readableToken(page: Page): Promise<{ cookie: string; storage: string[] }> {
+  return page.evaluate(() => ({
+    cookie: document.cookie,
+    storage: Object.keys(localStorage).filter((key) => key !== 'gd-theme'),
+  }));
 }
