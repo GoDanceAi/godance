@@ -29,6 +29,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import ai.godance.domain.AuditOutcome;
+import ai.godance.domain.UserRole;
 import ai.godance.repository.AuditLogEntryRepository;
 import ai.godance.repository.UserRepository;
 import ai.godance.security.SessionCookies;
@@ -409,6 +410,24 @@ class SessionCookieIntegrationTest {
         me(cookie).expectStatus().isUnauthorized();
         http.get().uri("/v1/auth/me").header("Authorization", "Bearer " + cookie)
                 .exchange().expectStatus().isUnauthorized();
+    }
+
+    @Test
+    void logout_givenStaffRole_expectsAllowed() {
+        String email = uniqueEmail("logout-support");
+        fromApp("/v1/auth/signup", signupBody(email)).exchange().expectStatus().isCreated();
+        var user = users.findByEmail(email).orElseThrow();
+        user.setRole(UserRole.SUPPORT);
+        users.save(user);
+        String cookie = setCookie(fromApp("/v1/auth/login", Map.of("email", email, "password", PASSWORD))
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody(AuthResponse.class).returnResult())
+                .getValue();
+
+        fromLogout(cookie);
+
+        me(cookie).expectStatus().isUnauthorized();
     }
 
     @Test
