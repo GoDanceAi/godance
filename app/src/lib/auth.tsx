@@ -12,9 +12,18 @@ interface AuthContextValue {
   user: MeResponse | null;
   loading: boolean;                  // true on first mount while we hydrate /me
   login: (email: string, password: string) => Promise<void>;
-  signup: (email: string, password: string, fullName: string) => Promise<void>;
+  signup: (input: SignupInput) => Promise<void>;
   logout: () => void;
   refresh: () => Promise<void>;      // re-fetch /me (after a top-up etc.)
+}
+
+/** birthMonth is YYYY-MM; parentEmail is sent only for someone under 16. */
+export interface SignupInput {
+  email: string;
+  password: string;
+  fullName: string;
+  birthMonth: string;
+  parentEmail?: string;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -60,11 +69,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await refresh();
   }, [refresh]);
 
-  const signup = useCallback(async (email: string, password: string, fullName: string) => {
+  const signup = useCallback(async (input: SignupInput) => {
     const resp = await apiFetch<AuthResponse>('/v1/auth/signup', {
       method: 'POST',
       auth: false,
-      json: { email, password, fullName },
+      json: input,
     });
     localStorage.setItem(TOKEN_KEY, resp.accessToken);
     await refresh();

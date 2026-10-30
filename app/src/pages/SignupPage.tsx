@@ -3,7 +3,18 @@ import type { FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import { apiFetch, ApiError } from '../lib/api';
+import { birthMonthParam, needsParentalConsent } from '../lib/age';
 import { Field } from './LoginPage';
+
+const MONTHS = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
+
+// Every year from this one back to 1900, newest first. No default is picked:
+// a neutral age screen asks everyone and doesn't steer the answer.
+const THIS_YEAR = new Date().getUTCFullYear();
+const YEARS = Array.from({ length: THIS_YEAR - 1900 + 1 }, (_, i) => THIS_YEAR - i);
 
 export default function SignupPage() {
   const { signup } = useAuth();
@@ -12,17 +23,34 @@ export default function SignupPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
+  const [birthMonth, setBirthMonth] = useState('');
+  const [birthYear, setBirthYear] = useState('');
+  const [parentEmail, setParentEmail] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [taken, setTaken] = useState(false);
   const [busy, setBusy] = useState(false);
 
+  const born = birthMonth && birthYear ? { year: Number(birthYear), month: Number(birthMonth) } : null;
+  const child = born !== null && needsParentalConsent(born.year, born.month);
+
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    if (!born) return; // the selects are required
     setError(null);
     setTaken(false);
+    if (child && parentEmail.trim().toLowerCase() === email.trim().toLowerCase()) {
+      setError("Your parent's or guardian's email address must be different from yours.");
+      return;
+    }
     setBusy(true);
     try {
-      await signup(email, password, fullName);
+      await signup({
+        email,
+        password,
+        fullName,
+        birthMonth: birthMonthParam(born.year, born.month),
+        ...(child ? { parentEmail } : {}),
+      });
       navigate('/dashboard', { replace: true });
     } catch (err) {
       setError(err instanceof ApiError ? err.detail || err.message : 'Signup failed');
@@ -48,6 +76,47 @@ export default function SignupPage() {
         <p className="text-xs text-fg-subtle">
           Min 12 characters. We hash with BCrypt — the plaintext is never stored.
         </p>
+        <fieldset>
+          <legend className="text-sm font-medium text-fg">Date of birth</legend>
+          <div className="mt-1.5 grid grid-cols-2 gap-3">
+            <select
+              aria-label="Birth month"
+              value={birthMonth}
+              onChange={(e) => setBirthMonth(e.target.value)}
+              autoComplete="bday-month"
+              required
+              className="input"
+            >
+              <option value="" disabled>Month</option>
+              {MONTHS.map((name, i) => (
+                <option key={name} value={i + 1}>{name}</option>
+              ))}
+            </select>
+            <select
+              aria-label="Birth year"
+              value={birthYear}
+              onChange={(e) => setBirthYear(e.target.value)}
+              autoComplete="bday-year"
+              required
+              className="input"
+            >
+              <option value="" disabled>Year</option>
+              {YEARS.map((y) => (
+                <option key={y} value={y}>{y}</option>
+              ))}
+            </select>
+          </div>
+        </fieldset>
+        {child && (
+          <div className="space-y-2">
+            <Field label="Parent or guardian's email" type="email" value={parentEmail} onChange={setParentEmail} autoComplete="off" required />
+            <p className="text-xs text-fg-subtle">
+              Because of your age, a parent or guardian needs to approve your account before you
+              can use Godance. We'll email them a link, and they approve by adding credit to your
+              account with their card. Until then, your account stays locked.
+            </p>
+          </div>
+        )}
         {error && <p className="text-sm text-danger">{error}</p>}
         {taken && <ReleaseLinkOffer email={email} />}
         <button type="submit" disabled={busy} className="btn btn-primary btn-lg w-full">

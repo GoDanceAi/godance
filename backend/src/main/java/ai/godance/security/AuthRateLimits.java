@@ -63,6 +63,24 @@ public class AuthRateLimits {
     }
 
     /**
+     * Re-sending the parental-consent email: the same limits as
+     * {@link #resendVerification}, on counters of its own.
+     */
+    public Mono<Void> resendParentalConsent(String clientIp, UUID userId) {
+        return limiter.check("consent-resend-ip", clientIp, props.resendPerIp())
+                .then(limiter.check("consent-resend-account", userId == null ? null : userId.toString(),
+                        props.resendPerAccount()));
+    }
+
+    /**
+     * The public parental-consent endpoints, which take an emailed token
+     * like {@code /v1/auth/verify}: per client IP, at the verify limit.
+     */
+    public Mono<Void> parentalConsent(String clientIp) {
+        return limiter.check("consent-ip", clientIp, props.verifyPerIp());
+    }
+
+    /**
      * Per client IP, then per normalized email, counted whether or not an
      * account holds the address. Never fails, like {@link #forgotPassword}:
      * the release-link endpoint answers 202 either way and just skips the

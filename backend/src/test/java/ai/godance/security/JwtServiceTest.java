@@ -20,6 +20,7 @@ import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 import com.nimbusds.jose.jwk.source.ImmutableSecret;
 
 import ai.godance.config.JwtProperties;
+import ai.godance.domain.AgeStatus;
 import ai.godance.domain.User;
 import ai.godance.domain.UserRole;
 import ai.godance.security.JwtService.IssuedToken;
@@ -65,6 +66,32 @@ class JwtServiceTest {
         Jwt decoded = decoder.decode(jwt.issueFor(u).token());
 
         assertThat(JwtService.sessionVersionOf(decoded)).isEqualTo(3L);
+    }
+
+    @Test
+    void issueFor_givenChildWaitingForParentalConsent_expectsPendingConsentScopeInsteadOfRole() {
+        User u = new User();
+        u.setId(UUID.randomUUID());
+        u.setEmail("kid@godance.ai");
+        u.setRole(UserRole.USER);
+        u.setAgeStatus(AgeStatus.CONSENT_PENDING);
+
+        Jwt decoded = decoder.decode(jwt.issueFor(u).token());
+
+        assertThat(decoded.<String>getClaim("scope")).isEqualTo("PENDING_CONSENT");
+    }
+
+    @Test
+    void issueFor_givenChildWhoseParentConsented_expectsTheRoleScope() {
+        User u = new User();
+        u.setId(UUID.randomUUID());
+        u.setEmail("kid@godance.ai");
+        u.setRole(UserRole.USER);
+        u.setAgeStatus(AgeStatus.CONSENT_GRANTED);
+
+        Jwt decoded = decoder.decode(jwt.issueFor(u).token());
+
+        assertThat(decoded.<String>getClaim("scope")).isEqualTo("USER");
     }
 
     @Test

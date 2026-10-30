@@ -1,6 +1,7 @@
 package ai.godance.domain;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -99,6 +100,28 @@ public class User {
     /** Address being added to a placeholder account; becomes {@code email} once verified. */
     @Column(name = "pending_email")
     private String pendingEmail;
+
+    // ----- Parental consent (V19) --------------------------------------
+    @Enumerated(EnumType.STRING)
+    @Column(name = "age_status", nullable = false)
+    private AgeStatus ageStatus = AgeStatus.ADULT;
+
+    /** First day of the birth month; null when signup didn't ask. */
+    @Column(name = "birth_month")
+    private LocalDate birthMonth;
+
+    @Column(name = "parent_email")
+    private String parentEmail;
+
+    /** SHA-256 (hex) of the live parental-consent token; the plaintext is only ever emailed. */
+    @Column(name = "parental_consent_token_hash")
+    private String parentalConsentTokenHash;
+
+    @Column(name = "parental_consent_requested_at")
+    private Instant parentalConsentRequestedAt;
+
+    @Column(name = "parental_consent_at")
+    private Instant parentalConsentAt;
 
     @Column(name = "stripe_customer_id", unique = true)
     private String stripeCustomerId;
@@ -220,6 +243,24 @@ public class User {
 
     public String getPendingEmail() { return pendingEmail; }
     public void setPendingEmail(String pendingEmail) { this.pendingEmail = pendingEmail; }
+
+    public AgeStatus getAgeStatus() { return ageStatus; }
+    public void setAgeStatus(AgeStatus ageStatus) { this.ageStatus = ageStatus; }
+
+    public LocalDate getBirthMonth() { return birthMonth; }
+    public void setBirthMonth(LocalDate birthMonth) { this.birthMonth = birthMonth; }
+
+    public String getParentEmail() { return parentEmail; }
+    public void setParentEmail(String parentEmail) { this.parentEmail = parentEmail; }
+
+    public String getParentalConsentTokenHash() { return parentalConsentTokenHash; }
+    public void setParentalConsentTokenHash(String h) { this.parentalConsentTokenHash = h; }
+
+    public Instant getParentalConsentRequestedAt() { return parentalConsentRequestedAt; }
+    public void setParentalConsentRequestedAt(Instant t) { this.parentalConsentRequestedAt = t; }
+
+    public Instant getParentalConsentAt() { return parentalConsentAt; }
+    public void setParentalConsentAt(Instant t) { this.parentalConsentAt = t; }
 
     public String getStripeCustomerId() { return stripeCustomerId; }
     public void setStripeCustomerId(String stripeCustomerId) { this.stripeCustomerId = stripeCustomerId; }

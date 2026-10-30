@@ -9,6 +9,7 @@ import VerifyEmailPage from './pages/VerifyEmailPage';
 import ForgotPasswordPage from './pages/ForgotPasswordPage';
 import ResetPasswordPage from './pages/ResetPasswordPage';
 import OAuthCallbackPage from './pages/OAuthCallbackPage';
+import ParentConsentPage from './pages/ParentConsentPage';
 import DashboardPage from './pages/DashboardPage';
 import ChatPage from './pages/ChatPage';
 import ApiKeysPage from './pages/ApiKeysPage';
@@ -34,6 +35,8 @@ export default function App() {
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route path="/oauth/callback" element={<OAuthCallbackPage />} />
+          {/* Public: a parent approves a child's account from the emailed link. */}
+          <Route path="/parent-consent" element={<ParentConsentPage />} />
 
           {/* Authenticated */}
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
