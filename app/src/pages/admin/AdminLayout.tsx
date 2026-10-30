@@ -1,13 +1,28 @@
-import { Navigate, NavLink, Outlet } from 'react-router-dom';
+import { Link, Navigate, NavLink, Outlet } from 'react-router-dom';
 import { useAdmin } from '../../lib/admin';
 
 // Shell for /admin/*: sub-nav tabs + client-side guard. Non-admins are
 // bounced to the dashboard (the backend allowlist 403s them regardless).
 export default function AdminLayout() {
-  const { isAdmin, loading } = useAdmin();
+  const { isAdmin, needsTwoFactor, loading } = useAdmin();
 
   if (loading) {
     return <div className="mx-auto max-w-6xl px-6 py-12 text-sm text-fg-faint">Checking access…</div>;
+  }
+  if (needsTwoFactor) {
+    return (
+      <div className="mx-auto max-w-3xl px-6 py-8">
+        <h1 className="text-2xl font-bold tracking-tight text-fg">Admin</h1>
+        <section className="mt-8 card">
+          <h2 className="font-semibold text-fg">Turn on two-factor sign-in</h2>
+          <p className="mt-1 text-sm text-fg-muted">
+            The admin console needs two-factor sign-in on your account. It takes a minute,
+            from your settings.
+          </p>
+          <Link to="/settings" className="mt-4 btn btn-sm btn-primary">Go to settings</Link>
+        </section>
+      </div>
+    );
   }
   if (!isAdmin) {
     return <Navigate to="/dashboard" replace />;

@@ -34,6 +34,8 @@ class AuthRateLimitsTest {
     private static final Limit RESEND_PER_ACCOUNT = new Limit(6, Duration.ofDays(1));
     private static final Limit RELEASE_LINK_PER_IP = new Limit(13, Duration.ofHours(1));
     private static final Limit RELEASE_LINK_PER_EMAIL = new Limit(7, Duration.ofDays(1));
+    private static final Limit TWO_FACTOR_PER_IP = new Limit(7, Duration.ofDays(1));
+    private static final Limit TWO_FACTOR_PER_ACCOUNT = new Limit(8, Duration.ofDays(1));
     private static final String IP = "203.0.113.7";
     private static final UUID USER_ID = UUID.fromString("5b0c8a4e-2f6d-4c1a-9e3b-7d2f1a6c8e90");
 
@@ -46,7 +48,22 @@ class AuthRateLimitsTest {
         rateLimits = new AuthRateLimits(limiter, new RateLimitProperties(
                 true, LOGIN_PER_IP, LOGIN_PER_EMAIL, SIGNUP_PER_IP, VERIFY_PER_IP,
                 FORGOT_PER_IP, FORGOT_PER_EMAIL, RESEND_PER_IP, RESEND_PER_ACCOUNT,
-                RELEASE_LINK_PER_IP, RELEASE_LINK_PER_EMAIL));
+                RELEASE_LINK_PER_IP, RELEASE_LINK_PER_EMAIL, TWO_FACTOR_PER_IP, TWO_FACTOR_PER_ACCOUNT));
+    }
+
+    @Test
+    void twoFactor_givenIpOverLimit_expectsAccountNotCounted() {
+        UUID userId = UUID.randomUUID();
+        PublisherProbe<Void> accountCheck = PublisherProbe.empty();
+        when(limiter.check("two-factor-ip", IP, TWO_FACTOR_PER_IP)).thenReturn(over());
+        when(limiter.check("two-factor-account", userId.toString(), TWO_FACTOR_PER_ACCOUNT))
+                .thenReturn(accountCheck.mono());
+
+        StepVerifier.create(rateLimits.twoFactor(IP, userId))
+                .expectError(RateLimitExceededException.class)
+                .verify();
+
+        accountCheck.assertWasNotSubscribed();
     }
 
     private static Mono<Void> over() {

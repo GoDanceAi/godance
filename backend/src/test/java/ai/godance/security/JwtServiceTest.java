@@ -56,6 +56,23 @@ class JwtServiceTest {
     }
 
     @Test
+    void issueTwoFactorChallenge_expectsOnlyThePendingScopeAndAShortLife() {
+        User u = new User();
+        u.setId(UUID.randomUUID());
+        u.setEmail("admin@godance.ai");
+        u.setRole(UserRole.ADMIN);
+        u.setSessionVersion(4);
+
+        Jwt decoded = decoder.decode(jwt.issueTwoFactorChallenge(u).token());
+
+        // Never the role: this token must not pass for a session.
+        assertThat(decoded.<String>getClaim("scope")).isEqualTo(JwtService.TWO_FACTOR_PENDING_SCOPE);
+        assertThat(decoded.getExpiresAt()).isCloseTo(
+                Instant.now().plus(5, ChronoUnit.MINUTES), within(5, ChronoUnit.SECONDS));
+        assertThat(JwtService.sessionVersionOf(decoded)).isEqualTo(4);
+    }
+
+    @Test
     void issueFor_givenSessionVersion_expectsItInSessionVersionClaim() {
         User u = new User();
         u.setId(UUID.randomUUID());

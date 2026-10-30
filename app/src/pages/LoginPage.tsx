@@ -16,7 +16,11 @@ export default function LoginPage() {
   const { login } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const state = location.state as { from?: string; oauthError?: string } | null;
+  const state = location.state as {
+    from?: string;
+    oauthError?: string;
+    twoFactorToken?: string;
+  } | null;
   const redirectTo = state?.from ?? '/dashboard';
   // Navigation state, not the query string, so a crafted link can't put
   // words in this error line; only OAuthCallbackPage sets it.
@@ -26,20 +30,41 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // From this page's password form, or from a social sign-in or password
+  // reset that lands here owing the code. Navigation state, like oauthError.
+  const [challenge, setChallenge] = useState<string | null>(state?.twoFactorToken ?? null);
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
     setBusy(true);
     try {
-      await login(email, password);
-      navigate(redirectTo, { replace: true });
+      const pending = await login(email, password);
+      if (pending) {
+        setChallenge(pending);
+        setPassword('');
+      } else {
+        navigate(redirectTo, { replace: true });
+      }
     } catch (err) {
       setError(err instanceof ApiError ? err.detail || err.message : 'Login failed');
     } finally {
       setBusy(false);
     }
   };
+
+  if (challenge) {
+    return (
+      <TwoFactorStep
+        challenge={challenge}
+        onSignedIn={() => navigate(redirectTo, { replace: true })}
+        onExpired={() => {
+          setChallenge(null);
+          setError('That took too long. Sign in again.');
+        }}
+      />
+    );
+  }
 
   return (
     <div className="mx-auto max-w-sm px-6 py-16">
@@ -98,6 +123,54 @@ export default function LoginPage() {
   );
 }
 
+/** The second step of signing in: the challenge plus a code buys the session. */
+function TwoFactorStep({ challenge, onSignedIn, onExpired }: {
+  challenge: string;
+  onSignedIn: () => void;
+  onExpired: () => void;
+}) {
+  const { completeTwoFactor } = useAuth();
+  const [code, setCode] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const onSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setBusy(true);
+    try {
+      await completeTwoFactor(challenge, code);
+      onSignedIn();
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        onExpired();
+        return;
+      }
+      setCode('');
+      setError(err instanceof ApiError ? err.detail || err.message : 'Sign-in failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mx-auto max-w-sm px-6 py-16">
+      <h1 className="text-2xl font-bold tracking-tight text-fg">Enter your code</h1>
+      <p className="mt-2 text-sm text-fg-muted">
+        Open your authenticator app and enter the 6-digit code for Godance. If you can't get to
+        the app, enter one of your recovery codes instead.
+      </p>
+      <form onSubmit={(e) => void onSubmit(e)} className="mt-8 space-y-4">
+        <Field label="Code" type="text" value={code} onChange={setCode} autoComplete="one-time-code" required autoFocus />
+        {error && <p role="alert" className="text-sm text-danger">{error}</p>}
+        <button type="submit" disabled={busy} className="btn btn-primary btn-lg w-full">
+          {busy ? 'Checking…' : 'Continue'}
+        </button>
+      </form>
+    </div>
+  );
+}
+
 function Field(props: {
   label: string;
   type: string;
@@ -106,6 +179,7 @@ function Field(props: {
   autoComplete?: string;
   required?: boolean;
   minLength?: number;
+  autoFocus?: boolean;
 }) {
   return (
     <label className="block">
@@ -117,6 +191,7 @@ function Field(props: {
         autoComplete={props.autoComplete}
         required={props.required}
         minLength={props.minLength}
+        autoFocus={props.autoFocus}
         className="input mt-1.5"
       />
     </label>

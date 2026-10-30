@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.Map;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -28,6 +29,7 @@ import ai.godance.repository.AuditLogEntryRepository;
 import ai.godance.repository.ModelCatalogEntryRepository;
 import ai.godance.repository.ModelPriceHistoryRepository;
 import ai.godance.repository.UserRepository;
+import ai.godance.repository.UserTwoFactorRepository;
 import ai.godance.service.AuditLogService;
 import ai.godance.web.dto.AuthDtos.AuthResponse;
 
@@ -52,6 +54,7 @@ class AdminCatalogIntegrationTest {
         r.add("godance.pricing.refresh-cron", () -> "0 0 0 1 1 ? 2099");
     }
 
+    @Autowired UserTwoFactorRepository twoFactors;
     @Autowired WebTestClient http;
     @Autowired ModelCatalogEntryRepository catalogRepo;
     @Autowired ModelPriceHistoryRepository historyRepo;
@@ -62,10 +65,17 @@ class AdminCatalogIntegrationTest {
     private String adminBearer;
     private String userBearer;
 
+    /** The next test's sign-in is by password alone, so 2FA can't stay on. */
+    @AfterEach
+    void turnOffTwoFactor() {
+        twoFactors.deleteAll();
+    }
+
     @BeforeEach
     void seedAccounts() {
         adminBearer = signUpOrLogIn("admin@godance.test");
         markEmailVerified("admin@godance.test");
+        TwoFactorFixture.turnOn(twoFactors, users.findByEmail("admin@godance.test").orElseThrow().getId());
         userBearer = signUpOrLogIn("user-" + java.util.UUID.randomUUID() + "@godance.test");
     }
 

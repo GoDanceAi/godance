@@ -91,6 +91,17 @@ public class AuthRateLimits {
                 .then(limiter.check("release-link-email", normalize(email), props.releaseLinkPerEmail())));
     }
 
+    /**
+     * Each code offered and each change to an account's second factor: per
+     * client IP, then per account. On top of the lockout in
+     * {@link ai.godance.service.TwoFactorService}, which holds if Redis doesn't.
+     */
+    public Mono<Void> twoFactor(String clientIp, UUID userId) {
+        return limiter.check("two-factor-ip", clientIp, props.twoFactorPerIp())
+                .then(limiter.check("two-factor-account", userId == null ? null : userId.toString(),
+                        props.twoFactorPerAccount()));
+    }
+
     /** {@code true} if every check passed, {@code false} instead of a 429. */
     private static Mono<Boolean> allowed(Mono<Void> checks) {
         return checks.thenReturn(true).onErrorReturn(RateLimitExceededException.class, false);

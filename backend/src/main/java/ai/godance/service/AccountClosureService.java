@@ -23,6 +23,7 @@ import ai.godance.repository.ConversationRepository;
 import ai.godance.repository.GenerationJobRepository;
 import ai.godance.repository.OAuthIdentityRepository;
 import ai.godance.repository.UserRepository;
+import ai.godance.repository.UserTwoFactorRepository;
 
 /**
  * Closes an account on its owner's request. Operator-run, from
@@ -36,7 +37,8 @@ import ai.godance.repository.UserRepository;
  *   <li>replaces the email with {@code closed-<id>@closed.invalid} and the
  *       name with "Closed account"; removes the password hash, social
  *       logins, the pending email change, email-verification and
- *       password-reset tokens, and the webhook signing secrets;</li>
+ *       password-reset tokens, the webhook signing secrets, and the
+ *       two-factor secret and recovery codes;</li>
  *   <li>disables the account and bumps its session version, so its JWTs
  *       fail at once, and deletes its API keys;</li>
  *   <li>turns auto-recharge off and forgets the saved payment method, so the
@@ -64,6 +66,7 @@ public class AccountClosureService {
     private static final List<JobStatus> OPEN = List.of(JobStatus.QUEUED, JobStatus.RUNNING);
 
     private final UserRepository users;
+    private final UserTwoFactorRepository twoFactors;
     private final ApiKeyRepository apiKeys;
     private final OAuthIdentityRepository identities;
     private final ConversationRepository conversations;
@@ -73,12 +76,14 @@ public class AccountClosureService {
     private final AuditLogService audit;
     private final TransactionTemplate tx;
 
-    public AccountClosureService(UserRepository users, ApiKeyRepository apiKeys,
+    public AccountClosureService(UserRepository users, UserTwoFactorRepository twoFactors,
+                                 ApiKeyRepository apiKeys,
                                  OAuthIdentityRepository identities, ConversationRepository conversations,
                                  GenerationJobRepository jobs, GenerationJobSettlement settlement,
                                  DataRetentionService retention, AuditLogService audit,
                                  PlatformTransactionManager txManager) {
         this.users = users;
+        this.twoFactors = twoFactors;
         this.apiKeys = apiKeys;
         this.identities = identities;
         this.conversations = conversations;
@@ -170,6 +175,7 @@ public class AccountClosureService {
         u.setSessionVersion(u.getSessionVersion() + 1);
         users.save(u);
 
+        twoFactors.deleteById(userId);
         int keys = apiKeys.deleteByUserId(userId);
         int links = identities.deleteByUserId(userId);
         int convs = conversations.deleteByUserId(userId);

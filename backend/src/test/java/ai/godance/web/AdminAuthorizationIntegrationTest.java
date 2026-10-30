@@ -2,6 +2,7 @@ package ai.godance.web;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -21,14 +22,17 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 import ai.godance.domain.User;
 import ai.godance.repository.CreditLedgerRepository;
 import ai.godance.repository.UserRepository;
+import ai.godance.repository.UserTwoFactorRepository;
+import ai.godance.security.AdminAuthorizationFilter;
 import ai.godance.web.dto.ApiKeyDtos.CreateApiKeyResponse;
 import ai.godance.web.dto.AuthDtos.AuthResponse;
 
 /**
  * Who {@link ai.godance.security.AdminAuthorizationFilter} lets onto
- * {@code /v1/admin/**}: an active account whose current email is verified
- * and allowlisted, over a JWT session. The JWT {@code email} claim alone
- * is never enough — it is unverified at signup and a snapshot afterwards.
+ * {@code /v1/admin/**}: an active account with two-factor sign-in on whose
+ * current email is verified and allowlisted, over a JWT session. The JWT
+ * {@code email} claim alone is never enough — it is unverified at signup
+ * and a snapshot afterwards.
  *
  * <p>Each test signs up its own allowlisted address: the tests share one
  * database and an address can be registered only once.
@@ -48,16 +52,18 @@ class AdminAuthorizationIntegrationTest {
     private static final String PROMOTED_ADMIN = "promoted-admin@godance.test";
     private static final String DEACTIVATED_ADMIN = "deactivated-admin@godance.test";
     private static final String KEYED_ADMIN = "keyed-admin@godance.test";
+    private static final String NO_2FA_ADMIN = "no-2fa-admin@godance.test";
 
     @DynamicPropertySource
     static void props(DynamicPropertyRegistry r) {
         r.add("godance.admin.emails", () -> String.join(",", UNVERIFIED_ADMIN, VERIFIED_ADMIN,
-                RENAMED_ADMIN, PROMOTED_ADMIN, DEACTIVATED_ADMIN, KEYED_ADMIN));
+                RENAMED_ADMIN, PROMOTED_ADMIN, DEACTIVATED_ADMIN, KEYED_ADMIN, NO_2FA_ADMIN));
         r.add("godance.pricing.refresh-cron", () -> "0 0 0 1 1 ? 2099");
     }
 
     @Autowired WebTestClient http;
     @Autowired UserRepository users;
+    @Autowired UserTwoFactorRepository twoFactors;
     @Autowired CreditLedgerRepository ledger;
 
     @Test
@@ -98,6 +104,7 @@ class AdminAuthorizationIntegrationTest {
                 .header("Authorization", bearer)
                 .exchange()
                 .expectStatus().isNoContent();
+        TwoFactorFixture.turnOn(twoFactors, users.findByEmail(VERIFIED_ADMIN).orElseThrow().getId());
 
         http.get().uri("/v1/admin/me")
                 .header("Authorization", bearer)
@@ -105,6 +112,22 @@ class AdminAuthorizationIntegrationTest {
                 .expectStatus().isOk()
                 .expectBody()
                 .jsonPath("$.email").isEqualTo(VERIFIED_ADMIN);
+    }
+
+    @Test
+    void filter_givenVerifiedAdminWithoutTwoFactor_returns403WithCode() {
+        String bearer = signUpWithoutTwoFactor(NO_2FA_ADMIN);
+
+        for (String route : List.of("/v1/admin/me", "/v1/admin/users", "/v1/admin/overview",
+                "/v1/admin/pricing/proposals", "/v1/admin/pricing/models")) {
+            http.get().uri(route)
+                    .header("Authorization", bearer)
+                    .exchange()
+                    .expectStatus().isForbidden()
+                    .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON)
+                    .expectBody()
+                    .jsonPath("$.code").isEqualTo(AdminAuthorizationFilter.TWO_FACTOR_REQUIRED_CODE);
+        }
     }
 
     @Test
@@ -205,11 +228,17 @@ class AdminAuthorizationIntegrationTest {
     }
 
     /** Signs up, then marks the email verified directly instead of following the emailed link. */
-    private String signUpVerified(String email) {
+    private String signUpWithoutTwoFactor(String email) {
         String bearer = signUp(email);
         User u = users.findByEmail(email).orElseThrow();
         u.setEmailVerified(true);
         users.save(u);
+        return bearer;
+    }
+
+    private String signUpVerified(String email) {
+        String bearer = signUpWithoutTwoFactor(email);
+        TwoFactorFixture.turnOn(twoFactors, users.findByEmail(email).orElseThrow().getId());
         return bearer;
     }
 }

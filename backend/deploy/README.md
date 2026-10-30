@@ -60,6 +60,7 @@ Things that need real values up-front:
 | Variable | Source |
 |---|---|
 | `JWT_SIGNING_KEY` | `openssl rand -base64 48` |
+| `KEY_VAULT_KEY` | `openssl rand -base64 32`. Encrypts authenticator secrets in the database. The backend won't boot without it, and the deploy stops before touching the running container if it's missing. Back it up apart from the database: if it is lost, nobody with two-factor sign-in on can sign in |
 | `DATABASE_PASSWORD` | `openssl rand -base64 24` |
 | `OBJECT_STORAGE_*` | DigitalOcean → Spaces → create bucket + key |
 | `STRIPE_SECRET_KEY` | Stripe dashboard → Developers → API keys |

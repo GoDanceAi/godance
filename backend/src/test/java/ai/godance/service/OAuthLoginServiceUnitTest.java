@@ -45,6 +45,7 @@ class OAuthLoginServiceUnitTest {
     UserRepository users;
     OAuthIdentityRepository identities;
     JwtService jwt;
+    TwoFactorService twoFactor;
     OAuthLoginService oauthLogin;
 
     @BeforeEach
@@ -52,7 +53,8 @@ class OAuthLoginServiceUnitTest {
         users = mock(UserRepository.class);
         identities = mock(OAuthIdentityRepository.class);
         jwt = mock(JwtService.class);
-        oauthLogin = new OAuthLoginService(users, identities, jwt, mock(AuditLogService.class));
+        twoFactor = mock(TwoFactorService.class);
+        oauthLogin = new OAuthLoginService(users, identities, jwt, mock(AuditLogService.class), twoFactor);
 
         when(identities.findByProviderAndSubject(any(), any())).thenReturn(Optional.empty());
         when(users.findByEmail(any())).thenReturn(Optional.empty());
@@ -89,6 +91,21 @@ class OAuthLoginServiceUnitTest {
         ArgumentCaptor<OAuthIdentity> saved = ArgumentCaptor.forClass(OAuthIdentity.class);
         verify(identities).save(saved.capture());
         return saved.getValue();
+    }
+
+    @Test
+    void completeLogin_givenTwoFactorOn_returnsTheChallengeAndNoSession() {
+        User existing = existingUser("two-factor@godance.test", PASSWORD_HASH, true);
+        AuthResponse challenge = AuthResponse.twoFactor("challenge", Instant.now().plusSeconds(300));
+        when(twoFactor.isEnabled(existing.getId())).thenReturn(true);
+        when(twoFactor.challenge(existing, "oauth:GOOGLE", null)).thenReturn(challenge);
+
+        AuthResponse response = oauthLogin.completeLogin(
+                OAuthProvider.GOOGLE, "google-2fa", "two-factor@godance.test", true, "Linked");
+
+        assertThat(response).isSameAs(challenge);
+        assertThat(existing.getLastLoginAt()).isNull();
+        verify(jwt, never()).issueFor(any());
     }
 
     @Test

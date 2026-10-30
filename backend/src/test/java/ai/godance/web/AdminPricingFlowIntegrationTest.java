@@ -7,6 +7,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -30,6 +31,7 @@ import ai.godance.domain.User;
 import ai.godance.gateway.ModelCatalog;
 import ai.godance.repository.ModelChangeProposalRepository;
 import ai.godance.repository.UserRepository;
+import ai.godance.repository.UserTwoFactorRepository;
 import ai.godance.web.dto.AuthDtos.AuthResponse;
 
 /**
@@ -57,6 +59,7 @@ class AdminPricingFlowIntegrationTest {
         r.add("godance.pricing.refresh-cron", () -> "0 0 0 1 1 ? 2099");
     }
 
+    @Autowired UserTwoFactorRepository twoFactors;
     @Autowired WebTestClient http;
     @Autowired ModelChangeProposalRepository proposals;
     @Autowired ModelCatalog catalog;
@@ -65,12 +68,19 @@ class AdminPricingFlowIntegrationTest {
     private String adminBearer;
     private String userBearer;
 
+    /** The next test's sign-in is by password alone, so 2FA can't stay on. */
+    @AfterEach
+    void turnOffTwoFactor() {
+        twoFactors.deleteAll();
+    }
+
     @BeforeEach
     void seedAccounts() {
         // Admin email must match the allowlist exactly. Signup-or-login so
         // the @BeforeEach is idempotent across tests in this class.
         adminBearer = signUpOrLogIn("admin@godance.test");
         markEmailVerified("admin@godance.test");
+        TwoFactorFixture.turnOn(twoFactors, users.findByEmail("admin@godance.test").orElseThrow().getId());
         // Non-admin uses a fresh random local-part each test to dodge the
         // signup-uniqueness check; the allowlist still rejects them.
         userBearer  = signUpOrLogIn("user-" + java.util.UUID.randomUUID() + "@godance.test");

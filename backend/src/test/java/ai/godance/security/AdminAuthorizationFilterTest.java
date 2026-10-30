@@ -1,6 +1,7 @@
 package ai.godance.security;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -23,18 +24,20 @@ import org.springframework.web.server.WebFilterChain;
 import ai.godance.config.AdminProperties;
 import ai.godance.domain.User;
 import ai.godance.repository.UserRepository;
+import ai.godance.repository.UserTwoFactorRepository;
 import reactor.core.publisher.Mono;
 
 /**
  * The admin gate decides on the caller's account row, never on the JWT
  * {@code email} claim: active, email verified, current email allowlisted,
- * and not an API-key principal.
+ * two-factor sign-in on, and not an API-key principal.
  */
 class AdminAuthorizationFilterTest {
 
     private static final String ADMIN_EMAIL = "admin@godance.test";
 
     UserRepository users;
+    UserTwoFactorRepository twoFactors;
     AdminAuthorizationFilter filter;
     AtomicBoolean chainCalled;
     WebFilterChain chain;
@@ -42,9 +45,11 @@ class AdminAuthorizationFilterTest {
     @BeforeEach
     void setUp() {
         users = mock(UserRepository.class);
+        twoFactors = mock(UserTwoFactorRepository.class);
+        when(twoFactors.existsByUserIdAndEnabledAtIsNotNull(any())).thenReturn(true);
         AdminProperties admin = new AdminProperties();
         admin.setEmails(List.of(ADMIN_EMAIL));
-        filter = new AdminAuthorizationFilter(admin, users);
+        filter = new AdminAuthorizationFilter(admin, users, twoFactors);
         chainCalled = new AtomicBoolean();
         chain = exchange -> {
             chainCalled.set(true);
@@ -62,6 +67,20 @@ class AdminAuthorizationFilterTest {
         assertThat(chainCalled).isTrue();
         assertThat((String) exchange.getAttribute(AdminAuthorizationFilter.ADMIN_EMAIL_ATTRIBUTE))
                 .isEqualTo(ADMIN_EMAIL);
+    }
+
+    @Test
+    void filter_givenAdminWithoutTwoFactor_returns403WithCode() {
+        User u = user(ADMIN_EMAIL, true, true);
+        when(twoFactors.existsByUserIdAndEnabledAtIsNotNull(u.getId())).thenReturn(false);
+        MockServerWebExchange exchange = adminRequest();
+
+        run(exchange, jwtFor(u.getId(), ADMIN_EMAIL));
+
+        assertThat(chainCalled).isFalse();
+        assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(exchange.getResponse().getBodyAsString().block())
+                .contains("\"code\":\"" + AdminAuthorizationFilter.TWO_FACTOR_REQUIRED_CODE + "\"");
     }
 
     @Test
