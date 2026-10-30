@@ -42,6 +42,7 @@ import ai.godance.domain.Provider;
 import ai.godance.domain.Region;
 import ai.godance.domain.UsageRecord;
 import ai.godance.domain.User;
+import ai.godance.domain.UserRole;
 import ai.godance.repository.AuditLogEntryRepository;
 import ai.godance.repository.ModelChangeProposalRepository;
 import ai.godance.repository.UsageRecordRepository;
@@ -94,7 +95,6 @@ class EmailSendingIntegrationTest {
     static void mailProps(DynamicPropertyRegistry r) {
         r.add("godance.mail.api-key",  () -> TEST_API_KEY);
         r.add("godance.mail.api-base", () -> wm.baseUrl());
-        r.add("godance.admin.emails",  () -> "admin-one@godance.test,admin-two@godance.test");
         // Empty feeds: the digest tests drive PricingRefreshService.runOnce()
         // directly; feed content is PricingRefreshFlowIntegrationTest's concern.
         r.add("godance.pricing.feeds.openrouter-url", () -> wm.baseUrl() + "/or/models");
@@ -124,6 +124,14 @@ class EmailSendingIntegrationTest {
                 .willReturn(aResponse().withHeader("Content-Type", "application/json")
                         .withBody("{}")));
         proposals.deleteAll();
+    }
+
+    private void staff(String email, UserRole role, boolean emailVerified) {
+        signup(email);
+        User u = users.findByEmail(email).orElseThrow();
+        u.setRole(role);
+        u.setEmailVerified(emailVerified);
+        users.save(u);
     }
 
     private String signup(String email) {
@@ -191,7 +199,11 @@ class EmailSendingIntegrationTest {
     // ===== pricing digest =============================================
 
     @Test
-    void runOnce_givenPendingProposal_expectsOneDigestToWholeAdminAllowlist() {
+    void runOnce_givenPendingProposal_expectsOneDigestToEveryReachableAdmin() {
+        staff("admin-one@godance.test", UserRole.ADMIN, true);
+        staff("admin-two@godance.test", UserRole.ADMIN, true);
+        staff("support@godance.test", UserRole.SUPPORT, true);
+        staff("unverified-admin@godance.test", UserRole.ADMIN, false);
         seedPendingProposal("gpt-4o");
 
         refresh.runOnce();
@@ -200,6 +212,7 @@ class EmailSendingIntegrationTest {
                 .withRequestBody(matchingJsonPath("$.subject", containing("pricing digest")))
                 .withRequestBody(matchingJsonPath("$.to[0]", equalTo("admin-one@godance.test")))
                 .withRequestBody(matchingJsonPath("$.to[1]", equalTo("admin-two@godance.test")))
+                .withRequestBody(matchingJsonPath("$.to.size()", equalTo("2")))
                 .withRequestBody(matchingJsonPath("$.text", containing("gpt-4o"))));
     }
 

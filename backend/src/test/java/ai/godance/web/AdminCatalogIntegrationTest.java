@@ -23,6 +23,7 @@ import ai.godance.domain.ModelCatalogEntry;
 import ai.godance.domain.ModelPriceHistory;
 import ai.godance.domain.PriceField;
 import ai.godance.domain.User;
+import ai.godance.domain.UserRole;
 import ai.godance.gateway.ModelCatalog;
 import ai.godance.repository.AuditLogEntryRepository;
 import ai.godance.repository.ModelCatalogEntryRepository;
@@ -48,7 +49,6 @@ class AdminCatalogIntegrationTest {
 
     @DynamicPropertySource
     static void props(DynamicPropertyRegistry r) {
-        r.add("godance.admin.emails", () -> "admin@godance.test");
         r.add("godance.pricing.refresh-cron", () -> "0 0 0 1 1 ? 2099");
     }
 
@@ -65,7 +65,7 @@ class AdminCatalogIntegrationTest {
     @BeforeEach
     void seedAccounts() {
         adminBearer = signUpOrLogIn("admin@godance.test");
-        markEmailVerified("admin@godance.test");
+        makeAdmin("admin@godance.test");
         userBearer = signUpOrLogIn("user-" + java.util.UUID.randomUUID() + "@godance.test");
     }
 
@@ -264,12 +264,13 @@ class AdminCatalogIntegrationTest {
     }
 
     /**
-     * Admin access needs the account's email verified. Password signup
-     * leaves it unverified, so mark it directly instead of following the
-     * emailed link.
+     * Admin access needs the role and a verified email. Password signup
+     * gives neither, so set both directly instead of going through an
+     * existing admin and the emailed link.
      */
-    private void markEmailVerified(String email) {
+    private void makeAdmin(String email) {
         User u = users.findByEmail(email).orElseThrow();
+        u.setRole(UserRole.ADMIN);
         u.setEmailVerified(true);
         users.save(u);
     }

@@ -8,9 +8,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
-import ai.godance.config.AdminProperties;
 import ai.godance.domain.ModelChangeProposal;
 import ai.godance.domain.User;
+import ai.godance.domain.UserRole;
+import ai.godance.repository.UserRepository;
 import ai.godance.service.ParentalNotice;
 
 /**
@@ -39,12 +40,12 @@ public class MailService {
     private static final Logger log = LoggerFactory.getLogger(MailService.class);
 
     private final EmailSender sender;
-    private final AdminProperties admin;
+    private final UserRepository users;
     private final MailProperties props;
 
-    public MailService(EmailSender sender, AdminProperties admin, MailProperties props) {
+    public MailService(EmailSender sender, UserRepository users, MailProperties props) {
         this.sender = sender;
-        this.admin = admin;
+        this.users = users;
         this.props = props;
     }
 
@@ -327,18 +328,16 @@ public class MailService {
 
     /**
      * pricing-proposals-digest — ONE email per pricing-cron run listing
-     * the pending proposals, to the {@code GODANCE_ADMIN_EMAILS}
-     * allowlist. Skips silently when there is nothing pending or the
-     * allowlist is empty (fail-closed, consistent with the admin API).
+     * the pending proposals, to everyone who can approve them: the active,
+     * verified ADMIN accounts. Skips silently when there is nothing
+     * pending or no such account.
      */
     public void sendPricingProposalsDigest(List<ModelChangeProposal> pending) {
         try {
             if (pending == null || pending.isEmpty()) return;
-            List<String> to = admin.getEmails().stream()
-                    .filter(e -> e != null && !e.isBlank())
-                    .toList();
+            List<String> to = users.findActiveVerifiedEmailsByRole(UserRole.ADMIN);
             if (to.isEmpty()) {
-                log.debug("pricing digest skipped: admin allowlist empty (fail-closed)");
+                log.debug("pricing digest skipped: no admin account to send it to");
                 return;
             }
             String stubLine = "Pricing digest: " + pending.size()
