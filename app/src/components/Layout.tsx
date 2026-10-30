@@ -59,11 +59,6 @@ export default function Layout({ children }: Props) {
               >
                 Log out
               </button>
-              {logoutFailed && (
-                <span role="alert" className="text-sm text-danger">
-                  Couldn't log out. Try again.
-                </span>
-              )}
             </div>
           ) : (
             <div className="flex items-center gap-3">
@@ -78,6 +73,12 @@ export default function Layout({ children }: Props) {
           )}
         </div>
       </header>
+
+      {logoutFailed && (
+        <p role="alert" className="mx-auto w-full max-w-6xl px-6 pt-3 text-right text-sm text-danger">
+          Couldn't log out. Try again.
+        </p>
+      )}
 
       <main className="flex-1">{children}</main>
 
