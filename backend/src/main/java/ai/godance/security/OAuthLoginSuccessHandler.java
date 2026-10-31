@@ -27,8 +27,10 @@ import reactor.core.scheduler.Schedulers;
  * provider redirect dance has authenticated the user, this translates
  * the provider identity into a Godance JWT (via {@link OAuthLoginService})
  * and bounces the browser back to the SPA with the token in the URL
- * fragment — the same shape a native SPA OAuth callback expects. A
- * refused sign-in comes back the same way with {@code #error=<reason>}.
+ * fragment — the same shape a native SPA OAuth callback expects. An
+ * account with two-factor sign-in on gets {@code #two_factor_token=} instead:
+ * the provider proved one factor, and the SPA asks for the code. A refused
+ * sign-in comes back the same way with {@code #error=<reason>}.
  * Either carries {@code &login_nonce=} when the SPA started the sign-in
  * with one (see {@link OAuthLoginNonce}).
  */
@@ -70,6 +72,12 @@ public class OAuthLoginSuccessHandler implements ServerAuthenticationSuccessHand
     }
 
     private Mono<Void> redirectWithToken(ServerWebExchange exchange, AuthResponse auth) {
+        if (auth.twoFactorToken() != null) {
+            return redirect(exchange, props.postLoginRedirectUri()
+                    + "#two_factor_token=" + enc(auth.twoFactorToken())
+                    + "&expires_at=" + enc(auth.expiresAt().toString())
+                    + nonceParam(exchange));
+        }
         return redirect(exchange, props.postLoginRedirectUri()
                 + "#access_token=" + enc(auth.accessToken())
                 + "&token_type=" + enc(auth.tokenType())

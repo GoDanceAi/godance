@@ -11,6 +11,7 @@ import java.util.UUID;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -50,6 +51,7 @@ import ai.godance.repository.GenerationJobRepository;
 import ai.godance.repository.OAuthIdentityRepository;
 import ai.godance.repository.UsageRecordRepository;
 import ai.godance.repository.UserRepository;
+import ai.godance.repository.UserTwoFactorRepository;
 import ai.godance.service.AccountClosureService;
 import ai.godance.service.AuditLogService;
 import ai.godance.service.ConversationService;
@@ -115,6 +117,7 @@ class AccountClosureIntegrationTest {
         if (inspector != null) inspector.close();
     }
 
+    @Autowired UserTwoFactorRepository twoFactors;
     @Autowired WebTestClient http;
     @Autowired UserRepository users;
     @Autowired CreditLedgerService ledgerService;
@@ -133,6 +136,12 @@ class AccountClosureIntegrationTest {
     private String adminBearer;
     private UUID adminId;
 
+    /** The next test's sign-in is by password alone, so 2FA can't stay on. */
+    @AfterEach
+    void turnOffTwoFactor() {
+        twoFactors.deleteAll();
+    }
+
     @BeforeEach
     void signInAdmin() {
         adminBearer = signUpOrLogIn(ADMIN);
@@ -141,6 +150,7 @@ class AccountClosureIntegrationTest {
         admin.setEmailVerified(true);
         users.save(admin);
         adminId = admin.getId();
+        TwoFactorFixture.turnOn(twoFactors, adminId);
     }
 
     // ===== Closing an account ===========================================
@@ -265,6 +275,21 @@ class AccountClosureIntegrationTest {
                 .toList();
         assertThat(rows).hasSize(1);
         assertThat(rows.get(0).getEventDetail()).containsEntry("actorUserId", adminId.toString());
+    }
+
+    @Test
+    void close_givenTwoFactorOn_removesTheSecretAndRecoveryCodes() {
+        String email = "closure-2fa-" + UUID.randomUUID() + "@godance.test";
+        signUpOrLogIn(email);
+        UUID id = users.findByEmail(email).orElseThrow().getId();
+        TwoFactorFixture.turnOn(twoFactors, id);
+
+        http.post().uri("/v1/admin/users/" + id + "/close")
+                .header("Authorization", adminBearer)
+                .exchange()
+                .expectStatus().isOk();
+
+        assertThat(twoFactors.findById(id)).isEmpty();
     }
 
     @Test

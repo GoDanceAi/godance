@@ -5,6 +5,7 @@ import java.time.LocalDate;
 import java.util.Objects;
 import java.util.UUID;
 
+import org.hibernate.annotations.DynamicUpdate;
 import org.hibernate.annotations.UuidGenerator;
 
 import jakarta.persistence.Column;
@@ -16,7 +17,15 @@ import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 
+/**
+ * {@code @DynamicUpdate} because a save must write only what it changed.
+ * Saving this row is common and {@code credit_balance_cents} and
+ * {@code session_version} change underneath it. Writing every column back
+ * from a copy read a moment earlier would undo a debit, or bring back
+ * sessions that were just ended.
+ */
 @Entity
+@DynamicUpdate
 @Table(name = "users")
 public class User {
 

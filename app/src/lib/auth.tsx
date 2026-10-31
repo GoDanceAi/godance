@@ -6,12 +6,15 @@ import {
   UNAUTHORIZED_EVENT,
   type AuthResponse,
   type MeResponse,
+  type SignInResponse,
 } from './api';
 
 interface AuthContextValue {
   user: MeResponse | null;
   loading: boolean;                  // true on first mount while we hydrate /me
-  login: (email: string, password: string) => Promise<void>;
+  // Resolves to a challenge when the account has 2FA on, else null: signed in.
+  login: (email: string, password: string) => Promise<string | null>;
+  completeTwoFactor: (challenge: string, code: string) => Promise<void>;
   signup: (input: SignupInput) => Promise<void>;
   logout: () => void;
   refresh: () => Promise<void>;      // re-fetch /me (after a top-up etc.)
@@ -60,10 +63,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const login = useCallback(async (email: string, password: string) => {
-    const resp = await apiFetch<AuthResponse>('/v1/auth/login', {
+    const resp = await apiFetch<SignInResponse>('/v1/auth/login', {
       method: 'POST',
       auth: false,
       json: { email, password },
+    });
+    if ('twoFactorToken' in resp) return resp.twoFactorToken;
+    localStorage.setItem(TOKEN_KEY, resp.accessToken);
+    await refresh();
+    return null;
+  }, [refresh]);
+
+  const completeTwoFactor = useCallback(async (challenge: string, code: string) => {
+    // auth: false because a challenge is not a session. Its 401 means it
+    // expired, which the sign-in page handles, not that a session ended.
+    const resp = await apiFetch<AuthResponse>('/v1/auth/2fa/verify', {
+      method: 'POST',
+      auth: false,
+      headers: { Authorization: `Bearer ${challenge}` },
+      json: { code },
     });
     localStorage.setItem(TOKEN_KEY, resp.accessToken);
     await refresh();
@@ -85,7 +103,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, signup, logout, refresh }}>
+    <AuthContext.Provider value={{ user, loading, login, completeTwoFactor, signup, logout, refresh }}>
       {children}
     </AuthContext.Provider>
   );

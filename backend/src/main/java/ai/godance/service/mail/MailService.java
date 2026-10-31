@@ -281,6 +281,55 @@ public class MailService {
         }
     }
 
+    /** What a two-factor notice tells the owner. */
+    public enum TwoFactorNotice {
+        ENABLED("Two-factor sign-in is on for your Godance account",
+                "Two-factor sign-in was turned on for your Godance account. "
+                        + "Signing in now needs a code from an authenticator app."),
+        DISABLED("Two-factor sign-in is off for your Godance account",
+                "Two-factor sign-in was turned off for your Godance account."),
+        RECOVERY_CODE_USED("A recovery code was used on your Godance account",
+                "A recovery code was used to sign in to your Godance account."),
+        LOCKED("Someone may have your Godance password",
+                "Too many wrong codes were entered after the right password for your Godance "
+                        + "account, so signing in is paused for 15 minutes. If this wasn't you, "
+                        + "reset your password now."),
+        RESET_BY_SUPPORT("Two-factor sign-in was reset on your Godance account",
+                "Godance support turned off two-factor sign-in on your account and signed it "
+                        + "out everywhere.");
+
+        private final String subject;
+        private final String body;
+
+        TwoFactorNotice(String subject, String body) {
+            this.subject = subject;
+            this.body = body;
+        }
+    }
+
+    /**
+     * two-factor-notice — tells the owner about any change to their second
+     * factor. A thief who enrols on a stolen account can't be evicted by a
+     * password reset, so this email is how the owner finds out and asks for
+     * help. An account with only a placeholder address gets nothing.
+     */
+    public void sendTwoFactorNotice(User user, TwoFactorNotice notice) {
+        if (user.hasSyntheticEmail()) return;
+        try {
+            String stubLine = "Two-factor notice for " + user.getEmail() + ": " + notice.name();
+            String text = stubLine + "\n\n"
+                    + "Hi " + user.getFullName() + ",\n\n"
+                    + notice.body + "\n\n"
+                    + "If you didn't do this, email hello@godance.ai right away.\n";
+            String html = "<p>Hi " + escape(user.getFullName()) + ",</p>"
+                    + "<p>" + escape(notice.body) + "</p>"
+                    + "<p>If you didn't do this, email hello@godance.ai right away.</p>";
+            sender.send(List.of(user.getEmail()), notice.subject, text, html);
+        } catch (Exception e) {
+            log.error("two-factor notice build/send failed for {}: {}", user.getId(), e.getMessage());
+        }
+    }
+
     /** autorecharge-failed — auto-recharge was disabled after a hard payment failure. */
     public void sendAutoRechargeFailed(User user, String reason) {
         try {

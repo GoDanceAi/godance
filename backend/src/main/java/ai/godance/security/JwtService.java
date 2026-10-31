@@ -1,5 +1,6 @@
 package ai.godance.security;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.UUID;
@@ -39,6 +40,18 @@ public class JwtService {
     /** The authority a {@link #PENDING_CONSENT_SCOPE} token grants. */
     public static final String PENDING_CONSENT_AUTHORITY = "SCOPE_" + PENDING_CONSENT_SCOPE;
 
+    /**
+     * The {@code scope} of a sign-in that has passed its first factor and
+     * still owes a second, in place of the role. {@code SecurityConfig}
+     * admits it on {@code POST /v1/auth/2fa/verify} and nowhere else.
+     */
+    public static final String TWO_FACTOR_PENDING_SCOPE = "TWO_FACTOR_PENDING";
+    /** The authority a {@link #TWO_FACTOR_PENDING_SCOPE} token grants. */
+    public static final String TWO_FACTOR_PENDING_AUTHORITY = "SCOPE_" + TWO_FACTOR_PENDING_SCOPE;
+
+    /** How long someone has to enter their code after their password. */
+    static final Duration TWO_FACTOR_CHALLENGE_TTL = Duration.ofMinutes(5);
+
     private final JwtEncoder encoder;
     private final JwtProperties props;
 
@@ -49,15 +62,28 @@ public class JwtService {
 
     /** Issue a bearer token for {@code user}. Caller hands this to the client verbatim. */
     public IssuedToken issueFor(User user) {
+        return issue(user, scopeFor(user), Duration.of(props.expiryMinutes(), ChronoUnit.MINUTES));
+    }
+
+    /**
+     * Issue the short-lived token that stands for a sign-in waiting for its
+     * second factor. It carries the session version, so a password reset
+     * ends any challenge issued before it.
+     */
+    public IssuedToken issueTwoFactorChallenge(User user) {
+        return issue(user, TWO_FACTOR_PENDING_SCOPE, TWO_FACTOR_CHALLENGE_TTL);
+    }
+
+    private IssuedToken issue(User user, String scope, Duration ttl) {
         Instant now = Instant.now();
-        Instant exp = now.plus(props.expiryMinutes(), ChronoUnit.MINUTES);
+        Instant exp = now.plus(ttl);
         JwtClaimsSet claims = JwtClaimsSet.builder()
                 .issuer(props.issuer())
                 .issuedAt(now)
                 .expiresAt(exp)
                 .subject(user.getId().toString())
                 .claim("email", user.getEmail())
-                .claim("scope", scopeFor(user))   // SimpleGrantedAuthority → "SCOPE_USER" / "SCOPE_ADMIN" / ...
+                .claim("scope", scope)   // SimpleGrantedAuthority → "SCOPE_USER" / "SCOPE_ADMIN" / ...
                 .claim(SESSION_VERSION_CLAIM, user.getSessionVersion())
                 .build();
         JwsHeader header = JwsHeader.with(MacAlgorithm.HS256).build();
