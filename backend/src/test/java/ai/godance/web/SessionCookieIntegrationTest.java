@@ -299,6 +299,19 @@ class SessionCookieIntegrationTest {
     }
 
     @Test
+    void bearerToken_givenCookieToo_expectsNoCsrfCheck() {
+        String cookie = signIn(uniqueEmail("bearer-and-cookie"));
+
+        // A browser never adds Authorization on its own, so this request was built on purpose.
+        createKey().header("Authorization", "Bearer " + cookie)
+                .cookie(cookies.name(), cookie)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("name", "script"))
+                .exchange()
+                .expectStatus().isCreated();
+    }
+
+    @Test
     void apiKey_givenNoCookie_expectsBearerStillWorks() {
         String email = uniqueEmail("api-key");
         fromApp("/v1/auth/signup", signupBody(email)).exchange().expectStatus().isCreated();
