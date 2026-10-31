@@ -59,6 +59,8 @@ godance:
     secret: ${JWT_SIGNING_KEY}           # REQUIRED — fail-fast if unset (no fallback)
     expiry-minutes: ${JWT_EXPIRY_MINUTES:60}
     issuer: ${JWT_ISSUER:https://godance.ai}
+  key-vault:
+    key: ${KEY_VAULT_KEY}                # REQUIRED — fail-fast if unset (no fallback)
   oauth:
     # Social sign-in. Placeholder defaults keep the context bootable when an
     # operator has not enabled OAuth; supplying the real values via env turns

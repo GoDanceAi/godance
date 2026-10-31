@@ -67,7 +67,8 @@ import reactor.core.publisher.Mono;
         SecurityProperties.class,
         PricingProperties.class,
         AdminProperties.class,
-        RateLimitProperties.class})
+        RateLimitProperties.class,
+        KeyVaultProperties.class})
 public class SecurityConfig {
 
     /**
@@ -85,6 +86,12 @@ public class SecurityConfig {
      * the two routes the waiting screen uses and nowhere else.
      */
     private static final String SESSION_PENDING_CONSENT = JwtService.PENDING_CONSENT_AUTHORITY;
+    /**
+     * A sign-in that still owes its second factor carries this instead of
+     * its role ({@link JwtService#TWO_FACTOR_PENDING_SCOPE}). Admitted on
+     * the route that takes the code and nowhere else.
+     */
+    private static final String SESSION_TWO_FACTOR_PENDING = JwtService.TWO_FACTOR_PENDING_AUTHORITY;
 
     private static String[] sessionOr(String authority) {
         return Stream.concat(Arrays.stream(SESSION), Stream.of(authority)).toArray(String[]::new);
@@ -200,8 +207,11 @@ public class SecurityConfig {
                                 .hasAuthority(SESSION_PENDING_CONSENT)
                         // Any signed-in session may end itself or move into the
                         // cookie. Not an API key: it must never mint a session.
+                        // Not a challenge either: it isn't a session yet.
                         .pathMatchers(HttpMethod.POST, "/v1/auth/logout", "/v1/auth/session")
                                 .hasAnyAuthority(sessionOr(SESSION_PENDING_CONSENT))
+                        .pathMatchers(HttpMethod.POST, "/v1/auth/2fa/verify")
+                                .hasAuthority(SESSION_TWO_FACTOR_PENDING)
                         // Public read-only: model catalog (model picker) and
                         // provider status board (marketing /status page).
                         .pathMatchers(HttpMethod.GET, "/v1/models", "/v1/status").permitAll()

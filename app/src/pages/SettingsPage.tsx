@@ -4,6 +4,7 @@ import { apiFetch, ApiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { Icon } from '../components/Brand';
 import ResendEmailButton from '../components/ResendEmailButton';
+import TwoFactorSection from '../components/TwoFactorSection';
 
 interface SecretResponse {
   secret: string;
@@ -56,6 +57,8 @@ export default function SettingsPage() {
       <h1 className="text-2xl font-bold tracking-tight text-fg">Settings</h1>
 
       <EmailSection />
+
+      <TwoFactorSection />
 
       <section className="mt-8 card">
         <h2 className="font-semibold text-fg">Webhook signing secret</h2>

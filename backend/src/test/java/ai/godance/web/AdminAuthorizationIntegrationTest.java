@@ -2,6 +2,7 @@ package ai.godance.web;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -22,14 +23,16 @@ import ai.godance.domain.User;
 import ai.godance.domain.UserRole;
 import ai.godance.repository.CreditLedgerRepository;
 import ai.godance.repository.UserRepository;
+import ai.godance.repository.UserTwoFactorRepository;
+import ai.godance.security.AdminAuthorizationFilter;
 import ai.godance.web.dto.ApiKeyDtos.CreateApiKeyResponse;
 import ai.godance.web.dto.AuthDtos.AuthResponse;
 
 /**
  * Which accounts {@link ai.godance.security.AdminAuthorizationFilter} lets
- * onto {@code /v1/admin/**}: an active account with a verified email that
- * holds a role, over a JWT session. {@link AdminRolesIntegrationTest}
- * covers which role reaches which route.
+ * onto {@code /v1/admin/**}: an active account with a verified email and
+ * two-factor sign-in on that holds a role, over a JWT session.
+ * {@link AdminRolesIntegrationTest} covers which role reaches which route.
  *
  * <p>Each test signs up its own address: the tests share one database and
  * an address can be registered only once.
@@ -53,6 +56,7 @@ class AdminAuthorizationIntegrationTest {
 
     @Autowired WebTestClient http;
     @Autowired UserRepository users;
+    @Autowired UserTwoFactorRepository twoFactors;
     @Autowired CreditLedgerRepository ledger;
 
     @Test
@@ -103,6 +107,36 @@ class AdminAuthorizationIntegrationTest {
                 .expectBody()
                 .jsonPath("$.email").isEqualTo(email)
                 .jsonPath("$.role").isEqualTo("ADMIN");
+    }
+
+    @Test
+    void filter_givenVerifiedStaffWithoutTwoFactor_returns403WithCodeOnEveryRoute() {
+        String email = freshEmail();
+        String bearer = signUpVerified(email);
+        User staff = users.findByEmail(email).orElseThrow();
+        staff.setRole(UserRole.ADMIN);
+        users.save(staff);
+
+        for (String route : List.of("/v1/admin/me", "/v1/admin/users", "/v1/admin/usage/summary",
+                "/v1/admin/pricing/proposals", "/v1/admin/pricing/models")) {
+            http.get().uri(route)
+                    .header("Authorization", bearer)
+                    .exchange()
+                    .expectStatus().isForbidden()
+                    .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON)
+                    .expectBody()
+                    .jsonPath("$.code").isEqualTo(AdminAuthorizationFilter.TWO_FACTOR_REQUIRED_CODE);
+        }
+    }
+
+    @Test
+    void filter_givenPlainUserWithoutTwoFactor_returns403WithoutTheCode() {
+        // Nothing here should tell a customer that a console exists to unlock.
+        http.get().uri("/v1/admin/me")
+                .header("Authorization", signUpVerified(freshEmail()))
+                .exchange()
+                .expectStatus().isForbidden()
+                .expectBody().jsonPath("$.code").doesNotExist();
     }
 
     @Test
@@ -213,9 +247,11 @@ class AdminAuthorizationIntegrationTest {
         return bearer;
     }
 
+    /** Gives the account a role and the two-factor sign-in staff need. */
     private User hold(String email, UserRole role) {
         User u = users.findByEmail(email).orElseThrow();
         u.setRole(role);
+        TwoFactorFixture.turnOn(twoFactors, u.getId());
         return users.save(u);
     }
 }

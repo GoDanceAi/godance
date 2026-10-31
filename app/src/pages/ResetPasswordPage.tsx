@@ -8,7 +8,8 @@ import { Field } from './LoginPage';
 /**
  * Landing page for the password-reset email's link. The backend signs out
  * every session, this browser's included, and revokes the API keys and webhook
- * secret. It doesn't sign anyone in: the person does that with the new password.
+ * secret. It doesn't sign anyone in: the person does that with the new password,
+ * and their code when 2FA is on.
  */
 export default function ResetPasswordPage() {
   const [params] = useSearchParams();

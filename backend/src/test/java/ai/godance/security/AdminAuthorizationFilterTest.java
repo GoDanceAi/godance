@@ -1,6 +1,7 @@
 package ai.godance.security;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -27,13 +28,14 @@ import org.springframework.web.server.WebFilterChain;
 import ai.godance.domain.User;
 import ai.godance.domain.UserRole;
 import ai.godance.repository.UserRepository;
+import ai.godance.repository.UserTwoFactorRepository;
 import reactor.core.publisher.Mono;
 
 /**
  * The admin gate is deny by default: the matched route must declare
  * {@link AdminRoles}, and the caller's account row, never a JWT claim,
- * must be active, verified and hold one of those roles. API keys never
- * pass.
+ * must be active, verified, hold one of those roles and have two-factor
+ * sign-in on. API keys never pass.
  */
 class AdminAuthorizationFilterTest {
 
@@ -48,12 +50,15 @@ class AdminAuthorizationFilterTest {
     }
 
     UserRepository users;
+    UserTwoFactorRepository twoFactors;
     AtomicBoolean chainCalled;
     WebFilterChain chain;
 
     @BeforeEach
     void setUp() {
         users = mock(UserRepository.class);
+        twoFactors = mock(UserTwoFactorRepository.class);
+        when(twoFactors.existsByUserIdAndEnabledAtIsNotNull(any())).thenReturn(true);
         chainCalled = new AtomicBoolean();
         chain = exchange -> {
             chainCalled.set(true);
@@ -73,6 +78,34 @@ class AdminAuthorizationFilterTest {
                 .isEqualTo(ADMIN_EMAIL);
         assertThat((UserRole) exchange.getAttribute(AdminAuthorizationFilter.ADMIN_ROLE_ATTRIBUTE))
                 .isEqualTo(UserRole.FINANCE);
+    }
+
+    @Test
+    void filter_givenDeclaredRoleWithoutTwoFactor_returns403WithCode() {
+        for (UserRole role : Set.of(UserRole.FINANCE, UserRole.ADMIN)) {
+            User u = user(ADMIN_EMAIL, role, true, true);
+            when(twoFactors.existsByUserIdAndEnabledAtIsNotNull(u.getId())).thenReturn(false);
+            MockServerWebExchange exchange = adminRequest();
+
+            run(exchange, jwtFor(u.getId(), ADMIN_EMAIL));
+
+            assertThat(chainCalled).isFalse();
+            assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+            assertThat(exchange.getResponse().getBodyAsString().block())
+                    .contains("\"code\":\"" + AdminAuthorizationFilter.TWO_FACTOR_REQUIRED_CODE + "\"");
+        }
+    }
+
+    @Test
+    void filter_givenRoleTheRouteDoesNotDeclareAndNoTwoFactor_refusesWithoutTheCode() {
+        User u = user(ADMIN_EMAIL, UserRole.USER, true, true);
+        when(twoFactors.existsByUserIdAndEnabledAtIsNotNull(u.getId())).thenReturn(false);
+        MockServerWebExchange exchange = adminRequest();
+
+        run(exchange, jwtFor(u.getId(), ADMIN_EMAIL));
+
+        assertDenied(exchange);
+        assertThat(exchange.getResponse().getBodyAsString().block()).doesNotContain("\"code\"");
     }
 
     @Test
@@ -218,7 +251,7 @@ class AdminAuthorizationFilterTest {
     // ===== Helpers ======================================================
 
     private AdminAuthorizationFilter filter(HandlerMapping routes) {
-        return new AdminAuthorizationFilter(routes, users);
+        return new AdminAuthorizationFilter(routes, users, twoFactors);
     }
 
     private static HandlerMapping routeTo(String handler) {

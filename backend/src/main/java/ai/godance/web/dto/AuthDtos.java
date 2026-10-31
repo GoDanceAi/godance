@@ -3,6 +3,8 @@ package ai.godance.web.dto;
 import java.time.Instant;
 import java.util.UUID;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+
 import ai.godance.domain.AgeStatus;
 import ai.godance.domain.User;
 import ai.godance.domain.UserRole;
@@ -44,18 +46,30 @@ public final class AuthDtos {
             @NotBlank @Size(min = 12, max = 128) String newPassword
     ) { }
 
+    /**
+     * Either a session ({@code accessToken}), or, when the account has
+     * two-factor sign-in on, {@code twoFactorToken} and no session: the
+     * caller sends that to {@code POST /v1/auth/2fa/verify} with a code, by
+     * {@code expiresAt}.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     public record AuthResponse(
             String accessToken,
             String tokenType,
-            Instant expiresAt
+            Instant expiresAt,
+            String twoFactorToken
     ) {
         public static AuthResponse bearer(String token, Instant expiresAt) {
-            return new AuthResponse(token, "Bearer", expiresAt);
+            return new AuthResponse(token, "Bearer", expiresAt, null);
+        }
+
+        public static AuthResponse twoFactor(String challengeToken, Instant expiresAt) {
+            return new AuthResponse(null, null, expiresAt, challengeToken);
         }
 
         /** For a client whose session is in the cookie: nothing here for page script to read. */
         public static AuthResponse cookie(Instant expiresAt) {
-            return new AuthResponse(null, "Cookie", expiresAt);
+            return new AuthResponse(null, "Cookie", expiresAt, null);
         }
     }
 
@@ -88,7 +102,8 @@ public final class AuthDtos {
      * ask for the current password. {@code ageStatus} is
      * {@code CONSENT_PENDING} while a child's account waits for a parent's
      * approval; {@code parentEmailMasked} then says (masked) where the
-     * request went, and is null for an adult.
+     * request went, and is null for an adult. {@code twoFactorEnabled} is
+     * whether signing in needs an authenticator code.
      */
     public record MeResponse(
             UUID id,
@@ -104,9 +119,10 @@ public final class AuthDtos {
             Long monthlyCreditCapCents,
             Instant createdAt,
             AgeStatus ageStatus,
-            String parentEmailMasked
+            String parentEmailMasked,
+            boolean twoFactorEnabled
     ) {
-        public static MeResponse from(User u) {
+        public static MeResponse from(User u, boolean twoFactorEnabled) {
             return new MeResponse(
                     u.getId(),
                     u.getEmail(),
@@ -121,7 +137,8 @@ public final class AuthDtos {
                     u.getMonthlyCreditCapCents(),
                     u.getCreatedAt(),
                     u.getAgeStatus(),
-                    u.getParentEmail() == null ? null : maskEmail(u.getParentEmail()));
+                    u.getParentEmail() == null ? null : maskEmail(u.getParentEmail()),
+                    twoFactorEnabled);
         }
     }
 

@@ -33,6 +33,14 @@ public class AuditLogService {
     public static final String EVT_AUTH_EMAIL_RELEASE = "auth.email.release";
     public static final String EVT_AUTH_EMAIL_RELEASE_LINK = "auth.email.release_link";
     public static final String EVT_AUTH_OAUTH_LOGIN   = "auth.oauth.login";
+    /** A first factor was accepted and the sign-in now owes a second. */
+    public static final String EVT_AUTH_2FA_CHALLENGE = "auth.2fa.challenge";
+    /** A code offered to finish signing in: right, wrong, or refused during a lockout. */
+    public static final String EVT_AUTH_2FA_VERIFY    = "auth.2fa.verify";
+    /** Enrolment started: a new secret was issued, not yet confirmed. */
+    public static final String EVT_AUTH_2FA_ENROL     = "auth.2fa.enrol";
+    public static final String EVT_AUTH_2FA_ENABLED   = "auth.2fa.enabled";
+    public static final String EVT_AUTH_2FA_DISABLED  = "auth.2fa.disabled";
     /** A consent request emailed to a child's parent: at signup, or resent. */
     public static final String EVT_AUTH_PARENTAL_CONSENT_REQUESTED = "auth.parental_consent.requested";
     /** The parent opened the link and started the approving Checkout Session. */
@@ -68,6 +76,8 @@ public class AuditLogService {
     public static final String EVT_ADMIN_CATALOG_UPDATED = "admin.catalog.updated";
     /** An operator closed an account on its owner's request (anonymised, data deleted, billing kept). */
     public static final String EVT_ADMIN_ACCOUNT_CLOSED = "admin.account.closed";
+    /** An operator turned off an account's 2FA for an owner who could not. */
+    public static final String EVT_ADMIN_TWO_FACTOR_RESET = "admin.two_factor.reset";
     /** An account's role was granted or revoked; {@code userId} is the account, the actor is in the detail. */
     public static final String EVT_ADMIN_ROLE_CHANGED = "admin.role.changed";
 

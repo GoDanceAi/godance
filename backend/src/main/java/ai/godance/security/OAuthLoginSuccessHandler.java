@@ -29,9 +29,11 @@ import reactor.core.scheduler.Schedulers;
  * puts it in the session cookie ({@link SessionCookies}) and bounces the
  * browser back to the SPA. A sign-in started by an app bundle from before
  * the cookie also gets the token in the URL fragment, which that bundle
- * expects. A refused sign-in comes back the same way with
- * {@code #error=<reason>}. Either carries {@code &login_nonce=} when the
- * SPA started the sign-in with one (see {@link OAuthLoginNonce}).
+ * expects. An account with two-factor sign-in on gets no cookie and
+ * {@code #two_factor_token=} instead: the provider proved one factor, and
+ * the SPA asks for the code. A refused sign-in comes back the same way with
+ * {@code #error=<reason>}. Any of them carries {@code &login_nonce=} when
+ * the SPA started the sign-in with one (see {@link OAuthLoginNonce}).
  */
 @Component
 public class OAuthLoginSuccessHandler implements ServerAuthenticationSuccessHandler {
@@ -65,6 +67,7 @@ public class OAuthLoginSuccessHandler implements ServerAuthenticationSuccessHand
                         provider, subject, email, emailVerified, fullName))
                 .subscribeOn(Schedulers.boundedElastic())
                 .flatMap(auth -> {
+                    if (auth.twoFactorToken() != null) return redirectWithChallenge(exchange, auth);
                     sessionCookies.set(exchange.getResponse(), auth.accessToken(), auth.expiresAt());
                     return OAuthLoginNonce.isCookieClient(exchange)
                             ? redirectSignedIn(exchange)
@@ -80,6 +83,13 @@ public class OAuthLoginSuccessHandler implements ServerAuthenticationSuccessHand
 
     private Mono<Void> redirectSignedIn(ServerWebExchange exchange) {
         return redirect(exchange, props.postLoginRedirectUri() + "#token_type=Cookie" + nonceParam(exchange));
+    }
+
+    private Mono<Void> redirectWithChallenge(ServerWebExchange exchange, AuthResponse auth) {
+        return redirect(exchange, props.postLoginRedirectUri()
+                + "#two_factor_token=" + enc(auth.twoFactorToken())
+                + "&expires_at=" + enc(auth.expiresAt().toString())
+                + nonceParam(exchange));
     }
 
     private Mono<Void> redirectWithToken(ServerWebExchange exchange, AuthResponse auth) {

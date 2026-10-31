@@ -171,8 +171,9 @@ public class AuthController {
 
     /**
      * Every session ended with the old password, this browser's included, so
-     * the cookie goes and a cookie client signs in with the new password. A
-     * client without the cookie still gets the token it has always got.
+     * the cookie goes and a cookie client signs in with the new password,
+     * and its code when two-factor sign-in is on. A client without the cookie
+     * still gets what it has always got: a token, or that challenge.
      */
     @PostMapping("/password/reset")
     public Mono<ResponseEntity<AuthResponse>> resetPassword(
@@ -190,9 +191,8 @@ public class AuthController {
     @GetMapping("/me")
     public Mono<MeResponse> me(@AuthenticationPrincipal Jwt jwt) {
         UUID userId = JwtService.userIdFromSubject(jwt.getSubject());
-        return Mono.fromCallable(() -> auth.loadById(userId))
-                .subscribeOn(Schedulers.boundedElastic())
-                .map(MeResponse::from);
+        return Mono.fromCallable(() -> auth.me(userId))
+                .subscribeOn(Schedulers.boundedElastic());
     }
 
     /**

@@ -9,7 +9,7 @@ interface Props { children: ReactNode }
 
 export default function Layout({ children }: Props) {
   const { user, logout } = useAuth();
-  const { isAdmin } = useAdmin();
+  const { isAdmin, needsTwoFactor } = useAdmin();
   const navigate = useNavigate();
 
   const [logoutFailed, setLogoutFailed] = useState(false);
@@ -42,7 +42,7 @@ export default function Layout({ children }: Props) {
               <NavLink to="/keys" className={linkClass}>API keys</NavLink>
               <NavLink to="/billing" className={linkClass}>Billing</NavLink>
               <NavLink to="/settings" className={linkClass}>Settings</NavLink>
-              {isAdmin && <NavLink to="/admin" className={linkClass}>Admin</NavLink>}
+              {(isAdmin || needsTwoFactor) && <NavLink to="/admin" className={linkClass}>Admin</NavLink>}
             </nav>
           )}
 

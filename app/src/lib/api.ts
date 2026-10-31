@@ -13,10 +13,12 @@ export const UNAUTHORIZED_EVENT = 'godance.unauthorized';
 export class ApiError extends Error {
   status: number;
   detail?: string;
-  constructor(status: number, message: string, detail?: string) {
+  code?: string;             // problem+json `code`, for a client to branch on
+  constructor(status: number, message: string, detail?: string, code?: string) {
     super(message);
     this.status = status;
     this.detail = detail;
+    this.code = code;
   }
 }
 
@@ -31,12 +33,12 @@ type ApiOptions = Omit<RequestInit, 'body'> & {
  * Set-Cookie without `credentials: 'include'`, and the header tells the API
  * this client uses the cookie, so it keeps the token out of the response.
  */
-export const SESSION_CALL: ApiOptions = {
+export const SESSION_CALL = {
   method: 'POST',
   auth: false,
   credentials: 'include',
   headers: { 'X-Godance-Session': 'cookie' },
-};
+} satisfies ApiOptions;
 
 export async function apiFetch<T = unknown>(path: string, opts: ApiOptions = {}): Promise<T> {
   const { json, auth = true, headers, ...rest } = opts;
@@ -66,13 +68,15 @@ export async function apiFetch<T = unknown>(path: string, opts: ApiOptions = {})
   if (!res.ok) {
     // Backend uses RFC 7807 problem+json for errors.
     let detail = `HTTP ${res.status}`;
+    let code: string | undefined;
     try {
-      const body = (await res.json()) as { detail?: string; title?: string };
+      const body = (await res.json()) as { detail?: string; title?: string; code?: string };
       detail = body.detail || body.title || detail;
+      code = body.code;
     } catch {
       /* non-JSON body — keep the default */
     }
-    throw new ApiError(res.status, detail);
+    throw new ApiError(res.status, detail, undefined, code);
   }
 
   if (res.status === 204) return undefined as T;
@@ -161,6 +165,7 @@ export interface MeResponse {
   // session reaches /v1/auth/me and the consent resend only.
   ageStatus: AgeStatus;
   parentEmailMasked: string | null; // where the consent request went, masked; null for adults
+  twoFactorEnabled: boolean; // true: signing in needs an authenticator code
 }
 
 export type AgeStatus = 'ADULT' | 'CONSENT_PENDING' | 'CONSENT_GRANTED';
@@ -194,6 +199,28 @@ export interface TopUpResponse {
   sessionId: string;
   checkoutUrl: string;
   amountCents: number;
+}
+
+/** Password sign-in. The session is in the cookie, or with 2FA on there is just a challenge. */
+export interface SignInResponse {
+  twoFactorToken?: string;
+  expiresAt: string;
+}
+
+/** POST /v1/auth/2fa/enrol. The secret for typing in, and the URI the QR code encodes. */
+export interface TwoFactorEnrolment {
+  secret: string;
+  otpauthUri: string;
+}
+
+/** POST /v1/auth/2fa/enable. The recovery codes are shown this once. */
+export interface TwoFactorEnabled {
+  recoveryCodes: string[];
+}
+
+export interface TwoFactorStatus {
+  enabled: boolean;
+  recoveryCodesRemaining: number;
 }
 
 export interface ApiKeySummary {

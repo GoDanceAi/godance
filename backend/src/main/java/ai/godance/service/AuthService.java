@@ -11,6 +11,7 @@ import java.time.YearMonth;
 import java.time.ZoneOffset;
 import java.util.Base64;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -34,8 +35,11 @@ import ai.godance.service.mail.MailService;
 import ai.godance.web.dto.AuthDtos.AuthResponse;
 import ai.godance.web.dto.AuthDtos.ForgotPasswordRequest;
 import ai.godance.web.dto.AuthDtos.LoginRequest;
+import ai.godance.web.dto.AuthDtos.MeResponse;
 import ai.godance.web.dto.AuthDtos.ResetPasswordRequest;
 import ai.godance.web.dto.AuthDtos.SignupRequest;
+import ai.godance.web.dto.TwoFactorDtos.EnableResponse;
+import ai.godance.web.dto.TwoFactorDtos.EnrolResponse;
 
 /**
  * Email + password accounts: signup, login, email verification and
@@ -50,6 +54,10 @@ import ai.godance.web.dto.AuthDtos.SignupRequest;
  * proves the inbox, and the reset evicts whoever held the account before:
  * every earlier JWT stops working, and the API keys and webhook signing
  * secret are replaced.
+ *
+ * <p>That is why an account with a password must verify its email before
+ * it can turn on two-factor sign-in. A reset never turns 2FA off, so a
+ * squatter's authenticator would otherwise keep the owner out for good.
  */
 @Service
 public class AuthService {
@@ -74,10 +82,12 @@ public class AuthService {
     private final AuditLogService audit;
     private final MailService mail;
     private final ParentalConsentService parentalConsent;
+    private final TwoFactorService twoFactor;
 
     public AuthService(UserRepository users, ApiKeyRepository apiKeys, PasswordEncoder passwords,
                        JwtService jwt, WebhookSigner webhooks, AuditLogService audit,
-                       MailService mail, ParentalConsentService parentalConsent) {
+                       MailService mail, ParentalConsentService parentalConsent,
+                       TwoFactorService twoFactor) {
         this.users = users;
         this.apiKeys = apiKeys;
         this.passwords = passwords;
@@ -86,6 +96,7 @@ public class AuthService {
         this.audit = audit;
         this.mail = mail;
         this.parentalConsent = parentalConsent;
+        this.twoFactor = twoFactor;
     }
 
     /**
@@ -164,6 +175,9 @@ public class AuthService {
                     u.getId(), ipAddress, Map.of("reason", "inactive"));
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "account disabled");
         }
+        if (twoFactor.isEnabled(u.getId())) {
+            return twoFactor.challenge(u, "password", ipAddress);
+        }
         u.setLastLoginAt(Instant.now());
         users.save(u);
 
@@ -172,6 +186,74 @@ public class AuthService {
 
         IssuedToken issued = jwt.issueFor(u);
         return AuthResponse.bearer(issued.token(), issued.expiresAt());
+    }
+
+    /**
+     * The second step of signing in, from a challenge: an authenticator
+     * code or a recovery code buys the session. Disabled accounts never get
+     * here, their challenge fails like any of their tokens
+     * ({@link ai.godance.security.SessionVersionJwtDecoder}).
+     *
+     * <p>noRollbackFor keeps the failure count and audit row of a wrong code.
+     * The account is read after the code is checked, which can wait on a
+     * lock: saving it writes the whole row back, so it should be fresh.
+     */
+    @Transactional(noRollbackFor = ResponseStatusException.class)
+    public AuthResponse completeTwoFactorSignIn(UUID userId, String code, String ipAddress) {
+        String method = twoFactor.verify(userId, code, ipAddress);
+        User u = loadById(userId);
+        u.setLastLoginAt(Instant.now());
+        users.save(u);
+
+        audit.record(AuditLogService.EVT_AUTH_LOGIN_OK, AuditOutcome.SUCCESS,
+                userId, ipAddress, Map.of("secondFactor", method));
+
+        IssuedToken issued = jwt.issueFor(u);
+        return AuthResponse.bearer(issued.token(), issued.expiresAt());
+    }
+
+    /**
+     * Start turning on two-factor sign-in. A session alone is not enough:
+     * a stolen one could otherwise tie the account to the thief's
+     * authenticator and keep its owner out.
+     */
+    @Transactional(noRollbackFor = ResponseStatusException.class)
+    public EnrolResponse startTwoFactorEnrolment(UUID userId, String currentPassword,
+                                                 Instant signedInAt, String ipAddress) {
+        User u = loadById(userId);
+        requireReauthenticated(u, currentPassword, signedInAt, ipAddress,
+                AuditLogService.EVT_AUTH_2FA_ENROL, "turn on two-factor sign-in");
+        if (u.getPasswordHash() != null && !u.isEmailVerified()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Verify your email address before you turn on two-factor sign-in.");
+        }
+        return twoFactor.startEnrolment(u, ipAddress);
+    }
+
+    /**
+     * Finish enrolment with one code from the authenticator. Sessions
+     * opened before this never passed the second factor, so all of them
+     * end, and the caller gets a new one.
+     */
+    @Transactional(noRollbackFor = ResponseStatusException.class)
+    public EnableResponse enableTwoFactor(UUID userId, String code, String ipAddress) {
+        List<String> recoveryCodes = twoFactor.confirmEnrolment(userId, code, ipAddress);
+        User u = loadById(userId);
+        u.setSessionVersion(u.getSessionVersion() + 1);
+        users.save(u);
+
+        IssuedToken issued = jwt.issueFor(u);
+        return new EnableResponse(recoveryCodes, AuthResponse.bearer(issued.token(), issued.expiresAt()));
+    }
+
+    /** Turn two-factor sign-in off: both factors again, as a stolen session must not be able to. */
+    @Transactional(noRollbackFor = ResponseStatusException.class)
+    public void disableTwoFactor(UUID userId, String currentPassword, String code,
+                                 Instant signedInAt, String ipAddress) {
+        User u = loadById(userId);
+        requireReauthenticated(u, currentPassword, signedInAt, ipAddress,
+                AuditLogService.EVT_AUTH_2FA_DISABLED, "turn off two-factor sign-in");
+        twoFactor.disable(userId, code, ipAddress);
     }
 
     /**
@@ -278,7 +360,8 @@ public class AuthService {
     public void requestEmailChange(UUID userId, String email, String currentPassword,
                                    Instant signedInAt, String ipAddress) {
         User u = loadById(userId);
-        requireReauthenticated(u, currentPassword, signedInAt, ipAddress);
+        requireReauthenticated(u, currentPassword, signedInAt, ipAddress,
+                AuditLogService.EVT_AUTH_EMAIL_CHANGE, "change your email");
         String normalized = email.trim().toLowerCase();
         if (normalized.endsWith(User.SYNTHETIC_EMAIL_SUFFIX)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
@@ -305,19 +388,20 @@ public class AuthService {
                 u.getId(), ipAddress, Map.of("email", normalized));
     }
 
+    /** {@code action} finishes the sentence "sign in again, then ...". */
     private void requireReauthenticated(User u, String currentPassword, Instant signedInAt,
-                                        String ipAddress) {
+                                        String ipAddress, String auditEvent, String action) {
         if (u.getPasswordHash() != null) {
             if (currentPassword == null || !passwords.matches(currentPassword, u.getPasswordHash())) {
                 // Own transaction: the 403 rolls back the caller's.
-                audit.recordInNewTransaction(AuditLogService.EVT_AUTH_EMAIL_CHANGE,
+                audit.recordInNewTransaction(auditEvent,
                         AuditOutcome.FAILURE, u.getId(), ipAddress, Map.of("reason", "bad-password"));
                 throw new ResponseStatusException(HttpStatus.FORBIDDEN,
                         "Your current password is incorrect.");
             }
         } else if (signedInAt == null || signedInAt.plus(RECENT_SIGN_IN).isBefore(Instant.now())) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                    "For your security, sign in again, then change your email within "
+                    "For your security, sign in again, then " + action + " within "
                             + RECENT_SIGN_IN.toMinutes() + " minutes.");
         }
     }
@@ -467,7 +551,9 @@ public class AuthService {
      * the account before: bump the session version (every earlier JWT now
      * fails), delete the API keys, and rotate the webhook signing secret
      * with no grace window. Following the link proved the inbox, so the
-     * email counts as verified. Returns a session for the new password.
+     * email counts as verified. Returns a session for the new password,
+     * or, with two-factor sign-in on, a challenge: 2FA stays on, and the
+     * inbox alone must not buy a session.
      *
      * <p>noRollbackFor keeps the DENIED audit rows: both refusals throw
      * before anything else is written.
@@ -503,6 +589,9 @@ public class AuthService {
         audit.record(AuditLogService.EVT_AUTH_PASSWORD_RESET_COMPLETED, AuditOutcome.SUCCESS,
                 u.getId(), ipAddress, Map.of("apiKeysRevoked", keysRevoked));
 
+        if (twoFactor.isEnabled(u.getId())) {
+            return twoFactor.challenge(u, "password-reset", ipAddress);
+        }
         IssuedToken issued = jwt.issueFor(u);
         return AuthResponse.bearer(issued.token(), issued.expiresAt());
     }
@@ -538,6 +627,11 @@ public class AuthService {
                     "Enter an email address your parent or guardian can receive mail at.");
         }
         return parent;
+    }
+
+    @Transactional(readOnly = true)
+    public MeResponse me(UUID id) {
+        return MeResponse.from(loadById(id), twoFactor.isEnabled(id));
     }
 
     @Transactional(readOnly = true)

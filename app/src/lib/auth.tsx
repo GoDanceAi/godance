@@ -6,13 +6,16 @@ import {
   SESSION_CALL,
   UNAUTHORIZED_EVENT,
   type MeResponse,
+  type SignInResponse,
 } from './api';
 import { adoptLegacySession } from './legacy-session';
 
 interface AuthContextValue {
   user: MeResponse | null;
   loading: boolean;                  // true on first mount while we hydrate /me
-  login: (email: string, password: string) => Promise<void>;
+  // Resolves to a challenge when the account has 2FA on, else null: signed in.
+  login: (email: string, password: string) => Promise<string | null>;
+  completeTwoFactor: (challenge: string, code: string) => Promise<void>;
   signup: (input: SignupInput) => Promise<void>;
   logout: () => Promise<void>;       // rejects, still signed in, if the API couldn't be reached
   refresh: () => Promise<void>;      // re-fetch /me (after a top-up etc.)
@@ -61,7 +64,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const login = useCallback(async (email: string, password: string) => {
-    await apiFetch('/v1/auth/login', { ...SESSION_CALL, json: { email, password } });
+    const resp = await apiFetch<SignInResponse>('/v1/auth/login', {
+      ...SESSION_CALL,
+      json: { email, password },
+    });
+    if (resp.twoFactorToken) return resp.twoFactorToken;
+    await refresh();
+    return null;
+  }, [refresh]);
+
+  const completeTwoFactor = useCallback(async (challenge: string, code: string) => {
+    // auth: false because a challenge is not a session. Its 401 means it
+    // expired, which the sign-in page handles, not that a session ended.
+    await apiFetch('/v1/auth/2fa/verify', {
+      ...SESSION_CALL,
+      headers: { ...SESSION_CALL.headers, Authorization: `Bearer ${challenge}` },
+      json: { code },
+    });
     await refresh();
   }, [refresh]);
 
@@ -82,7 +101,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, signup, logout, refresh }}>
+    <AuthContext.Provider value={{ user, loading, login, completeTwoFactor, signup, logout, refresh }}>
       {children}
     </AuthContext.Provider>
   );

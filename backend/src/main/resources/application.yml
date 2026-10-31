@@ -95,6 +95,9 @@ godance:
     resend-per-account: { requests: 5,  window: 24h }   # a handful of verification emails per account per day
     release-link-per-ip:    { requests: 10, window: 1h }
     release-link-per-email: { requests: 5,  window: 24h }   # a handful of release links per address per day
+    # Each code offered, and each change to an account's second factor.
+    two-factor-per-ip:      { requests: 30, window: 15m }
+    two-factor-per-account: { requests: 10, window: 15m }
   object-storage:
     endpoint:         ${OBJECT_STORAGE_ENDPOINT:http://localhost:9000}
     region:           ${OBJECT_STORAGE_REGION:us-east-1}   # MinIO accepts any placeholder
@@ -108,6 +111,10 @@ godance:
     secret: ${JWT_SIGNING_KEY:dev-only-do-not-use-in-prod-godance-jwt-signing-key-must-be-32-bytes}
     expiry-minutes: ${JWT_EXPIRY_MINUTES:60}
     issuer: ${JWT_ISSUER:https://godance.ai}   # must be URI per RFC 7519 `iss` claim
+  key-vault:
+    # Encrypts secrets stored in the database (KeyVault). Dev-only default, 32
+    # bytes in Base64. Override in prod via env var.
+    key: ${KEY_VAULT_KEY:ZGV2LW9ubHktZG8tbm90LXVzZS1pbi1wcm9kLWtleSE=}
   oauth:
     # Social sign-in (Google / Apple / X) alongside email+password. The dev
     # defaults below are placeholders — they let the context boot but do not

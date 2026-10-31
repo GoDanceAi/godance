@@ -149,6 +149,32 @@ class OAuthLoginSuccessHandlerTest {
     }
 
     @Test
+    void onAuthenticationSuccess_givenTwoFactorChallenge_redirectsWithChallengeAndNoSession() {
+        when(oauthLogin.completeLogin(any(), any(), any(), anyBoolean(), any()))
+                .thenReturn(AuthResponse.twoFactor("challenge-1", Instant.parse("2026-01-01T00:00:00Z")));
+
+        MockServerWebExchange exchange = signIn("google", principal(Boolean.TRUE), NONCE);
+
+        assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.FOUND);
+        assertThat(exchange.getResponse().getHeaders().getLocation()).hasToString(
+                CALLBACK + "#two_factor_token=challenge-1&expires_at=2026-01-01T00%3A00%3A00Z"
+                        + "&login_nonce=" + NONCE);
+        assertThat(exchange.getResponse().getCookies()).isEmpty();
+    }
+
+    @Test
+    void onAuthenticationSuccess_givenChallengeForCookieClient_expectsChallengeInRedirectAndNoCookie() {
+        when(oauthLogin.completeLogin(any(), any(), any(), anyBoolean(), any()))
+                .thenReturn(AuthResponse.twoFactor("challenge-2", LATER));
+
+        MockServerWebExchange exchange = signIn("google", principal(Boolean.TRUE), NONCE, true);
+
+        assertThat(exchange.getResponse().getHeaders().getLocation().toString())
+                .startsWith(CALLBACK + "#two_factor_token=challenge-2&");
+        assertThat(exchange.getResponse().getCookies()).isEmpty();
+    }
+
+    @Test
     void onAuthenticationSuccess_givenLoginNonce_expectsNonceEchoedAfterToken() {
         when(oauthLogin.completeLogin(any(), any(), any(), anyBoolean(), any()))
                 .thenReturn(AuthResponse.bearer("jwt-3", Instant.parse("2026-01-01T00:00:00Z")));
