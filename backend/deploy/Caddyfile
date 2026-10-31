@@ -11,7 +11,26 @@
 #      for expiry warnings.
 #
 # Replace api.godance.ai if you're using a different hostname.
+#
+# A change to this file reaches the running proxy only when the container is
+# recreated; deploys don't do that. See "Changing the Caddyfile" in README.md.
 # =====================================================================
+
+# Keeps credentials out of every log below. Caddy redacts Authorization,
+# Cookie and Set-Cookie itself, but not these: OAuth sign-in redirects carry
+# the session token in Location's fragment, and URLs carry ?access_token=,
+# ?token=, OAuth codes and admin searches. The whole query string goes, so a
+# new parameter can't leak by not being on a list.
+(redact_credentials) {
+    format filter {
+        wrap json
+        fields {
+            request>uri regexp "\?.*" "?REDACTED"
+            request>headers>Referer delete
+            resp_headers>Location delete
+        }
+    }
+}
 
 {
     email {$ACME_EMAIL:admin@godance.ai}
@@ -19,6 +38,12 @@
     # Uncomment for dry runs, then re-comment + delete /data/caddy/acme
     # to switch back to production certs.
     # acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+
+    # 502s and broken streams are logged here, with the request, not by the
+    # site's access log below.
+    log default {
+        import redact_credentials
+    }
 }
 
 api.godance.ai {
@@ -54,7 +79,7 @@ api.godance.ai {
     # Caddy logs to stdout by default; docker compose captures it.
     log {
         output stdout
-        format json
+        import redact_credentials
         # Skip access logs for the very chatty health endpoint.
         level info
     }
