@@ -17,8 +17,10 @@ import org.springframework.http.HttpCookie;
 import org.springframework.http.ResponseCookie;
 import org.springframework.mock.http.server.reactive.MockServerHttpRequest;
 import org.springframework.mock.http.server.reactive.MockServerHttpResponse;
+import org.springframework.mock.web.server.MockServerWebExchange;
 
 import ai.godance.config.SecurityProperties;
+import ai.godance.web.dto.AuthDtos.AuthResponse;
 
 /**
  * Production's cookie: {@code __Host-} forces browsers to refuse it unless
@@ -69,6 +71,16 @@ class SessionCookiesTest {
 
         assertThat(response.getCookies().get(production.name())).hasSize(1);
         assertThat(response.getCookies().getFirst(production.name()).getValue()).isEqualTo("jwt-2");
+    }
+
+    @Test
+    void start_givenTwoFactorChallenge_expectsNoCookieAndTheChallengeBack() {
+        MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest.post("/v1/auth/login")
+                .header(SessionCookies.CLIENT_HEADER, SessionCookies.COOKIE_CLIENT));
+        AuthResponse challenge = AuthResponse.twoFactor("challenge-1", Instant.now().plus(Duration.ofMinutes(5)));
+
+        assertThat(production.start(exchange, challenge)).isEqualTo(challenge);
+        assertThat(exchange.getResponse().getCookies()).isEmpty();
     }
 
     @Test

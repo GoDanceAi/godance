@@ -62,9 +62,11 @@ public class SessionCookies {
     /**
      * Start {@code session} and return the response body for it. A client
      * using the cookie gets no token in the body. Every other client does,
-     * as it always has.
+     * as it always has. A two-factor challenge is not a session, so it sets
+     * no cookie and goes back as it is: the client needs it to send the code.
      */
     public AuthResponse start(ServerWebExchange exchange, AuthResponse session) {
+        if (session.twoFactorToken() != null) return session;
         set(exchange.getResponse(), session.accessToken(), session.expiresAt());
         return isCookieClient(exchange.getRequest()) ? AuthResponse.cookie(session.expiresAt()) : session;
     }
