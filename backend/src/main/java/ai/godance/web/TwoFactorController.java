@@ -15,6 +15,7 @@ import org.springframework.web.server.ServerWebExchange;
 
 import ai.godance.security.AuthRateLimits;
 import ai.godance.security.JwtService;
+import ai.godance.security.SessionCookies;
 import ai.godance.service.AuthService;
 import ai.godance.service.TwoFactorService;
 import ai.godance.web.dto.AuthDtos.AuthResponse;
@@ -43,11 +44,14 @@ public class TwoFactorController {
     private final AuthService auth;
     private final TwoFactorService twoFactor;
     private final AuthRateLimits rateLimits;
+    private final SessionCookies sessionCookies;
 
-    public TwoFactorController(AuthService auth, TwoFactorService twoFactor, AuthRateLimits rateLimits) {
+    public TwoFactorController(AuthService auth, TwoFactorService twoFactor, AuthRateLimits rateLimits,
+                               SessionCookies sessionCookies) {
         this.auth = auth;
         this.twoFactor = twoFactor;
         this.rateLimits = rateLimits;
+        this.sessionCookies = sessionCookies;
     }
 
     @GetMapping
@@ -69,6 +73,7 @@ public class TwoFactorController {
                         .subscribeOn(Schedulers.boundedElastic()));
     }
 
+    /** Ends every session, the caller's too, so the new one goes straight into the cookie. */
     @PostMapping("/enable")
     public Mono<EnableResponse> enable(@AuthenticationPrincipal Jwt jwt,
             @Valid @RequestBody EnableRequest req, ServerWebExchange exchange) {
@@ -76,7 +81,8 @@ public class TwoFactorController {
         String ip = clientIp(exchange);
         return rateLimits.twoFactor(ip, userId)
                 .then(Mono.fromCallable(() -> auth.enableTwoFactor(userId, req.code(), ip))
-                        .subscribeOn(Schedulers.boundedElastic()));
+                        .subscribeOn(Schedulers.boundedElastic()))
+                .map(on -> new EnableResponse(on.recoveryCodes(), sessionCookies.start(exchange, on.session())));
     }
 
     @PostMapping("/disable")
@@ -100,7 +106,8 @@ public class TwoFactorController {
         String ip = clientIp(exchange);
         return rateLimits.twoFactor(ip, userId)
                 .then(Mono.fromCallable(() -> auth.completeTwoFactorSignIn(userId, req.code(), ip))
-                        .subscribeOn(Schedulers.boundedElastic()));
+                        .subscribeOn(Schedulers.boundedElastic()))
+                .map(session -> sessionCookies.start(exchange, session));
     }
 
     private static String clientIp(ServerWebExchange exchange) {

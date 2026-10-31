@@ -18,6 +18,7 @@ import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.List;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -51,6 +52,7 @@ import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
 import ai.godance.domain.OAuthProvider;
 import ai.godance.security.OAuthLoginFailureHandler;
 import ai.godance.security.OAuthLoginSuccessHandler;
+import ai.godance.security.SessionCookies;
 import ai.godance.service.OAuthLoginService;
 import ai.godance.web.dto.AuthDtos.AuthResponse;
 
@@ -69,6 +71,8 @@ class OAuthLoginNonceFlowTest {
     private static final String CALLBACK = "https://app.godance.test/oauth/callback";
     private static final String NONCE = "0123456789abcdef0123456789abcdef";
     private static final WireMockServer PROVIDER = startProvider();
+    private static final SessionCookies COOKIES =
+            new SessionCookies(new SecurityProperties(List.of("https://app.godance.test"), true));
 
     @Configuration
     @EnableWebFlux
@@ -102,7 +106,7 @@ class OAuthLoginNonceFlowTest {
                 ReactiveClientRegistrationRepository clientRegistrations, OAuthLoginService oauthLogin) {
             OAuthProperties props = new OAuthProperties(CALLBACK, null, null, null);
             return new SecurityConfig().oauthLoginSecurityChain(http, clientRegistrations,
-                    new OAuthLoginSuccessHandler(oauthLogin, props), new OAuthLoginFailureHandler(props));
+                    new OAuthLoginSuccessHandler(oauthLogin, props, COOKIES), new OAuthLoginFailureHandler(props));
         }
     }
 
@@ -181,6 +185,26 @@ class OAuthLoginNonceFlowTest {
         assertThat(signIn("/oauth2/authorization/x?login_nonce=" + NONCE)).hasToString(CALLBACK
                 + "#access_token=jwt-1&token_type=Bearer&expires_at=2026-01-01T00%3A00%3A00Z"
                 + "&login_nonce=" + NONCE);
+    }
+
+    @Test
+    void oauthLogin_givenCookieClient_expectsSessionCookieAndNoTokenInRedirect() {
+        when(oauthLogin.completeLogin(eq(OAuthProvider.X), eq("x-user-1"), any(), anyBoolean(), any()))
+                .thenReturn(AuthResponse.bearer("jwt-1", Instant.parse("2099-01-01T00:00:00Z")));
+        Started started = start("/oauth2/authorization/x?session=cookie&login_nonce=" + NONCE);
+
+        EntityExchangeResult<byte[]> callback = client.get()
+                .uri("/login/oauth2/code/x?code=code-1&state={state}", started.state())
+                .cookie(started.session().getName(), started.session().getValue())
+                .exchange()
+                .expectStatus().isFound()
+                .expectBody().returnResult();
+
+        assertThat(callback.getResponseHeaders().getLocation())
+                .hasToString(CALLBACK + "#token_type=Cookie&login_nonce=" + NONCE);
+        ResponseCookie cookie = callback.getResponseCookies().getFirst(COOKIES.name());
+        assertThat(cookie).isNotNull();
+        assertThat(cookie.getValue()).isEqualTo("jwt-1");
     }
 
     @Test

@@ -1,5 +1,16 @@
 import type { Page } from '@playwright/test';
-import { authResponse, expect, makeUser, problem, storedToken, test, type MockApi } from './mock-api';
+import {
+  expect,
+  makeUser,
+  problem,
+  readableToken,
+  sessionCleared,
+  sessionStarted,
+  sessionToken,
+  test,
+  type MockApi,
+  type Reply,
+} from './mock-api';
 
 const PASSWORD = 'correct-horse-battery';
 const CHALLENGE = { twoFactorToken: 'challenge-1', expiresAt: '2030-01-01T00:00:00Z' };
@@ -10,6 +21,12 @@ const ENROLMENT = {
 };
 const RECOVERY_CODES = Array.from({ length: 10 }, (_, i) => `AAAA-BBBB-CCCC-DDD${i}`);
 const WRONG_CODE = problem(403, "That code isn't right, or has already been used.");
+
+/** POST /v1/auth/2fa/enable: the replacement session goes in the cookie, as at sign-in. */
+function turnedOn(token: string): Reply {
+  const session = sessionStarted(token);
+  return { ...session, json: { recoveryCodes: RECOVERY_CODES, session: session.json } };
+}
 
 async function submitPassword(page: Page) {
   await page.getByLabel('Email').fill('ada@example.com');
@@ -25,29 +42,31 @@ async function submitCode(page: Page, code: string) {
 test.describe('signing in with two-factor on', () => {
   test('the password alone asks for a code, and the code signs in', async ({ page, api }) => {
     api.on('POST', '/v1/auth/login', { json: CHALLENGE })
-      .on('POST', '/v1/auth/2fa/verify', { json: authResponse('tok-after-code') })
+      .on('POST', '/v1/auth/2fa/verify', sessionStarted('tok-after-code'))
       .mockUser();
 
     await page.goto('/login');
     await submitPassword(page);
 
     await expect(page.getByRole('heading', { name: 'Enter your code' })).toBeVisible();
-    // No session yet: nothing stored, and /me was never called.
-    expect(await storedToken(page)).toBeNull();
-    expect(api.callsTo('GET', '/v1/auth/me')).toEqual([]);
+    // No session yet: no cookie, and the only /me was the app's own at boot.
+    expect(await sessionToken(page)).toBeNull();
+    expect(api.callsTo('GET', '/v1/auth/me')).toHaveLength(1);
 
     await submitCode(page, '123456');
 
     await expect(page).toHaveURL('/dashboard');
-    expect(await storedToken(page)).toBe('tok-after-code');
+    expect(await sessionToken(page)).toBe('tok-after-code');
+    expect(await readableToken(page)).toEqual({ cookie: '', storage: [] });
     const [verify] = api.callsTo('POST', '/v1/auth/2fa/verify');
     expect(verify.headers.authorization).toBe('Bearer challenge-1');
+    expect(verify.headers['x-godance-session']).toBe('cookie');
     expect(verify.body).toEqual({ code: '123456' });
   });
 
   test('a recovery code goes in the same box', async ({ page, api }) => {
     api.on('POST', '/v1/auth/login', { json: CHALLENGE })
-      .on('POST', '/v1/auth/2fa/verify', { json: authResponse('tok-recovery') })
+      .on('POST', '/v1/auth/2fa/verify', sessionStarted('tok-recovery'))
       .mockUser();
 
     await page.goto('/login');
@@ -69,9 +88,9 @@ test.describe('signing in with two-factor on', () => {
     await expect(page.getByRole('alert')).toContainText("That code isn't right");
     await expect(page.getByLabel('Code')).toHaveValue('');
     await expect(page).toHaveURL('/login');
-    expect(await storedToken(page)).toBeNull();
+    expect(await sessionToken(page)).toBeNull();
 
-    api.on('POST', '/v1/auth/2fa/verify', { json: authResponse('tok-second-try') }).mockUser();
+    api.on('POST', '/v1/auth/2fa/verify', sessionStarted('tok-second-try')).mockUser();
     await submitCode(page, '123456');
     await expect(page).toHaveURL('/dashboard');
   });
@@ -85,7 +104,7 @@ test.describe('signing in with two-factor on', () => {
     await submitCode(page, '000000');
 
     await expect(page.getByRole('alert')).toContainText('try again in 15 minutes');
-    expect(await storedToken(page)).toBeNull();
+    expect(await sessionToken(page)).toBeNull();
   });
 
   test('an expired challenge goes back to the password', async ({ page, api }) => {
@@ -102,7 +121,7 @@ test.describe('signing in with two-factor on', () => {
   });
 
   test('without two-factor, signing in stays one step', async ({ page, api }) => {
-    api.on('POST', '/v1/auth/login', { json: authResponse('tok-plain') }).mockUser();
+    api.on('POST', '/v1/auth/login', sessionStarted('tok-plain')).mockUser();
 
     await page.goto('/login');
     await submitPassword(page);
@@ -113,12 +132,9 @@ test.describe('signing in with two-factor on', () => {
 
   test('it returns to the page that asked for sign-in', async ({ page, api }) => {
     api.on('POST', '/v1/auth/login', { json: CHALLENGE })
-      .on('POST', '/v1/auth/2fa/verify', { json: authResponse('tok-after-code') })
+      .on('POST', '/v1/auth/2fa/verify', sessionStarted('tok-after-code'))
       .on('GET', '/v1/keys', { json: [] })
-      .on('GET', '/v1/auth/me', (call) => (call.headers.authorization
-        ? { json: makeUser({ twoFactorEnabled: true }) }
-        : problem(401, 'Unauthorized')))
-      .on('GET', '/v1/admin/me', problem(403, 'Forbidden'));
+      .mockUser(makeUser({ twoFactorEnabled: true }));
 
     await page.goto('/keys');
     await expect(page).toHaveURL('/login');
@@ -131,7 +147,7 @@ test.describe('signing in with two-factor on', () => {
 
 test.describe('the other ways in', () => {
   test('a social sign-in with two-factor on asks for the code', async ({ page, api }) => {
-    api.on('POST', '/v1/auth/2fa/verify', { json: authResponse('tok-social') }).mockUser();
+    api.on('POST', '/v1/auth/2fa/verify', sessionStarted('tok-social')).mockUser();
     await page.addInitScript(() => {
       if (!sessionStorage.getItem('e2e.nonce-set')) {
         sessionStorage.setItem('e2e.nonce-set', '1');
@@ -143,7 +159,7 @@ test.describe('the other ways in', () => {
 
     await expect(page.getByRole('heading', { name: 'Enter your code' })).toBeVisible();
     await expect(page).toHaveURL('/login');
-    expect(await storedToken(page)).toBeNull();
+    expect(await sessionToken(page)).toBeNull();
 
     await submitCode(page, '123456');
 
@@ -159,22 +175,25 @@ test.describe('the other ways in', () => {
     await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
   });
 
-  test('a password reset leaves two-factor on and asks for the code', async ({ page, api }) => {
-    api.on('POST', '/v1/auth/password/reset', { json: CHALLENGE })
-      .on('POST', '/v1/auth/2fa/verify', { json: authResponse('tok-after-reset') })
+  test('a password reset leaves two-factor on: the next sign-in asks for the code', async ({ page, api }) => {
+    api.on('POST', '/v1/auth/password/reset', sessionCleared())
+      .on('POST', '/v1/auth/login', { json: CHALLENGE })
+      .on('POST', '/v1/auth/2fa/verify', sessionStarted('tok-after-reset'))
       .mockUser();
 
     await page.goto('/reset-password?token=reset-1');
     await page.getByLabel('New password').fill('a-brand-new-password');
     await page.getByRole('button', { name: 'Reset password' }).click();
 
-    await expect(page.getByRole('heading', { name: 'Enter your code' })).toBeVisible();
-    expect(await storedToken(page)).toBeNull();
+    await expect(page.getByText('Password changed. Sign in with your new password.')).toBeVisible();
+    expect(await sessionToken(page)).toBeNull();
 
+    await submitPassword(page);
+    await expect(page.getByRole('heading', { name: 'Enter your code' })).toBeVisible();
     await submitCode(page, '123456');
 
     await expect(page).toHaveURL('/dashboard');
-    expect(await storedToken(page)).toBe('tok-after-reset');
+    expect(await sessionToken(page)).toBe('tok-after-reset');
   });
 });
 
@@ -193,7 +212,7 @@ test.describe('turning two-factor on', () => {
       .on('POST', '/v1/auth/2fa/enable', (call) => {
         if ((call.body as { code: string }).code === '000000') return WRONG_CODE;
         account.twoFactorEnabled = true;
-        return { json: { recoveryCodes: RECOVERY_CODES, session: authResponse('tok-after') } };
+        return turnedOn('tok-after');
       })
       .on('GET', '/v1/auth/2fa', { json: { enabled: true, recoveryCodesRemaining: 10 } });
 
@@ -217,15 +236,17 @@ test.describe('turning two-factor on', () => {
     const codes = section.getByRole('list', { name: 'Recovery codes' });
     await expect(codes.getByRole('listitem')).toHaveCount(10);
     await expect(codes).toContainText(RECOVERY_CODES[0]);
-    // Turning it on ended the old session; the replacement is what's stored.
-    expect(await storedToken(page)).toBe('tok-after');
+    // Turning it on ended the old session; the replacement is in the cookie.
+    expect(await sessionToken(page)).toBe('tok-after');
+    expect(await readableToken(page)).toEqual({ cookie: '', storage: [] });
+    expect(api.callsTo('POST', '/v1/auth/2fa/enable').at(-1)!.headers['x-godance-session']).toBe('cookie');
 
     await section.getByRole('button', { name: "I've saved them" }).click();
 
     await expect(codes).toHaveCount(0);
     await expect(section).toContainText('On.');
     await expect(section).toContainText('10 recovery codes left.');
-    expect(api.callsTo('GET', '/v1/auth/2fa').at(-1)!.headers.authorization).toBe('Bearer tok-after');
+    expect(api.callsTo('GET', '/v1/auth/2fa').at(-1)!.headers.cookie).toContain('tok-after');
   });
 
   test('a wrong password stops before any secret is shown', async ({ page, api }) => {
@@ -315,7 +336,7 @@ test.describe('the admin console', () => {
       .on('POST', '/v1/auth/2fa/enrol', { json: ENROLMENT })
       .on('POST', '/v1/auth/2fa/enable', () => {
         account.twoFactorEnabled = true;
-        return { json: { recoveryCodes: RECOVERY_CODES, session: authResponse('tok-after') } };
+        return turnedOn('tok-after');
       });
 
     await page.goto('/admin/users');

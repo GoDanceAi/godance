@@ -1,15 +1,15 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { apiFetch, ApiError, TOKEN_KEY, type SignInResponse } from '../lib/api';
+import { apiFetch, ApiError, SESSION_CALL } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { Field } from './LoginPage';
 
 /**
  * Landing page for the password-reset email's link. The backend signs out
- * every earlier session and revokes the API keys and webhook secret, then
- * returns a fresh token, which we store exactly as login does. With 2FA on
- * it returns a challenge instead, and the sign-in page asks for the code.
+ * every session, this browser's included, and revokes the API keys and webhook
+ * secret. It doesn't sign anyone in: the person does that with the new password,
+ * and their code when 2FA is on.
  */
 export default function ResetPasswordPage() {
   const [params] = useSearchParams();
@@ -27,18 +27,16 @@ export default function ResetPasswordPage() {
     setError(null);
     setBusy(true);
     try {
-      const resp = await apiFetch<SignInResponse>('/v1/auth/password/reset', {
-        method: 'POST',
-        auth: false,
+      await apiFetch('/v1/auth/password/reset', {
+        ...SESSION_CALL,
         json: { token, newPassword: password },
       });
-      if ('twoFactorToken' in resp) {
-        navigate('/login', { replace: true, state: { twoFactorToken: resp.twoFactorToken } });
-        return;
-      }
-      localStorage.setItem(TOKEN_KEY, resp.accessToken);
+      // Someone signed in on this browser just lost that session.
       await refresh();
-      navigate('/dashboard', { replace: true });
+      navigate('/login', {
+        replace: true,
+        state: { notice: 'Password changed. Sign in with your new password.' },
+      });
     } catch (err) {
       setError(err instanceof ApiError ? err.detail || err.message : 'Reset failed');
     } finally {

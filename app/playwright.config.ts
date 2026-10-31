@@ -1,11 +1,13 @@
 import { defineConfig, devices } from '@playwright/test';
-import { API_ORIGIN } from './e2e/api-origin';
+import { API_ORIGIN, APP_HOST } from './e2e/api-origin';
 
 // Browser journeys against a production build of the app. The API is never
 // real: the build points VITE_API_URL at a fake origin and every test mocks
 // it in the browser with page.route (see e2e/mock-api.ts). Nothing leaves
-// localhost.
-const PORT = 4174;
+// localhost. Cookies are real: the browser keeps and sends the mock's session
+// cookie by its own rules.
+// Parallel worktrees on one machine each need their own.
+const PORT = Number(process.env.E2E_PORT ?? 4174);
 const CI = !!process.env.CI;
 
 export default defineConfig({
@@ -17,12 +19,12 @@ export default defineConfig({
     ? [['github'], ['html', { open: 'never' }]]
     : [['list'], ['html', { open: 'never' }]],
   use: {
-    baseURL: `http://127.0.0.1:${PORT}`,
+    baseURL: `http://${APP_HOST}:${PORT}`,
     trace: 'retain-on-failure',
     // Backstop for what page.route can't see (e.g. <link rel=preconnect>):
-    // no hostname but localhost resolves.
+    // no hostname but the app's and localhost resolves.
     launchOptions: {
-      args: ['--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1, EXCLUDE localhost'],
+      args: [`--host-resolver-rules=MAP ${APP_HOST} 127.0.0.1, MAP * ~NOTFOUND, EXCLUDE 127.0.0.1, EXCLUDE localhost`],
     },
   },
   projects: [

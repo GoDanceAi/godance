@@ -1,10 +1,13 @@
-// Centralized fetch wrapper. Adds Authorization, parses problem+json on errors,
+// Centralized fetch wrapper. Sends the session cookie, parses problem+json on errors,
 // and auto-logs-out on 401 by dispatching a custom event the auth context listens for.
+//
+// The session is an HttpOnly cookie on the API's host, so nothing here can read
+// it: the browser attaches it, because every session call says `credentials:
+// 'include'`, and the app and API are one site, so SameSite lets it through.
 
 export const API_BASE: string =
   (import.meta.env.VITE_API_URL as string | undefined) || 'http://localhost:8080';
 
-export const TOKEN_KEY = 'godance.token';
 export const UNAUTHORIZED_EVENT = 'godance.unauthorized';
 
 export class ApiError extends Error {
@@ -22,8 +25,20 @@ export class ApiError extends Error {
 type ApiOptions = Omit<RequestInit, 'body'> & {
   json?: unknown;            // shorthand for JSON body
   body?: BodyInit;           // raw body if you need it (e.g. SSE clients)
-  auth?: boolean;            // default true; set false on /v1/auth/{signup,login}
+  auth?: boolean;            // default true; false sends no session and a 401 is not a lapsed one
 };
+
+/**
+ * For the calls that set or clear the session cookie: the browser ignores
+ * Set-Cookie without `credentials: 'include'`, and the header tells the API
+ * this client uses the cookie, so it keeps the token out of the response.
+ */
+export const SESSION_CALL = {
+  method: 'POST',
+  auth: false,
+  credentials: 'include',
+  headers: { 'X-Godance-Session': 'cookie' },
+} satisfies ApiOptions;
 
 export async function apiFetch<T = unknown>(path: string, opts: ApiOptions = {}): Promise<T> {
   const { json, auth = true, headers, ...rest } = opts;
@@ -38,16 +53,15 @@ export async function apiFetch<T = unknown>(path: string, opts: ApiOptions = {})
     finalHeaders['Content-Type'] = 'application/json';
   }
 
-  if (auth) {
-    const token = localStorage.getItem(TOKEN_KEY);
-    if (token) finalHeaders.Authorization = `Bearer ${token}`;
-  }
-
-  const res = await fetch(`${API_BASE}${path}`, { ...rest, body, headers: finalHeaders });
+  const res = await fetch(`${API_BASE}${path}`, {
+    credentials: auth ? 'include' : 'omit',
+    ...rest,
+    body,
+    headers: finalHeaders,
+  });
 
   if (res.status === 401 && auth) {
-    // Token rejected; clear it and notify the auth context.
-    localStorage.removeItem(TOKEN_KEY);
+    // Session rejected; the API has cleared the cookie. Notify the auth context.
     window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT));
   }
 
@@ -77,20 +91,18 @@ export async function apiFetch<T = unknown>(path: string, opts: ApiOptions = {})
 /** Streamed POST for /v1/chat/completions. Yields parsed chunk objects from SSE. */
 export async function* streamChat(path: string, body: unknown, signal?: AbortSignal):
     AsyncGenerator<ChatChunk> {
-  const token = localStorage.getItem(TOKEN_KEY);
   const res = await fetch(`${API_BASE}${path}`, {
     method: 'POST',
+    credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
       Accept: 'text/event-stream',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
     body: JSON.stringify(body),
     signal,
   });
 
   if (res.status === 401) {
-    localStorage.removeItem(TOKEN_KEY);
     window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT));
     throw new ApiError(401, 'unauthorized');
   }
@@ -189,14 +201,11 @@ export interface TopUpResponse {
   amountCents: number;
 }
 
-export interface AuthResponse {
-  accessToken: string;
-  tokenType: string;
+/** Password sign-in. The session is in the cookie, or with 2FA on there is just a challenge. */
+export interface SignInResponse {
+  twoFactorToken?: string;
   expiresAt: string;
 }
-
-/** Password sign-in and reset. With 2FA on there is no session yet, just a challenge. */
-export type SignInResponse = AuthResponse | { twoFactorToken: string; expiresAt: string };
 
 /** POST /v1/auth/2fa/enrol. The secret for typing in, and the URI the QR code encodes. */
 export interface TwoFactorEnrolment {
@@ -207,7 +216,6 @@ export interface TwoFactorEnrolment {
 /** POST /v1/auth/2fa/enable. The recovery codes are shown this once. */
 export interface TwoFactorEnabled {
   recoveryCodes: string[];
-  session: AuthResponse;
 }
 
 export interface TwoFactorStatus {

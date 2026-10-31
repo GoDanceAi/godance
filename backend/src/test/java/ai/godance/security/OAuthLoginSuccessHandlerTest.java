@@ -19,6 +19,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseCookie;
 import org.springframework.mock.http.server.reactive.MockServerHttpRequest;
 import org.springframework.mock.web.server.MockServerWebExchange;
 import org.springframework.security.core.authority.AuthorityUtils;
@@ -29,6 +30,7 @@ import org.springframework.security.web.server.WebFilterExchange;
 import org.springframework.web.server.ResponseStatusException;
 
 import ai.godance.config.OAuthProperties;
+import ai.godance.config.SecurityProperties;
 import ai.godance.domain.OAuthProvider;
 import ai.godance.service.OAuthLoginService;
 import ai.godance.web.dto.AuthDtos.AuthResponse;
@@ -45,6 +47,9 @@ class OAuthLoginSuccessHandlerTest {
 
     private static final String CALLBACK = "https://app.godance.test/oauth/callback";
     private static final String NONCE = "0123456789abcdef".repeat(2);
+    private static final Instant LATER = Instant.parse("2099-01-01T00:00:00Z");
+    private static final SessionCookies COOKIES =
+            new SessionCookies(new SecurityProperties(List.of("https://app.godance.test"), true));
 
     OAuthLoginService oauthLogin;
     OAuthLoginSuccessHandler handler;
@@ -53,7 +58,7 @@ class OAuthLoginSuccessHandlerTest {
     void setUp() {
         oauthLogin = mock(OAuthLoginService.class);
         handler = new OAuthLoginSuccessHandler(
-                oauthLogin, new OAuthProperties(CALLBACK, null, null, null));
+                oauthLogin, new OAuthProperties(CALLBACK, null, null, null), COOKIES);
     }
 
     private static OAuth2User principal(Object emailVerifiedClaim) {
@@ -68,11 +73,17 @@ class OAuthLoginSuccessHandlerTest {
         return signIn(registrationId, principal, null);
     }
 
-    /** {@code loginNonce} stands in for what {@link OAuthLoginNonce} leaves on the callback exchange. */
     private MockServerWebExchange signIn(String registrationId, OAuth2User principal, String loginNonce) {
+        return signIn(registrationId, principal, loginNonce, false);
+    }
+
+    /** {@code loginNonce} and {@code cookieClient} stand in for what {@link OAuthLoginNonce} leaves on the callback exchange. */
+    private MockServerWebExchange signIn(String registrationId, OAuth2User principal, String loginNonce,
+                                         boolean cookieClient) {
         MockServerWebExchange exchange = MockServerWebExchange.from(
                 MockServerHttpRequest.get("/login/oauth2/code/" + registrationId));
         if (loginNonce != null) exchange.getAttributes().put(OAuthLoginNonce.EXCHANGE_ATTRIBUTE, loginNonce);
+        if (cookieClient) exchange.getAttributes().put(OAuthLoginNonce.SESSION_EXCHANGE_ATTRIBUTE, true);
         OAuth2AuthenticationToken token = new OAuth2AuthenticationToken(
                 principal, principal.getAuthorities(), registrationId);
         handler.onAuthenticationSuccess(new WebFilterExchange(exchange, e -> Mono.empty()), token)
@@ -148,6 +159,19 @@ class OAuthLoginSuccessHandlerTest {
         assertThat(exchange.getResponse().getHeaders().getLocation()).hasToString(
                 CALLBACK + "#two_factor_token=challenge-1&expires_at=2026-01-01T00%3A00%3A00Z"
                         + "&login_nonce=" + NONCE);
+        assertThat(exchange.getResponse().getCookies()).isEmpty();
+    }
+
+    @Test
+    void onAuthenticationSuccess_givenChallengeForCookieClient_expectsChallengeInRedirectAndNoCookie() {
+        when(oauthLogin.completeLogin(any(), any(), any(), anyBoolean(), any()))
+                .thenReturn(AuthResponse.twoFactor("challenge-2", LATER));
+
+        MockServerWebExchange exchange = signIn("google", principal(Boolean.TRUE), NONCE, true);
+
+        assertThat(exchange.getResponse().getHeaders().getLocation().toString())
+                .startsWith(CALLBACK + "#two_factor_token=challenge-2&");
+        assertThat(exchange.getResponse().getCookies()).isEmpty();
     }
 
     @Test
@@ -161,6 +185,43 @@ class OAuthLoginSuccessHandlerTest {
         assertThat(exchange.getResponse().getHeaders().getLocation()).hasToString(
                 CALLBACK + "#access_token=jwt-3&token_type=Bearer&expires_at=2026-01-01T00%3A00%3A00Z"
                         + "&login_nonce=" + NONCE);
+    }
+
+    @Test
+    void onAuthenticationSuccess_givenCookieClient_expectsCookieAndNoTokenInRedirect() {
+        when(oauthLogin.completeLogin(any(), any(), any(), anyBoolean(), any()))
+                .thenReturn(AuthResponse.bearer("jwt-4", LATER));
+
+        MockServerWebExchange exchange = signIn("google", principal(Boolean.TRUE), NONCE, true);
+
+        assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.FOUND);
+        assertThat(exchange.getResponse().getHeaders().getLocation()).hasToString(
+                CALLBACK + "#token_type=Cookie&login_nonce=" + NONCE);
+        ResponseCookie cookie = exchange.getResponse().getCookies().getFirst(COOKIES.name());
+        assertThat(cookie.getValue()).isEqualTo("jwt-4");
+        assertThat(cookie.isHttpOnly()).isTrue();
+    }
+
+    @Test
+    void onAuthenticationSuccess_givenAppBundleFromBeforeTheCookie_expectsTokenInRedirectAndCookie() {
+        when(oauthLogin.completeLogin(any(), any(), any(), anyBoolean(), any()))
+                .thenReturn(AuthResponse.bearer("jwt-5", LATER));
+
+        MockServerWebExchange exchange = signIn("google", principal(Boolean.TRUE), NONCE);
+
+        assertThat(exchange.getResponse().getHeaders().getLocation().toString())
+                .startsWith(CALLBACK + "#access_token=jwt-5&");
+        assertThat(exchange.getResponse().getCookies().getFirst(COOKIES.name()).getValue()).isEqualTo("jwt-5");
+    }
+
+    @Test
+    void onAuthenticationSuccess_givenRefusedSignIn_expectsNoCookie() {
+        when(oauthLogin.completeLogin(any(), any(), any(), anyBoolean(), any()))
+                .thenThrow(new ResponseStatusException(HttpStatus.FORBIDDEN, "Account disabled."));
+
+        MockServerWebExchange exchange = signIn("google", principal(Boolean.TRUE), NONCE, true);
+
+        assertThat(exchange.getResponse().getCookies()).isEmpty();
     }
 
     @Test

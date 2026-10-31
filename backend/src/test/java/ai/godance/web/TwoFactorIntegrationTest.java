@@ -26,8 +26,10 @@ import org.springframework.boot.testcontainers.service.connection.ServiceConnect
 import org.springframework.boot.webtestclient.autoconfigure.AutoConfigureWebTestClient;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseCookie;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.test.web.reactive.server.EntityExchangeResult;
 import org.springframework.test.web.reactive.server.WebTestClient;
 import org.springframework.test.web.reactive.server.WebTestClient.ResponseSpec;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -49,6 +51,7 @@ import ai.godance.repository.UserRepository;
 import ai.godance.repository.UserTwoFactorRepository;
 import ai.godance.security.AdminAuthorizationFilter;
 import ai.godance.security.KeyVault;
+import ai.godance.security.SessionCookies;
 import ai.godance.security.Totp;
 import ai.godance.service.AuditLogService;
 import ai.godance.service.AuthService;
@@ -83,6 +86,7 @@ class TwoFactorIntegrationTest {
 
     private static final String PASSWORD = "correct-horse-battery-staple";
     private static final String WRONG_CODE = "000000";
+    private static final String APP_ORIGIN = "http://localhost:5173";
 
     @Autowired WebTestClient http;
     @Autowired UserRepository users;
@@ -93,6 +97,7 @@ class TwoFactorIntegrationTest {
     @Autowired AuthService auth;
     @Autowired OAuthLoginService oauthLogin;
     @Autowired PlatformTransactionManager txManager;
+    @Autowired SessionCookies cookies;
     @MockitoSpyBean MailService mail;
 
     // ===== Enrolment =====================================================
@@ -793,6 +798,160 @@ class TwoFactorIntegrationTest {
         assertThat(row.getWebhookSigningSecret()).isEqualTo("whsec_saved_by_the_stale_copy");
     }
 
+    // ===== The web app's cookie ==========================================
+
+    @Test
+    void login_givenCookieClient_returnsChallengeAndSetsNoCookie() {
+        Person p = withTwoFactor();
+
+        EntityExchangeResult<AuthResponse> login = fromApp("/v1/auth/login")
+                .bodyValue(Map.of("email", p.email, "password", PASSWORD))
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody(AuthResponse.class).returnResult();
+
+        assertThat(login.getResponseBody().twoFactorToken()).isNotBlank();
+        assertThat(login.getResponseBody().accessToken()).isNull();
+        assertThat(login.getResponseCookies()).doesNotContainKey(cookies.name());
+    }
+
+    @Test
+    void verify_givenCookieClient_setsCookieAndKeepsTokenOutOfBody() {
+        Person p = withTwoFactor();
+        String challenge = login(p.email, PASSWORD).twoFactorToken();
+
+        EntityExchangeResult<AuthResponse> verified = verifyFromApp(challenge, liveCode(p.id))
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody(AuthResponse.class).returnResult();
+
+        assertThat(verified.getResponseBody().accessToken()).as("page script must not see the token").isNull();
+        assertThat(verified.getResponseBody().tokenType()).isEqualTo("Cookie");
+        ResponseCookie cookie = sessionCookie(verified);
+        assertThat(cookie.isHttpOnly()).isTrue();
+        assertThat(cookie.getSameSite()).isEqualTo("Strict");
+        meByCookie(cookie.getValue()).expectStatus().isOk();
+    }
+
+    @Test
+    void verify_givenWrongCode_setsNoCookie() {
+        Person p = withTwoFactor();
+        String challenge = login(p.email, PASSWORD).twoFactorToken();
+
+        EntityExchangeResult<byte[]> refused = verifyFromApp(challenge, WRONG_CODE)
+                .exchange()
+                .expectStatus().isForbidden()
+                .expectBody().returnResult();
+
+        assertThat(refused.getResponseCookies()).doesNotContainKey(cookies.name());
+    }
+
+    @Test
+    void verify_givenAnotherSessionInTheCookie_expectsTheChallengeToDecide() {
+        Person p = withTwoFactor();
+        String otherSession = signUpVerified().bearer.substring("Bearer ".length());
+        String challenge = login(p.email, PASSWORD).twoFactorToken();
+
+        EntityExchangeResult<AuthResponse> verified = verifyFromApp(challenge, liveCode(p.id))
+                .cookie(cookies.name(), otherSession)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody(AuthResponse.class).returnResult();
+
+        MeResponse signedIn = meByCookie(sessionCookie(verified).getValue())
+                .expectStatus().isOk()
+                .expectBody(MeResponse.class).returnResult().getResponseBody();
+        assertThat(signedIn.email()).isEqualTo(p.email);
+    }
+
+    @Test
+    void verify_givenClientWithoutTheCookieHeader_expectsTokenInBodyAsBefore() {
+        Person p = withTwoFactor();
+        String challenge = login(p.email, PASSWORD).twoFactorToken();
+
+        AuthResponse verified = verify("Bearer " + challenge, liveCode(p.id))
+                .expectStatus().isOk()
+                .expectBody(AuthResponse.class).returnResult().getResponseBody();
+
+        me("Bearer " + verified.accessToken()).expectStatus().isOk();
+    }
+
+    @Test
+    void enable_givenCookieSession_replacesTheCookieItsOwnBumpEnded() {
+        Person p = signUpVerified();
+        String before = p.bearer.substring("Bearer ".length());
+        enrol(p.bearer).expectStatus().isOk();
+
+        EntityExchangeResult<EnableResponse> on = fromApp("/v1/auth/2fa/enable")
+                .cookie(cookies.name(), before)
+                .bodyValue(Map.of("code", liveCode(p.id)))
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody(EnableResponse.class).returnResult();
+
+        assertThat(on.getResponseBody().recoveryCodes()).hasSize(10);
+        assertThat(on.getResponseBody().session().accessToken()).as("page script must not see the token").isNull();
+        String replacement = sessionCookie(on).getValue();
+        assertThat(replacement).isNotEqualTo(before);
+        meByCookie(before).expectStatus().isUnauthorized();
+        meByCookie(replacement).expectStatus().isOk();
+    }
+
+    @Test
+    void resetPassword_givenCookieClient_returnsNoChallengeAndClearsTheCookie() {
+        Person p = withTwoFactor();
+
+        EntityExchangeResult<byte[]> reset = fromApp("/v1/auth/password/reset")
+                .bodyValue(Map.of("token", plantResetToken(p), "newPassword", "a-brand-new-password"))
+                .exchange()
+                .expectStatus().isNoContent()
+                .expectBody().returnResult();
+
+        ResponseCookie cleared = sessionCookie(reset);
+        assertThat(cleared.getValue()).isEmpty();
+        assertThat(cleared.getMaxAge()).isZero();
+        // The new password alone still isn't enough.
+        assertThat(login(p.email, "a-brand-new-password").twoFactorToken()).isNotBlank();
+    }
+
+    @Test
+    void adoptSession_givenChallenge_isRefusedAndSetsNoCookie() {
+        Person p = withTwoFactor();
+        String challenge = login(p.email, PASSWORD).twoFactorToken();
+
+        EntityExchangeResult<byte[]> refused = http.post().uri("/v1/auth/session")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + challenge)
+                .exchange()
+                .expectStatus().isForbidden()
+                .expectBody().returnResult();
+
+        assertThat(refused.getResponseCookies()).doesNotContainKey(cookies.name());
+    }
+
+    @Test
+    void adminConsole_givenCookieSession_expectsTheSameTwoFactorGate() {
+        Person without = signUpVerified();
+        grant(without.id, UserRole.ADMIN);
+        Person with = withTwoFactor();
+        grant(with.id, UserRole.ADMIN);
+
+        http.get().uri("/v1/admin/me").cookie(cookies.name(), without.bearer.substring("Bearer ".length()))
+                .exchange()
+                .expectStatus().isForbidden()
+                .expectBody().jsonPath("$.code").isEqualTo("two_factor_required");
+        http.get().uri("/v1/admin/me").cookie(cookies.name(), with.bearer.substring("Bearer ".length()))
+                .exchange()
+                .expectStatus().isOk();
+    }
+
+    @Test
+    void anyRoute_givenChallengeInTheCookie_expectsNoSession() {
+        Person p = withTwoFactor();
+        String challenge = login(p.email, PASSWORD).twoFactorToken();
+
+        meByCookie(challenge).expectStatus().isForbidden();
+    }
+
     // ===== Helpers =======================================================
 
     /** A session on a new account holding ADMIN, with the two-factor sign-in staff need. */
@@ -855,6 +1014,30 @@ class TwoFactorIntegrationTest {
         return new Person(p.email, p.id, "Bearer " + on.session().accessToken(), on.recoveryCodes());
     }
 
+    /** What the app sends. CORS compares Origin with the request's host, so this URL needs one. */
+    private WebTestClient.RequestBodySpec fromApp(String path) {
+        return http.mutate().baseUrl("http://localhost:8080").build().post().uri(path)
+                .header(HttpHeaders.ORIGIN, APP_ORIGIN)
+                .header(SessionCookies.CLIENT_HEADER, SessionCookies.COOKIE_CLIENT)
+                .contentType(MediaType.APPLICATION_JSON);
+    }
+
+    private WebTestClient.RequestHeadersSpec<?> verifyFromApp(String challenge, String code) {
+        return fromApp("/v1/auth/2fa/verify")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + challenge)
+                .bodyValue(Map.of("code", code));
+    }
+
+    private ResponseCookie sessionCookie(EntityExchangeResult<?> result) {
+        List<ResponseCookie> set = result.getResponseCookies().get(cookies.name());
+        assertThat(set).as("one Set-Cookie for the session").hasSize(1);
+        return set.get(0);
+    }
+
+    private ResponseSpec meByCookie(String cookie) {
+        return http.get().uri("/v1/auth/me").cookie(cookies.name(), cookie).exchange();
+    }
+
     private ResponseSpec enrol(String bearer) {
         return http.post().uri("/v1/auth/2fa/enrol")
                 .header(HttpHeaders.AUTHORIZATION, bearer)
@@ -910,15 +1093,19 @@ class TwoFactorIntegrationTest {
 
     /** Follows the emailed link: the token's hash is planted, as the email isn't readable here. */
     private ResponseSpec resetPassword(Person p, String newPassword) {
+        return http.post().uri("/v1/auth/password/reset")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("token", plantResetToken(p), "newPassword", newPassword))
+                .exchange();
+    }
+
+    private String plantResetToken(Person p) {
         String token = "reset-" + UUID.randomUUID();
         User u = users.findById(p.id).orElseThrow();
         u.setPasswordResetTokenHash(sha256Hex(token));
         u.setPasswordResetSentAt(Instant.now());
         users.save(u);
-        return http.post().uri("/v1/auth/password/reset")
-                .contentType(MediaType.APPLICATION_JSON)
-                .bodyValue(Map.of("token", token, "newPassword", newPassword))
-                .exchange();
+        return token;
     }
 
     private static String sha256Hex(String text) {

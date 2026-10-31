@@ -535,6 +535,18 @@ public class AuthService {
     }
 
     /**
+     * End every session this account has: the bumped session version fails
+     * each JWT issued so far, on every device.
+     */
+    @Transactional
+    public void logout(UUID userId, String ipAddress) {
+        User u = loadById(userId);
+        u.setSessionVersion(u.getSessionVersion() + 1);
+        users.save(u);
+        audit.record(AuditLogService.EVT_AUTH_LOGOUT, AuditOutcome.SUCCESS, userId, ipAddress, null);
+    }
+
+    /**
      * Set a new password from an emailed reset link, and evict whoever held
      * the account before: bump the session version (every earlier JWT now
      * fails), delete the API keys, and rotate the webhook signing secret

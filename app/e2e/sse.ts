@@ -42,12 +42,14 @@ export async function startLiveStream(): Promise<LiveStream> {
   const closed = new Promise<void>((r) => { close = r; });
   let res: http.ServerResponse | null = null;
 
-  const server = http.createServer((_req, response) => {
+  const server = http.createServer((req, response) => {
     res = response;
     response.writeHead(200, {
       'content-type': 'text/event-stream',
       'cache-control': 'no-cache',
-      'access-control-allow-origin': '*',
+      // With credentials, so as the API answers: the exact origin, never `*`.
+      'access-control-allow-origin': req.headers.origin ?? '',
+      'access-control-allow-credentials': 'true',
     });
     response.flushHeaders();
     response.on('close', close);
