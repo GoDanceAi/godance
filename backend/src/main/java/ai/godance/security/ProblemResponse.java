@@ -22,12 +22,19 @@ final class ProblemResponse {
     private ProblemResponse() { }
 
     static Mono<Void> write(ServerWebExchange exchange, HttpStatus status, String detail) {
+        return write(exchange, status, detail, null);
+    }
+
+    /** With {@code code}, an extension member a client can branch on, as it can't on {@code detail}. */
+    static Mono<Void> write(ServerWebExchange exchange, HttpStatus status, String detail, String code) {
         ServerHttpResponse response = exchange.getResponse();
         response.setStatusCode(status);
         response.getHeaders().setContentType(MediaType.APPLICATION_PROBLEM_JSON);
         String body = "{\"type\":\"about:blank\",\"title\":\"" + escape(status.getReasonPhrase())
                 + "\",\"status\":" + status.value()
-                + ",\"detail\":\"" + escape(detail) + "\"}";
+                + ",\"detail\":\"" + escape(detail) + "\""
+                + (code == null ? "" : ",\"code\":\"" + escape(code) + "\"")
+                + "}";
         DataBuffer buffer = response.bufferFactory().wrap(body.getBytes(StandardCharsets.UTF_8));
         return response.writeWith(Mono.just(buffer));
     }

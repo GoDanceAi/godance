@@ -20,15 +20,26 @@ import org.springframework.web.server.WebFilterChain;
 import ai.godance.domain.User;
 import ai.godance.domain.UserRole;
 import ai.godance.repository.UserRepository;
+import ai.godance.repository.UserTwoFactorRepository;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
 /**
  * Role gate on {@code /v1/admin/**}, deny by default. A request passes
  * only when the route it resolves to declares {@link AdminRoles} and the
- * caller's account is active, has a verified email, and holds one of the
- * declared roles. A path with no route, or a route with no declaration,
- * is refused for everyone, including admins.
+ * caller's account is active, has a verified email, holds one of the
+ * declared roles, and has two-factor sign-in on. A path with no route, or a
+ * route with no declaration, is refused for everyone, including admins.
+ *
+ * <p>The 2FA check covers every role, because any of them can read customer
+ * accounts. It reads the account, not the session. With 2FA on, every way of
+ * signing in demands the code ({@link ai.godance.service.TwoFactorService}),
+ * and turning it on ends every earlier session, so a live session on such
+ * an account has passed it. Staff without 2FA get
+ * {@code 403 application/problem+json} with
+ * {@code "code":"}{@value #TWO_FACTOR_REQUIRED_CODE}{@code "}, which the SPA
+ * turns into a prompt to set it up from their account settings. Those
+ * routes are outside {@code /v1/admin}, so nobody is locked out of enrolling.
  *
  * <p>The role comes from the account row on every request, never from a
  * JWT claim: the {@code scope} claim is a snapshot taken at issue time.
@@ -60,15 +71,20 @@ public class AdminAuthorizationFilter {
     /** Exchange attribute holding the caller's current {@link UserRole}. */
     public static final String ADMIN_ROLE_ATTRIBUTE = "ai.godance.security.AdminAuthorizationFilter.adminRole";
 
+    /** The problem {@code code} of staff refused for not having 2FA on. */
+    public static final String TWO_FACTOR_REQUIRED_CODE = "two_factor_required";
+
     private static final String ADMIN_PATH_PREFIX = "/v1/admin";
 
     private final HandlerMapping routes;
     private final UserRepository users;
+    private final UserTwoFactorRepository twoFactors;
 
     public AdminAuthorizationFilter(@Qualifier("requestMappingHandlerMapping") HandlerMapping routes,
-                                    UserRepository users) {
+                                    UserRepository users, UserTwoFactorRepository twoFactors) {
         this.routes = routes;
         this.users = users;
+        this.twoFactors = twoFactors;
     }
 
     public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
@@ -92,10 +108,15 @@ public class AdminAuthorizationFilter {
                         .map(SecurityContext::getAuthentication)
                         .flatMap(auth -> caller(auth, allowed))
                         .defaultIfEmpty(Optional.empty()))
-                .flatMap(caller -> caller.isPresent()
-                        ? allow(exchange, chain, caller.get())
-                        : deny(exchange));
+                .flatMap(caller -> {
+                    if (caller.isEmpty()) return deny(exchange);
+                    return caller.get().twoFactorOn()
+                            ? allow(exchange, chain, caller.get().account())
+                            : denyWithoutTwoFactor(exchange);
+                });
     }
+
+    private record Caller(User account, boolean twoFactorOn) { }
 
     /**
      * The roles the matched route declares. Empty, so nobody passes, when
@@ -112,11 +133,11 @@ public class AdminAuthorizationFilter {
     }
 
     /**
-     * The caller's account when it may use a route open to {@code allowed},
-     * else empty. The user lookup is blocking JPA, so it hops to
-     * {@code boundedElastic}.
+     * The caller's account and 2FA state when it holds a role in
+     * {@code allowed}, else empty. The lookups are blocking JPA, so they hop
+     * to {@code boundedElastic}.
      */
-    private Mono<Optional<User>> caller(Authentication auth, List<UserRole> allowed) {
+    private Mono<Optional<Caller>> caller(Authentication auth, List<UserRole> allowed) {
         if (allowed.isEmpty()) return Mono.just(Optional.empty());
         if (auth == null || !(auth.getPrincipal() instanceof Jwt jwt)) return Mono.just(Optional.empty());
         if (jwt.hasClaim("api_key_id")) return Mono.just(Optional.empty());
@@ -129,7 +150,8 @@ public class AdminAuthorizationFilter {
         return Mono.fromCallable(() -> users.findById(userId)
                         .filter(User::isActive)
                         .filter(User::isEmailVerified)
-                        .filter(u -> allowed.contains(u.getRole())))
+                        .filter(u -> allowed.contains(u.getRole()))
+                        .map(u -> new Caller(u, twoFactors.existsByUserIdAndEnabledAtIsNotNull(u.getId()))))
                 .subscribeOn(Schedulers.boundedElastic());
     }
 
@@ -141,5 +163,10 @@ public class AdminAuthorizationFilter {
 
     private static Mono<Void> deny(ServerWebExchange exchange) {
         return ProblemResponse.write(exchange, HttpStatus.FORBIDDEN, "admin access required");
+    }
+
+    private static Mono<Void> denyWithoutTwoFactor(ServerWebExchange exchange) {
+        return ProblemResponse.write(exchange, HttpStatus.FORBIDDEN,
+                "Turn on two-factor sign-in to use the admin console.", TWO_FACTOR_REQUIRED_CODE);
     }
 }

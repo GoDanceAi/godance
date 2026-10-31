@@ -24,7 +24,10 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
+import ai.godance.domain.User;
 import ai.godance.repository.UserRepository;
+import ai.godance.repository.UserTwoFactorRepository;
+import ai.godance.security.JwtService;
 import ai.godance.service.mail.LoggingEmailSender;
 import ai.godance.web.dto.AuthDtos.AuthResponse;
 import ch.qos.logback.classic.Logger;
@@ -51,7 +54,9 @@ import ch.qos.logback.core.read.ListAppender;
         "godance.rate-limit.resend-per-ip.requests=4",
         "godance.rate-limit.resend-per-account.requests=2",
         "godance.rate-limit.release-link-per-ip.requests=4",
-        "godance.rate-limit.release-link-per-email.requests=2"})
+        "godance.rate-limit.release-link-per-email.requests=2",
+        "godance.rate-limit.two-factor-per-ip.requests=4",
+        "godance.rate-limit.two-factor-per-account.requests=2"})
 @AutoConfigureWebTestClient
 @Testcontainers
 class AuthRateLimitIntegrationTest {
@@ -64,6 +69,8 @@ class AuthRateLimitIntegrationTest {
 
     @Autowired WebTestClient http;
     @Autowired UserRepository users;
+    @Autowired UserTwoFactorRepository twoFactors;
+    @Autowired JwtService jwt;
 
     private static String uniqueEmail(String tag) {
         return tag + "-" + UUID.randomUUID() + "@godance.test";
@@ -72,6 +79,23 @@ class AuthRateLimitIntegrationTest {
     private static String randomClientIp() {
         ThreadLocalRandom r = ThreadLocalRandom.current();
         return "10." + r.nextInt(256) + "." + r.nextInt(256) + "." + (1 + r.nextInt(254));
+    }
+
+    /** A challenge for a new account with 2FA on, as a password sign-in would get. */
+    private String twoFactorChallenge(String email) {
+        signup(randomClientIp(), email).expectStatus().isCreated();
+        User u = users.findByEmail(email).orElseThrow();
+        TwoFactorFixture.turnOn(twoFactors, u.getId());
+        return "Bearer " + jwt.issueTwoFactorChallenge(u).token();
+    }
+
+    private ResponseSpec twoFactorVerify(String clientIp, String challenge) {
+        return http.post().uri("/v1/auth/2fa/verify")
+                .header("X-Forwarded-For", clientIp)
+                .header("Authorization", challenge)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("code", "AAAA-BBBB-CCCC-DDDD"))
+                .exchange();
     }
 
     private ResponseSpec signup(String clientIp, String email) {
@@ -325,6 +349,28 @@ class AuthRateLimitIntegrationTest {
         });
 
         assertThat(sent).isEqualTo(2);
+    }
+
+    @Test
+    void twoFactorVerify_givenTooManyOnOneAccount_expects429FromAnyIp() {
+        String challenge = twoFactorChallenge(uniqueEmail("rl-2fa-account"));
+        twoFactorVerify(randomClientIp(), challenge).expectStatus().isForbidden();
+        twoFactorVerify(randomClientIp(), challenge).expectStatus().isForbidden();
+
+        twoFactorVerify(randomClientIp(), challenge).expectStatus().isEqualTo(HttpStatus.TOO_MANY_REQUESTS)
+                .expectHeader().exists(HttpHeaders.RETRY_AFTER)
+                .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON);
+    }
+
+    @Test
+    void twoFactorVerify_givenTooManyFromOneIp_expects429AcrossAccounts() {
+        String ip = randomClientIp();
+        for (int i = 0; i < 4; i++) {
+            twoFactorVerify(ip, twoFactorChallenge(uniqueEmail("rl-2fa-ip"))).expectStatus().isForbidden();
+        }
+
+        twoFactorVerify(ip, twoFactorChallenge(uniqueEmail("rl-2fa-ip")))
+                .expectStatus().isEqualTo(HttpStatus.TOO_MANY_REQUESTS);
     }
 
     @Test

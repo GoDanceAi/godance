@@ -10,9 +10,11 @@ import { consumeLoginNonce, OAUTH_GENERIC_ERROR } from '../lib/oauth';
  * here with the token in the URL *fragment*:
  *   /oauth/callback#access_token=<jwt>&token_type=Bearer&expires_at=<iso>&login_nonce=<nonce>
  * We store the token exactly as the email flow does, hydrate /me, and hand
- * off to the dashboard. A refused sign-in arrives as `#error=<reason>` and
- * is handed to the login page in navigation state. Either is accepted only
- * when `login_nonce` is the one this tab sent (see lib/oauth).
+ * off to the dashboard. An account with 2FA on arrives as
+ * `#two_factor_token=<challenge>` instead, and a refused sign-in as
+ * `#error=<reason>`; both are handed to the login page in navigation state.
+ * Any of them is accepted only when `login_nonce` is the one this tab sent
+ * (see lib/oauth).
  */
 export default function OAuthCallbackPage() {
   const navigate = useNavigate();
@@ -26,6 +28,7 @@ export default function OAuthCallbackPage() {
     const fragment = new URLSearchParams(window.location.hash.replace(/^#/, ''));
     const query = new URLSearchParams(window.location.search);
     const token = fragment.get('access_token');
+    const twoFactorToken = fragment.get('two_factor_token');
     const error = fragment.get('error') ?? query.get('error');
     // Anyone can link to /oauth/callback with a token or error of their
     // choosing; only a round-trip this tab started carries its nonce.
@@ -36,11 +39,13 @@ export default function OAuthCallbackPage() {
       // Scrub the token out of the address bar / history before continuing.
       window.history.replaceState(null, '', window.location.pathname);
       void refresh().then(() => navigate('/dashboard', { replace: true }));
+    } else if (twoFactorToken && nonceMatches) {
+      navigate('/login', { replace: true, state: { twoFactorToken } });
     } else {
       // A token without this tab's nonce wasn't requested here: never store
       // it. Replacing the history entry also drops it from the address bar.
       let reason = OAUTH_GENERIC_ERROR;
-      if (token) {
+      if (token || twoFactorToken) {
         reason = "Sign-in couldn't be verified because it wasn't started in this tab. Please try again.";
       } else if (error && nonceMatches) {
         reason = error;

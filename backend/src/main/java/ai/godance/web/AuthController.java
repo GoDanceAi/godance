@@ -147,9 +147,8 @@ public class AuthController {
     @GetMapping("/me")
     public Mono<MeResponse> me(@AuthenticationPrincipal Jwt jwt) {
         UUID userId = JwtService.userIdFromSubject(jwt.getSubject());
-        return Mono.fromCallable(() -> auth.loadById(userId))
-                .subscribeOn(Schedulers.boundedElastic())
-                .map(MeResponse::from);
+        return Mono.fromCallable(() -> auth.me(userId))
+                .subscribeOn(Schedulers.boundedElastic());
     }
 
     /**

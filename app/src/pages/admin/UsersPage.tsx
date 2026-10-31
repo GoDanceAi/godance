@@ -210,6 +210,10 @@ function UserDrawer({ user, onClose, onUserUpdated }: {
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<string | null>(null);
 
+  // Two-factor reset
+  const [resetting, setResetting] = useState(false);
+  const [resetResult, setResetResult] = useState<string | null>(null);
+
   const loadLedger = useCallback(async (p: number) => {
     try {
       const resp = await apiFetch<AdminLedgerPage>(`/v1/admin/users/${user.id}/ledger?page=${p}`);
@@ -253,6 +257,20 @@ function UserDrawer({ user, onClose, onUserUpdated }: {
       setError(err instanceof ApiError ? err.detail || err.message : 'Adjustment failed');
     } finally {
       setBusy(false);
+    }
+  };
+
+  const resetTwoFactor = async () => {
+    if (!window.confirm(`Turn off two-factor sign-in for ${user.email} and sign them out everywhere?`)) return;
+    setResetting(true);
+    setResetResult(null);
+    try {
+      await apiFetch(`/v1/admin/users/${user.id}/2fa/reset`, { method: 'POST' });
+      setResetResult('Two-factor sign-in is off. The owner has been emailed.');
+    } catch (err) {
+      setResetResult(err instanceof ApiError ? err.detail || err.message : 'Reset failed');
+    } finally {
+      setResetting(false);
     }
   };
 
@@ -337,6 +355,25 @@ function UserDrawer({ user, onClose, onUserUpdated }: {
           </div>
         )}
         {error && <p className="mt-2 text-xs text-danger">{error}</p>}
+
+        {/* Two-factor reset */}
+        {role === 'ADMIN' && (
+          <div className="mt-6 card">
+            <p className="text-sm font-semibold text-fg">Two-factor sign-in</p>
+            <p className="mt-1 text-xs text-fg-subtle">
+              For an owner who lost their device and recovery codes, or whose account a thief
+              enrolled. Check who is asking first: this is the only thing that gets past 2FA.
+            </p>
+            <button
+              className="btn btn-danger btn-sm mt-3"
+              disabled={resetting}
+              onClick={() => void resetTwoFactor()}
+            >
+              {resetting ? 'Resetting…' : 'Reset two-factor sign-in'}
+            </button>
+            {resetResult && <p role="status" className="mt-2 text-xs text-fg-muted">{resetResult}</p>}
+          </div>
+        )}
 
         {/* Ledger */}
         <div className="mt-6">

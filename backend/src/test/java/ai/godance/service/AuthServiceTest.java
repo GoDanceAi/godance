@@ -34,6 +34,7 @@ import ai.godance.security.WebhookSigner;
 import ai.godance.service.mail.MailService;
 import ai.godance.web.dto.AuthDtos.AuthResponse;
 import ai.godance.web.dto.AuthDtos.ForgotPasswordRequest;
+import ai.godance.web.dto.AuthDtos.LoginRequest;
 import ai.godance.web.dto.AuthDtos.ResetPasswordRequest;
 
 /**
@@ -58,6 +59,7 @@ class AuthServiceTest {
     ApiKeyRepository apiKeys;
     JwtService jwt;
     WebhookSigner webhooks;
+    TwoFactorService twoFactor;
     MailService mail;
     AuditLogService audit;
     // Real BCrypt (minimum cost) so stored hashes are checked for what they hash.
@@ -72,13 +74,114 @@ class AuthServiceTest {
         webhooks = mock(WebhookSigner.class);
         mail = mock(MailService.class);
         audit = mock(AuditLogService.class);
+        twoFactor = mock(TwoFactorService.class);
         auth = new AuthService(users, apiKeys, passwords, jwt, webhooks, audit, mail,
-                mock(ParentalConsentService.class));
+                mock(ParentalConsentService.class), twoFactor);
         when(users.findByEmailVerificationToken(any())).thenReturn(Optional.empty());
         when(users.findByEmail(any())).thenReturn(Optional.empty());
         when(users.findByPasswordResetTokenHash(any())).thenReturn(Optional.empty());
         when(jwt.issueFor(any())).thenAnswer(inv -> new IssuedToken(
                 "jwt-for-" + inv.<User>getArgument(0).getId(), Instant.now().plusSeconds(3600)));
+    }
+
+    @Test
+    void login_givenTwoFactorOn_returnsTheChallengeAndWritesNoSignIn() {
+        User u = passwordUser(true);
+        when(users.findByEmail(u.getEmail())).thenReturn(Optional.of(u));
+        AuthResponse challenge = AuthResponse.twoFactor("challenge", Instant.now().plusSeconds(300));
+        when(twoFactor.isEnabled(u.getId())).thenReturn(true);
+        when(twoFactor.challenge(u, "password", "1.2.3.4")).thenReturn(challenge);
+
+        AuthResponse out = auth.login(new LoginRequest(u.getEmail(), PASSWORD), "1.2.3.4");
+
+        assertThat(out).isSameAs(challenge);
+        assertThat(u.getLastLoginAt()).isNull();
+        verify(jwt, never()).issueFor(any());
+    }
+
+    @Test
+    void resetPassword_givenTwoFactorOn_stillEvictsButReturnsTheChallenge() {
+        String token = "reset-token";
+        User u = passwordUser(true);
+        u.setPasswordResetTokenHash(AuthService.sha256Hex(token));
+        u.setPasswordResetSentAt(Instant.now());
+        when(users.findByPasswordResetTokenHash(u.getPasswordResetTokenHash())).thenReturn(Optional.of(u));
+        AuthResponse challenge = AuthResponse.twoFactor("challenge", Instant.now().plusSeconds(300));
+        when(twoFactor.isEnabled(u.getId())).thenReturn(true);
+        when(twoFactor.challenge(u, "password-reset", "1.2.3.4")).thenReturn(challenge);
+
+        AuthResponse out = auth.resetPassword(new ResetPasswordRequest(token, "a-brand-new-password"), "1.2.3.4");
+
+        assertThat(out).isSameAs(challenge);
+        assertThat(u.getSessionVersion()).isEqualTo(1);
+        verify(apiKeys).deleteByUserId(u.getId());
+        verify(webhooks).rotateSecretWithoutGrace(u.getId());
+        verify(jwt, never()).issueFor(any());
+    }
+
+    @Test
+    void startTwoFactorEnrolment_givenUnverifiedPasswordAccount_expects403() {
+        User u = passwordUser(false);
+        when(users.findById(u.getId())).thenReturn(Optional.of(u));
+
+        assertThatThrownBy(() -> auth.startTwoFactorEnrolment(u.getId(), PASSWORD, Instant.now(), "1.2.3.4"))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(e -> assertThat(((ResponseStatusException) e).getStatusCode())
+                        .isEqualTo(HttpStatus.FORBIDDEN));
+        verify(twoFactor, never()).startEnrolment(any(), any());
+    }
+
+    @Test
+    void startTwoFactorEnrolment_givenNoPasswordAndOldSignIn_expects403() {
+        User u = socialUser();
+        when(users.findById(u.getId())).thenReturn(Optional.of(u));
+        Instant longAgo = Instant.now().minus(AuthService.RECENT_SIGN_IN).minusSeconds(1);
+
+        assertThatThrownBy(() -> auth.startTwoFactorEnrolment(u.getId(), null, longAgo, "1.2.3.4"))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("turn on two-factor sign-in");
+        verify(twoFactor, never()).startEnrolment(any(), any());
+    }
+
+    @Test
+    void startTwoFactorEnrolment_givenNoPasswordAndRecentSignIn_expectsEnrolment() {
+        User u = socialUser();
+        when(users.findById(u.getId())).thenReturn(Optional.of(u));
+
+        auth.startTwoFactorEnrolment(u.getId(), null, Instant.now().minusSeconds(60), "1.2.3.4");
+
+        verify(twoFactor).startEnrolment(u, "1.2.3.4");
+    }
+
+    @Test
+    void disableTwoFactor_givenNoPasswordAndOldSignIn_expects403AndCodeUnspent() {
+        User u = socialUser();
+        when(users.findById(u.getId())).thenReturn(Optional.of(u));
+        Instant longAgo = Instant.now().minus(AuthService.RECENT_SIGN_IN).minusSeconds(1);
+
+        assertThatThrownBy(() -> auth.disableTwoFactor(u.getId(), null, "123456", longAgo, "1.2.3.4"))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("turn off two-factor sign-in");
+        verify(twoFactor, never()).disable(any(), any(), any());
+    }
+
+    private User passwordUser(boolean emailVerified) {
+        User u = new User();
+        u.setId(UUID.randomUUID());
+        u.setEmail("person@godance.test");
+        u.setPasswordHash(passwords.encode(PASSWORD));
+        u.setActive(true);
+        u.setEmailVerified(emailVerified);
+        return u;
+    }
+
+    private static User socialUser() {
+        User u = new User();
+        u.setId(UUID.randomUUID());
+        u.setEmail("social@godance.test");
+        u.setActive(true);
+        u.setEmailVerified(true);
+        return u;
     }
 
     private User unverifiedUserWithToken(String token) {

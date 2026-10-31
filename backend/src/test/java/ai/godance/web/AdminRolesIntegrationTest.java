@@ -44,6 +44,7 @@ import ai.godance.domain.User;
 import ai.godance.domain.UserRole;
 import ai.godance.repository.AuditLogEntryRepository;
 import ai.godance.repository.UserRepository;
+import ai.godance.repository.UserTwoFactorRepository;
 import ai.godance.security.AdminRoles;
 import ai.godance.service.AuditLogService;
 import ai.godance.web.dto.ApiKeyDtos.CreateApiKeyResponse;
@@ -108,6 +109,7 @@ class AdminRolesIntegrationTest {
                     Map.of("amountCents", 100, "note", "matrix"), MONEY),
             new Route(HttpMethod.POST, "/v1/admin/users/{id}/close", ADMIN),
             new Route(HttpMethod.PUT, "/v1/admin/users/{id}/role", Map.of("role", "SUPPORT"), ADMIN),
+            new Route(HttpMethod.POST, "/v1/admin/users/{id}/2fa/reset", ADMIN),
             new Route(HttpMethod.GET, "/v1/admin/usage/summary", STAFF),
             new Route(HttpMethod.GET, "/v1/admin/pricing/proposals", STAFF),
             new Route(HttpMethod.POST, "/v1/admin/pricing/proposals/{id}/approve", ADMIN),
@@ -123,6 +125,7 @@ class AdminRolesIntegrationTest {
 
     @Autowired WebTestClient http;
     @Autowired UserRepository users;
+    @Autowired UserTwoFactorRepository twoFactors;
     @Autowired AuditLogEntryRepository audit;
     @Autowired @Qualifier("requestMappingHandlerMapping") RequestMappingHandlerMapping routes;
 
@@ -138,6 +141,7 @@ class AdminRolesIntegrationTest {
             signUp(email);
             set(email, role, true);
             bearers.put(role, logIn(email));
+            turnOnTwoFactor(email);
             if (role == UserRole.ADMIN) {
                 adminEmail = email;
                 adminId = users.findByEmail(email).orElseThrow().getId();
@@ -257,7 +261,9 @@ class AdminRolesIntegrationTest {
         // The session version moved, so the token that says USER is dead.
         http.get().uri("/v1/auth/me").header("Authorization", before)
                 .exchange().expectStatus().isUnauthorized();
-        http.get().uri("/v1/admin/me").header("Authorization", logIn(email))
+        String after = logIn(email);
+        turnOnTwoFactor(email);
+        http.get().uri("/v1/admin/me").header("Authorization", after)
                 .exchange().expectStatus().isOk()
                 .expectBody().jsonPath("$.role").isEqualTo("FINANCE");
 
@@ -277,6 +283,7 @@ class AdminRolesIntegrationTest {
         signUp(email);
         set(email, UserRole.ADMIN, true);
         String before = logIn(email);
+        turnOnTwoFactor(email);
         UUID id = users.findByEmail(email).orElseThrow().getId();
         http.get().uri("/v1/admin/me").header("Authorization", before)
                 .exchange().expectStatus().isOk();
@@ -286,6 +293,7 @@ class AdminRolesIntegrationTest {
 
         http.get().uri("/v1/admin/me").header("Authorization", before)
                 .exchange().expectStatus().isUnauthorized();
+        twoFactors.deleteById(id);   // so the next sign-in is by password alone
         http.get().uri("/v1/admin/me").header("Authorization", logIn(email))
                 .exchange().expectStatus().isForbidden();
         assertThat(roleChanges(id)).singleElement()
@@ -308,6 +316,7 @@ class AdminRolesIntegrationTest {
         signUp(email);
         set(email, UserRole.SUPPORT, true);
         String before = logIn(email);
+        turnOnTwoFactor(email);
         UUID id = users.findByEmail(email).orElseThrow().getId();
 
         changeRole(id, "SUPPORT").expectStatus().isOk();
@@ -381,6 +390,11 @@ class AdminRolesIntegrationTest {
                 .expectStatus().isOk()
                 .expectBody(AuthResponse.class).returnResult().getResponseBody();
         return "Bearer " + resp.accessToken();
+    }
+
+    /** After the password sign-in, which would otherwise need the code. */
+    private void turnOnTwoFactor(String email) {
+        TwoFactorFixture.turnOn(twoFactors, users.findByEmail(email).orElseThrow().getId());
     }
 
     private void set(String email, UserRole role, boolean emailVerified) {

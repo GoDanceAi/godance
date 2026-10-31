@@ -26,7 +26,9 @@ public record RateLimitProperties(
         Limit resendPerIp,
         Limit resendPerAccount,
         Limit releaseLinkPerIp,
-        Limit releaseLinkPerEmail
+        Limit releaseLinkPerEmail,
+        Limit twoFactorPerIp,
+        Limit twoFactorPerAccount
 ) {
     public RateLimitProperties {
         require("login-per-ip", loginPerIp);
@@ -39,6 +41,8 @@ public record RateLimitProperties(
         require("resend-per-account", resendPerAccount);
         require("release-link-per-ip", releaseLinkPerIp);
         require("release-link-per-email", releaseLinkPerEmail);
+        require("two-factor-per-ip", twoFactorPerIp);
+        require("two-factor-per-account", twoFactorPerAccount);
     }
 
     public record Limit(int requests, Duration window) { }

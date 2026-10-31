@@ -75,13 +75,15 @@ public class OAuthLoginService {
     private final OAuthIdentityRepository identities;
     private final JwtService jwt;
     private final AuditLogService audit;
+    private final TwoFactorService twoFactor;
 
     public OAuthLoginService(UserRepository users, OAuthIdentityRepository identities,
-                             JwtService jwt, AuditLogService audit) {
+                             JwtService jwt, AuditLogService audit, TwoFactorService twoFactor) {
         this.users = users;
         this.identities = identities;
         this.jwt = jwt;
         this.audit = audit;
+        this.twoFactor = twoFactor;
     }
 
     /**
@@ -89,7 +91,8 @@ public class OAuthLoginService {
      * null (e.g. X.com does not return an email). {@code emailVerified}
      * is the provider's {@code email_verified} claim; an email without it
      * is never trusted. Returns the bearer token the caller hands back to
-     * the client.
+     * the client, or, for an account with two-factor sign-in on, a
+     * challenge: the provider proves one factor, not two.
      */
     @Transactional
     public AuthResponse completeLogin(OAuthProvider provider, String subject,
@@ -151,6 +154,10 @@ public class OAuthLoginService {
             audit.recordInNewTransaction(AuditLogService.EVT_AUTH_OAUTH_LOGIN, AuditOutcome.DENIED,
                     user.getId(), null, Map.of("provider", provider.name(), "reason", "inactive"));
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "account disabled");
+        }
+
+        if (twoFactor.isEnabled(user.getId())) {
+            return twoFactor.challenge(user, "oauth:" + provider.name(), null);
         }
 
         user.setLastLoginAt(Instant.now());
