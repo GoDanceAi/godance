@@ -19,6 +19,7 @@ import org.springframework.web.server.ServerWebExchange;
 import ai.godance.security.ApiKeyAuthFilter;
 import ai.godance.security.AuthRateLimits;
 import ai.godance.security.JwtService;
+import ai.godance.security.SessionCookies;
 import ai.godance.service.AuthService;
 import ai.godance.web.dto.AuthDtos.AuthResponse;
 import ai.godance.web.dto.AuthDtos.ChangeEmailRequest;
@@ -39,10 +40,12 @@ public class AuthController {
 
     private final AuthService auth;
     private final AuthRateLimits rateLimits;
+    private final SessionCookies sessionCookies;
 
-    public AuthController(AuthService auth, AuthRateLimits rateLimits) {
+    public AuthController(AuthService auth, AuthRateLimits rateLimits, SessionCookies sessionCookies) {
         this.auth = auth;
         this.rateLimits = rateLimits;
+        this.sessionCookies = sessionCookies;
     }
 
     @PostMapping("/signup")
@@ -52,7 +55,7 @@ public class AuthController {
         return rateLimits.signup(ip)
                 .then(Mono.fromCallable(() -> auth.signup(req, ip))
                         .subscribeOn(Schedulers.boundedElastic()))
-                .map(body -> ResponseEntity.status(HttpStatus.CREATED).body(body));
+                .map(session -> ResponseEntity.status(HttpStatus.CREATED).body(sessionCookies.start(exchange, session)));
     }
 
     @PostMapping("/login")
@@ -61,7 +64,36 @@ public class AuthController {
         String ip = clientIp(exchange);
         return rateLimits.login(ip, req.email())
                 .then(Mono.fromCallable(() -> auth.login(req, ip))
-                        .subscribeOn(Schedulers.boundedElastic()));
+                        .subscribeOn(Schedulers.boundedElastic()))
+                .map(session -> sessionCookies.start(exchange, session));
+    }
+
+    /**
+     * Sign out: clears the cookie and bumps the session version, which ends
+     * this account's sessions on every device.
+     */
+    @PostMapping("/logout")
+    public Mono<ResponseEntity<Void>> logout(@AuthenticationPrincipal Jwt jwt, ServerWebExchange exchange) {
+        UUID userId = JwtService.userIdFromSubject(jwt.getSubject());
+        return Mono.fromRunnable(() -> auth.logout(userId, clientIp(exchange)))
+                .subscribeOn(Schedulers.boundedElastic())
+                .then(Mono.fromSupplier(() -> {
+                    sessionCookies.clear(exchange.getResponse());
+                    return ResponseEntity.noContent().build();
+                }));
+    }
+
+    /**
+     * Move a session from before the cookie into it, once, when that browser
+     * first loads an app that uses the cookie ({@code lib/legacy-session.ts}).
+     * The same JWT with the same expiry: reissuing would let a stolen token
+     * renew itself for ever. Goes away once no client gets a token in the
+     * response ({@link SessionCookies#start}).
+     */
+    @PostMapping("/session")
+    public Mono<ResponseEntity<Void>> adoptSession(@AuthenticationPrincipal Jwt jwt, ServerWebExchange exchange) {
+        sessionCookies.set(exchange.getResponse(), jwt.getTokenValue(), jwt.getExpiresAt());
+        return Mono.just(ResponseEntity.noContent().build());
     }
 
     @GetMapping("/verify")
@@ -137,11 +169,23 @@ public class AuthController {
                 .then(Mono.just(ResponseEntity.accepted().build()));
     }
 
+    /**
+     * Every session ended with the old password, this browser's included, so
+     * the cookie goes and a cookie client signs in with the new password,
+     * and its code when two-factor sign-in is on. A client without the cookie
+     * still gets what it has always got: a token, or that challenge.
+     */
     @PostMapping("/password/reset")
-    public Mono<AuthResponse> resetPassword(
+    public Mono<ResponseEntity<AuthResponse>> resetPassword(
             @Valid @RequestBody ResetPasswordRequest req, ServerWebExchange exchange) {
         return Mono.fromCallable(() -> auth.resetPassword(req, clientIp(exchange)))
-                .subscribeOn(Schedulers.boundedElastic());
+                .subscribeOn(Schedulers.boundedElastic())
+                .map(session -> {
+                    sessionCookies.clear(exchange.getResponse());
+                    return SessionCookies.isCookieClient(exchange.getRequest())
+                            ? ResponseEntity.noContent().<AuthResponse>build()
+                            : ResponseEntity.ok(session);
+                });
     }
 
     @GetMapping("/me")

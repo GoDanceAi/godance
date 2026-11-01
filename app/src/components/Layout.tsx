@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Link, NavLink, useNavigate } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import { useAuth, formatCents } from '../lib/auth';
@@ -11,9 +12,16 @@ export default function Layout({ children }: Props) {
   const { isAdmin, needsTwoFactor } = useAdmin();
   const navigate = useNavigate();
 
-  const handleLogout = () => {
-    logout();
-    navigate('/login');
+  const [logoutFailed, setLogoutFailed] = useState(false);
+
+  const handleLogout = async () => {
+    setLogoutFailed(false);
+    try {
+      await logout();
+      navigate('/login');
+    } catch {
+      setLogoutFailed(true);
+    }
   };
 
   const linkClass = ({ isActive }: { isActive: boolean }) =>
@@ -46,7 +54,7 @@ export default function Layout({ children }: Props) {
               </span>
               <ThemeToggle compact />
               <button
-                onClick={handleLogout}
+                onClick={() => void handleLogout()}
                 className="text-sm font-medium text-fg-muted hover:text-fg transition-colors"
               >
                 Log out
@@ -65,6 +73,12 @@ export default function Layout({ children }: Props) {
           )}
         </div>
       </header>
+
+      {logoutFailed && (
+        <p role="alert" className="mx-auto w-full max-w-6xl px-6 pt-3 text-right text-sm text-danger">
+          Couldn't log out. Try again.
+        </p>
+      )}
 
       <main className="flex-1">{children}</main>
 

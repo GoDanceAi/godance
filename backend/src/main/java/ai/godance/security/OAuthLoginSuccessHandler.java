@@ -25,24 +25,28 @@ import reactor.core.scheduler.Schedulers;
 /**
  * Spring Security {@code oauth2Login()} success handler. Once the
  * provider redirect dance has authenticated the user, this translates
- * the provider identity into a Godance JWT (via {@link OAuthLoginService})
- * and bounces the browser back to the SPA with the token in the URL
- * fragment — the same shape a native SPA OAuth callback expects. An
- * account with two-factor sign-in on gets {@code #two_factor_token=} instead:
- * the provider proved one factor, and the SPA asks for the code. A refused
- * sign-in comes back the same way with {@code #error=<reason>}.
- * Either carries {@code &login_nonce=} when the SPA started the sign-in
- * with one (see {@link OAuthLoginNonce}).
+ * the provider identity into a Godance JWT (via {@link OAuthLoginService}),
+ * puts it in the session cookie ({@link SessionCookies}) and bounces the
+ * browser back to the SPA. A sign-in started by an app bundle from before
+ * the cookie also gets the token in the URL fragment, which that bundle
+ * expects. An account with two-factor sign-in on gets no cookie and
+ * {@code #two_factor_token=} instead: the provider proved one factor, and
+ * the SPA asks for the code. A refused sign-in comes back the same way with
+ * {@code #error=<reason>}. Any of them carries {@code &login_nonce=} when
+ * the SPA started the sign-in with one (see {@link OAuthLoginNonce}).
  */
 @Component
 public class OAuthLoginSuccessHandler implements ServerAuthenticationSuccessHandler {
 
     private final OAuthLoginService oauthLogin;
     private final OAuthProperties props;
+    private final SessionCookies sessionCookies;
 
-    public OAuthLoginSuccessHandler(OAuthLoginService oauthLogin, OAuthProperties props) {
+    public OAuthLoginSuccessHandler(OAuthLoginService oauthLogin, OAuthProperties props,
+                                    SessionCookies sessionCookies) {
         this.oauthLogin = oauthLogin;
         this.props = props;
+        this.sessionCookies = sessionCookies;
     }
 
     @Override
@@ -62,7 +66,13 @@ public class OAuthLoginSuccessHandler implements ServerAuthenticationSuccessHand
         return Mono.fromCallable(() -> oauthLogin.completeLogin(
                         provider, subject, email, emailVerified, fullName))
                 .subscribeOn(Schedulers.boundedElastic())
-                .flatMap(auth -> redirectWithToken(exchange, auth))
+                .flatMap(auth -> {
+                    if (auth.twoFactorToken() != null) return redirectWithChallenge(exchange, auth);
+                    sessionCookies.set(exchange.getResponse(), auth.accessToken(), auth.expiresAt());
+                    return OAuthLoginNonce.isCookieClient(exchange)
+                            ? redirectSignedIn(exchange)
+                            : redirectWithToken(exchange, auth);
+                })
                 // A refused sign-in (unverified email, disabled account) goes
                 // back to the SPA, which shows the reason on the login page.
                 .onErrorResume(ResponseStatusException.class,
@@ -71,13 +81,18 @@ public class OAuthLoginSuccessHandler implements ServerAuthenticationSuccessHand
                                 : Mono.error(e));
     }
 
+    private Mono<Void> redirectSignedIn(ServerWebExchange exchange) {
+        return redirect(exchange, props.postLoginRedirectUri() + "#token_type=Cookie" + nonceParam(exchange));
+    }
+
+    private Mono<Void> redirectWithChallenge(ServerWebExchange exchange, AuthResponse auth) {
+        return redirect(exchange, props.postLoginRedirectUri()
+                + "#two_factor_token=" + enc(auth.twoFactorToken())
+                + "&expires_at=" + enc(auth.expiresAt().toString())
+                + nonceParam(exchange));
+    }
+
     private Mono<Void> redirectWithToken(ServerWebExchange exchange, AuthResponse auth) {
-        if (auth.twoFactorToken() != null) {
-            return redirect(exchange, props.postLoginRedirectUri()
-                    + "#two_factor_token=" + enc(auth.twoFactorToken())
-                    + "&expires_at=" + enc(auth.expiresAt().toString())
-                    + nonceParam(exchange));
-        }
         return redirect(exchange, props.postLoginRedirectUri()
                 + "#access_token=" + enc(auth.accessToken())
                 + "&token_type=" + enc(auth.tokenType())

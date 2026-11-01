@@ -11,8 +11,9 @@ React Router, deployed to Cloudflare Pages alongside the marketing site.
 - **Tailwind** — same `tailwind.config.js` palette as `frontend-marketing/` so the
   brand presentation is consistent.
 - **React Router v6** with a `ProtectedRoute` wrapper and a centralised `AuthProvider`
-  context. JWT stored in `localStorage`; backend 401s dispatch a custom event that
-  the context listens for and clears state.
+  context. The session is an `HttpOnly` cookie on the API's host, out of page
+  script's reach; backend 401s dispatch a custom event that the context listens
+  for and clears state.
 - **No state library, no UI library, no form library** by design — skeleton stays
   tiny and grows on demand.
 

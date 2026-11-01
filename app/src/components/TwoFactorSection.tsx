@@ -4,7 +4,7 @@ import { QRCodeSVG } from 'qrcode.react';
 import {
   apiFetch,
   ApiError,
-  TOKEN_KEY,
+  SESSION_CALL,
   type TwoFactorEnabled,
   type TwoFactorEnrolment,
   type TwoFactorStatus,
@@ -82,10 +82,11 @@ export default function TwoFactorSection() {
     void run(async () => {
       const on = await apiFetch<TwoFactorEnabled>('/v1/auth/2fa/enable', {
         method: 'POST',
+        // Turning this on ends every session, this one too. The header gets
+        // its replacement in the cookie and keeps the token out of the response.
+        headers: SESSION_CALL.headers,
         json: { code },
       });
-      // Turning this on ended every session, this one too; this is its replacement.
-      localStorage.setItem(TOKEN_KEY, on.session.accessToken);
       go({ name: 'recovery-codes', codes: on.recoveryCodes });
       await refresh();
     }, 'Could not turn on two-factor sign-in');

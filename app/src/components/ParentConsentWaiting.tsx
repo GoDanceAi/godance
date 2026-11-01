@@ -28,9 +28,14 @@ export default function ParentConsentWaiting() {
     }
   };
 
-  const signOut = () => {
-    logout();
-    navigate('/login');
+  const signOut = async () => {
+    try {
+      await logout();
+      navigate('/login');
+    } catch {
+      setStatus('error');
+      setError("Couldn't sign out. Try again.");
+    }
   };
 
   return (
@@ -54,7 +59,7 @@ export default function ParentConsentWaiting() {
         >
           {status === 'sending' ? 'Sending…' : 'Email them again'}
         </button>
-        <button type="button" onClick={signOut} className="btn btn-secondary">
+        <button type="button" onClick={() => void signOut()} className="btn btn-secondary">
           Sign out
         </button>
       </div>

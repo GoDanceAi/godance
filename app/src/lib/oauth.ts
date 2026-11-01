@@ -3,8 +3,8 @@ import { API_BASE } from './api';
 // A fresh random nonce per sign-in, kept in this tab's sessionStorage and sent
 // to the backend, which stores it with the OAuth authorization request and
 // echoes it back as `#login_nonce=` (OAuthLoginNonce, OAuthLoginSuccessHandler).
-// OAuthCallbackPage accepts a token or an error only when the echo matches, so
-// a crafted link to /oauth/callback#access_token=… or #error=… is refused:
+// OAuthCallbackPage accepts a sign-in or an error only when the echo matches, so
+// a crafted link to /oauth/callback or /oauth/callback#error=… is refused:
 // whoever wrote the link can't know this tab's nonce.
 const NONCE_KEY = 'godance.oauth_nonce';
 
@@ -12,9 +12,10 @@ export const OAUTH_GENERIC_ERROR = 'Sign-in was cancelled or failed';
 
 /**
  * Hitting `${API_BASE}/oauth2/authorization/{id}` starts the provider
- * round-trip; the backend success handler (OAuthLoginSuccessHandler) sends
- * the browser back to `/oauth/callback#access_token=…` or `#error=<reason>`,
- * plus `&login_nonce=<nonce>`.
+ * round-trip; the backend success handler (OAuthLoginSuccessHandler) sets the
+ * session cookie and sends the browser back to `/oauth/callback#token_type=Cookie`
+ * or `#error=<reason>`, plus `&login_nonce=<nonce>`. `session=cookie` tells it
+ * to keep the token out of that URL.
  */
 export function startOAuth(id: string) {
   const bytes = crypto.getRandomValues(new Uint8Array(16));
@@ -24,7 +25,7 @@ export function startOAuth(id: string) {
   } catch {
     // Storage blocked: the callback can't match the nonce and refuses the sign-in.
   }
-  window.location.href = `${API_BASE}/oauth2/authorization/${id}?login_nonce=${nonce}`;
+  window.location.href = `${API_BASE}/oauth2/authorization/${id}?session=cookie&login_nonce=${nonce}`;
 }
 
 /** Whether `received` is the nonce this tab sent. Clears it either way, so each nonce works once. */

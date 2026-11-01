@@ -55,6 +55,28 @@ jobs:
           npm run lint
           npm run build
           npm audit --audit-level=high
+      # The app signs in through the API's session cookie, and one merge can
+      # change both: this workflow finishes well before the backend's, and an
+      # app ahead of its API can't sign anyone in. So wait until the API accepts
+      # the app's X-Godance-Session header, which only a backend with the cookie
+      # does. An app behind its API is fine: the API still serves old bundles.
+      # A preflight needs no credentials and changes nothing.
+      - name: Wait for an API with the session cookie
+        run: |
+          for i in $(seq 1 60); do
+            status=$(curl -s -o /dev/null -w '%{http_code}' -X OPTIONS \
+              -H 'Origin: https://app.godance.ai' \
+              -H 'Access-Control-Request-Method: POST' \
+              -H 'Access-Control-Request-Headers: x-godance-session' \
+              https://api.godance.ai/v1/auth/login || true)
+            if [ "$status" = "200" ]; then
+              echo "API ready"; exit 0
+            fi
+            echo "waiting ($i): preflight answered '$status'"
+            sleep 30
+          done
+          echo "the API never accepted the session header; not deploying the app" >&2
+          exit 1
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
         with:

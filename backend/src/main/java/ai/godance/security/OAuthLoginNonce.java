@@ -30,14 +30,24 @@ import reactor.core.publisher.Mono;
  *
  * <p>The backend only echoes; the SPA enforces. A sign-in started without
  * a nonce still completes and simply comes back without one.
+ *
+ * <p>{@code session=cookie} on the same request rides along the same way:
+ * it is the OAuth form of {@link SessionCookies#CLIENT_HEADER}, since a
+ * browser redirect can't carry a header.
  */
 public final class OAuthLoginNonce {
 
     /** Query parameter on the authorization request and key in the callback fragment. */
     public static final String PARAM = "login_nonce";
 
+    /** Query parameter on the authorization request: {@link SessionCookies#COOKIE_CLIENT} or absent. */
+    public static final String SESSION_PARAM = "session";
+
     /** Key on the callback exchange; package-private so handler tests can stand in for the repository. */
     static final String EXCHANGE_ATTRIBUTE = OAuthLoginNonce.class.getName();
+
+    /** Same, for {@link #SESSION_PARAM}. */
+    static final String SESSION_EXCHANGE_ATTRIBUTE = EXCHANGE_ATTRIBUTE + ".session";
 
     /** The SPA sends 32 hex chars; anything outside this shape is dropped, not echoed. */
     private static final Pattern FORMAT = Pattern.compile("[A-Za-z0-9_-]{16,128}");
@@ -87,6 +97,9 @@ public final class OAuthLoginNonce {
                     if (nonce != null) {
                         exchange.getAttributes().put(EXCHANGE_ATTRIBUTE, nonce);
                     }
+                    if (request.getAttribute(SESSION_PARAM) != null) {
+                        exchange.getAttributes().put(SESSION_EXCHANGE_ATTRIBUTE, true);
+                    }
                 });
             }
         };
@@ -97,17 +110,28 @@ public final class OAuthLoginNonce {
         return exchange.getAttribute(EXCHANGE_ATTRIBUTE);
     }
 
+    /** True when the SPA started this sign-in asking for the cookie alone. */
+    public static boolean isCookieClient(ServerWebExchange exchange) {
+        return exchange.getAttribute(SESSION_EXCHANGE_ATTRIBUTE) != null;
+    }
+
     private static OAuth2AuthorizationRequest withNonce(OAuth2AuthorizationRequest request,
                                                         ServerWebExchange exchange) {
         String nonce = exchange.getRequest().getQueryParams().getFirst(PARAM);
-        if (nonce == null || !FORMAT.matcher(nonce).matches()) {
+        boolean validNonce = nonce != null && FORMAT.matcher(nonce).matches();
+        boolean cookieClient = SessionCookies.COOKIE_CLIENT.equals(
+                exchange.getRequest().getQueryParams().getFirst(SESSION_PARAM));
+        if (!validNonce && !cookieClient) {
             return request;
         }
         return OAuth2AuthorizationRequest.from(request)
                 // from() leaves the URI out, and rebuilding it could differ from
                 // what the default resolver produced; keep it byte-for-byte.
                 .authorizationRequestUri(request.getAuthorizationRequestUri())
-                .attributes(attributes -> attributes.put(PARAM, nonce))
+                .attributes(attributes -> {
+                    if (validNonce) attributes.put(PARAM, nonce);
+                    if (cookieClient) attributes.put(SESSION_PARAM, SessionCookies.COOKIE_CLIENT);
+                })
                 .build();
     }
 }

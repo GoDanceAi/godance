@@ -66,6 +66,11 @@ public final class AuthDtos {
         public static AuthResponse twoFactor(String challengeToken, Instant expiresAt) {
             return new AuthResponse(null, null, expiresAt, challengeToken);
         }
+
+        /** For a client whose session is in the cookie: nothing here for page script to read. */
+        public static AuthResponse cookie(Instant expiresAt) {
+            return new AuthResponse(null, "Cookie", expiresAt, null);
+        }
     }
 
     /** The token from a verification email, to free that address from its account. */

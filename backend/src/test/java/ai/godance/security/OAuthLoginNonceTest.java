@@ -85,6 +85,55 @@ class OAuthLoginNonceTest {
     }
 
     @Test
+    void resolve_givenCookieSession_expectsFlagOnRequestButNotInProviderUrl() {
+        OAuth2AuthorizationRequest request = start("?session=cookie", new MockWebSession());
+
+        assertThat(request.<String>getAttribute(OAuthLoginNonce.SESSION_PARAM)).isEqualTo("cookie");
+        assertThat(request.getAttributes()).doesNotContainKey(OAuthLoginNonce.PARAM);
+        assertThat(request.getAuthorizationRequestUri())
+                .startsWith("https://accounts.google.com/")
+                .doesNotContain("session=");
+    }
+
+    @Test
+    void resolve_givenOtherSessionValue_expectsNoFlag() {
+        OAuth2AuthorizationRequest request = start("?session=bearer", new MockWebSession());
+
+        assertThat(request.getAttributes()).doesNotContainKey(OAuthLoginNonce.SESSION_PARAM);
+    }
+
+    @Test
+    void removeAuthorizationRequest_givenCookieSession_expectsFlagOnCallbackExchange() {
+        MockWebSession session = new MockWebSession();
+        ServerAuthorizationRequestRepository<OAuth2AuthorizationRequest> repository = OAuthLoginNonce.repository();
+        OAuth2AuthorizationRequest request = start("?session=cookie&login_nonce=" + NONCE, session);
+        repository.saveAuthorizationRequest(request,
+                exchange(API + "/oauth2/authorization/google", session)).block();
+
+        MockServerWebExchange callback = exchange(
+                API + "/login/oauth2/code/google?code=code-1&state=" + request.getState(), session);
+        repository.removeAuthorizationRequest(callback).block();
+
+        assertThat(OAuthLoginNonce.isCookieClient(callback)).isTrue();
+        assertThat(OAuthLoginNonce.from(callback)).isEqualTo(NONCE);
+    }
+
+    @Test
+    void removeAuthorizationRequest_givenNoCookieSession_expectsNoFlagOnCallbackExchange() {
+        MockWebSession session = new MockWebSession();
+        ServerAuthorizationRequestRepository<OAuth2AuthorizationRequest> repository = OAuthLoginNonce.repository();
+        OAuth2AuthorizationRequest request = start("?login_nonce=" + NONCE, session);
+        repository.saveAuthorizationRequest(request,
+                exchange(API + "/oauth2/authorization/google", session)).block();
+
+        MockServerWebExchange callback = exchange(
+                API + "/login/oauth2/code/google?code=code-1&state=" + request.getState(), session);
+        repository.removeAuthorizationRequest(callback).block();
+
+        assertThat(OAuthLoginNonce.isCookieClient(callback)).isFalse();
+    }
+
+    @Test
     void removeAuthorizationRequest_givenCallbackWithWrongState_expectsNothingOnCallbackExchange() {
         MockWebSession session = new MockWebSession();
         ServerAuthorizationRequestRepository<OAuth2AuthorizationRequest> repository = OAuthLoginNonce.repository();

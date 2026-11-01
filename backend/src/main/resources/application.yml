@@ -77,6 +77,8 @@ godance:
     # CORS allow-list for browser-origin /v1/** calls. Comma-separate via env;
     # prod must include https://app.godance.ai.
     cors-allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:4173}
+    # Local dev is plain HTTP, where a Secure cookie can't work. Prod sets true.
+    session-cookie-secure: ${SESSION_COOKIE_SECURE:false}
   rate-limit:
     # Fixed-window Redis counters on the pre-auth endpoints (RateLimiter).
     # Over a limit → 429 problem+json with Retry-After. Fails open if Redis

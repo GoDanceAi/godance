@@ -28,7 +28,7 @@ export default function VerifyEmailPage() {
     attempted.current = true;
     (async () => {
       try {
-        // Sent with the session's token: the API only verifies the signed-in account.
+        // Sent with the session cookie: the API only verifies the signed-in account.
         await apiFetch(`/v1/auth/verify?token=${encodeURIComponent(token)}`);
         setStatus('success');
         // Refresh /me so emailVerified flips immediately.

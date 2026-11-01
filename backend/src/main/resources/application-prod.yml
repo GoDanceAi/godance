@@ -46,6 +46,7 @@ godance:
   region: ${REGION}            # MUST be set in prod: digitalocean | alicloud
   security:
     cors-allowed-origins: ${CORS_ALLOWED_ORIGINS:https://app.godance.ai}
+    session-cookie-secure: true
   object-storage:
     endpoint:         ${OBJECT_STORAGE_ENDPOINT}     # REQUIRED
     region:           ${OBJECT_STORAGE_REGION:us-east-1}
