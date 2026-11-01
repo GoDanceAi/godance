@@ -116,6 +116,30 @@ docker compose -f backend/deploy/docker-compose.prod.yml \
 Only the `backend` service is rebuilt; postgres/redis/caddy keep
 running with their volumes intact.
 
+## Changing the Caddyfile
+
+A deploy updates the file on the droplet but leaves the running proxy alone,
+so a Caddyfile change does nothing until you recreate the container. Once the
+deploy has finished:
+
+```bash
+cd /opt/godance/backend
+docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env.prod \
+               run --rm --no-deps caddy \
+               caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env.prod \
+               up -d --no-deps --force-recreate caddy
+```
+
+The first command checks the new file in a throwaway container; the proxy
+keeps running. The second drops open connections, chat streams included, for a
+couple of seconds. `--no-deps` leaves the backend alone, and certificates stay
+in `caddy_data`. Recreating also deletes the old container's logs.
+
+`caddy reload` and a plain `up -d caddy` don't apply the change, and neither
+says so. `git` replaces the file, the container's bind mount stays on the old
+one, and the reload exits 0 with the old config.
+
 ## Rolling back
 
 Every build is in GHCR under its full commit sha. To go back to an earlier
