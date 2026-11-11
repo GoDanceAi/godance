@@ -109,8 +109,7 @@ public class ChatCompletionService {
                 calculator.estimateInputCents(primary, estimatedInputTokens));
 
         if (!ledger.preDebit(userId, apiKeyId, estimateCents, requestId)) {
-            throw new ResponseStatusException(HttpStatus.PAYMENT_REQUIRED,
-                    "insufficient credit; top up via /v1/billing/topup");
+            throw new InsufficientCreditException();
         }
 
         // fallbackUsed means "not the first resolved candidate": request.model()
@@ -382,8 +381,7 @@ public class ChatCompletionService {
             return Flux.error(capReached);
         }
         if (!debited) {
-            return Flux.error(new ResponseStatusException(HttpStatus.PAYMENT_REQUIRED,
-                    "insufficient credit; top up via /v1/billing/topup"));
+            return Flux.error(new InsufficientCreditException());
         }
 
         // Same fallbackUsed rule as execute(): not the first resolved candidate.

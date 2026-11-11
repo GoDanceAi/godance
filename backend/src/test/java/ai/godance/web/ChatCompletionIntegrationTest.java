@@ -186,7 +186,10 @@ class ChatCompletionIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(request("gpt-4o", "Hello"))
                 .exchange()
-                .expectStatus().isEqualTo(402);
+                .expectStatus().isEqualTo(402)
+                // The code tells this apart from a spending-cap 402, where topping up doesn't help.
+                .expectBody()
+                .jsonPath("$.code").isEqualTo("insufficient_credit");
 
         // No upstream call should have happened
         assertThat(openAiMock.getAllServeEvents()).isEmpty();
@@ -551,7 +554,8 @@ class ChatCompletionIntegrationTest {
                 .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON)
                 .expectBody()
                 .jsonPath("$.status").isEqualTo(402)
-                .jsonPath("$.detail").isEqualTo("insufficient credit; top up via /v1/billing/topup");
+                .jsonPath("$.detail").isEqualTo("insufficient credit; top up via /v1/billing/topup")
+                .jsonPath("$.code").isEqualTo("insufficient_credit");
 
         assertThat(openAiMock.getAllServeEvents()).isEmpty();
     }

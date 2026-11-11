@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
+import { Link } from 'react-router-dom';
 import {
   ApiError,
   apiFetch,
@@ -16,6 +17,20 @@ interface Message {
 }
 
 interface ModelOption { id: string; label: string; }
+
+/**
+ * Why the last send failed. Not enough credit gets a way to add some; any
+ * other error, a spending cap's 402 included (topping up doesn't lift a
+ * cap), shows the API's reason.
+ */
+type SendError = { outOfCredit: true } | { outOfCredit: false; message: string };
+
+function sendError(err: unknown): SendError {
+  if (err instanceof ApiError && err.status === 402 && err.code === 'insufficient_credit') {
+    return { outOfCredit: true };
+  }
+  return { outOfCredit: false, message: err instanceof ApiError ? err.detail || err.message : 'Chat failed' };
+}
 
 // Tiny offline fallback — used if /v1/models is unreachable so the picker
 // is never empty. The live catalog replaces this on every successful load.
@@ -81,7 +96,7 @@ export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<SendError | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   // Leaving the page ends a stream in progress, so the request stops running.
@@ -153,7 +168,7 @@ export default function ChatPage() {
       if ((err as Error).name === 'AbortError') {
         // user cancelled — leave the partial assistant content in place
       } else {
-        setError(err instanceof ApiError ? err.detail || err.message : 'Chat failed');
+        setError(sendError(err));
         // Roll back the empty placeholder if we never wrote into it.
         setMessages((cur) => (cur[assistantIdx]?.content === '' ? cur.slice(0, -1) : cur));
       }
@@ -250,7 +265,17 @@ export default function ChatPage() {
       </div>
 
       {error && (
-        <p className="mt-2 text-sm text-danger">{error}</p>
+        <p className="mt-2 text-sm text-danger">
+          {error.outOfCredit ? (
+            <>
+              Not enough credit for this message.{' '}
+              <Link to="/billing" className="text-brand-600 hover:text-brand-700 underline">
+                Top up on the Billing page
+              </Link>{' '}
+              to keep chatting.
+            </>
+          ) : error.message}
+        </p>
       )}
 
       <form onSubmit={send} className="mt-4 flex gap-2">

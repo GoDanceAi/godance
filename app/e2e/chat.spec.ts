@@ -69,13 +69,28 @@ test.describe('chat', () => {
     await expect(page.getByPlaceholder('Ask anything')).toBeEnabled();
   });
 
-  test('a 402 shows the reason the API gives', async ({ page, api }) => {
+  test('a 402 for too little credit points to the Billing page', async ({ page, api }) => {
     await openChat(page, api);
-    api.on('POST', '/v1/chat/completions', problem(402, 'insufficient credit; top up via /v1/billing/topup'));
+    api.on('POST', '/v1/chat/completions',
+      problem(402, 'insufficient credit; top up via /v1/billing/topup', 'insufficient_credit'));
 
     await ask(page, 'Hello?');
 
-    await expect(page.getByText('insufficient credit; top up via /v1/billing/topup')).toBeVisible();
+    await expect(page.getByText('Not enough credit for this message.')).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Top up on the Billing page' })).toHaveAttribute('href', '/billing');
+    await expect(page.getByText('/v1/billing/topup')).toHaveCount(0);
+  });
+
+  test('a spending-cap 402 shows the reason the API gives, with no Billing link', async ({ page, api }) => {
+    await openChat(page, api);
+    // Topping up doesn't lift a cap, so this one must not send the user to Billing.
+    api.on('POST', '/v1/chat/completions',
+      problem(402, 'daily spending cap reached (1000 of 1000 cents used) — resets at the start of the next period'));
+
+    await ask(page, 'Hello?');
+
+    await expect(page.getByText(/daily spending cap reached/)).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Top up on the Billing page' })).toHaveCount(0);
   });
 
   test('Stop mid-stream keeps the partial reply and closes the connection', async ({ page, api }) => {
