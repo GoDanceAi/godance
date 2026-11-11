@@ -28,12 +28,12 @@ export interface Reply {
 /** A reply, or a function of the call; a function may also answer the route itself and return nothing. */
 type Responder = Reply | ((call: ApiCall, route: Route) => Reply | void | Promise<Reply | void>);
 
-/** RFC 7807 error, the shape the backend sends for every HTTP error. */
-export function problem(status: number, detail: string): Reply {
+/** RFC 7807 error, the shape the backend sends for every HTTP error; `code` is its extension member. */
+export function problem(status: number, detail: string, code?: string): Reply {
   return {
     status,
     contentType: 'application/problem+json',
-    json: { type: 'about:blank', title: 'Error', status, detail },
+    json: { type: 'about:blank', title: 'Error', status, detail, ...(code ? { code } : {}) },
   };
 }
 

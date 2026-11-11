@@ -182,7 +182,10 @@ class SpendingLimitIntegrationTest {
         setDailyCap(userId, 10_00L);
         seedUsage(userId, 10_00L, Instant.now());   // 100% of the cap already spent today
 
-        callChat(login(userId)).expectStatus().isEqualTo(402);
+        callChat(login(userId)).expectStatus().isEqualTo(402)
+                // Not insufficient_credit: topping up doesn't lift a cap, so the SPA mustn't send them to Billing.
+                .expectBody()
+                .jsonPath("$.code").doesNotExist();
 
         assertThat(openAiMock.getAllServeEvents()).isEmpty();
     }

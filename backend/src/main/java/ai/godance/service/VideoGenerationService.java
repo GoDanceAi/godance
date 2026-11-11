@@ -101,8 +101,7 @@ public class VideoGenerationService {
 
         GenerationJob job = newJob(userId, model, request, duration, cost, requestId, webhookUrl);
         if (!settlement.accept(job, apiKeyId)) {
-            throw new ResponseStatusException(HttpStatus.PAYMENT_REQUIRED,
-                    "insufficient credit; top up via /v1/billing/topup");
+            throw new InsufficientCreditException();
         }
 
         // The pre-debit and the job row are committed together; if this worker

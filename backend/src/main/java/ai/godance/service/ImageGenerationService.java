@@ -147,8 +147,7 @@ public class ImageGenerationService {
         long cost = Math.max(1L, calculator.imageCostCents(model, count));
         GenerationJob job = newJob(userId, model, request, cost, newRequestId(), webhookUrl);
         if (!settlement.accept(job, apiKeyId)) {
-            throw new ResponseStatusException(HttpStatus.PAYMENT_REQUIRED,
-                    "insufficient credit; top up via /v1/billing/topup");
+            throw new InsufficientCreditException();
         }
         return job;
     }

@@ -186,7 +186,10 @@ class ChatCompletionIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(request("gpt-4o", "Hello"))
                 .exchange()
-                .expectStatus().isEqualTo(402);
+                .expectStatus().isEqualTo(402)
+                // The code tells this apart from a spending-cap 402, where topping up doesn't help.
+                .expectBody()
+                .jsonPath("$.code").isEqualTo("insufficient_credit");
 
         // No upstream call should have happened
         assertThat(openAiMock.getAllServeEvents()).isEmpty();
@@ -535,5 +538,44 @@ class ChatCompletionIntegrationTest {
             assertThat(recordsFor(u)).hasSize(2)
                     .allSatisfy(r -> assertThat(r.getOutcome()).isEqualTo(CallOutcome.ERROR));
         });
+    }
+
+    // ===== Errors on a streaming request ==============================
+    // The SPA (and OpenAI SDKs with stream: true) send Accept: text/event-stream.
+    // An error raised before the stream starts must still come back as a
+    // problem document the client can parse, not wrapped in an SSE data: frame.
+
+    @Test
+    void chatCompletions_streaming_zeroBalance_returns402_asProblemJson() {
+        Signed u = signupWithBalance(0L);
+
+        streamGpt4o(u)
+                .expectStatus().isEqualTo(402)
+                .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON)
+                .expectBody()
+                .jsonPath("$.status").isEqualTo(402)
+                .jsonPath("$.detail").isEqualTo("insufficient credit; top up via /v1/billing/topup")
+                .jsonPath("$.code").isEqualTo("insufficient_credit");
+
+        assertThat(openAiMock.getAllServeEvents()).isEmpty();
+    }
+
+    @Test
+    void chatCompletions_streaming_invalidRequest_returns400_asProblemJson() {
+        Signed u = signupWithBalance(100_00L);
+
+        http.post().uri("/v1/chat/completions")
+                .header("Authorization", u.bearer())
+                .accept(MediaType.TEXT_EVENT_STREAM)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of(
+                        "model", "gpt-4o",
+                        "messages", List.of(),      // empty messages → @NotEmpty violation
+                        "stream", true))
+                .exchange()
+                .expectStatus().isBadRequest()
+                .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON)
+                .expectBody()
+                .jsonPath("$.status").isEqualTo(400);
     }
 }

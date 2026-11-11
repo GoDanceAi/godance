@@ -109,13 +109,15 @@ export async function* streamChat(path: string, body: unknown, signal?: AbortSig
   if (!res.ok || !res.body) {
     // Same problem+json reading as apiFetch, so a 402 says why.
     let detail = `HTTP ${res.status}`;
+    let code: string | undefined;
     try {
-      const problem = (await res.json()) as { detail?: string; title?: string };
+      const problem = (await res.json()) as { detail?: string; title?: string; code?: string };
       detail = problem.detail || problem.title || detail;
+      code = problem.code;
     } catch {
       /* non-JSON body — keep the default */
     }
-    throw new ApiError(res.status, detail);
+    throw new ApiError(res.status, detail, undefined, code);
   }
 
   const reader = res.body.getReader();
