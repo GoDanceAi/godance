@@ -1,0 +1,15 @@
+<!doctype html>
+<!--
+  Cloudflare Pages answers a missing file under /_astro/ with this page, as a
+  404 with Cache-Control: no-store, so nothing keeps the miss.
+
+  The site has no top-level 404.html, so Pages would otherwise answer with
+  the home page and a 200, and the /_astro/* rule in _headers would let that
+  HTML be cached for a year in place of the stylesheet or script it stands
+  in for. That can happen when a new file is requested before it has reached
+  Cloudflare's edge; it did to the app on 2026-11-11.
+
+  Pages uses the nearest 404.html, so this one only covers /_astro/.
+-->
+<title>Not found</title>
+<p>Not found.</p>

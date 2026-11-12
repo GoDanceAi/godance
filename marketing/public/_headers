@@ -7,7 +7,8 @@
   Permissions-Policy: camera=(), microphone=(), geolocation=()
   Strict-Transport-Security: max-age=63072000; includeSubDomains; preload
 
-# Hashed asset bundles — immutable, year-long cache.
+# Hashed asset bundles — immutable, year-long cache. A file missing here
+# gets _astro/404.html with no-store instead, never this header.
 /_astro/*
   Cache-Control: public, max-age=31536000, immutable
 
