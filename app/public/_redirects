@@ -1,4 +1,8 @@
-# Cloudflare Pages — SPA fallback so client-side routes don't 404.
-# Every unmatched path serves index.html and React Router takes over.
-
-/*    /index.html   200
+# Cloudflare Pages — no redirect rules.
+#
+# Client-side routes such as /billing need no rule here. With no 404.html at
+# the top of the site, Pages serves index.html for any path that isn't a file
+# (its single-page-app mode), and React Router takes over. Pages drops a
+# `/* /index.html 200` rule as an infinite loop, so don't add one.
+#
+# assets/404.html keeps missing /assets/ files out of that fallback.

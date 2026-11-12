@@ -1,0 +1,16 @@
+<!doctype html>
+<!--
+  Cloudflare Pages answers a missing file under /assets/ with this page, as a
+  404 with Cache-Control: no-store, so nothing keeps the miss.
+
+  Without it, Pages' single-page-app fallback answers with index.html and a
+  200, and the /assets/* rule in _headers lets that HTML be cached for a year
+  in place of the script it stands in for. That happened on 2026-11-11, when
+  a new bundle was requested before it had reached Cloudflare's edge, and it
+  blanked the app until the cache was purged.
+
+  Keep it in assets/: Pages uses the nearest 404.html, and one at the top of
+  the site would turn the fallback off, so routes like /billing would 404.
+-->
+<title>Not found</title>
+<p>Not found.</p>
