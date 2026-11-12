@@ -37,6 +37,10 @@ jobs:
   deploy-app:
     name: app.godance.ai (SPA)
     runs-on: ubuntu-latest
+    outputs:
+      # The script this build's index.html loads, e.g. /assets/index-AbC123.js.
+      # The smoke job waits until the live site serves it.
+      bundle: ${{ steps.build.outputs.bundle }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -45,6 +49,7 @@ jobs:
           cache: npm
           cache-dependency-path: app/package-lock.json
       - name: Build
+        id: build
         working-directory: app
         env:
           VITE_API_URL: https://api.godance.ai
@@ -55,6 +60,9 @@ jobs:
           npm run lint
           npm run build
           npm audit --audit-level=high
+          re='src="(/assets/[^"]+\.js)"'
+          [[ $(<dist/index.html) =~ $re ]] || { echo "no /assets/*.js bundle in dist/index.html" >&2; exit 1; }
+          echo "bundle=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
       # The app signs in through the API's session cookie, and one merge can
       # change both: this workflow finishes well before the backend's, and an
       # app ahead of its API can't sign anyone in. So wait until the API accepts
@@ -128,14 +136,34 @@ jobs:
     # (curl error 23, echo SIGPIPE) and fails the step under pipefail. It
     # also lets a curl error fail the step as itself, not as a missing string.
     steps:
-      - name: SPA bundle contains USDT rail + save-card
+      # A deploy reports complete before its new files reach every Cloudflare
+      # edge. Until they do, the new index.html can be live while its bundle
+      # isn't, and the SPA fallback answers the bundle's URL with index.html,
+      # which the /assets/* rule in _headers lets the edge cache for a year.
+      # This step once fetched the bundle 14 s after the deploy and left that
+      # HTML cached in its place, blanking the app (2026-11-11). So it never
+      # fetches the bundle's own URL: each try adds a query string, which the
+      # edge caches under its own key, so an early answer spoils nothing.
+      - name: SPA serves this build's bundle, with USDT rail + admin console
+        env:
+          BUNDLE: ${{ needs.deploy-app.outputs.bundle }}
         run: |
-          HTML=$(curl -fsS $CURL_RETRY https://app.godance.ai)
-          re='src="(/assets/[^"]+\.js)"'
-          [[ $HTML =~ $re ]] || { echo "no /assets/*.js bundle in the SPA index" >&2; exit 1; }
-          BUNDLE=${BASH_REMATCH[1]}
           echo "bundle: $BUNDLE"
-          JS=$(curl -fsS $CURL_RETRY "https://app.godance.ai$BUNDLE")
+          for i in $(seq 1 30); do
+            HTML=$(curl -fsS $CURL_RETRY https://app.godance.ai)
+            if [[ $HTML != *"src=\"$BUNDLE\""* ]]; then
+              echo "waiting ($i): the live index.html doesn't load this build's bundle yet"
+            else
+              # A 404 or 5xx counts as not there yet: --fail would end the step.
+              TYPE=$(curl -sS $CURL_RETRY -o bundle.js -w '%{http_code} %{content_type}' \
+                "https://app.godance.ai$BUNDLE?smoke=$GITHUB_RUN_ID.$GITHUB_RUN_ATTEMPT.$i")
+              [[ $TYPE == "200 "*javascript* ]] && break
+              echo "waiting ($i): the bundle answered '$TYPE'"
+            fi
+            [ "$i" -lt 30 ] || { echo "this build's bundle never went live" >&2; exit 1; }
+            sleep 10
+          done
+          JS=$(<bundle.js)
           grep -qi "usdt" <<<"$JS"     || { echo "USDT missing from deployed bundle" >&2; exit 1; }
           # save_card was asserted here originally, but it is a backend-only
           # string (Stripe auto-recharge) that has never been in the SPA
