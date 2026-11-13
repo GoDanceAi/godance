@@ -1,0 +1,52 @@
+{
+  "slug": "tin-robot-tea-party",
+  "title": {
+    "en": "Tin robot tea party",
+    "zh": "铁皮机器人的茶会"
+  },
+  "modality": "IMAGE",
+  "tags": [
+    "toys",
+    "still-life"
+  ],
+  "prompt": {
+    "en": "Three wind-up tin robots sharing tea at a tiny wooden table, soft window light, shallow depth of field, studio still life.",
+    "zh": "三个发条铁皮机器人围坐在一张小木桌旁喝茶，柔和的窗光，浅景深，棚拍静物。",
+    "zh_origin": "list"
+  },
+  "runs": [
+    {
+      "model": "gpt-image-2",
+      "prompt_lang": "en",
+      "params": {
+        "size": "1024x1024",
+        "n": 1
+      },
+      "cost_cents": 6,
+      "generated_on": "2026-11-08",
+      "outputs": [
+        {
+          "file": "tin-robot-tea-party/gpt-image-2-0.webp",
+          "thumb": "tin-robot-tea-party/gpt-image-2-0-480.webp",
+          "content_type": "image/webp",
+          "width": 1024,
+          "height": 1024
+        }
+      ]
+    }
+  ],
+  "source": {
+    "list": "example-org/invented-image-prompts",
+    "list_commit": "0000000000000000000000000000000000000000",
+    "licence": "CC0-1.0",
+    "author": "fixture_ada",
+    "author_url": "https://example.com/@fixture_ada",
+    "original_url": "https://example.com/@fixture_ada/posts/11001",
+    "changes": []
+  },
+  "review": {
+    "approved_on": "2026-11-10",
+    "standard_version": 1
+  },
+  "published_on": "2026-11-10"
+}
