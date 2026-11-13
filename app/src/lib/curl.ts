@@ -16,7 +16,8 @@ export function postCurl(path: string, body: unknown): string {
     `curl ${API_BASE}${path} \\`,
     `  -H "Authorization: Bearer ${API_KEY_VAR}" \\`,
     `  -H "Content-Type: application/json" \\`,
-    `  -d ${shellWord(JSON.stringify(body, null, 2))}`,
+    // The JSON body indented under -d.
+    `  -d ${shellWord(JSON.stringify(body, null, 2).replaceAll('\n', '\n  '))}`,
   ].join('\n');
 }
 

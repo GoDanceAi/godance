@@ -180,7 +180,8 @@ export default function StudioPage({ modality }: { modality: MediaModality }) {
         What you make is kept in <Link to="/history" className="text-brand-600 hover:underline">History</Link>.
       </p>
 
-      <div className="mt-6 grid items-start gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+      {/* grid-cols-1 is minmax(0, 1fr): long curl lines scroll in their block instead of widening the page. */}
+      <div className="mt-6 grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
         <form onSubmit={(e) => void submit(e)} aria-label={`Create ${words.one === 'image' ? 'an image' : 'a video'}`}
               className="card space-y-5">
           <div>
