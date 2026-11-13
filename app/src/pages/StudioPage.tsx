@@ -16,9 +16,12 @@ import {
   type StudioValues,
 } from '../lib/studio';
 import { fitValues, readPrefill, resolvePrefill, type Prefill } from '../lib/studio-prefill';
+import type { GalleryRecipe, RecipeLang } from '../lib/recipe';
 import CopyButton from '../components/CopyButton';
+import GalleryExamples from '../components/GalleryExamples';
 import { JobOutputs } from '../components/JobMedia';
 import JobStatusPill from '../components/JobStatusPill';
+import RecipeSource from '../components/RecipeSource';
 import SendErrorNotice from '../components/SendErrorNotice';
 
 const WORDS = {
@@ -68,6 +71,10 @@ export default function StudioPage({ modality }: { modality: MediaModality }) {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<SendError | null>(null);
   const [codeOpen, setCodeOpen] = useState(false);
+  // The gallery recipe the form was filled from (?example=), and its prompt's language.
+  const [recipe, setRecipe] = useState<{ recipe: GalleryRecipe; lang: RecipeLang } | null>(null);
+  // Opened with nothing to load, or with nothing that could be: the Studio offers examples.
+  const [startedEmpty, setStartedEmpty] = useState(false);
   // The query this page wrote itself after a submit, which needs no loading.
   const ownSearch = useRef<string | null>(null);
   const resultRef = useRef<HTMLElement>(null);
@@ -104,9 +111,20 @@ export default function StudioPage({ modality }: { modality: MediaModality }) {
     const fitted = fitValues(prefill.values, models, modality);
     setValues(fitted.values);
     setNote(prefill.note ?? fitted.note ?? null);
+    setRecipe(prefill.recipe ? { recipe: prefill.recipe, lang: prefill.recipe.run.promptLang } : null);
+    setStartedEmpty(!prefill.job && !prefill.recipe && Object.keys(prefill.values).length === 0);
     setPrefill(null);
     setReady(true);
   }, [prefill, models, modality]);
+
+  // Credit added in another tab (a top-up, a parent's approval) shows when this one is back in view.
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void refresh();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [refresh]);
 
   // Watch the current job until it ends; the balance moves when it does.
   const liveId = current && !current.gone && !isTerminal(current.status) ? current.id : null;
@@ -133,6 +151,14 @@ export default function StudioPage({ modality }: { modality: MediaModality }) {
   const update = (patch: Partial<StudioValues>) => setValues((v) => ({ ...v, ...patch }));
   const pickModel = (id: string) =>
     setValues((v) => fitValues({ ...v, model: id }, models ?? [], modality).values);
+  // An example loads as its link would: through the URL, so Back returns to the empty Studio.
+  const pickExample = (slug: string) => setSearchParams({ example: slug });
+  const switchLanguage = (lang: RecipeLang) => {
+    const text = recipe?.recipe.prompt[lang];
+    if (!recipe || !text) return;
+    setRecipe({ ...recipe, lang });
+    update({ prompt: text.slice(0, PROMPT_MAX_LENGTH) });
+  };
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -180,14 +206,18 @@ export default function StudioPage({ modality }: { modality: MediaModality }) {
         What you make is kept in <Link to="/history" className="text-brand-600 hover:underline">History</Link>.
       </p>
 
+      {ready && startedEmpty && current === null && <GalleryExamples modality={modality} onPick={pickExample} />}
+
       {/* grid-cols-1 is minmax(0, 1fr): long curl lines scroll in their block instead of widening the page. */}
       <div className="mt-6 grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
         <form onSubmit={(e) => void submit(e)} aria-label={`Create ${words.one === 'image' ? 'an image' : 'a video'}`}
               className="card space-y-5">
+          {recipe && <RecipeSource recipe={recipe.recipe} lang={recipe.lang} onLanguage={switchLanguage} />}
           <div>
             <label htmlFor="studio-prompt" className="block text-sm font-medium text-fg">Prompt</label>
             <textarea
               id="studio-prompt"
+              lang={recipe?.lang === 'zh' ? 'zh-Hans' : undefined}
               value={values.prompt}
               onChange={(e) => update({ prompt: e.target.value })}
               maxLength={PROMPT_MAX_LENGTH}

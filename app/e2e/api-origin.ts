@@ -7,3 +7,8 @@ export const APP_HOST = 'app.godance.localhost';
 // The e2e build's VITE_API_URL. It never resolves: every request to it is
 // answered in the browser by MockApi (mock-api.ts).
 export const API_ORIGIN = 'http://api.godance.localhost';
+
+// The e2e build's VITE_GALLERY_URL: the marketing site, on the same site as
+// the app, as godance.ai is to app.godance.ai. It never resolves either, and
+// MockApi aborts every request to it unless a test answers it.
+export const GALLERY_ORIGIN = 'http://godance.localhost';
