@@ -33,7 +33,10 @@ China and elsewhere, tell us about the Godance gallery, Studio and API?
   API, but only after they have searched for prompts that work and refined
   them by trial and error dozens of times.
 
-What the research says about serving them:
+Not targeting experts or consumers does not mean not serving them. The
+features they want come in later rounds, built on the same pieces (§5.12).
+
+What the research says about serving aspiring builders:
 
 1. **The prompt is a commodity.** Tens of thousands of prompts for the newest
    models are free, many under CC0 or CC BY. They are copied between lists,
@@ -439,18 +442,89 @@ accepts inputs, and the image-first video workflow depends on them.
 - Not yet: card disputes are not handled, so paying creators would make the
   exposure round 9 already notes larger.
 
-### 5.12 What not to build for this audience
+### 5.12 Consumers and experts: served later, on the same pieces
 
-- **Social features:** feeds, likes, follows. That is the consumer game.
-- **Expert controls first:** bring-your-own-key, custom routing policies,
-  self-hosting. Experts are not the target.
-- **Volume:** tens of thousands of unchecked entries.
-- **A positioning that contradicts the product.**
-  `marketing/public/llms.txt` says Godance is "an OpenAI-compatible
-  developer API, not an end-user product" that "targets engineering teams".
-  Rewrite it and the home page for aspiring builders when the Studio ships,
-  for example: *find a recipe, make it yours in the Studio, then run it at
-  scale through the same API.*
+Godance targets aspiring builders and serves everyone. What consumers and
+experts want comes after rounds 10–13, because each item builds on
+something those rounds make. Several also help aspiring builders.
+
+**Social features (consumers, and learners)**
+- **Builds on:**
+  - published recipes (§5.10)
+  - creator rewards (§5.11)
+  - saved generations (round 9)
+- **Shape:**
+  - public profiles with published recipes
+  - "made from" lineage, as with Civitai's remix
+  - follows
+  - a count of how often a recipe was run, which is a more honest signal
+    than likes alone
+  - likes and comments after that
+- **Why it helps the target too:** seeing how someone else tuned a recipe is
+  how aspiring builders learn.
+- **Needs first:**
+  - moderation and reporting for user content
+  - the content standard extended from the curated gallery to user posts
+  - a rule for whether user content is all-ages, as the gallery is
+  - the real-person rule
+  - a removal process
+- **Earliest:** after round 13, once users can publish recipes.
+
+**Bring your own key (experts)**
+- **Builds on:**
+  - the provider gateway
+  - usage rows in the ledger, which would record zero provider cost plus
+    Godance's fee
+  - per-key caps
+- **Needs first:**
+  - Store users' provider keys encrypted, and never log or return them.
+  - Keep the regional allowlist binding: a user's own key must not route
+    around it. The allowlist stays in code and fails closed.
+  - Check each provider's terms on keys used through a third party.
+- **Pricing** is an operator decision: a fee per request, or a flat plan.
+- **Earliest:** after batch (round 12), because BYOK users want batch and MCP
+  too.
+
+**Custom routing policies (experts)**
+- **Already designed.** Round 4's routing design puts user-authored
+  policies in Phase 3: `RoutingPolicyEntity`, `/v1/routing/policies` and the
+  `X-Godance-Route` hint. Phase 2 (`routed_policy` and `routed_rule` on usage
+  records) comes before it.
+- **Why it helps the target too:** a 500-row batch should not fail because
+  one provider is down. Fallback rules such as "this model, else that one"
+  give batches reliability.
+- **Earliest:** continue the round 4 phases once batches run at volume.
+
+**Supported self-hosting (experts and teams)**
+- **Builds on:** the repository, which is already Apache 2.0. Anyone can run
+  it today, but nothing supports doing so.
+- **Shape:**
+  - an install guide
+  - packaging beyond the development compose file
+  - a configuration reference
+  - upgrade notes for Flyway migrations
+- **Needs first:**
+  - Decide what a self-hosted copy does about billing. The credit ledger is
+    central to the code.
+  - The regional allowlist stays in force.
+- **Who it serves:** teams with data-residency needs, including deployments
+  in China under the Alicloud allowlist.
+- **Earliest:** any time for documentation. A support commitment is the real
+  cost.
+- **Not the same as round 4's Phase 1b,** which hosts a cheap open-weight
+  model inside Godance.
+
+**One thing stays a no:** publishing curated gallery content unreviewed.
+Round 8 makes this a hard rule. User posts are a separate case, governed by
+moderation as above.
+
+### 5.13 Positioning wording
+
+`marketing/public/llms.txt` says Godance is "an OpenAI-compatible developer
+API, not an end-user product" that "targets engineering teams". Rewrite it
+and the home page when the Studio ships. For example: *built for people
+building with AI, whether or not they are engineers yet: find a recipe, make
+it yours in the Studio, then run it at scale through the same API.*
 
 ## 6. A possible order after round 9
 
@@ -462,7 +536,8 @@ Each round can run as parallel workstreams, as rounds 7–9 do.
 | 11 · Your own inputs | `/v1/images/edits`, reference and first-frame images for video, Studio upload and "Animate this", recipe `inputs` slots, the staged policy (§5.5) | The largest content gap, and the key to cheap video iteration. Needs an operator policy decision first. |
 | 12 · Batch and hand-over | Batch runs from a sheet, "Copy for your AI assistant", generated code, an n8n template, a capped key in one click (§5.6). OpenAI's video shape, `llms-full.txt`, OpenAPI (§5.7) | Graduation is measured from round 10, so its effect shows. |
 | 13 · Reach | MCP server, open recipe list, model-launch routine, comparison pages (§5.7, §5.8) | Distribution, once the funnel converts. |
-| Operator, any time | Catalog naming and freshness, China-hosted runs for Chinese recipes, `llms.txt` and home page wording (§5.9, §5.12) | No brief needed. |
+| 14 and later · Consumers and experts | Social features on published recipes · bring your own key · round 4 routing Phases 2–3 (custom policies, fallbacks for batches) · supported self-hosting (§5.12) | Each builds on rounds 10–13. The order among them is the operator's call. |
+| Operator, any time | Catalog naming and freshness, China-hosted runs for Chinese recipes, `llms.txt` and home page wording (§5.9, §5.13), self-hosting documentation (§5.12) | No brief needed. |
 
 ## 7. Decisions for the operator
 
@@ -480,6 +555,10 @@ Each round can run as parallel workstreams, as rounds 7–9 do.
 - **Whether Chinese recipes must carry a run** on a China-hosted model (§5.9).
 - **Whether a published recipe can earn its author** a referral-style reward,
   and when (§5.11).
+- **The order of the later rounds** for consumers and experts, and for bring
+  your own key: how it is priced (§5.12).
+- **For self-hosting:** what a self-hosted copy does about billing, and what
+  support is offered (§5.12).
 
 ## Sources
 
