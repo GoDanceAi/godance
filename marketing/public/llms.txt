@@ -21,8 +21,19 @@
   requires_async in /v1/models (currently every image model) or the request sets
   async:true; otherwise sync
 - POST /v1/videos/generations — async only, signed webhook callback
-- GET /v1/jobs/{id} — poll status of any async generation
-- GET /v1/models — catalog enumeration
+- GET /v1/jobs/{id} — status of an async generation, with its prompt and params,
+  every output (outputs[]: index, url, contentType, sizeBytes, revisedPrompt; each url
+  signed at read time), purged, and mediaExpiresAt (files and prompt deleted 90 days
+  after creation)
+- GET /v1/jobs — your jobs, newest first, as a bare array; optional limit (1-100),
+  before (a job id: older jobs only), modality (IMAGE | VIDEO), status
+- POST /v1/estimates — price of an image or video request before sending it
+  ({model, n, size, seconds} → estimated_cost_cents, the exact amount the request would
+  reserve); no charge, no job
+- GET /v1/models — catalog enumeration; image and video entries may carry
+  godance.display_name, godance.description and godance.capabilities (sizes,
+  default_size, durations, default_seconds, max_n; a missing key means unknown, a
+  missing max_n means 1). An n above max_n answers 400 before any charge
 - CRUD /v1/keys — API key management (plaintext returned exactly once)
 - POST /v1/billing/topup — Stripe Checkout for card / ACH / SEPA
 - GET /v1/webhooks/secret — signing secret (Stripe-style HMAC-SHA256)
