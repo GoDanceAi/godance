@@ -1,7 +1,10 @@
 import type { Page } from '@playwright/test';
 import { expect, makeUser, sessionStarted, sessionToken, test, type MockApi } from './mock-api';
+import { fillSignUp, signInWithPassword, socialProvider, submitCode } from './sign-in';
 
-const PASSWORD = 'correct-horse-battery';
+// Recipe links, and the line the sign-in pages show for them, are in
+// gallery-hand-off.spec.ts.
+
 // Mirror src/lib/oauth.ts and src/lib/return-to.ts, which can't be imported at
 // runtime here: they read the page's sessionStorage and location.
 const NONCE_KEY = 'godance.oauth_nonce';
@@ -25,49 +28,6 @@ const WAITING_KID = makeUser({
 /** Answers the destination page's own request, and /me once the session cookie is there. */
 function destinationPage(api: MockApi, user = makeUser()): MockApi {
   return api.on('GET', '/v1/keys', { json: [] }).mockUser(user);
-}
-
-type SocialOutcome = 'signed in' | 'two-factor' | { error: string };
-
-/**
- * The API's /oauth2/authorization/google, standing in for the whole trip to
- * the provider: it sends the browser back to the app's callback with the
- * nonce this tab sent, as OAuthLoginSuccessHandler does, and the session
- * cookie when the sign-in is complete.
- */
-function socialProvider(api: MockApi, appOrigin: string, outcome: SocialOutcome): MockApi {
-  return api.on('GET', '/oauth2/authorization/google', (call, route) => {
-    const nonce = call.query.get('login_nonce') ?? '';
-    const fragment = outcome === 'signed in'
-      ? `token_type=Cookie&login_nonce=${nonce}`
-      : outcome === 'two-factor'
-        ? `two_factor_token=challenge-social&expires_at=2030-01-01T00%3A00%3A00Z&login_nonce=${nonce}`
-        : `error=${encodeURIComponent(outcome.error)}&login_nonce=${nonce}`;
-    const cookie = outcome === 'signed in' ? sessionStarted('tok-social').setCookie : undefined;
-    return route.fulfill({
-      status: 302,
-      headers: { location: `${appOrigin}/oauth/callback#${fragment}`, ...(cookie ? { 'set-cookie': cookie } : {}) },
-    });
-  });
-}
-
-async function signInWithPassword(page: Page) {
-  await page.getByLabel('Email').fill('ada@example.com');
-  await page.getByLabel('Password').fill(PASSWORD);
-  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-}
-
-async function fillSignUp(page: Page, born = { month: 'December', year: '1990' }) {
-  await page.getByLabel('Full name').fill('Ada Lovelace');
-  await page.getByLabel('Email', { exact: true }).fill('ada@example.com');
-  await page.getByLabel('Password').fill(PASSWORD);
-  await page.getByLabel('Birth month').selectOption(born.month);
-  await page.getByLabel('Birth year').selectOption(born.year);
-}
-
-async function submitCode(page: Page, code: string) {
-  await page.getByLabel('Code').fill(code);
-  await page.getByRole('button', { name: 'Continue', exact: true }).click();
 }
 
 /** What the login page keeps for a social sign-in, with the age given. */
@@ -298,49 +258,4 @@ test.describe('a destination kept for a social sign-in', () => {
 
     await expect(page).toHaveURL('/dashboard');
   });
-});
-
-test.describe('on the way to a recipe', () => {
-  const SIGN_IN_LINE = 'Sign in and the recipe you picked from the gallery will be ready to run.';
-  const SIGN_UP_LINE = 'Create your account and the recipe you picked from the gallery will be ready to run.';
-
-  // Until the Studio's /create routes exist, the way to the sign-in page with
-  // a recipe as the destination is back from a refused social sign-in.
-  async function backFromRefusedSocialSignIn(page: Page, destination: string) {
-    await page.goto('/login');
-    await seedSocialSignIn(page, kept(destination));
-    await page.goto(`/oauth/callback#error=${encodeURIComponent('Google sign-in was cancelled.')}&login_nonce=${NONCE}`);
-    await expect(page.getByText('Google sign-in was cancelled.')).toBeVisible();
-  }
-
-  test("sign-in and sign-up say the recipe will be waiting, in the app's own words", async ({ page }) => {
-    await backFromRefusedSocialSignIn(page, '/create/image?example=free-credit-click-here');
-
-    await expect(page.getByText(SIGN_IN_LINE, { exact: true })).toBeVisible();
-    await page.getByRole('link', { name: 'Create an account' }).click();
-    await expect(page.getByText(SIGN_UP_LINE, { exact: true })).toBeVisible();
-    await expect(page.getByText('free-credit-click-here')).toHaveCount(0);
-  });
-
-  test('a video recipe gets the same line', async ({ page }) => {
-    await backFromRefusedSocialSignIn(page, '/create/video?example=koi-pond-in-the-rain');
-
-    await expect(page.getByText(SIGN_IN_LINE, { exact: true })).toBeVisible();
-  });
-
-  const NOT_A_RECIPE: { what: string; destination: string }[] = [
-    { what: 'another page', destination: DESTINATION },
-    { what: 'a slug with capitals', destination: '/create/image?example=Paper-Lantern' },
-    { what: 'a slug over 80 characters', destination: `/create/image?example=${'a'.repeat(81)}` },
-    { what: 'a link that also names a job', destination: '/create/image?example=paper-lantern&job=job_1' },
-    { what: 'a modality that does not exist', destination: '/create/audio?example=paper-lantern' },
-  ];
-  for (const { what, destination } of NOT_A_RECIPE) {
-    test(`no line for ${what}`, async ({ page }) => {
-      await backFromRefusedSocialSignIn(page, destination);
-
-      await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
-      await expect(page.getByText('recipe you picked')).toHaveCount(0);
-    });
-  }
 });
