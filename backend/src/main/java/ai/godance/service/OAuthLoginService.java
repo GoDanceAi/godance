@@ -76,14 +76,17 @@ public class OAuthLoginService {
     private final JwtService jwt;
     private final AuditLogService audit;
     private final TwoFactorService twoFactor;
+    private final SignupCreditService signupCredit;
 
     public OAuthLoginService(UserRepository users, OAuthIdentityRepository identities,
-                             JwtService jwt, AuditLogService audit, TwoFactorService twoFactor) {
+                             JwtService jwt, AuditLogService audit, TwoFactorService twoFactor,
+                             SignupCreditService signupCredit) {
         this.users = users;
         this.identities = identities;
         this.jwt = jwt;
         this.audit = audit;
         this.twoFactor = twoFactor;
+        this.signupCredit = signupCredit;
     }
 
     /**
@@ -122,8 +125,11 @@ public class OAuthLoginService {
             user = (normalizedEmail != null)
                     ? users.findByEmail(normalizedEmail).orElse(null)
                     : null;
+            // True when this sign-in is what verifies the account's email.
+            boolean verifiesEmail;
             if (user == null) {
                 user = createOAuthUser(provider, subject, normalizedEmail, fullName);
+                verifiesEmail = user.isEmailVerified();
             } else if (!user.isEmailVerified()) {
                 if (user.getPasswordHash() != null) {
                     // Possibly pre-registered by someone who doesn't own the
@@ -140,12 +146,21 @@ public class OAuthLoginService {
                 }
                 // The provider has verified ownership of this email — trust it.
                 user.setEmailVerified(true);
+                verifiesEmail = true;
+            } else {
+                // Verified before this link: any signup credit was due then,
+                // and an account verified before the credit existed gets none.
+                verifiesEmail = false;
             }
             OAuthIdentity identity = new OAuthIdentity();
             identity.setUserId(user.getId());
             identity.setProvider(provider);
             identity.setSubject(subject);
             identities.save(identity);
+            if (verifiesEmail) {
+                // After commit, so a sign-in refused below (inactive account) grants nothing.
+                signupCredit.grantIfEligible(user);
+            }
         }
 
         if (!user.isActive()) {

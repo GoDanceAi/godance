@@ -83,11 +83,12 @@ public class AuthService {
     private final MailService mail;
     private final ParentalConsentService parentalConsent;
     private final TwoFactorService twoFactor;
+    private final SignupCreditService signupCredit;
 
     public AuthService(UserRepository users, ApiKeyRepository apiKeys, PasswordEncoder passwords,
                        JwtService jwt, WebhookSigner webhooks, AuditLogService audit,
                        MailService mail, ParentalConsentService parentalConsent,
-                       TwoFactorService twoFactor) {
+                       TwoFactorService twoFactor, SignupCreditService signupCredit) {
         this.users = users;
         this.apiKeys = apiKeys;
         this.passwords = passwords;
@@ -97,6 +98,7 @@ public class AuthService {
         this.mail = mail;
         this.parentalConsent = parentalConsent;
         this.twoFactor = twoFactor;
+        this.signupCredit = signupCredit;
     }
 
     /**
@@ -299,6 +301,8 @@ public class AuthService {
         u.setEmailVerified(true);
         u.setEmailVerificationToken(null);
         users.save(u);
+        // After commit, and only once per account: a changed email verified again earns nothing.
+        signupCredit.grantIfEligible(u);
         if (replacedEmail != null) {
             mail.sendEmailChangedNotice(replacedEmail, u);
         }
@@ -583,6 +587,8 @@ public class AuthService {
         u.setSessionVersion(u.getSessionVersion() + 1);
         u.setLastLoginAt(Instant.now());
         users.save(u);
+        // Following the reset link verified the email; granted after commit, once per account.
+        signupCredit.grantIfEligible(u);
         int keysRevoked = apiKeys.deleteByUserId(u.getId());
         webhooks.rotateSecretWithoutGrace(u.getId());
 

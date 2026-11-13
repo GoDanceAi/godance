@@ -28,4 +28,21 @@ public interface CreditLedgerRepository extends JpaRepository<CreditLedger, UUID
     /** Paged ledger history for the admin user-detail drawer, newest first. */
     org.springframework.data.domain.Page<CreditLedger> findByUserIdOrderByOccurredAtDesc(
             UUID userId, org.springframework.data.domain.Pageable pageable);
+
+    /**
+     * Entries from {@code source} whose idempotency key starts with
+     * {@code keyPrefix}, written at or after {@code since}: how many of one
+     * promotion's grants a day has seen. A scan of the ledger, so call it
+     * only once a grant is otherwise due.
+     */
+    long countBySourceAndIdempotencyKeyStartingWithAndOccurredAtGreaterThanEqual(
+            CreditSource source, String keyPrefix, java.time.Instant since);
+
+    /**
+     * Take a Postgres advisory lock held until the caller's transaction
+     * ends, so grants under one cap are counted and written one at a time.
+     * Must run inside a transaction.
+     */
+    @Query(value = "SELECT 1 FROM (SELECT pg_advisory_xact_lock(:lockId)) AS held", nativeQuery = true)
+    int lockForTransaction(@Param("lockId") long lockId);
 }

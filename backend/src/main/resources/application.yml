@@ -215,6 +215,12 @@ godance:
     text-markup-percent:  ${TEXT_MARKUP_PERCENT:5}     # 5% platform fee on top of provider cost
     image-markup-percent: ${IMAGE_MARKUP_PERCENT:5}    # symmetric across modalities
     video-markup-percent: ${VIDEO_MARKUP_PERCENT:5}    # symmetric across modalities
+  promo:
+    # One-time PROMO ledger credit when an account's email is first verified
+    # (SignupCreditService). Every grant is real provider spend, so 0 = off:
+    # a fresh deployment grants nothing until the amount is set.
+    signup-credit-cents:       ${PROMO_SIGNUP_CREDIT_CENTS:0}
+    signup-credit-daily-limit: ${PROMO_SIGNUP_CREDIT_DAILY_LIMIT:200}  # most grants per UTC day
   providers:
     openai:
       api-key:  ${OPENAI_API_KEY:sk_dev_dummy_openai_key_do_not_use_for_real_calls}
