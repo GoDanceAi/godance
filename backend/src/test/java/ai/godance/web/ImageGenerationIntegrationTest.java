@@ -285,6 +285,7 @@ class ImageGenerationIntegrationTest {
         // Two images were held up front; one was delivered, so one is charged.
         assertThat(done.estimatedCostCents()).isEqualTo(forTwo);
         assertThat(done.actualCostCents()).isEqualTo(forOne);
+        assertThat(done.outputs()).hasSize(1);
         awaitBalance(u.id(), 100_00L - forOne);
 
         // The usage row feeds spending caps and revenue reports: it carries the charge, not the hold.
