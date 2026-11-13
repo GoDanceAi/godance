@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ApiError, type JobView } from '../lib/api';
+import { ApiError, type JobView, type ModelListResponse } from '../lib/api';
 import { formatCents, useAuth } from '../lib/auth';
 import { costText, fetchJob, isJobId, isTerminal, mediaModality, STATUS_LABEL, useWatchedJob } from '../lib/jobs';
+import { controlsFor, loadCatalog, mediaModels, modelName } from '../lib/media-models';
 import { sendError, type SendError } from '../lib/send-error';
 import { rerunBody, startGeneration, useEstimate } from '../lib/studio';
 import { formatDate, formatDateTime } from '../lib/time';
@@ -60,13 +61,41 @@ const PARAM_LABELS: { key: 'size' | 'n' | 'seconds' | 'style' | 'quality'; label
   { key: 'quality', label: 'Quality' },
 ];
 
+/** GET /v1/models, once it is needed; 'failed' when it could not be read, null while it loads. */
+function useCatalog(needed: boolean): ModelListResponse | 'failed' | null {
+  const [catalog, setCatalog] = useState<ModelListResponse | 'failed' | null>(null);
+  useEffect(() => {
+    if (!needed) return;
+    let cancelled = false;
+    loadCatalog().then(
+      (list) => { if (!cancelled) setCatalog(list); },
+      () => { if (!cancelled) setCatalog('failed'); },
+    );
+    return () => { cancelled = true; };
+  }, [needed]);
+  return catalog;
+}
+
 function JobDetail({ initial }: { initial: JobView }) {
   const { refresh } = useAuth();
   const navigate = useNavigate();
   const job = useWatchedJob(initial, () => void refresh());
   const modality = mediaModality(job);
-  const rerun = rerunBody(job);
+  const canRerun = Boolean(modality && job.prompt);
+  // Run again sends what the model takes now, so it waits for the model list.
+  const catalog = useCatalog(canRerun);
+  const model = catalog && catalog !== 'failed' && modality
+    ? mediaModels(catalog, modality).find((m) => m.id === job.model)
+    : undefined;
+  const retired = catalog !== null && catalog !== 'failed' && !model;
+  const rerun = modality && catalog !== null && !retired
+    ? rerunBody(job, catalog === 'failed' ? null : controlsFor(model, modality))
+    : null;
   const price = useEstimate(rerun);
+  // How many the job asked for, when Run again asks for fewer.
+  const asked = typeof job.params?.n === 'number' ? job.params.n : 1;
+  const fewer = rerun && model && asked > (rerun.n ?? 1) ? rerun.n ?? 1 : null;
+  const noun = modality === 'VIDEO' ? 'video' : 'image';
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<SendError | null>(null);
 
@@ -144,15 +173,28 @@ function JobDetail({ initial }: { initial: JobView }) {
         </dl>
       </section>
 
-      {rerun && modality && (
+      {canRerun && modality && (
         <div className="mt-6 flex flex-wrap items-center gap-2">
-          <button type="button" onClick={() => void runAgain()} disabled={starting} className="btn btn-primary">
-            {starting ? 'Starting…' : <>Run again{price !== null && <> <span aria-hidden="true">·</span> {formatCents(price)}</>}</>}
-          </button>
+          {!retired && (
+            <button type="button" onClick={() => void runAgain()} disabled={starting || !rerun} className="btn btn-primary">
+              {starting ? 'Starting…' : <>Run again{price !== null && <> <span aria-hidden="true">·</span> {formatCents(price)}</>}</>}
+            </button>
+          )}
           <Link to={`/create/${modality.toLowerCase()}?job=${encodeURIComponent(job.id)}`} className="btn btn-secondary">
             Open in Studio
           </Link>
         </div>
+      )}
+      {fewer !== null && model && (
+        <p className="mt-3 text-sm text-fg-muted">
+          {modelName(model)} makes {fewer === 1 ? `one ${noun}` : `up to ${fewer} ${noun}s`} per request,
+          so Run again asks for {fewer === 1 ? 'one' : fewer}.
+        </p>
+      )}
+      {canRerun && retired && (
+        <p className="mt-3 text-sm text-fg-muted">
+          {job.model} isn&apos;t available any more. Open it in the Studio to run the prompt on another model.
+        </p>
       )}
       {error && <SendErrorNotice error={error} what="this generation" then="to keep creating" className="mt-3" />}
     </article>

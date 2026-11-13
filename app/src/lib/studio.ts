@@ -61,14 +61,23 @@ function text(value: unknown): value is string {
   return typeof value === 'string' && value !== '';
 }
 
-/** A job's own request, to send again. Null once its prompt has been deleted. */
-export function rerunBody(job: JobView): GenerationBody | null {
+/**
+ * A job's own request, to send again, with its count fitted to what the model
+ * makes per request now (`controls`): above the model's max_n it comes down to
+ * it, and a model that makes one at a time gets no count, as from the Studio.
+ * With `controls` null (the model list could not be read) the count goes as it
+ * was and the API decides. Null once the job's prompt has been deleted.
+ */
+export function rerunBody(job: JobView, controls: Controls | null): GenerationBody | null {
   const modality = mediaModality(job);
   if (!modality || !job.prompt) return null;
   const p = job.params ?? {};
   const body: GenerationBody = { model: job.model, prompt: job.prompt };
   if (text(p.size)) body.size = p.size;
-  if (positiveInt(p.n)) body.n = p.n;
+  if (positiveInt(p.n)) {
+    if (!controls) body.n = p.n;
+    else if (controls.maxN) body.n = Math.min(p.n, controls.maxN);
+  }
   if (modality === 'VIDEO' && positiveInt(p.seconds)) body.seconds = p.seconds;
   if (modality === 'IMAGE' && text(p.style)) body.style = p.style;
   if (modality === 'IMAGE' && text(p.quality)) body.quality = p.quality;

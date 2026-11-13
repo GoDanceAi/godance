@@ -243,8 +243,68 @@ test.describe('the job page', () => {
     await expect(page.getByRole('status')).toHaveText('Queued. The model starts on it shortly.');
   });
 
+  test('Run again asks for no more than the model makes per request', async ({ page, api }) => {
+    await signedIn(page, api);
+    api.on('GET', '/v1/models', { json: MODELS });
+    mockEstimates(api);
+    // Made before the API checked counts: two images from a model that makes one.
+    const flux = makeJob({ id: jobId(10), params: { size: '1024x1024', n: 2 }, outputs: outputsOf(2), actualCostCents: 8 });
+    // Six from a model that makes up to four.
+    const gpt = makeJob({
+      id: jobId(11), model: 'gpt-image-1.5', params: { size: '1024x1024', n: 6 }, outputs: outputsOf(6), actualCostCents: 30,
+    });
+    serveJob(api, flux);
+    serveJob(api, gpt);
+    const again = jobId(12);
+    api.on('POST', '/v1/images/generations', accepted(again));
+    serveJob(api, inProgress({ ...flux, id: again, params: { size: '1024x1024' } }, 'QUEUED'));
+
+    await page.goto(`/history/${gpt.id}`);
+    await expect(page.getByRole('button', { name: 'Run again $0.20' })).toBeVisible();
+    expect(api.callsTo('POST', '/v1/estimates').at(-1)!.body).toEqual({ model: 'gpt-image-1.5', n: 4, size: '1024x1024' });
+    await expect(page.getByText('GPT Image 1.5 makes up to 4 images per request, so Run again asks for 4.')).toBeVisible();
+
+    await page.goto(`/history/${flux.id}`);
+    await expect(page.getByText('FLUX.2 [pro] makes one image per request, so Run again asks for one.')).toBeVisible();
+    const runAgain = page.getByRole('button', { name: 'Run again $0.04' });
+    await expect(runAgain).toBeVisible();
+    expect(api.callsTo('POST', '/v1/estimates').at(-1)!.body).toEqual({ model: 'flux-2-pro', size: '1024x1024' });
+    await runAgain.click();
+    await expect(page).toHaveURL(`/create/image?job=${again}`);
+    expect(api.callsTo('POST', '/v1/images/generations')[0].body).toEqual({
+      model: 'flux-2-pro', prompt: flux.prompt, size: '1024x1024', async: true,
+    });
+  });
+
+  test('a model that is no longer offered has no Run again, and opens in the Studio', async ({ page, api }) => {
+    await signedIn(page, api);
+    api.on('GET', '/v1/models', { json: MODELS });
+    const retired = makeJob({ id: jobId(13), model: 'flux-1-dev', params: { size: '1024x1024', n: 2 } });
+    serveJob(api, retired);
+
+    await page.goto(`/history/${retired.id}`);
+    await expect(page.getByText("flux-1-dev isn't available any more. Open it in the Studio to run the prompt on another model.")).toBeVisible();
+    await expect(page.getByRole('button', { name: /^Run again/ })).toHaveCount(0);
+    await expect(page.getByRole('link', { name: 'Open in Studio' })).toHaveAttribute('href', `/create/image?job=${retired.id}`);
+    expect(api.callsTo('POST', '/v1/estimates')).toHaveLength(0);
+  });
+
+  test('when the model list can\'t be read, Run again sends the job as it was', async ({ page, api }) => {
+    await signedIn(page, api);
+    api.on('GET', '/v1/models', { status: 503 });
+    mockEstimates(api);
+    const job = makeJob({ id: jobId(14), params: { size: '1024x1024', n: 2 } });
+    serveJob(api, job);
+
+    await page.goto(`/history/${job.id}`);
+    await expect(page.getByRole('button', { name: 'Run again $0.08' })).toBeEnabled();
+    expect(api.callsTo('POST', '/v1/estimates').at(-1)!.body).toEqual({ model: 'flux-2-pro', n: 2, size: '1024x1024' });
+    await expect(page.getByText(/so Run again asks for/)).toHaveCount(0);
+  });
+
   test('a failed job shows the error and the refund; no date when none is set', async ({ page, api }) => {
     await signedIn(page, api);
+    api.on('GET', '/v1/models', { json: MODELS });
     api.on('POST', '/v1/estimates', { status: 503 });
     const failed = makeJob({
       id: jobId(8), status: 'FAILED', outputs: [], outputUrl: null, actualCostCents: null, mediaExpiresAt: null,
