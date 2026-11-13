@@ -1,8 +1,10 @@
 package ai.godance.web;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
+import static com.github.tomakehurst.wiremock.client.WireMock.get;
 import static com.github.tomakehurst.wiremock.client.WireMock.post;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
+import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.Base64;
@@ -34,6 +36,9 @@ import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
 
 import ai.godance.domain.CreditSource;
 import ai.godance.domain.JobStatus;
+import ai.godance.gateway.CostCalculator;
+import ai.godance.gateway.ModelCatalog;
+import ai.godance.gateway.ModelCatalog.ModelInfo;
 import ai.godance.repository.GenerationJobRepository;
 import ai.godance.repository.UserRepository;
 import ai.godance.service.CreditLedgerService;
@@ -78,6 +83,7 @@ class ImageGenerationIntegrationTest {
 
     static WireMockServer openAiMock;
     static WireMockServer volcMock;
+    static WireMockServer bflMock;
 
     @BeforeAll
     static void startMocks() {
@@ -85,18 +91,23 @@ class ImageGenerationIntegrationTest {
         openAiMock.start();
         volcMock = new WireMockServer(WireMockConfiguration.options().dynamicPort());
         volcMock.start();
+        bflMock = new WireMockServer(WireMockConfiguration.options().dynamicPort());
+        bflMock.start();
     }
 
     @AfterAll
     static void stopMocks() {
         if (openAiMock != null) openAiMock.stop();
         if (volcMock != null) volcMock.stop();
+        if (bflMock != null) bflMock.stop();
     }
 
     @DynamicPropertySource
     static void dynamicProps(DynamicPropertyRegistry r) {
         r.add("godance.providers.openai.api-base",     () -> openAiMock.baseUrl());
         r.add("godance.providers.volcengine.api-base", () -> volcMock.baseUrl());
+        r.add("godance.providers.bfl.api-base",        () -> bflMock.baseUrl());
+        r.add("godance.providers.bfl.poll-interval",   () -> "50ms");
         r.add("godance.object-storage.endpoint",       MINIO::getS3URL);
         r.add("godance.object-storage.access-key",     MINIO::getUserName);
         r.add("godance.object-storage.secret-key",     MINIO::getPassword);
@@ -109,11 +120,14 @@ class ImageGenerationIntegrationTest {
     @Autowired CreditLedgerService ledger;
     @Autowired GenerationJobRepository jobs;
     @Autowired ai.godance.repository.UsageRecordRepository usage;
+    @Autowired CostCalculator costs;
+    @Autowired ModelCatalog catalog;
 
     @BeforeEach
     void reset() {
         openAiMock.resetAll();
         volcMock.resetAll();
+        bflMock.resetAll();
     }
 
     private record Signed(UUID id, String bearer) { }
@@ -249,6 +263,49 @@ class ImageGenerationIntegrationTest {
         // seedream-5.0: 35 000 µ¢ × 1.12 = 39 200 µ¢ → HALF_UP /10 000 = 4¢.
         assertThat(done.actualCostCents()).isEqualTo(4L);
         awaitBalance(u.id(), 100_00L - 4L);
+    }
+
+    // ===== Billing matches what was generated =========================
+
+    @Test
+    void generate_fewerImagesDeliveredThanRequested_billsTheDeliveredImages() throws Exception {
+        Signed u = signupWithBalance(100_00L);
+        // Flux returns one image per request, whatever n is.
+        bflMock.stubFor(post(urlEqualTo("/v1/flux-pro-1.1"))
+                .willReturn(aResponse().withStatus(200)
+                        .withHeader("content-type", "application/json")
+                        .withBody("{\"id\":\"job-n2\",\"polling_url\":\"unused\"}")));
+        bflMock.stubFor(get(urlPathEqualTo("/v1/get_result"))
+                .willReturn(aResponse().withStatus(200)
+                        .withHeader("content-type", "application/json")
+                        .withBody("{\"id\":\"job-n2\",\"status\":\"Ready\","
+                                + "\"result\":{\"sample\":\"" + bflMock.baseUrl() + "/_test/n2.png\"}}")));
+        bflMock.stubFor(get(urlEqualTo("/_test/n2.png"))
+                .willReturn(aResponse().withStatus(200)
+                        .withHeader("content-type", "image/png")
+                        .withBody(TINY_PNG)));
+
+        AsyncJobAcknowledged ack = submitImage(u.bearer(),
+                Map.of("model", "flux-1.1-pro", "prompt", "Two boats, please", "n", 2));
+        JobView done = pollUntilTerminal(ack.jobId(), u.bearer());
+        assertThat(done.status()).isEqualTo(JobStatus.DONE);
+
+        ModelInfo flux = catalog.find("flux-1.1-pro").orElseThrow();
+        long forTwo = costs.imageCostCents(flux, 2);
+        long forOne = costs.imageCostCents(flux, 1);
+        assertThat(forOne).isLessThan(forTwo);
+
+        // Two images were held up front; one was delivered, so one is charged.
+        assertThat(done.estimatedCostCents()).isEqualTo(forTwo);
+        assertThat(done.actualCostCents()).isEqualTo(forOne);
+        awaitBalance(u.id(), 100_00L - forOne);
+
+        // The usage row feeds spending caps and revenue reports: it carries the charge, not the hold.
+        assertThat(usage.findByUserIdAndRecordedAtGreaterThanEqual(u.id(), java.time.Instant.now().minusSeconds(60)))
+                .singleElement().satisfies(r -> {
+                    assertThat(r.getCostCents()).isEqualTo(forOne);
+                    assertThat(r.getOutputTokens()).isEqualTo(1);     // images delivered
+                });
     }
 
     // ===== Refund on upstream failure =================================

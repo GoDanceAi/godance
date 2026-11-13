@@ -62,6 +62,11 @@ public class KlingVideoProvider implements VideoProviderAdapter {
     }
 
     @Override
+    public int defaultDurationSeconds() {
+        return DEFAULT_DURATION_SECONDS;
+    }
+
+    @Override
     public Mono<List<GeneratedVideo>> generate(VideoRequest request) {
         KlingSubmit body = new KlingSubmit(
                 request.model(),

@@ -1,8 +1,11 @@
 package ai.godance.gateway.providers;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
+import static com.github.tomakehurst.wiremock.client.WireMock.equalTo;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
+import static com.github.tomakehurst.wiremock.client.WireMock.matchingJsonPath;
 import static com.github.tomakehurst.wiremock.client.WireMock.post;
+import static com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -87,5 +90,33 @@ class MiniMaxHailuoVideoProviderTest {
         VideoRequest req = new VideoRequest("minimax-hailuo-2.3", "x", "1080p", 6, 1);
         assertThatThrownBy(() -> provider.generate(req).block(Duration.ofSeconds(5)))
                 .hasMessageContaining("Fail");
+    }
+
+    @Test
+    void generate_givenNoDuration_asksForTheDefaultItDeclares() {
+        wm.stubFor(post(urlEqualTo("/v1/video_generation"))
+                .willReturn(aResponse().withStatus(200)
+                        .withHeader("content-type", "application/json")
+                        .withBody("{\"task_id\":\"mt_def\"}")));
+        wm.stubFor(get(urlPathEqualTo("/v1/query/video_generation"))
+                .willReturn(aResponse().withStatus(200)
+                        .withHeader("content-type", "application/json")
+                        .withBody("{\"task_id\":\"mt_def\",\"status\":\"Success\",\"file_id\":\"fl_def\"}")));
+        wm.stubFor(get(urlPathEqualTo("/v1/files/retrieve"))
+                .willReturn(aResponse().withStatus(200)
+                        .withHeader("content-type", "application/json")
+                        .withBody("{\"file\":{\"download_url\":\""
+                                + wm.baseUrl() + "/_test/def.mp4\"}}")));
+        wm.stubFor(get(urlEqualTo("/_test/def.mp4"))
+                .willReturn(aResponse().withStatus(200)
+                        .withHeader("content-type", "video/mp4")
+                        .withBody(new byte[] { 'M', 'P', '4' })));
+
+        provider.generate(new VideoRequest("minimax-hailuo-2.3", "x", null, null, 1)).block(Duration.ofSeconds(5));
+
+        // The service prices a request on defaultDurationSeconds(); the two must not drift apart.
+        wm.verify(postRequestedFor(urlEqualTo("/v1/video_generation"))
+                .withRequestBody(matchingJsonPath("$.duration",
+                        equalTo(String.valueOf(provider.defaultDurationSeconds())))));
     }
 }

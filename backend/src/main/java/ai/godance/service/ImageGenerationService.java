@@ -154,7 +154,6 @@ public class ImageGenerationService {
 
     private ImageResult runJob(GenerationJob job, UUID userId, UUID apiKeyId, ModelInfo model,
                                ImageRequest request, String webhookUrl) {
-        long cost = job.getEstimatedCostCents();
         ImageProviderAdapter adapter;
         try {
             adapter = gateway.dispatch(model);
@@ -186,6 +185,12 @@ public class ImageGenerationService {
         // share one guard: a failure here ends the job FAILED and refunded, never
         // RUNNING with the pre-debit kept (spec risk R-05). The first image's URL
         // goes into output_url; the rest live under images/<jobId>/.
+        //
+        // The charge is for the images delivered, never more than was asked
+        // for: a provider that returns one image for n = 2 is paid for one,
+        // and settlement returns the rest of the hold.
+        int requested = request.n() == null ? 1 : request.n();
+        long cost = chargeFor(job, model, Math.min(upstream.size(), requested));
         List<UploadedImage> uploaded;
         boolean completed;
         try {
@@ -209,6 +214,12 @@ public class ImageGenerationService {
             fireWebhook(userId, webhookUrl, result);
         }
         return result;
+    }
+
+    /** The price of {@code images} images, capped at what the job held up front. */
+    private long chargeFor(GenerationJob job, ModelInfo model, int images) {
+        long price = Math.max(1L, calculator.imageCostCents(model, images));
+        return Math.min(job.getEstimatedCostCents(), price);
     }
 
     private List<UploadedImage> uploadAll(UUID jobId, List<GeneratedImage> images) {

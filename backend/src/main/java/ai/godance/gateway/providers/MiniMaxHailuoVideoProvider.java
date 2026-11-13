@@ -65,6 +65,11 @@ public class MiniMaxHailuoVideoProvider implements VideoProviderAdapter {
     }
 
     @Override
+    public int defaultDurationSeconds() {
+        return DEFAULT_DURATION_SECONDS;
+    }
+
+    @Override
     public Mono<List<GeneratedVideo>> generate(VideoRequest request) {
         MiniMaxSubmit body = new MiniMaxSubmit(
                 request.model(),

@@ -39,8 +39,11 @@ import reactor.core.scheduler.Schedulers;
  * {@code requiresAsync} flag is true and {@link VideoController} only
  * exposes a 202 response.
  *
- * <p>Cost is per-second × clip-count × markup, computed up-front from
- * the request (no reconcile pass — duration is the client's contract).
+ * <p>Cost is per-second × clip-count × markup. The clip length is decided
+ * once, here: a request that names none gets its adapter's default, and
+ * that same value is both priced and sent to the provider. The price for
+ * the requested clip count is held up front; when the provider delivers
+ * fewer clips, only those are charged and the rest of the hold is returned.
  *
  * <p>Every status change goes through {@link GenerationJobSettlement}: the
  * job row and its pre-debit are written together, and the job ends exactly
@@ -55,7 +58,6 @@ public class VideoGenerationService {
     /** Longest a live worker can hold a job: the upstream wait plus time to store the result. */
     private static final Duration LEASE = UPSTREAM_BLOCK_TIMEOUT.plusMinutes(10);
     private static final Duration WEBHOOK_TIMEOUT = Duration.ofSeconds(10);
-    private static final int DEFAULT_DURATION_SECONDS = 5;
 
     private final ModelCatalog catalog;
     private final CostCalculator calculator;
@@ -90,11 +92,15 @@ public class VideoGenerationService {
      * Processing continues on a bounded-elastic worker; client polls
      * {@code GET /v1/jobs/{id}} or receives a signed webhook POST.
      */
-    public UUID submit(UUID userId, UUID apiKeyId, VideoRequest request, String webhookUrl) {
+    public UUID submit(UUID userId, UUID apiKeyId, VideoRequest submitted, String webhookUrl) {
         webhookDestinations.requireAllowed(webhookUrl);   // before any charge (spec risk R-02)
-        ModelInfo model = requireVideoModel(request);
-        int duration = request.durationSeconds() == null
-                ? DEFAULT_DURATION_SECONDS : request.durationSeconds();
+        ModelInfo model = requireVideoModel(submitted);
+        // The length that is priced is the length the provider is asked for:
+        // the adapter never falls back to a default of its own.
+        int duration = submitted.durationSeconds() != null
+                ? submitted.durationSeconds() : gateway.defaultDurationSeconds(model);
+        VideoRequest request = new VideoRequest(submitted.model(), submitted.prompt(),
+                submitted.size(), duration, submitted.n());
         int clips = request.n() == null ? 1 : request.n();
         long cost = Math.max(1L, calculator.videoCostCents(model, duration, clips));
         String requestId = "vid_" + UUID.randomUUID().toString().replace("-", "").substring(0, 24);
@@ -115,7 +121,6 @@ public class VideoGenerationService {
 
     private void runJob(GenerationJob job, UUID userId, UUID apiKeyId, ModelInfo model, VideoRequest request,
                         int duration, int clips, String webhookUrl) {
-        long cost = job.getEstimatedCostCents();
         VideoProviderAdapter adapter;
         try {
             adapter = gateway.dispatch(model);
@@ -144,12 +149,17 @@ public class VideoGenerationService {
         // The provider has delivered. Storing the result and ending the job DONE
         // share one guard: a failure here ends the job FAILED and refunded, never
         // RUNNING with the pre-debit kept (spec risk R-05).
+        //
+        // The charge is for the clips delivered, never more than was asked for:
+        // a provider that returns one clip for n = 2 is paid for one, and
+        // settlement returns the rest of the hold.
+        long cost = chargeFor(job, model, duration, Math.min(upstream.size(), clips));
         List<UploadedVideo> uploaded;
         boolean completed;
         try {
             uploaded = uploadAll(job.getId(), upstream);
             completed = settlement.complete(job, uploaded.isEmpty() ? null : uploaded.get(0).url(), cost,
-                    buildUsageRecord(userId, apiKeyId, model, cost, job.getRequestId(), duration, clips));
+                    buildUsageRecord(userId, apiKeyId, model, cost, job.getRequestId(), duration, upstream.size()));
         } catch (RuntimeException e) {
             log.warn("Video job {} could not be finalised: {}", job.getId(), e.getMessage());
             settlement.fail(job, "finalize: " + e.getMessage(), "video result could not be stored");
@@ -163,6 +173,12 @@ public class VideoGenerationService {
         if (webhookUrl != null && !webhookUrl.isBlank()) {
             fireWebhook(userId, webhookUrl, job.getId(), uploaded, cost);
         }
+    }
+
+    /** The price of {@code clips} clips of this job's length, capped at what the job held up front. */
+    private long chargeFor(GenerationJob job, ModelInfo model, int duration, int clips) {
+        long price = Math.max(1L, calculator.videoCostCents(model, duration, clips));
+        return Math.min(job.getEstimatedCostCents(), price);
     }
 
     private List<UploadedVideo> uploadAll(UUID jobId, List<GeneratedVideo> videos) {
@@ -242,6 +258,7 @@ public class VideoGenerationService {
         return job;
     }
 
+    /** {@code clips} is the number of clips the provider returned, which is what it bills us for. */
     private UsageRecord buildUsageRecord(UUID userId, UUID apiKeyId, ModelInfo model, long actualCents,
                                          String requestId, int duration, int clips) {
         long providerCostMicrocents = model.perSecondMicrocents() * duration * clips;

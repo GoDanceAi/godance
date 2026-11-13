@@ -42,6 +42,7 @@ public class SoraVideoProvider implements VideoProviderAdapter {
     private static final Duration POLL_INTERVAL = Duration.ofSeconds(5);
     private static final Duration POLL_TIMEOUT = Duration.ofMinutes(10);
     private static final String STATUS_COMPLETED = "completed";
+    private static final int DEFAULT_DURATION_SECONDS = 10;
 
     private final WebClient client;
 
@@ -60,6 +61,11 @@ public class SoraVideoProvider implements VideoProviderAdapter {
     }
 
     @Override
+    public int defaultDurationSeconds() {
+        return DEFAULT_DURATION_SECONDS;
+    }
+
+    @Override
     public Mono<List<GeneratedVideo>> generate(VideoRequest request) {
         // "sora-2-pro-hd" is a Godance catalog alias for Sora 2 Pro at 1024p HD
         // (the $0.50/s tier). There is no distinct upstream model id, so map it to
@@ -71,7 +77,7 @@ public class SoraVideoProvider implements VideoProviderAdapter {
         SoraSubmit body = new SoraSubmit(
                 upstreamModel,
                 request.prompt(),
-                request.durationSeconds() == null ? 10 : request.durationSeconds(),
+                request.durationSeconds() == null ? DEFAULT_DURATION_SECONDS : request.durationSeconds(),
                 request.size() == null ? defaultSize : request.size());
 
         return client.post()

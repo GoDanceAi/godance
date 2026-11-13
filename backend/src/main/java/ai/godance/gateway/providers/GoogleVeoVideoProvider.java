@@ -67,6 +67,11 @@ public class GoogleVeoVideoProvider implements VideoProviderAdapter {
     }
 
     @Override
+    public int defaultDurationSeconds() {
+        return DEFAULT_DURATION_SECONDS;
+    }
+
+    @Override
     public Mono<List<GeneratedVideo>> generate(VideoRequest request) {
         VeoSubmit body = new VeoSubmit(
                 List.of(new VeoInstance(request.prompt())),

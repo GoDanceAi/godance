@@ -15,7 +15,20 @@ import reactor.core.publisher.Mono;
  */
 public interface VideoProviderAdapter {
 
+    /** The clip length an adapter generates by default unless it says otherwise. */
+    int STANDARD_CLIP_SECONDS = 5;
+
     Provider type();
+
+    /**
+     * The clip length this adapter generates for a request that names none.
+     * The service prices the request on this value and sends it in the
+     * request, so billing and generation cannot disagree; it must be the
+     * value {@link #generate} falls back to.
+     */
+    default int defaultDurationSeconds() {
+        return STANDARD_CLIP_SECONDS;
+    }
 
     Mono<List<GeneratedVideo>> generate(VideoRequest request);
 }

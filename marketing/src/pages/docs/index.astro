@@ -131,8 +131,10 @@ def verify(payload, header, secret):
     </ul>
     <p class="mt-4 text-fg-muted">
       The full cost (per-image price × <code class="code-chip">n</code>) is reserved from your
-      balance when the job is accepted and refunded automatically if generation fails. An
-      insufficient balance returns <code class="code-chip">402</code>.
+      balance when the job is accepted and refunded automatically if generation fails. A model
+      that returns fewer images than <code class="code-chip">n</code> is charged for the images it
+      returned, and the rest of the reservation goes back to your balance. An insufficient
+      balance returns <code class="code-chip">402</code>.
     </p>
     <pre class="code-block mt-4"><code>{imageSnippet}</code></pre>
     <pre class="code-block mt-4"><code>{acceptedSnippet}</code></pre>
@@ -147,13 +149,15 @@ def verify(payload, header, secret):
     <ul class="mt-4 space-y-2 text-fg-muted">
       <li><code class="code-chip">model</code>, <code class="code-chip">prompt</code> (required).</li>
       <li><code class="code-chip">size</code> — optional output resolution.</li>
-      <li><code class="code-chip">seconds</code> — optional clip length, defaults to 5.</li>
+      <li><code class="code-chip">seconds</code> — optional clip length. Left out, the model's standard length is used: 5 seconds for most models, 10 for the Sora models and 6 for <code class="code-chip">minimax-hailuo-2.3</code>.</li>
       <li><code class="code-chip">n</code> — optional number of clips, defaults to 1.</li>
       <li><code class="code-chip">webhook_url</code> — optional; where to POST the completion event.</li>
     </ul>
     <p class="mt-4 text-fg-muted">
-      Cost is the model's per-second rate × <code class="code-chip">seconds</code> ×
-      <code class="code-chip">n</code>, reserved up front and refunded if generation fails.
+      Cost is the model's per-second rate × clip length × <code class="code-chip">n</code>,
+      reserved up front and refunded if generation fails. Send <code class="code-chip">seconds</code>
+      to fix both the length and the price. A model that returns fewer clips than
+      <code class="code-chip">n</code> is charged for the clips it returned.
     </p>
 
     <!-- ===== Jobs ===== -->
@@ -167,7 +171,7 @@ def verify(payload, header, secret):
       <li><code class="code-chip">status</code> — <code class="code-chip">QUEUED</code> → <code class="code-chip">RUNNING</code> → <code class="code-chip">DONE</code> or <code class="code-chip">FAILED</code>.</li>
       <li><code class="code-chip">outputUrl</code> — set once <code class="code-chip">DONE</code>: a time-limited signed URL to the first output, so copy the file to your own storage. When <code class="code-chip">n</code> &gt; 1, the webhook payload lists every output.</li>
       <li><code class="code-chip">errorMessage</code> — set when <code class="code-chip">FAILED</code>; the reserved credit is refunded.</li>
-      <li><code class="code-chip">estimatedCostCents</code>, <code class="code-chip">actualCostCents</code> — integer cents.</li>
+      <li><code class="code-chip">estimatedCostCents</code>, <code class="code-chip">actualCostCents</code> — integer cents: the amount reserved when the job was accepted, and the amount charged once it is <code class="code-chip">DONE</code>.</li>
       <li><code class="code-chip">id</code>, <code class="code-chip">modality</code>, <code class="code-chip">provider</code>, <code class="code-chip">model</code>, <code class="code-chip">createdAt</code>, <code class="code-chip">startedAt</code>, <code class="code-chip">completedAt</code> — timestamps are ISO 8601.</li>
     </ul>
 
