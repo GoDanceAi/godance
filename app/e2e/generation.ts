@@ -159,6 +159,25 @@ export function serveJob(api: MockApi, job: JobView): { set: (next: JobView) => 
   return { set: (next) => { current = next; } };
 }
 
+/**
+ * GET /v1/jobs over a fixed list, newest first, as the API pages it: limit,
+ * before (a job id; only older jobs) and modality.
+ */
+export function serveJobList(api: MockApi, jobs: JobView[]): MockApi {
+  return api.on('GET', '/v1/jobs', (call) => {
+    let list = jobs;
+    const modality = call.query.get('modality');
+    if (modality) list = list.filter((j) => j.modality === modality);
+    const before = call.query.get('before');
+    if (before) {
+      const at = list.findIndex((j) => j.id === before);
+      list = at === -1 ? [] : list.slice(at + 1);
+    }
+    const limit = call.query.get('limit');
+    return { json: limit ? list.slice(0, Number(limit)) : list };
+  });
+}
+
 /** The 202 a generation request gets. */
 export function accepted(id: string): Reply {
   return { status: 202, json: { job_id: id, status: 'QUEUED', poll_url: `/v1/jobs/${id}` } };
