@@ -87,7 +87,9 @@ export class MockApi {
     // The app asks on every load; with no session the API says so.
     this.on('GET', '/v1/auth/me', problem(401, 'Unauthorized'))
       // The dashboard shows the newest generations; an account has none until a test says so.
-      .on('GET', '/v1/jobs', { json: [] });
+      .on('GET', '/v1/jobs', { json: [] })
+      // Asked once signed in. Referrals ship off, so by default the API says so.
+      .on('GET', '/v1/referrals/me', { json: { enabled: false } });
   }
 
   async install(): Promise<void> {

@@ -221,6 +221,19 @@ godance:
     # a fresh deployment grants nothing until the amount is set.
     signup-credit-cents:       ${PROMO_SIGNUP_CREDIT_CENTS:0}
     signup-credit-daily-limit: ${PROMO_SIGNUP_CREDIT_DAILY_LIMIT:200}  # most grants per UTC day
+    # Referral (ReferralService, ReferralRewardService): an invited user's first
+    # qualifying top-up gives each side one REFERRAL ledger credit. Every reward
+    # is real provider spend, so both amounts default to 0 = off: no code is made,
+    # every claim is refused, and no top-up path does anything new.
+    referral:
+      referrer-reward-cents: ${PROMO_REFERRAL_REFERRER_REWARD_CENTS:0}
+      referee-reward-cents:  ${PROMO_REFERRAL_REFEREE_REWARD_CENTS:0}
+      min-topup-cents:       ${PROMO_REFERRAL_MIN_TOPUP_CENTS:1000}      # smallest top-up that qualifies
+      monthly-reward-limit:  ${PROMO_REFERRAL_MONTHLY_REWARD_LIMIT:20}   # referrer rewards per UTC month
+      claim-window-hours:    ${PROMO_REFERRAL_CLAIM_WINDOW_HOURS:168}    # after signing up
+      qualifying-sources:    ${PROMO_REFERRAL_QUALIFYING_SOURCES:STRIPE} # STRIPE (card) and/or NOWPAYMENTS (USDT)
+      claim-limit-per-account: 5    # claims tried per account per hour
+      claim-limit-per-ip:      20   # claims tried per client IP per hour
   providers:
     openai:
       api-key:  ${OPENAI_API_KEY:sk_dev_dummy_openai_key_do_not_use_for_real_calls}

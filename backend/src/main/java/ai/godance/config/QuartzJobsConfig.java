@@ -12,6 +12,7 @@ import org.springframework.context.annotation.Configuration;
 import ai.godance.service.AutoRechargeCronJob;
 import ai.godance.service.DataRetentionJob;
 import ai.godance.service.GenerationJobSweepJob;
+import ai.godance.service.ReferralSweepJob;
 import ai.godance.service.pricing.PricingRefreshCronJob;
 
 /**
@@ -123,6 +124,32 @@ public class QuartzJobsConfig {
         return TriggerBuilder.newTrigger()
                 .forJob(dataRetentionJobDetail)
                 .withIdentity("dataRetentionTrigger")
+                .withSchedule(CronScheduleBuilder.cronSchedule(cron)
+                        .inTimeZone(java.util.TimeZone.getTimeZone("UTC"))
+                        .withMisfireHandlingInstructionDoNothing())
+                .build();
+    }
+
+    @Bean
+    JobDetail referralSweepJobDetail() {
+        return JobBuilder.newJob(ReferralSweepJob.class)
+                .withIdentity("referralSweepJob")
+                .storeDurably()
+                .build();
+    }
+
+    /**
+     * Hourly at :17 by default. The top-up path pays a reward within
+     * seconds; this only catches the ones it missed, and returns at once
+     * while referrals are switched off.
+     */
+    @Bean
+    Trigger referralSweepTrigger(
+            JobDetail referralSweepJobDetail,
+            @Value("${godance.scheduling.referral-sweep-cron:0 17 * * * ?}") String cron) {
+        return TriggerBuilder.newTrigger()
+                .forJob(referralSweepJobDetail)
+                .withIdentity("referralSweepTrigger")
                 .withSchedule(CronScheduleBuilder.cronSchedule(cron)
                         .inTimeZone(java.util.TimeZone.getTimeZone("UTC"))
                         .withMisfireHandlingInstructionDoNothing())

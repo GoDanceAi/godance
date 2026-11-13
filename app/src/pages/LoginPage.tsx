@@ -4,6 +4,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import { ApiError } from '../lib/api';
 import { startOAuth } from '../lib/oauth';
+import { useCaptureReferral } from '../lib/referral';
 import { carryDestination, destinationFrom, keepForSocialSignIn } from '../lib/return-to';
 import RecipeWaitingNote from '../components/RecipeWaitingNote';
 
@@ -18,6 +19,7 @@ export default function LoginPage() {
   const { login } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  useCaptureReferral();   // an invite link: /login?ref=<code>
   const state = location.state as {
     oauthError?: string;
     notice?: string;

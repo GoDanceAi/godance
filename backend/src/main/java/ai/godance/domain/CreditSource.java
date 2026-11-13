@@ -13,5 +13,7 @@ public enum CreditSource {
     ADJUSTMENT,
     /** Manual operator credit/debit via the admin console (audited). */
     ADMIN_ADJUSTMENT,
-    PROMO
+    PROMO,
+    /** A referral reward to the inviting or the invited user (ReferralRewardService). */
+    REFERRAL
 }

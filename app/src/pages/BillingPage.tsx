@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { apiFetch, ApiError } from '../lib/api';
 import { useAuth, formatCents } from '../lib/auth';
+import { useReferral } from '../lib/referral';
 
 interface TopUpResponse {
   sessionId: string;
@@ -41,6 +42,7 @@ const METHODS: {
 
 export default function BillingPage() {
   const { user } = useAuth();
+  const { info: referral } = useReferral();
   const [amount, setAmount] = useState<number>(25_00);
   const [method, setMethod] = useState<PayMethod>('stripe');
   const [error, setError] = useState<string | null>(null);
@@ -75,6 +77,12 @@ export default function BillingPage() {
         balance, pay any way you like — card or USDT, same credits. They never expire;
         pricing is provider list plus a platform fee (5% text, 12% image, 10–15% video).
       </p>
+      {referral?.enabled && !!referral.pending_reward_cents && (
+        <p className="mt-2 text-sm text-fg-muted">
+          You were invited: your first card top-up of {formatCents(referral.min_topup_cents)} or more
+          adds <strong className="text-fg">{formatCents(referral.pending_reward_cents)}</strong> to your balance.
+        </p>
+      )}
 
       <div className="mt-8 card space-y-6">
         {/* Amount picker */}

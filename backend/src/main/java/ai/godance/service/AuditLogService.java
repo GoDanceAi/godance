@@ -87,6 +87,15 @@ public class AuditLogService {
     public static final String EVT_PROMO_SIGNUP_CREDIT_SKIPPED = "promo.signup_credit.skipped";
     /** Granting the signup credit threw; the sign-in or verification around it still succeeded. */
     public static final String EVT_PROMO_SIGNUP_CREDIT_FAILED  = "promo.signup_credit.failed";
+    // Referral (round 9)
+    /** An invited user claimed a referral code; {@code userId} is the invited user. */
+    public static final String EVT_REFERRAL_CLAIMED  = "referral.claimed";
+    /** A referral was rewarded; both amounts and the top-up are in the detail. */
+    public static final String EVT_REFERRAL_REWARDED = "referral.rewarded";
+    /** A top-up or a side of a reward earned nothing; the reason is in the detail. */
+    public static final String EVT_REFERRAL_SKIPPED  = "referral.skipped";
+    /** Paying a reward threw; the top-up that asked for it stands, and the sweep retries. */
+    public static final String EVT_REFERRAL_FAILED   = "referral.failed";
 
     private final AuditLogEntryRepository repo;
 

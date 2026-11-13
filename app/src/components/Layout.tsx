@@ -3,6 +3,7 @@ import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import { useAuth, formatCents } from '../lib/auth';
 import { useAdmin } from '../lib/admin';
+import { useReferral } from '../lib/referral';
 import { carryDestination, destinationFrom } from '../lib/return-to';
 import { LogoLockup, ThemeToggle } from './Brand';
 
@@ -17,10 +18,13 @@ const NAV: { to: string; label: string }[] = [
   { to: '/billing', label: 'Billing' },
   { to: '/settings', label: 'Settings' },
 ];
+// Only while referrals are on (lib/referral); it sits after Billing.
+const INVITE = { to: '/referral', label: 'Invite' };
 
 export default function Layout({ children }: Props) {
   const { user, logout } = useAuth();
   const { isAdmin, needsTwoFactor } = useAdmin();
+  const { info: referral } = useReferral();
   const navigate = useNavigate();
   // On the sign-in and sign-up pages, the header's links keep where the
   // visitor was going too (lib/return-to).
@@ -43,9 +47,12 @@ export default function Layout({ children }: Props) {
 
   // A child's account waiting for consent reaches no page but the waiting screen.
   const showNav = user !== null && user.ageStatus !== 'CONSENT_PENDING';
+  const nav = referral?.enabled
+    ? NAV.flatMap((item) => (item.to === '/billing' ? [item, INVITE] : [item]))
+    : NAV;
   const links = (
     <>
-      {NAV.map((item) => (
+      {nav.map((item) => (
         <NavLink key={item.to} to={item.to} className={linkClass}>{item.label}</NavLink>
       ))}
       {(isAdmin || needsTwoFactor) && <NavLink to="/admin" className={linkClass}>Admin</NavLink>}
