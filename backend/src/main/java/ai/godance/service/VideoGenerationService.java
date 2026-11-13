@@ -9,20 +9,15 @@ import java.util.UUID;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
-import org.springframework.web.server.ResponseStatusException;
 
 import tools.jackson.databind.ObjectMapper;
 
 import ai.godance.domain.GenerationJob;
-import ai.godance.domain.Modality;
 import ai.godance.domain.Region;
 import ai.godance.domain.UsageRecord;
-import ai.godance.gateway.CostCalculator;
-import ai.godance.gateway.ModelCatalog;
 import ai.godance.gateway.ModelCatalog.ModelInfo;
 import ai.godance.gateway.VideoDtos.GeneratedVideo;
 import ai.godance.gateway.VideoDtos.VideoRequest;
@@ -30,6 +25,7 @@ import ai.godance.gateway.VideoProviderAdapter;
 import ai.godance.gateway.VideoProviderGateway;
 import ai.godance.security.WebhookSigner;
 import ai.godance.service.GenerationJobSettlement.StoredOutput;
+import ai.godance.service.GenerationQuotes.Quote;
 import ai.godance.storage.ObjectStorageClient;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
@@ -60,8 +56,7 @@ public class VideoGenerationService {
     private static final Duration LEASE = UPSTREAM_BLOCK_TIMEOUT.plusMinutes(10);
     private static final Duration WEBHOOK_TIMEOUT = Duration.ofSeconds(10);
 
-    private final ModelCatalog catalog;
-    private final CostCalculator calculator;
+    private final GenerationQuotes quotes;
     private final VideoProviderGateway gateway;
     private final GenerationJobSettlement settlement;
     private final ObjectStorageClient storage;
@@ -70,13 +65,12 @@ public class VideoGenerationService {
     private final WebhookDestinations webhookDestinations;
     private final WebClient webhookClient;
 
-    public VideoGenerationService(ModelCatalog catalog, CostCalculator calculator,
+    public VideoGenerationService(GenerationQuotes quotes,
                                   VideoProviderGateway gateway, GenerationJobSettlement settlement,
                                   ObjectStorageClient storage, ObjectMapper json,
                                   WebhookSigner webhookSigner,
                                   WebhookDestinations webhookDestinations) {
-        this.catalog = catalog;
-        this.calculator = calculator;
+        this.quotes = quotes;
         this.gateway = gateway;
         this.settlement = settlement;
         this.storage = storage;
@@ -95,15 +89,17 @@ public class VideoGenerationService {
      */
     public UUID submit(UUID userId, UUID apiKeyId, VideoRequest submitted, String webhookUrl) {
         webhookDestinations.requireAllowed(webhookUrl);   // before any charge (spec risk R-02)
-        ModelInfo model = requireVideoModel(submitted);
+        // 404 / 400 (including an n the model cannot return) before any charge.
+        // The quote is the pre-debit, the same figure POST /v1/estimates returns.
+        Quote quote = quotes.video(submitted.model(), submitted.n(), submitted.durationSeconds());
+        ModelInfo model = quote.model();
         // The length that is priced is the length the provider is asked for:
         // the adapter never falls back to a default of its own.
-        int duration = submitted.durationSeconds() != null
-                ? submitted.durationSeconds() : gateway.defaultDurationSeconds(model);
+        int duration = quote.seconds();
         VideoRequest request = new VideoRequest(submitted.model(), submitted.prompt(),
                 submitted.size(), duration, submitted.n());
-        int clips = request.n() == null ? 1 : request.n();
-        long cost = Math.max(1L, calculator.videoCostCents(model, duration, clips));
+        int clips = quote.n();
+        long cost = quote.costCents();
         String requestId = "vid_" + UUID.randomUUID().toString().replace("-", "").substring(0, 24);
 
         GenerationJob job = newJob(userId, model, request, duration, cost, requestId, webhookUrl);
@@ -180,8 +176,7 @@ public class VideoGenerationService {
 
     /** The price of {@code clips} clips of this job's length, capped at what the job held up front. */
     private long chargeFor(GenerationJob job, ModelInfo model, int duration, int clips) {
-        long price = Math.max(1L, calculator.videoCostCents(model, duration, clips));
-        return Math.min(job.getEstimatedCostCents(), price);
+        return Math.min(job.getEstimatedCostCents(), quotes.videoPriceCents(model, duration, clips));
     }
 
     /** What was stored: the clips as the webhook shows them, and the rows the job records. */
@@ -235,17 +230,6 @@ public class VideoGenerationService {
     }
 
     // ===== Persistence helpers =======================================
-
-    private ModelInfo requireVideoModel(VideoRequest request) {
-        ModelInfo model = catalog.find(request.model()).orElseThrow(() ->
-                new ResponseStatusException(HttpStatus.NOT_FOUND,
-                        "unknown model: " + request.model()));
-        if (model.modality() != Modality.VIDEO) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "model " + request.model() + " is not a video model");
-        }
-        return model;
-    }
 
     /** The job row, not yet saved; {@link GenerationJobSettlement#accept} saves it with the pre-debit. */
     private GenerationJob newJob(UUID userId, ModelInfo model, VideoRequest request, int duration,

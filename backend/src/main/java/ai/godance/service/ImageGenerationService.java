@@ -20,7 +20,6 @@ import tools.jackson.databind.ObjectMapper;
 import ai.godance.domain.GenerationJob;
 import ai.godance.domain.Region;
 import ai.godance.domain.UsageRecord;
-import ai.godance.gateway.CostCalculator;
 import ai.godance.gateway.ImageDtos.GeneratedImage;
 import ai.godance.gateway.ImageDtos.ImageRequest;
 import ai.godance.gateway.ImageProviderAdapter;
@@ -29,6 +28,7 @@ import ai.godance.gateway.ModelCatalog;
 import ai.godance.gateway.ModelCatalog.ModelInfo;
 import ai.godance.security.WebhookSigner;
 import ai.godance.service.GenerationJobSettlement.StoredOutput;
+import ai.godance.service.GenerationQuotes.Quote;
 import ai.godance.storage.ObjectStorageClient;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
@@ -66,7 +66,7 @@ public class ImageGenerationService {
     private static final Duration WEBHOOK_TIMEOUT = Duration.ofSeconds(10);
 
     private final ModelCatalog catalog;
-    private final CostCalculator calculator;
+    private final GenerationQuotes quotes;
     private final ImageProviderGateway gateway;
     private final GenerationJobSettlement settlement;
     private final ObjectStorageClient storage;
@@ -75,13 +75,13 @@ public class ImageGenerationService {
     private final WebhookDestinations webhookDestinations;
     private final WebClient webhookClient;
 
-    public ImageGenerationService(ModelCatalog catalog, CostCalculator calculator,
+    public ImageGenerationService(ModelCatalog catalog, GenerationQuotes quotes,
                                   ImageProviderGateway gateway, GenerationJobSettlement settlement,
                                   ObjectStorageClient storage, ObjectMapper json,
                                   WebhookSigner webhookSigner,
                                   WebhookDestinations webhookDestinations) {
         this.catalog = catalog;
-        this.calculator = calculator;
+        this.quotes = quotes;
         this.gateway = gateway;
         this.settlement = settlement;
         this.storage = storage;
@@ -122,8 +122,9 @@ public class ImageGenerationService {
      */
     public UUID executeAsync(UUID userId, UUID apiKeyId, ImageRequest request, String webhookUrl) {
         webhookDestinations.requireAllowed(webhookUrl);   // before any charge (spec risk R-02)
-        ModelInfo model = requireModel(request);
-        GenerationJob job = acceptJob(userId, apiKeyId, model, request, webhookUrl);
+        Quote quote = quotes.image(request.model(), request.n());   // 404 / 400 before any charge
+        ModelInfo model = quote.model();
+        GenerationJob job = acceptJob(userId, apiKeyId, quote, request, webhookUrl);
 
         // Kick off async processing. The pre-debit and the job row are already
         // committed together; if this worker dies, GenerationJobSweepJob fails
@@ -136,17 +137,19 @@ public class ImageGenerationService {
     }
 
     private ImageResult executeInternal(UUID userId, UUID apiKeyId, ImageRequest request, String webhookUrl) {
-        ModelInfo model = requireModel(request);
-        GenerationJob job = acceptJob(userId, apiKeyId, model, request, webhookUrl);
-        return runJob(job, userId, apiKeyId, model, request, webhookUrl);
+        Quote quote = quotes.image(request.model(), request.n());   // 404 / 400 before any charge
+        GenerationJob job = acceptJob(userId, apiKeyId, quote, request, webhookUrl);
+        return runJob(job, userId, apiKeyId, quote.model(), request, webhookUrl);
     }
 
-    /** Builds the job and accepts it: pre-debit and QUEUED row in one transaction, or 402. */
-    private GenerationJob acceptJob(UUID userId, UUID apiKeyId, ModelInfo model, ImageRequest request,
+    /**
+     * Builds the job and accepts it: pre-debit and QUEUED row in one
+     * transaction, or 402. The pre-debit is the quote, the same figure
+     * {@code POST /v1/estimates} returns.
+     */
+    private GenerationJob acceptJob(UUID userId, UUID apiKeyId, Quote quote, ImageRequest request,
                                     String webhookUrl) {
-        int count = request.n() == null ? 1 : request.n();
-        long cost = Math.max(1L, calculator.imageCostCents(model, count));
-        GenerationJob job = newJob(userId, model, request, cost, newRequestId(), webhookUrl);
+        GenerationJob job = newJob(userId, quote.model(), request, quote.costCents(), newRequestId(), webhookUrl);
         if (!settlement.accept(job, apiKeyId)) {
             throw new InsufficientCreditException();
         }
@@ -221,8 +224,7 @@ public class ImageGenerationService {
 
     /** The price of {@code images} images, capped at what the job held up front. */
     private long chargeFor(GenerationJob job, ModelInfo model, int images) {
-        long price = Math.max(1L, calculator.imageCostCents(model, images));
-        return Math.min(job.getEstimatedCostCents(), price);
+        return Math.min(job.getEstimatedCostCents(), quotes.imagePriceCents(model, images));
     }
 
     /** What was stored: the images as the response and webhook show them, and the rows the job records. */
@@ -278,17 +280,6 @@ public class ImageGenerationService {
     }
 
     // ===== Persistence helpers =======================================
-
-    private ModelInfo requireModel(ImageRequest request) {
-        ModelInfo model = catalog.find(request.model()).orElseThrow(() ->
-                new ResponseStatusException(HttpStatus.NOT_FOUND,
-                        "unknown model: " + request.model()));
-        if (model.modality() != ai.godance.domain.Modality.IMAGE) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "model " + request.model() + " is not an image-generation model");
-        }
-        return model;
-    }
 
     /** The job row, not yet saved; {@link GenerationJobSettlement#accept} saves it with the pre-debit. */
     private GenerationJob newJob(UUID userId, ModelInfo model, ImageRequest request,
