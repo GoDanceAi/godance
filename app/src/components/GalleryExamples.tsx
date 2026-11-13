@@ -44,7 +44,7 @@ export default function GalleryExamples({ modality, onPick }: {
               <button
                 type="button"
                 onClick={() => onPick(entry.slug)}
-                className="card-hover block w-full overflow-hidden rounded-md border border-border bg-surface text-left"
+                className="card-hover flex h-full w-full flex-col overflow-hidden rounded-md border border-border bg-surface text-left"
               >
                 {entry.thumb ? (
                   <img src={entry.thumb} alt="" loading="lazy" referrerPolicy="no-referrer"
