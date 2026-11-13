@@ -64,15 +64,18 @@ public class ParentalConsentService {
     private final MailService mail;
     private final MailProperties mailProps;
     private final AuditLogService audit;
+    private final SignupCreditService signupCredit;
 
     public ParentalConsentService(UserRepository users, StripeService stripe, BillingProperties billing,
-                                  MailService mail, MailProperties mailProps, AuditLogService audit) {
+                                  MailService mail, MailProperties mailProps, AuditLogService audit,
+                                  SignupCreditService signupCredit) {
         this.users = users;
         this.stripe = stripe;
         this.billing = billing;
         this.mail = mail;
         this.mailProps = mailProps;
         this.audit = audit;
+        this.signupCredit = signupCredit;
     }
 
     /**
@@ -192,6 +195,9 @@ public class ParentalConsentService {
             return;
         }
         User child = users.findById(childId).orElseThrow();
+        // A child who verified their email while waiting gets the signup
+        // credit now (after the webhook commits); one who hasn't, on verifying.
+        signupCredit.grantIfEligible(child);
         audit.record(AuditLogService.EVT_AUTH_PARENTAL_CONSENT_GRANTED, AuditOutcome.SUCCESS,
                 childId, ipAddress, Map.of(
                         "parentEmail", String.valueOf(child.getParentEmail()),

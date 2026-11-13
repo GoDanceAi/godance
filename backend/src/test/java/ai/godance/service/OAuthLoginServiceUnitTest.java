@@ -54,7 +54,8 @@ class OAuthLoginServiceUnitTest {
         identities = mock(OAuthIdentityRepository.class);
         jwt = mock(JwtService.class);
         twoFactor = mock(TwoFactorService.class);
-        oauthLogin = new OAuthLoginService(users, identities, jwt, mock(AuditLogService.class), twoFactor);
+        oauthLogin = new OAuthLoginService(users, identities, jwt, mock(AuditLogService.class), twoFactor,
+                mock(SignupCreditService.class));
 
         when(identities.findByProviderAndSubject(any(), any())).thenReturn(Optional.empty());
         when(users.findByEmail(any())).thenReturn(Optional.empty());

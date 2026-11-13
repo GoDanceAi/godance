@@ -80,6 +80,13 @@ public class AuditLogService {
     public static final String EVT_ADMIN_TWO_FACTOR_RESET = "admin.two_factor.reset";
     /** An account's role was granted or revoked; {@code userId} is the account, the actor is in the detail. */
     public static final String EVT_ADMIN_ROLE_CHANGED = "admin.role.changed";
+    // Promotional credit (round 7)
+    /** The one-time signup credit was written to the account's ledger; the amount is in the detail. */
+    public static final String EVT_PROMO_SIGNUP_CREDIT_GRANTED = "promo.signup_credit.granted";
+    /** An eligible account got no signup credit; the reason (e.g. {@code daily-limit}) is in the detail. */
+    public static final String EVT_PROMO_SIGNUP_CREDIT_SKIPPED = "promo.signup_credit.skipped";
+    /** Granting the signup credit threw; the sign-in or verification around it still succeeded. */
+    public static final String EVT_PROMO_SIGNUP_CREDIT_FAILED  = "promo.signup_credit.failed";
 
     private final AuditLogEntryRepository repo;
 
