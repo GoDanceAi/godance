@@ -20,7 +20,11 @@ export interface RecipeText {
   zh: string | null;
 }
 
-/** The request fields a run may pass on to the Studio. Anything else in `params` is dropped. */
+/**
+ * The request fields a run may pass on to the Studio. Anything else in
+ * `params` is dropped; the Studio's fitValues then keeps only what the chosen
+ * model's capabilities allow.
+ */
 export interface RecipeParams {
   size?: string;
   n?: number;
@@ -45,13 +49,6 @@ export interface GalleryEntry {
   model: string;
   /** The thumbnail (a video's poster), as an absolute https URL, or null. */
   thumb: string | null;
-}
-
-/** What the Studio reads from a model's `capabilities` in `/v1/models` (round 7's contract). */
-export interface RecipeCapabilities {
-  sizes?: string[];
-  durations?: number[];
-  max_n?: number;
 }
 
 const SLUG = /^[a-z0-9-]{1,80}$/;
@@ -132,29 +129,6 @@ export function parseGalleryIndex(json: unknown, galleryOrigin: string): Gallery
     entries.push({ slug: item.slug, title, modality, model, thumb: imageUrlOf(item.thumb, galleryOrigin) });
   }
   return entries;
-}
-
-/**
- * The recipe's parameters that `capabilities` allow: a size from `sizes`, a
- * duration from `durations`, and a count up to `max_n` when that is above 1,
- * since the Studio offers a count only then. A model without capabilities
- * takes none of them.
- */
-export function allowedParams(params: RecipeParams, capabilities: RecipeCapabilities | null | undefined): RecipeParams {
-  if (!capabilities) return {};
-  const allowed: RecipeParams = {};
-  if (params.size !== undefined && Array.isArray(capabilities.sizes) && capabilities.sizes.includes(params.size)) {
-    allowed.size = params.size;
-  }
-  if (params.seconds !== undefined && Array.isArray(capabilities.durations)
-      && capabilities.durations.includes(params.seconds)) {
-    allowed.seconds = params.seconds;
-  }
-  const maxN = capabilities.max_n;
-  if (params.n !== undefined && typeof maxN === 'number' && maxN > 1 && params.n <= maxN) {
-    allowed.n = params.n;
-  }
-  return allowed;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

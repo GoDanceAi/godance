@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { allowedParams, isRecipeSlug, parseGalleryIndex, parseRecipe, recipeLinkOf } from '../src/lib/recipe';
+import { isRecipeSlug, parseGalleryIndex, parseRecipe, recipeLinkOf } from '../src/lib/recipe';
 
 // The gallery's JSON is untrusted input. These tests run the parsers directly;
 // no page is opened. The shapes are the round 8 coordination doc's endpoints.
@@ -192,19 +192,6 @@ test.describe('the gallery index', () => {
     for (const json of [null, [], { recipes: 'x' }, { recipes: {} }, { items: [entry()] }, 'index']) {
       expect(parseGalleryIndex(json, GALLERY)).toEqual([]);
     }
-  });
-});
-
-test.describe("a model's capabilities", () => {
-  test('decide which of the recipe parameters are kept', () => {
-    const params = { size: '1024x1024', n: 2, seconds: 10 };
-
-    expect(allowedParams(params, null)).toEqual({});
-    expect(allowedParams(params, {})).toEqual({});
-    expect(allowedParams(params, { sizes: ['1024x1024', '1536x1024'], max_n: 4 })).toEqual({ size: '1024x1024', n: 2 });
-    expect(allowedParams(params, { sizes: ['1536x1024'], durations: [5], max_n: 1 })).toEqual({});
-    expect(allowedParams(params, { sizes: ['1280x720'], durations: [5, 10], max_n: 1 })).toEqual({ seconds: 10 });
-    expect(allowedParams({ n: 5 }, { max_n: 4 })).toEqual({});
   });
 });
 

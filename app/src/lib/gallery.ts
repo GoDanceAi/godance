@@ -10,14 +10,24 @@ export const GALLERY_ORIGIN: string = originOf(import.meta.env.VITE_GALLERY_URL)
 const TIMEOUT_MS = 10_000;
 const INDEX_CACHE_KEY = 'godance.gallery_index';
 
+const recipeLoads = new Map<string, Promise<GalleryRecipe | null>>();
+
 /**
  * One recipe, or null when it is missing, the gallery is off or out of reach,
- * or its JSON doesn't match. A slug that isn't valid is never requested.
+ * or its JSON doesn't match. A slug that isn't valid is never requested. A
+ * recipe once loaded is kept for this page load, so moving it to the Studio
+ * page for its modality doesn't fetch it again; a failure is not kept.
  */
-export async function loadRecipe(slug: string): Promise<GalleryRecipe | null> {
-  if (!isRecipeSlug(slug)) return null;
-  const json = await getJson(`/gallery/${slug}.json`);
-  return json === undefined ? null : parseRecipe(json, { slug, galleryOrigin: GALLERY_ORIGIN });
+export function loadRecipe(slug: string): Promise<GalleryRecipe | null> {
+  if (!isRecipeSlug(slug)) return Promise.resolve(null);
+  let load = recipeLoads.get(slug);
+  if (!load) {
+    load = getJson(`/gallery/${slug}.json`)
+      .then((json) => (json === undefined ? null : parseRecipe(json, { slug, galleryOrigin: GALLERY_ORIGIN })));
+    recipeLoads.set(slug, load);
+    void load.then((recipe) => { if (recipe === null) recipeLoads.delete(slug); });
+  }
+  return load;
 }
 
 let indexLoad: Promise<GalleryEntry[]> | null = null;

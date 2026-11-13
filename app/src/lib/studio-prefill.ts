@@ -1,6 +1,8 @@
 import type { JobView, MediaModality, ModelEntry } from './api';
+import { loadRecipe } from './gallery';
 import { fetchJob, isJobId, mediaModality } from './jobs';
 import { cheapest, controlsFor, modelName } from './media-models';
+import { isRecipeSlug, type GalleryRecipe, type RecipeLang } from './recipe';
 import { PROMPT_MAX_LENGTH, type StudioValues } from './studio';
 
 /*
@@ -9,10 +11,9 @@ import { PROMPT_MAX_LENGTH, type StudioValues } from './studio';
  *
  *   1. ?job=<id>                             one of the caller's own jobs;
  *                                            also how a reload resumes a run
- *   2. ?model=&prompt=&size=&n=&seconds=     loose values
- *
- * A new source (a gallery recipe, ?example=<slug>) slots in between 1 and 2:
- * a kind in PrefillRequest, a branch in readPrefill and in resolvePrefill.
+ *   2. ?example=<slug>                       a recipe from the gallery, the
+ *                                            "Run this" link (lib/gallery)
+ *   3. ?model=&prompt=&size=&n=&seconds=     loose values
  *
  * Loading never generates. A link can fill the form; only the Generate
  * button spends credit.
@@ -29,6 +30,7 @@ export interface PrefillValues {
 
 export type PrefillRequest =
   | { kind: 'job'; jobId: string }
+  | { kind: 'example'; slug: string }
   | { kind: 'values'; values: PrefillValues }
   | { kind: 'none' };
 
@@ -43,6 +45,10 @@ function positiveInt(raw: string | null): number | null {
 export function readPrefill(params: URLSearchParams): PrefillRequest {
   const job = params.get('job');
   if (job && isJobId(job)) return { kind: 'job', jobId: job };
+
+  // Checked before any request is made: anything but a valid slug is ignored.
+  const example = params.get('example');
+  if (example !== null && isRecipeSlug(example)) return { kind: 'example', slug: example };
 
   const values: PrefillValues = {};
   const model = params.get('model')?.trim();
@@ -61,11 +67,23 @@ export function readPrefill(params: URLSearchParams): PrefillRequest {
 export interface Prefill {
   values: PrefillValues;
   job?: JobView;                     // ?job=: shown as the result, and polled while it runs
-  otherModality?: MediaModality;     // ?job= is the other kind; the Studio moves to that page
+  recipe?: GalleryRecipe;            // ?example=: the recipe the form was filled from
+  otherModality?: MediaModality;     // ?job= or ?example= is the other kind; the Studio moves to that page
   note?: string;                     // what the link asked for that could not be loaded
 }
 
 const JOB_NOT_LOADED = "That generation couldn't be loaded, so the form starts empty.";
+const RECIPE_NOT_LOADED = "That recipe couldn't be loaded from the gallery, so the form starts empty.";
+
+/** The form values from a recipe's run, with its prompt in `lang`. Like any link's, fitValues checks them. */
+export function valuesFromRecipe(recipe: GalleryRecipe, lang: RecipeLang): PrefillValues {
+  const { model, params } = recipe.run;
+  const values: PrefillValues = { model, prompt: (recipe.prompt[lang] ?? '').slice(0, PROMPT_MAX_LENGTH) };
+  if (params.size !== undefined) values.size = params.size;
+  if (params.n !== undefined) values.n = params.n;
+  if (params.seconds !== undefined) values.seconds = params.seconds;
+  return values;
+}
 
 /** The form values from a job's own record. */
 export function valuesFromJob(job: JobView): PrefillValues {
@@ -95,6 +113,13 @@ export async function resolvePrefill(request: PrefillRequest, modality: MediaMod
       } catch {
         return { values: {}, note: JOB_NOT_LOADED };
       }
+    }
+    case 'example': {
+      // Never rejects: missing, switched off, out of reach and misshapen all come back as null.
+      const recipe = await loadRecipe(request.slug);
+      if (!recipe) return { values: {}, note: RECIPE_NOT_LOADED };
+      if (recipe.modality !== modality) return { values: {}, otherModality: recipe.modality };
+      return { values: valuesFromRecipe(recipe, recipe.run.promptLang), recipe };
     }
   }
 }
