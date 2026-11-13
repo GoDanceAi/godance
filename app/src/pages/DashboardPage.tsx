@@ -1,10 +1,12 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth, formatCents } from '../lib/auth';
-import { apiFetch, ApiError } from '../lib/api';
+import { apiFetch, ApiError, type JobView } from '../lib/api';
+import { listJobs } from '../lib/jobs';
 import ResendEmailButton from '../components/ResendEmailButton';
 import { Icon } from '../components/Brand';
+import { JobThumb } from '../components/JobMedia';
 
 export default function DashboardPage() {
   const { user } = useAuth();
@@ -42,13 +44,20 @@ export default function DashboardPage() {
         </Link>
       </div>
 
+      <RecentGenerations />
+
       {/* Quick links */}
       <h2 className="mt-12 text-lg font-semibold text-fg">Get going</h2>
       <div className="mt-4 grid sm:grid-cols-2 gap-4">
         <DashboardCard
-          to="/chat"
-          title="Start a chat"
-          body="Try any of 7 text models — GPT, Claude, Gemini — with one prompt box."
+          to="/create/image"
+          title="Create an image"
+          body="Pick an image model, see the price, and generate. No code needed."
+        />
+        <DashboardCard
+          to="/create/video"
+          title="Create a video"
+          body="Turn a prompt into a short clip. It runs in the background while you work."
         />
         <DashboardCard
           to="/keys"
@@ -64,6 +73,7 @@ export default function DashboardPage() {
           to="/settings"
           title="Webhook secret"
           body="Fetch or rotate your signing secret for verifying async-job callbacks."
+          className="sm:col-span-2"
         />
       </div>
 
@@ -74,9 +84,49 @@ export default function DashboardPage() {
   );
 }
 
-function DashboardCard({ to, title, body }: { to: string; title: string; body: string }) {
+/** The four newest generations. Absent until there is one. */
+function RecentGenerations() {
+  const [jobs, setJobs] = useState<JobView[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    listJobs({ limit: 4 })
+      .then((page) => { if (!cancelled) setJobs(page.slice(0, 4)); })
+      .catch(() => { /* the strip stays hidden */ });
+    return () => { cancelled = true; };
+  }, []);
+
+  if (jobs.length === 0) return null;
   return (
-    <Link to={to} className="card card-hover block">
+    <section aria-labelledby="recent-heading" className="mt-12">
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 id="recent-heading" className="text-lg font-semibold text-fg">Recent generations</h2>
+        <Link to="/history" className="text-sm font-medium text-brand-600 hover:underline">View all</Link>
+      </div>
+      <ul className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
+        {jobs.map((job) => (
+          <li key={job.id}>
+            <Link to={`/history/${job.id}`} className="card card-hover block overflow-hidden p-0">
+              <JobThumb job={job} />
+              <p className="truncate px-3 py-2 text-xs text-fg-muted">
+                {job.prompt || (job.purged ? 'Files deleted' : job.model)}
+              </p>
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function DashboardCard({ to, title, body, className = '' }: {
+  to: string;
+  title: string;
+  body: string;
+  className?: string;
+}) {
+  return (
+    <Link to={to} className={`card card-hover block ${className}`}>
       <h3 className="font-semibold text-fg flex items-center justify-between">
         {title}
         <Icon name="chevronRight" size={16} />
