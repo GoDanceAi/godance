@@ -1,9 +1,11 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import { apiFetch, ApiError } from '../lib/api';
 import { birthMonthParam, needsParentalConsent } from '../lib/age';
+import { carryDestination, destinationFrom } from '../lib/return-to';
+import RecipeWaitingNote from '../components/RecipeWaitingNote';
 import { Field } from './LoginPage';
 
 const MONTHS = [
@@ -19,6 +21,10 @@ const YEARS = Array.from({ length: THIS_YEAR - 1900 + 1 }, (_, i) => THIS_YEAR -
 export default function SignupPage() {
   const { signup } = useAuth();
   const navigate = useNavigate();
+  // Where the visitor was going, handed over by the sign-in page in navigation
+  // state (lib/return-to). A new account waiting for a parent's approval still
+  // gets the waiting screen there, from ProtectedRoute.
+  const from = destinationFrom(useLocation().state);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -51,7 +57,7 @@ export default function SignupPage() {
         birthMonth: birthMonthParam(born.year, born.month),
         ...(child ? { parentEmail } : {}),
       });
-      navigate('/dashboard', { replace: true });
+      navigate(from ?? '/dashboard', { replace: true });
     } catch (err) {
       setError(err instanceof ApiError ? err.detail || err.message : 'Signup failed');
       setTaken(err instanceof ApiError && err.status === 409);
@@ -65,10 +71,11 @@ export default function SignupPage() {
       <h1 className="text-2xl font-bold tracking-tight text-fg">Create your account</h1>
       <p className="mt-2 text-sm text-fg-muted">
         Already have one?{' '}
-        <Link to="/login" className="text-brand-600 hover:text-brand-700 underline">
+        <Link to="/login" state={carryDestination(from)} className="text-brand-600 hover:text-brand-700 underline">
           Sign in
         </Link>
       </p>
+      <RecipeWaitingNote destination={from} page="sign-up" />
       <form onSubmit={onSubmit} className="mt-8 space-y-4">
         <Field label="Full name" type="text" value={fullName} onChange={setFullName} autoComplete="name" required />
         <Field label="Email" type="email" value={email} onChange={setEmail} autoComplete="email" required />

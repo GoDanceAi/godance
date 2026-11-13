@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { Link, NavLink, useNavigate } from 'react-router-dom';
+import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import { useAuth, formatCents } from '../lib/auth';
 import { useAdmin } from '../lib/admin';
+import { carryDestination, destinationFrom } from '../lib/return-to';
 import { LogoLockup, ThemeToggle } from './Brand';
 
 interface Props { children: ReactNode }
@@ -11,6 +12,9 @@ export default function Layout({ children }: Props) {
   const { user, logout } = useAuth();
   const { isAdmin, needsTwoFactor } = useAdmin();
   const navigate = useNavigate();
+  // On the sign-in and sign-up pages, the header's links keep where the
+  // visitor was going too (lib/return-to).
+  const from = destinationFrom(useLocation().state);
 
   const [logoutFailed, setLogoutFailed] = useState(false);
 
@@ -63,10 +67,11 @@ export default function Layout({ children }: Props) {
           ) : (
             <div className="flex items-center gap-3">
               <ThemeToggle compact />
-              <Link to="/login" className="text-sm font-medium text-fg-muted hover:text-fg transition-colors">
+              <Link to="/login" state={carryDestination(from)}
+                    className="text-sm font-medium text-fg-muted hover:text-fg transition-colors">
                 Sign in
               </Link>
-              <Link to="/signup" className="btn btn-primary btn-sm">
+              <Link to="/signup" state={carryDestination(from)} className="btn btn-primary btn-sm">
                 Start free
               </Link>
             </div>
