@@ -261,10 +261,28 @@ export interface ModelPricing {
   per_second_microcents?: number;
 }
 
+/**
+ * What an image or video model accepts. The whole block may be absent, which
+ * means unknown, not unlimited; so may any field in it. A missing max_n is 1.
+ */
+export interface ModelCapabilities {
+  sizes?: string[];
+  default_size?: string;
+  durations?: number[];        // video: clip lengths in seconds
+  default_seconds?: number;    // video: the length used when a request omits seconds
+  max_n?: number;
+}
+
 export interface GodanceModelExtension {
   modality: 'TEXT' | 'IMAGE' | 'VIDEO' | 'AUDIO_TTS' | 'AUDIO_STT' | 'EMBEDDING';
   requires_async: boolean;
   pricing: ModelPricing;
+  // The platform fee billed on top of pricing, as the API charges it.
+  // Absent on backends that predate it.
+  markup_percent?: number;
+  display_name?: string;
+  description?: string;
+  capabilities?: ModelCapabilities;
 }
 
 // Routing presets (godance-fast/auto/quality). Each request resolves to a
@@ -295,6 +313,76 @@ export interface ModelListResponse {
 
 export function isVirtualModel(m: ModelEntry | VirtualModelEntry): m is VirtualModelEntry {
   return 'virtual' in m.godance && m.godance.virtual === true;
+}
+
+// ===== Generation jobs (/v1/images/generations, /v1/videos/generations, /v1/jobs) =====
+
+export type JobStatus = 'QUEUED' | 'RUNNING' | 'DONE' | 'FAILED' | 'CANCELLED';
+
+/** The modalities the Studio generates. */
+export type MediaModality = 'IMAGE' | 'VIDEO';
+
+/** POST /v1/estimates: the exact pre-debit a matching generation request would take. */
+export interface Estimate {
+  model: string;
+  modality: MediaModality;
+  n: number;
+  seconds: number | null;
+  estimated_cost_cents: number;
+  currency: string;
+}
+
+/** The 202 answer to an async generation request. */
+export interface AsyncJobAcknowledged {
+  job_id: string;
+  status: JobStatus;
+  poll_url: string;
+}
+
+/** One file a job produced. The link is signed when the job is read. */
+export interface JobOutput {
+  index: number;
+  url: string;
+  contentType: string;
+  sizeBytes: number;
+  revisedPrompt: string | null;
+}
+
+/**
+ * The request's own parameter names: size, n, style and quality for images;
+ * size, seconds and n for video. Empty once the job's files are purged.
+ */
+export interface JobParams {
+  size?: string;
+  n?: number;
+  style?: string;
+  quality?: string;
+  seconds?: number;
+}
+
+/**
+ * GET /v1/jobs/{id}. The fields from prompt down are newer than the rest and
+ * optional here, so the app keeps working against an API without them: it
+ * falls back to outputUrl when outputs is absent.
+ */
+export interface JobView {
+  id: string;
+  status: JobStatus;
+  modality: GodanceModelExtension['modality'];
+  provider: string;
+  model: string;
+  estimatedCostCents: number | null;
+  actualCostCents: number | null;
+  outputUrl: string | null;            // the first output, signed
+  errorMessage: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  prompt?: string | null;              // null once purged
+  params?: JobParams;
+  outputs?: JobOutput[];               // empty until DONE, and again once purged
+  purged?: boolean;
+  mediaExpiresAt?: string | null;      // null: the files are not scheduled for deletion
 }
 
 // ===== /v1/admin/** (admin console — mirror backend admin DTOs) =====
