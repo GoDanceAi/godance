@@ -1,8 +1,9 @@
 # Brief 02 — Gallery pages
 
-**Branch:** `feature/gallery-pages` (worktree `../gd-gallery-pages`) off `main` once brief 01 is merged
+**Branch:** `feature/gallery-pages` (worktree `../gd-gallery-pages`) off `main` once brief 00 is merged
 **Reserved migration:** none. This brief has no backend or app changes.
 **Baseline:** `npm ci && npm run lint && npm run build && npm test` green in `marketing/` on parent
+**Runs alongside:** brief 01. The two share no file, and you do not need its output.
 
 ## Mission (one line)
 
@@ -12,7 +13,7 @@ the operator turns it on.
 
 ## Why now
 
-Brief 01 produces recipes that nothing renders. Each recipe page is a
+The import pipeline produces recipes that nothing renders. Each recipe page is a
 working example of the API: the prompt, the model and parameters, what it
 cost, the output, and the request that reproduces it. Each one is also a
 page a search engine or an AI agent can find, which the site has few of today.
@@ -21,7 +22,9 @@ page a search engine or an AI agent can find, which the site has few of today.
 
 1. This brief and `00-coordination.md` (recipe format, JSON endpoints and
    the gallery switch are binding)
-2. `01-gallery-import.md`, the content standard and the licence notice
+2. `00-recipe-schema.md` and the schema module it produced. Skim
+   `01-gallery-import.md` to know where recipes come from; it is being
+   built at the same time, so none of its output exists yet
 3. `marketing/src/layouts/Layout.astro` — title, description, canonical,
    `jsonLd`, `ogImage` and `noindex` are already props
 4. `marketing/src/components/Nav.astro`, `marketing/src/pages/index.astro`,
@@ -134,6 +137,10 @@ variables and a recipe with two runs. No text or media from the source lists.
   only. No third-party script, tracker or embed.
 - Do not change the recipe format. If a page needs something it lacks,
   stop and raise it.
+- Do not edit `marketing/package.json`, its lockfile, the schema module or
+  the collection definition. Put the page tests under
+  `marketing/scripts/gallery-pages/`, where the existing `test` script
+  already finds them.
 - A recipe that fails validation fails the build. Never skip one quietly.
 - Do not add a web font for Chinese. The system font stack handles it.
 - Both themes must work, and the pages must work on a phone.

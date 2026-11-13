@@ -1,8 +1,9 @@
 # Round 8 — Coordination
 
 **Date opened:** 2026-11-12 · **Parent:** `main` @ `bce9491` (update if `main` has moved)
-**Workstreams:** 01 Gallery import (tooling and first batch of recipes) ·
-02 Gallery pages on the marketing site · 03 "Run this" hand-off into the app
+**Workstreams:** 00 Recipe schema (step zero) · 01 Gallery import (tooling
+and first batch of recipes) · 02 Gallery pages on the marketing site ·
+03 "Run this" hand-off into the app
 
 Context: the marketing site will carry a gallery of recipes. A recipe is a
 prompt, the model and parameters it was run with, what it cost, and the
@@ -11,15 +12,21 @@ open-source prompt lists with a clear licence, credited to their authors, and
 every output is generated on Godance. This round builds the import pipeline,
 defines the recipe format, and builds the pages that render it.
 
-01 and 02 touch only `marketing/` and `docs/`. They do not depend on round 7
-and can run alongside it. 03 touches only `app/` and needs round 7 brief 02
-(Studio and History) on `main` first.
+00, 01 and 02 touch only `marketing/` and `docs/`. They do not depend on
+round 7 and can run alongside it. 03 touches only `app/` and needs round 7
+brief 02 (Studio and History) on `main` first.
+
+**What can run at the same time.** 00 is a short first step that lands the
+recipe format in code. Once it is on `main`, 01 and 02 run together: they
+edit no file in common. 03 can run alongside both, as soon as the Studio
+is on `main`.
 
 ## Worktrees (one per agent — never share a checkout)
 
 ```bash
+git worktree add ../gd-gallery-schema -b feature/gallery-schema main
+# after 00 is merged, both at once:
 git worktree add ../gd-gallery-import -b feature/gallery-import main
-# after 01 is merged:
 git worktree add ../gd-gallery-pages  -b feature/gallery-pages main
 # after round 7 brief 02 is merged:
 git worktree add ../gd-gallery-hand-off -b feature/gallery-hand-off main
@@ -27,17 +34,18 @@ git worktree add ../gd-gallery-hand-off -b feature/gallery-hand-off main
 
 ## Reserved resources
 
-| Resource | 01 gallery-import | 02 gallery-pages |
-|---|---|---|
-| Flyway migrations | none | none |
-| Backend, app | none | none |
-| Marketing | `marketing/scripts/gallery/**`, `marketing/src/content/gallery/**`, `marketing/src/content.config.*`, `marketing/.gitignore` | `marketing/src/pages/gallery/**`, `marketing/src/components/gallery/**`, `marketing/src/lib/gallery*.ts`, `marketing/fixtures/gallery/**`, `marketing/scripts/gallery-pages/**`, `marketing/public/_headers` |
-| Shared files | `marketing/package.json`: scripts and dev dependencies | `Nav.astro`, `pages/index.astro`, `pages/models.astro`: gallery links only. `marketing/package.json`: the `test` script only |
-| Docs | `docs/gallery-content-standard.md` | none |
-| Env (operator's machine only) | `GODANCE_API_KEY`, `GODANCE_API_BASE` | none |
+| Resource | 00 recipe-schema | 01 gallery-import | 02 gallery-pages |
+|---|---|---|---|
+| Flyway migrations | none | none | none |
+| Backend, app | none | none | none |
+| Marketing | `marketing/src/content.config.*`, `marketing/src/lib/gallery-schema.*`, `marketing/scripts/gallery-schema/**`, `marketing/package.json` and its lockfile, `marketing/.gitignore` | `marketing/scripts/gallery/**`, `marketing/src/content/gallery/**` | `marketing/src/pages/gallery/**`, `marketing/src/components/gallery/**`, `marketing/src/lib/gallery-config.ts` and other `gallery-*.ts` helpers except the schema, `marketing/fixtures/gallery/**`, `marketing/scripts/gallery-pages/**`, `marketing/public/_headers` |
+| Existing files touched | none | none | `Nav.astro`, `pages/index.astro`, `pages/models.astro`: gallery links only |
+| Docs | none | `docs/gallery-content-standard.md` | none |
+| Env (operator's machine only) | none | `GODANCE_API_KEY`, `GODANCE_API_BASE` | none |
 
-02 starts after 01 is on `main`, so the two never edit `package.json` at
-the same time.
+After 00, nobody edits `marketing/package.json`, its lockfile, the schema
+module or the collection definition. 01 and 02 therefore share no file. If
+either needs one of those changed, it stops and raises it.
 
 03 edits only `app/src/**`, `app/e2e/**`, `app/playwright.config.ts` and
 `app/.env.example`. It shares no file with 01 or 02 and reads the JSON
@@ -114,8 +122,9 @@ invented to show the shape; it is not a real entry.
 folder in the layout above. Uploading it to public storage is the operator's
 step.
 
-**Fixtures.** 01 makes the collection's folder overridable with
-`GALLERY_CONTENT_DIR`, so 02 can build the pages against invented recipes.
+**Fixtures.** 00 makes the collection's folder overridable with
+`GALLERY_CONTENT_DIR`, so 02 can build the pages against invented recipes
+without waiting for 01's content.
 
 ## The gallery switch (02 builds it)
 
@@ -163,16 +172,20 @@ URL, and is the poster for a video or null when it has none.
 - A list with no licence, or a licence that does not allow reuse, is never
   a source.
 - The lists' own example images and videos are never downloaded or copied.
-- `npm ci && npm run lint && npm run build` stays green in `marketing/`.
+- `npm ci && npm run lint && npm run build` stays green in `marketing/`,
+  and `npm test` once 00 has added it.
 - Public repo: no secrets, private URLs or operator notes in committed files.
 
 ## Merge order
 
-1. **01**, then the operator runs the first batch and approves recipes.
-2. **02**, at any point after 01. It ships with the gallery off.
+1. **00** first. It is small, and 01 and 02 both start from it.
+2. **01 and 02**, in either order. 02 ships with the gallery off, so it can
+   merge before any recipe exists. After 01 merges, the operator runs the
+   first batch and approves recipes.
 3. **03**, at any point after round 7 brief 02. Until "Run this" is turned
    on nothing links to it, so it is safe to merge early.
-4. **Switching on** is the operator's step, below.
+4. **Switching on** is the operator's step, below. Before it, build the site
+   once with the real recipes and the pages together.
 
 ## Switching the gallery on (operator)
 

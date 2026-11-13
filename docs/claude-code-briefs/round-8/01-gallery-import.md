@@ -1,8 +1,9 @@
 # Brief 01 — Gallery import
 
-**Branch:** `feature/gallery-import` (worktree `../gd-gallery-import`) off `main` @ `bce9491`
+**Branch:** `feature/gallery-import` (worktree `../gd-gallery-import`) off `main` once brief 00 is merged
 **Reserved migration:** none. This brief has no backend or app changes.
-**Baseline:** `npm ci && npm run lint && npm run build` green in `marketing/` on parent
+**Baseline:** `npm ci && npm run lint && npm run build && npm test` green in `marketing/` on parent
+**Runs alongside:** brief 02. The two share no file.
 
 ## Mission (one line)
 
@@ -25,7 +26,7 @@ cost. That takes a pipeline with a human review step, not a one-off script.
 3. `marketing/src/lib/catalog.ts` — how the site already reads the API at build time
 4. The API docs page, `marketing/src/pages/docs/index.astro`: image and
    video generation, jobs, error shapes
-5. The content collection documentation for the installed Astro version
+5. `00-recipe-schema.md` and the schema module and `validate` command it produced
 6. The two first sources, read-only, at a commit you pin:
    - `Evolink-AI/awesome-gpt-image-2-API-Prompts` (CC0-1.0)
    - `YouMind-OpenLab/awesome-seedance-2-prompts` (CC BY 4.0)
@@ -122,12 +123,12 @@ prompt: a harmless prompt can still produce an output that fails.
 
 ### 3. Format and validation
 
-- Define the `gallery` content collection with a schema equal to the
-  coordination format, so a malformed recipe fails the site build.
-- Let `GALLERY_CONTENT_DIR` override the collection's folder, so brief 02
-  can build the pages against fixtures.
-- Add a `validate` command that checks every committed recipe without
-  starting Astro, and a `test` script in `marketing/package.json`.
+The format already exists in code: brief 00 landed the schema module, the
+content collection and the `validate` command.
+
+- `publish` checks every recipe with that schema module before writing it.
+  Do not write a second definition of the format.
+- If the pipeline needs the format changed, stop and raise it.
 
 ### 4. Licence notice
 
@@ -145,8 +146,8 @@ invent them.
 - placeholder resolution, de-duplication and the removal list
 - the budget guard never passing its cap
 - a resumed run not resubmitting an accepted job
-- format validation rejecting: a missing language, a run with no cost, a
-  video run with no `seconds`, a duplicate slug
+- `publish` refusing to write a recipe the schema rejects, or one whose
+  slug is already taken
 - the API key never appearing in the work folder or in output
 
 ### 6. The first batch
@@ -166,8 +167,9 @@ Runs only after the operator's go-ahead and with a cap.
 - A session never approves a recipe and never edits the review decisions.
 - The API key is read from the environment and written nowhere.
 - Never download or copy a list's own example images or videos.
-- `sharp` may be added as a dev dependency; it is already installed through
-  Astro. Flag any other new dependency before adding it.
+- Do not edit `marketing/package.json`, its lockfile, the schema module or
+  the collection definition. `sharp` is already a dev dependency. If you
+  need another dependency, stop and raise it.
 - Do not change `.github/workflows/`. CI does not run the new tests; say so
   in the final summary and leave adding a step to the operator.
 

@@ -1,6 +1,51 @@
 # Round 8 — Opening prompts (paste as the first message of each session)
 
+Order: Session 0 first. Once it is merged, Sessions A and B run at the same
+time. Session C runs alongside them as soon as round 7 brief 02 is merged.
+
+## Session 0 — Recipe schema (step zero)
+
+```
+You're a Claude Code session working on Godance round-8 brief 00 — Recipe
+schema: put the gallery's recipe format into code once (one schema module,
+the content collection, a validate command, the test script and the
+dependency the import pipeline needs), so the import and pages sessions can
+then run at the same time without sharing a file.
+
+Setup: working dir is a dedicated git worktree on branch
+feature/gallery-schema, off main. Confirm lint and build are green in
+marketing/ before changing anything.
+
+Read these before writing any code:
+1. docs/claude-code-briefs/round-8/00-recipe-schema.md (the brief)
+2. docs/claude-code-briefs/round-8/00-coordination.md (the recipe format is
+   binding)
+3. marketing/package.json, marketing/astro.config.mjs, marketing/.gitignore
+4. The content collection docs for the installed Astro version
+
+Hard rules:
+- Commit to feature/gallery-schema as you go. Do NOT merge to main. Do NOT
+  push or open a pull request unless asked. main auto-deploys.
+- Edits only in the paths the brief lists. No pages, no import tooling, no
+  recipes.
+- One definition of the format, importable by Astro and by plain Node.
+- If the format cannot be expressed as written, stop and raise it.
+
+Opening move: run the baseline. Check how the installed Astro version
+defines and validates a content collection, and whether a collection that
+no page reads is validated at build. Then summarize your plan in 3 bullets
+before writing code.
+
+Done = npm run lint, npm run build and npm test green in marketing/, the
+built site has the same routes as before, a malformed recipe shown failing
+the build and the validate command, all commits on your branch, main
+untouched. Hand back.
+```
+
 ## Session A — Gallery import
+
+Start after brief 00 is merged to `main`. It can run at the same time as
+Session B.
 
 ```
 You're a Claude Code session working on Godance round-8 brief 01 — Gallery
@@ -9,8 +54,8 @@ prompt lists into reviewed, bilingual, reproducible gallery recipes, plus
 the content standard and licence notice that go with it.
 
 Setup: working dir is a dedicated git worktree on branch
-feature/gallery-import, off main at commit bce9491. Confirm lint and build
-are green in marketing/ before changing anything.
+feature/gallery-import, off main with brief 00 already merged. Confirm lint,
+build and test are green in marketing/ before changing anything.
 
 Read these before writing any code:
 1. docs/claude-code-briefs/round-8/01-gallery-import.md (the brief)
@@ -18,7 +63,8 @@ Read these before writing any code:
    binding)
 3. marketing/README.md, marketing/package.json, marketing/astro.config.mjs
 4. marketing/src/lib/catalog.ts and marketing/src/pages/docs/index.astro
-5. The content collection docs for the installed Astro version
+5. docs/claude-code-briefs/round-8/00-recipe-schema.md and the schema
+   module and validate command it produced
 6. The two source lists named in the brief, read-only, at a commit you pin
 
 Hard rules:
@@ -34,6 +80,8 @@ Hard rules:
   without a clear licence is never a source.
 - Edits only in the paths reserved in 00-coordination.md. Do not touch
   .github/workflows/, backend/ or app/.
+- Do NOT edit marketing/package.json, its lockfile, the schema module or
+  the collection definition. The pages session is running at the same time.
 
 Opening move: run the baseline. Read both source lists at a pinned commit
 without writing anything, and report for each how many entries it has, how
@@ -49,7 +97,8 @@ stage.
 
 ## Session B — Gallery pages
 
-Start this one only after brief 01 is merged to `main`.
+Start after brief 00 is merged to `main`. It can run at the same time as
+Session A and does not need its output.
 
 ```
 You're a Claude Code session working on Godance round-8 brief 02 — Gallery
@@ -58,15 +107,16 @@ page to browse them, model pages, a home-page strip and two JSON endpoints,
 all switched off until the operator turns the gallery on.
 
 Setup: working dir is a dedicated git worktree on branch
-feature/gallery-pages, off main with brief 01 already merged. Confirm lint,
+feature/gallery-pages, off main with brief 00 already merged. Confirm lint,
 build and test are green in marketing/ before changing anything.
 
 Read these before writing any code:
 1. docs/claude-code-briefs/round-8/02-gallery-pages.md (the brief)
 2. docs/claude-code-briefs/round-8/00-coordination.md (recipe format, JSON
    endpoints and the gallery switch are binding)
-3. docs/claude-code-briefs/round-8/01-gallery-import.md,
-   docs/gallery-content-standard.md and the gallery licence notice
+3. docs/claude-code-briefs/round-8/00-recipe-schema.md and the schema
+   module it produced. The import session is running at the same time, so
+   none of its output exists yet
 4. marketing/src/layouts/Layout.astro, marketing/src/components/Nav.astro
 5. marketing/src/pages/index.astro, models.astro and docs/index.astro
 6. marketing/src/styles/global.css, marketing/public/_headers,
@@ -84,6 +134,9 @@ Hard rules:
 - Fixtures are invented: no text or media from the source lists.
 - Edits only in the paths reserved for 02. Do not touch
   .github/workflows/, marketing/public/llms.txt, backend/ or app/.
+- Do NOT edit marketing/package.json, its lockfile, the schema module or
+  the collection definition. Page tests go under
+  marketing/scripts/gallery-pages/.
 
 Opening move: run the baseline. Write the fixtures, then build once with
 the gallery on against them and once with it off, and confirm the off build
