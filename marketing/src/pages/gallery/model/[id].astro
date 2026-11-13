@@ -1,0 +1,44 @@
+---
+/**
+ * /gallery/model/<id>: the recipes that have a run on one model. Built only
+ * for models that have at least one recipe.
+ */
+import type { GetStaticPaths } from 'astro';
+import Layout from '../../../layouts/Layout.astro';
+import RecipeBrowser from '../../../components/gallery/RecipeBrowser.astro';
+import { GALLERY_PATH, galleryModels, loadGallery, modelPath } from '../../../lib/gallery-recipes';
+
+export const getStaticPaths = (async () => {
+  const gallery = await loadGallery();
+  return galleryModels(gallery.recipes).map(({ id }) => ({ params: { id } }));
+}) satisfies GetStaticPaths;
+
+const { id } = Astro.params;
+const gallery = await loadGallery();
+const models = galleryModels(gallery.recipes);
+const recipes = gallery.recipes.filter((recipe) => recipe.runs.some((run) => run.model === id));
+
+const title = `${id} examples — prompts and API calls | Godance gallery`;
+const description =
+  `${recipes.length} recipe${recipes.length === 1 ? '' : 's'} generated with ${id} through the Godance API, ` +
+  'each with its prompt, parameters, cost and the request that reproduces it.';
+---
+
+<Layout {title} {description} canonicalPath={modelPath(id)}>
+  <section class="mx-auto max-w-6xl px-6 pt-16 pb-20">
+    <p class="text-sm text-fg-subtle">
+      <a href={GALLERY_PATH} class="underline hover:text-fg">Gallery</a>
+      <span aria-hidden="true"> / </span>Model
+    </p>
+    <h1 class="mt-2 text-4xl font-bold tracking-tight text-fg">
+      Made with <span class="font-mono">{id}</span>
+    </h1>
+    <p class="mt-4 text-fg-muted max-w-2xl">
+      Recipes that were run on this model. See what it costs in the
+      <a href="/models" class="underline" style="color: var(--color-primary)">model catalog</a>.
+    </p>
+    <div class="mt-10">
+      <RecipeBrowser {recipes} mediaBase={gallery.config.mediaBaseUrl} {models} activeModel={id} />
+    </div>
+  </section>
+</Layout>

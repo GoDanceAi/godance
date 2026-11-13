@@ -1,0 +1,85 @@
+---
+/**
+ * What one run produced: its images, or its videos with controls. Nothing
+ * autoplays. A video with a poster loads nothing until it is played; one
+ * without loads only its metadata, so the first frame can show.
+ */
+import { isVideoOutput, mediaUrl, type Recipe, type Run } from '../../lib/gallery-recipes';
+
+interface Props {
+  recipe: Recipe;
+  run: Run;
+  mediaBase: string;
+  /** Load the first image straight away: it is the page's main picture. */
+  eager?: boolean;
+}
+
+const { recipe, run, mediaBase, eager = false } = Astro.props;
+const many = run.outputs.length > 1;
+const label = (i: number) =>
+  `${recipe.title.en}, generated with ${run.model}${many ? ` (${i + 1} of ${run.outputs.length})` : ''}`;
+---
+
+<div class:list={['gallery-output', { 'gallery-output-many': many }]}>
+  {run.outputs.map((output, i) =>
+    isVideoOutput(output) ? (
+      <video
+        controls
+        playsinline
+        preload={output.poster ? 'none' : 'metadata'}
+        poster={output.poster ? mediaUrl(mediaBase, output.poster) : undefined}
+        width={output.width}
+        height={output.height}
+        aria-label={label(i)}
+      >
+        <source src={mediaUrl(mediaBase, output.file)} type={output.content_type} />
+        <a href={mediaUrl(mediaBase, output.file)}>Download the video</a>
+      </video>
+    ) : (
+      <a href={mediaUrl(mediaBase, output.file)} title="Open the full-size image">
+        <img
+          src={mediaUrl(mediaBase, output.file)}
+          alt={label(i)}
+          width={output.width}
+          height={output.height}
+          loading={eager && i === 0 ? 'eager' : 'lazy'}
+          decoding="async"
+        />
+      </a>
+    ),
+  )}
+</div>
+
+<style>
+  .gallery-output {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 12px;
+    padding: 12px;
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    background: var(--color-bg-muted);
+  }
+  .gallery-output > * {
+    display: block;
+    min-width: 0;
+    max-width: 100%;
+  }
+  .gallery-output img,
+  .gallery-output video {
+    display: block;
+    width: auto;
+    height: auto;
+    max-width: 100%;
+    max-height: 72vh;
+    border-radius: 6px;
+    background: var(--color-border);
+  }
+  /* Several outputs sit side by side where there is room. */
+  @media (min-width: 640px) {
+    .gallery-output-many > * {
+      max-width: calc(50% - 6px);
+    }
+  }
+</style>

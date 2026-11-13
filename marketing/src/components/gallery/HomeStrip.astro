@@ -1,0 +1,31 @@
+---
+/**
+ * The home page's strip of the six newest recipes. Renders nothing while the
+ * gallery is off, and has no <style> block, so that nothing of it reaches the
+ * home page then.
+ */
+import RecipeCard from './RecipeCard.astro';
+import { GALLERY_PATH, loadGallery } from '../../lib/gallery-recipes';
+
+const gallery = await loadGallery();
+const newest = gallery.recipes.slice(0, 6);
+---
+
+{gallery.on && (
+  <section class="py-20 border-b border-border" data-gallery-strip>
+    <div class="mx-auto max-w-6xl px-6">
+      <div class="flex items-end justify-between gap-4 flex-wrap">
+        <div class="max-w-2xl">
+          <h2 class="text-3xl md:text-4xl font-bold tracking-tight text-fg">Made with one API call.</h2>
+          <p class="mt-3 text-lg text-fg-muted">
+            Each recipe shows the prompt, the model, what it cost and the request that reproduces it.
+          </p>
+        </div>
+        <a href={GALLERY_PATH} class="btn btn-secondary">Browse the gallery</a>
+      </div>
+      <div class="mt-10 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 items-start">
+        {newest.map((recipe) => <RecipeCard {recipe} mediaBase={gallery.config.mediaBaseUrl} />)}
+      </div>
+    </div>
+  </section>
+)}

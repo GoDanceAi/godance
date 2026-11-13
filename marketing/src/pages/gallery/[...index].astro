@@ -1,0 +1,58 @@
+---
+/**
+ * /gallery: every recipe, newest first.
+ *
+ * A rest parameter instead of index.astro so that the page has no path, and
+ * so is not built, while the gallery is off.
+ */
+import type { GetStaticPaths } from 'astro';
+import Layout from '../../layouts/Layout.astro';
+import RecipeBrowser from '../../components/gallery/RecipeBrowser.astro';
+import { GALLERY_PATH, galleryModels, loadGallery } from '../../lib/gallery-recipes';
+import { scriptJson } from '../../lib/gallery-recipes';
+
+export const getStaticPaths = (async () => {
+  const gallery = await loadGallery();
+  return gallery.on ? [{ params: { index: undefined } }] : [];
+}) satisfies GetStaticPaths;
+
+const { recipes, config } = await loadGallery();
+const models = galleryModels(recipes);
+
+const title = 'Gallery — prompts, outputs and the API call behind each | Godance';
+const description =
+  'Images and videos generated through the Godance API. Every recipe shows the prompt in English and ' +
+  'Chinese, the model and parameters, what it cost, and the request that reproduces it.';
+
+const itemList = {
+  '@context': 'https://schema.org',
+  '@type': 'CollectionPage',
+  name: 'Godance gallery',
+  description,
+  url: new URL(GALLERY_PATH, Astro.site).toString(),
+  mainEntity: {
+    '@type': 'ItemList',
+    numberOfItems: recipes.length,
+    itemListElement: recipes.map((recipe, i) => ({
+      '@type': 'ListItem',
+      position: i + 1,
+      name: recipe.title.en,
+      url: new URL(`${GALLERY_PATH}/${recipe.slug}`, Astro.site).toString(),
+    })),
+  },
+};
+---
+
+<Layout {title} {description} canonicalPath={GALLERY_PATH}>
+  <section class="mx-auto max-w-6xl px-6 pt-16 pb-20">
+    <h1 class="text-4xl font-bold tracking-tight text-fg">Gallery</h1>
+    <p class="mt-4 text-fg-muted max-w-2xl">
+      Images and videos generated through the Godance API. Open one to see its prompt, the model and
+      parameters, what it cost, and the request that reproduces it.
+    </p>
+    <div class="mt-10">
+      <RecipeBrowser {recipes} mediaBase={config.mediaBaseUrl} {models} />
+    </div>
+  </section>
+  <script type="application/ld+json" set:html={scriptJson(itemList)} />
+</Layout>

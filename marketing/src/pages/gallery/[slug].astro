@@ -1,0 +1,291 @@
+---
+/**
+ * /gallery/<slug>: one recipe. The output, the prompt in both languages, how
+ * it was made, the API call that reproduces it, and who the prompt is by.
+ */
+import type { GetStaticPaths } from 'astro';
+import Layout from '../../layouts/Layout.astro';
+import ApiCall from '../../components/gallery/ApiCall.astro';
+import PromptBlock from '../../components/gallery/PromptBlock.astro';
+import RecipeCard from '../../components/gallery/RecipeCard.astro';
+import RunOutput from '../../components/gallery/RunOutput.astro';
+import { LICENCE_URLS, recipeJsonLd } from '../../lib/gallery-api';
+import {
+  GALLERY_PATH,
+  excerpt,
+  formatCost,
+  formatDate,
+  formatParam,
+  isVideoOutput,
+  loadGallery,
+  mediaUrl,
+  modelPath,
+  recipePath,
+  relatedRecipes,
+  scriptJson,
+  type Recipe,
+} from '../../lib/gallery-recipes';
+
+export const getStaticPaths = (async () => {
+  const gallery = await loadGallery();
+  return gallery.recipes.map((recipe) => ({ params: { slug: recipe.slug }, props: { recipe } }));
+}) satisfies GetStaticPaths;
+
+interface Props {
+  recipe: Recipe;
+}
+
+const { recipe } = Astro.props;
+const { recipes, config } = await loadGallery();
+const mediaBase = config.mediaBaseUrl;
+const [firstRun, ...otherRuns] = recipe.runs;
+const firstOutput = firstRun.outputs[0];
+const isVideo = recipe.modality === 'VIDEO';
+const related = relatedRecipes(recipe, recipes);
+const { source } = recipe;
+
+const title = `${recipe.title.en} — ${firstRun.model} ${isVideo ? 'video' : 'image'} prompt | Godance gallery`;
+const description = excerpt(recipe.prompt.en);
+
+// The output is the page's Open Graph image: the image itself, or a video's
+// poster. A video without a poster keeps the site's default.
+const ogFile = isVideoOutput(firstOutput) ? firstOutput.poster : firstOutput.file;
+const ogImage = ogFile ? mediaUrl(mediaBase, ogFile) : undefined;
+
+const appUrl = import.meta.env.PUBLIC_APP_URL || 'https://app.godance.ai';
+const runThisUrl = `${appUrl}/create/${isVideo ? 'video' : 'image'}?example=${encodeURIComponent(recipe.slug)}`;
+
+// The source lists are GitHub repositories, named "owner/repo".
+const listUrl = /^[\w.-]+\/[\w.-]+$/.test(source.list)
+  ? `https://github.com/${source.list}${/^[0-9a-f]{7,40}$/.test(source.list_commit) ? `/tree/${source.list_commit}` : ''}`
+  : null;
+
+const contactIsEmail = !/^https?:/i.test(config.removalContact);
+const contactHref = contactIsEmail ? `mailto:${config.removalContact}` : config.removalContact;
+
+const link = 'underline';
+const linkStyle = 'color: var(--color-primary)';
+---
+
+<Layout {title} {description} canonicalPath={recipePath(recipe.slug)} {...(ogImage ? { ogImage } : {})}>
+  <article class="mx-auto max-w-5xl px-6 pt-12 pb-20" data-recipe-page={recipe.slug}>
+    <p class="text-sm text-fg-subtle">
+      <a href={GALLERY_PATH} class="underline hover:text-fg">Gallery</a>
+      <span aria-hidden="true"> / </span>{isVideo ? 'Video' : 'Image'}
+    </p>
+
+    <h1 class="mt-2 text-3xl md:text-4xl font-bold tracking-tight text-fg">{recipe.title.en}</h1>
+    {recipe.title.zh && (
+      <p class="mt-1.5 text-xl text-fg-muted" lang="zh-Hans" data-title-zh>{recipe.title.zh}</p>
+    )}
+    {recipe.tags.length > 0 && (
+      <ul class="mt-4 flex flex-wrap gap-1.5" aria-label="Tags">
+        {recipe.tags.map((tag) => (
+          <li><a href={`${GALLERY_PATH}?tag=${encodeURIComponent(tag)}`} class="pill">{tag}</a></li>
+        ))}
+      </ul>
+    )}
+
+    <!-- ===== Output ===== -->
+    <div class="mt-8">
+      <RunOutput {recipe} run={firstRun} {mediaBase} eager />
+    </div>
+
+    <div class="mt-10 grid gap-10 lg:grid-cols-[minmax(0,1fr)_20rem]">
+      <!-- ===== Prompt ===== -->
+      <div class="min-w-0">
+        <h2 class="text-2xl font-bold text-fg">Prompt</h2>
+        <div class="mt-4 space-y-4">
+          <PromptBlock id="prompt-en" heading="English" text={recipe.prompt.en} />
+          <PromptBlock
+            id="prompt-zh"
+            heading="中文"
+            text={recipe.prompt.zh}
+            lang="zh-Hans"
+            note={recipe.prompt.zh_origin === 'machine' ? 'Machine translation' : undefined}
+          />
+        </div>
+        <p class="mt-3 text-sm text-fg-subtle">
+          This run sent the {firstRun.prompt_lang === 'zh' ? 'Chinese' : 'English'} prompt.
+        </p>
+
+        {recipe.prompt.variables && recipe.prompt.variables.length > 0 && (
+          <section class="mt-8" data-variables>
+            <h3 class="text-lg font-semibold text-fg">Variables</h3>
+            <p class="mt-1 text-sm text-fg-muted">
+              The original prompt is a template. These are its placeholders, with the values used here.
+            </p>
+            <dl class="mt-3 card p-0 divide-y divide-border text-sm">
+              {recipe.prompt.variables.map((variable) => (
+                <div class="flex flex-wrap gap-x-4 gap-y-1 px-4 py-2.5">
+                  <dt class="font-mono text-fg-subtle">{variable.name}</dt>
+                  <dd class="text-fg">{variable.default === '' ? '(empty)' : variable.default}</dd>
+                </div>
+              ))}
+            </dl>
+          </section>
+        )}
+      </div>
+
+      <!-- ===== How it was made ===== -->
+      <aside>
+        <h2 class="text-2xl font-bold text-fg">How it was made</h2>
+        <dl class="mt-4 card p-0 divide-y divide-border text-sm" data-run-facts>
+          <div class="gallery-fact">
+            <dt>Model</dt>
+            <dd><a href={modelPath(firstRun.model)} class:list={['font-mono', link]} style={linkStyle}>{firstRun.model}</a></dd>
+          </div>
+          {Object.entries(firstRun.params).map(([key, value]) => (
+            <div class="gallery-fact">
+              <dt class="font-mono">{key}</dt>
+              <dd class="font-mono">{formatParam(value)}</dd>
+            </div>
+          ))}
+          <div class="gallery-fact">
+            <dt>Cost</dt>
+            <dd data-cost>{formatCost(firstRun.cost_cents)}</dd>
+          </div>
+          <div class="gallery-fact">
+            <dt>Generated</dt>
+            <dd><time datetime={firstRun.generated_on}>{formatDate(firstRun.generated_on)}</time></dd>
+          </div>
+        </dl>
+        <p class="mt-3 text-sm text-fg-subtle">
+          The cost is what this run was charged on the day it was generated. See
+          <a href="/pricing" class={link} style={linkStyle}>current prices</a>.
+        </p>
+
+        <div class="mt-6" data-cta>
+          {config.runThis ? (
+            <a href={runThisUrl} class="btn btn-primary btn-lg w-full" data-run-this>Run this</a>
+          ) : (
+            <a href={`${appUrl}/signup`} class="btn btn-primary btn-lg w-full" data-get-key>Get an API key</a>
+          )}
+        </div>
+      </aside>
+    </div>
+
+    <!-- ===== The API call ===== -->
+    <section class="mt-14">
+      <h2 class="text-2xl font-bold text-fg">The API call</h2>
+      <p class="mt-2 mb-4 text-fg-muted">
+        The request that made this, as it was sent. Set <code class="code-chip">GODANCE_API_KEY</code> and
+        paste it into a shell. More in the <a href="/docs" class={link} style={linkStyle}>docs</a>.
+      </p>
+      <ApiCall {recipe} run={firstRun} idPrefix="run-0" />
+    </section>
+
+    <!-- ===== More runs of the same prompt ===== -->
+    {otherRuns.length > 0 && (
+      <section class="mt-14" data-other-runs>
+        <h2 class="text-2xl font-bold text-fg">The same prompt on other models</h2>
+        <div class="mt-6 space-y-10">
+          {otherRuns.map((run, i) => (
+            <div data-run={run.model}>
+              <h3 class="text-lg font-semibold text-fg">
+                <a href={modelPath(run.model)} class:list={['font-mono', link]} style={linkStyle}>{run.model}</a>
+              </h3>
+              <p class="mt-1 text-sm text-fg-muted">
+                {formatCost(run.cost_cents)} ·
+                <time datetime={run.generated_on}>{formatDate(run.generated_on)}</time> ·
+                {run.prompt_lang === 'zh' ? 'Chinese' : 'English'} prompt
+                {Object.entries(run.params).map(([key, value]) => (
+                  <Fragment> · <span class="font-mono">{key}={formatParam(value)}</span></Fragment>
+                ))}
+              </p>
+              <div class="mt-4">
+                <RunOutput {recipe} {run} {mediaBase} />
+              </div>
+              <details class="mt-4">
+                <summary class="cursor-pointer text-sm font-semibold text-fg">The API call for this run</summary>
+                <div class="mt-4">
+                  <ApiCall {recipe} {run} idPrefix={`run-${i + 1}`} />
+                </div>
+              </details>
+            </div>
+          ))}
+        </div>
+      </section>
+    )}
+
+    <!-- ===== Credit ===== -->
+    <section class="mt-14" data-credit>
+      <h2 class="text-2xl font-bold text-fg">Credit</h2>
+      <div class="mt-4 card text-sm text-fg-muted space-y-2.5">
+        <p data-credit-prompt>
+          Prompt by
+          <a href={source.author_url} class={link} style={linkStyle} rel="noopener">{source.author}</a>
+          (<a href={source.original_url} class={link} style={linkStyle} rel="noopener">original post</a>),
+          from the list
+          {listUrl
+            ? <a href={listUrl} class:list={['font-mono', link]} style={linkStyle} rel="noopener">{source.list}</a>
+            : <span class="font-mono">{source.list}</span>},
+          licensed
+          <a href={LICENCE_URLS[source.licence]} class={link} style={linkStyle} rel="license noopener" data-source-licence>{source.licence}</a>.
+        </p>
+        <p data-credit-changes>
+          {source.changes.length > 0
+            ? <Fragment>Changes from the original: {source.changes.join('; ')}.</Fragment>
+            : 'The prompt is used as published, unchanged.'}
+        </p>
+        <p data-credit-output>
+          The {isVideo ? 'video' : 'image'} on this page was generated by Godance from that prompt.
+          {config.outputLicence && <Fragment> {config.outputLicence}</Fragment>}
+        </p>
+        <p data-removal>
+          Is this yours, and you would like it removed? Write to
+          {contactIsEmail
+            ? <Fragment><!--email_off--><a href={contactHref} class={link} style={linkStyle}>{config.removalContact}</a><!--/email_off--></Fragment>
+            : <a href={contactHref} class={link} style={linkStyle}>{config.removalContact}</a>}
+          and we will take it down.
+        </p>
+      </div>
+    </section>
+
+    <!-- ===== Related ===== -->
+    {related.length > 0 && (
+      <section class="mt-14" data-related>
+        <h2 class="text-2xl font-bold text-fg">Related recipes</h2>
+        <div class="mt-6 columns-2 md:columns-3 gap-4 [&>a]:mb-4">
+          {related.map((other) => <RecipeCard recipe={other} {mediaBase} />)}
+        </div>
+      </section>
+    )}
+  </article>
+
+  <script type="application/ld+json" set:html={scriptJson(recipeJsonLd(recipe, Astro.site ?? Astro.url, mediaBase))} />
+</Layout>
+
+<style>
+  .gallery-fact {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.625rem 1rem;
+  }
+  .gallery-fact dt {
+    color: var(--color-fg-subtle);
+  }
+  .gallery-fact dd {
+    color: var(--color-fg);
+    text-align: right;
+    overflow-wrap: anywhere;
+  }
+</style>
+
+<script is:inline>
+  // Copy buttons: each names the element whose text it copies.
+  (function () {
+    [].forEach.call(document.querySelectorAll('[data-copy]'), function (button) {
+      button.addEventListener('click', function () {
+        var target = document.getElementById(button.getAttribute('data-copy'));
+        if (!target || !navigator.clipboard) return;
+        navigator.clipboard.writeText(target.textContent || '').then(function () {
+          var label = button.textContent;
+          button.textContent = 'Copied';
+          setTimeout(function () { button.textContent = label; }, 1600);
+        });
+      });
+    });
+  })();
+</script>

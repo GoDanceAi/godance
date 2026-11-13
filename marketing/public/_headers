@@ -21,3 +21,9 @@
 
 /sitemap-*.xml
   Cache-Control: public, max-age=3600
+
+# Gallery JSON, read by the app from another origin. Short cache so a newly
+# published recipe shows up within minutes.
+/gallery/*.json
+  Access-Control-Allow-Origin: *
+  Cache-Control: public, max-age=300, must-revalidate
