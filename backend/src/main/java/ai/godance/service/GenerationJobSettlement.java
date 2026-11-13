@@ -72,12 +72,25 @@ public class GenerationJobSettlement {
      * Ends an open job DONE and writes its usage row, together. False when
      * the job already ended; then nothing is written, and the estimate was
      * already refunded by whoever ended it.
+     *
+     * <p>{@code actualCostCents} is what the job is charged. When the
+     * provider delivered less than the job held for, it is below the
+     * estimate, and the difference goes back in this same transaction. It is
+     * never above the estimate: nothing here charges beyond the hold.
      */
     @Transactional
     public boolean complete(GenerationJob job, String outputUrl, long actualCostCents, UsageRecord usageRecord) {
+        Long estimate = job.getEstimatedCostCents();
+        if (estimate != null && actualCostCents > estimate) {
+            throw new IllegalArgumentException("a job is never charged above its hold: estimate "
+                    + estimate + ", actual " + actualCostCents);
+        }
         Instant now = Instant.now();
         if (jobs.completeIfOpen(job.getId(), outputUrl, actualCostCents, now) == 0) return false;
         usage.save(usageRecord);
+        if (estimate != null && actualCostCents < estimate) {
+            ledger.reconcile(job.getUserId(), estimate, actualCostCents, refundRequestId(job));
+        }
         job.setStatus(JobStatus.DONE);
         job.setOutputUrl(outputUrl);
         job.setActualCostCents(actualCostCents);

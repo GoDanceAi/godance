@@ -63,6 +63,11 @@ public class RunwayVideoProvider implements VideoProviderAdapter {
     }
 
     @Override
+    public int defaultDurationSeconds() {
+        return DEFAULT_DURATION_SECONDS;
+    }
+
+    @Override
     public Mono<List<GeneratedVideo>> generate(VideoRequest request) {
         RunwaySubmit body = new RunwaySubmit(
                 request.model(),

@@ -4,6 +4,7 @@ import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import static com.github.tomakehurst.wiremock.client.WireMock.post;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
@@ -203,6 +204,34 @@ class GenerationJobRecoveryIntegrationTest {
         assertThat(after.getOutputUrl()).isNull();
         assertThat(usage.findByUserIdAndRecordedAtGreaterThanEqual(u.id(), Instant.now().minusSeconds(60))).isEmpty();
         assertThat(balance(u.id())).isEqualTo(100_00L);
+    }
+
+    @Test
+    void complete_afterTheSweepEndedTheJob_givenLessDeliveredThanHeld_returnsNothingMore() {
+        Signed u = signupWithBalance(100_00L);
+        GenerationJob job = job(u.id(), 500L, "img_" + UUID.randomUUID(), Instant.now().minusSeconds(60));
+        settlement.accept(job, null);
+        settlement.start(job);
+        GenerationJobSweepJob.sweep(settlement);   // the whole hold is already back
+
+        boolean completed = settlement.complete(job, "https://storage.invalid/late.png", 200L, new UsageRecord());
+
+        assertThat(completed).isFalse();
+        assertThat(balance(u.id())).isEqualTo(100_00L);
+    }
+
+    @Test
+    void complete_givenChargeAboveTheHold_throwsAndLeavesTheJobOpen() {
+        Signed u = signupWithBalance(100_00L);
+        GenerationJob job = job(u.id(), 500L, "img_" + UUID.randomUUID(), Instant.now().plus(Duration.ofMinutes(10)));
+        settlement.accept(job, null);
+        settlement.start(job);
+
+        assertThatThrownBy(() -> settlement.complete(job, "https://storage.invalid/over.png", 600L, new UsageRecord()))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        assertThat(jobs.findById(job.getId()).orElseThrow().getStatus()).isEqualTo(JobStatus.RUNNING);
+        assertThat(balance(u.id())).isEqualTo(100_00L - 500L);
     }
 
     // ===== Storage fails after the provider delivered (R-05) ==========

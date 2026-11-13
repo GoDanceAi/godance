@@ -104,4 +104,27 @@ class SoraVideoProviderTest {
                 .withRequestBody(matchingJsonPath("$.model", equalTo("sora-2-pro")))
                 .withRequestBody(matchingJsonPath("$.size", equalTo("1792x1024"))));
     }
+
+    @Test
+    void generate_givenNoDuration_asksForTheDefaultItDeclares() {
+        wm.stubFor(post(urlEqualTo("/v1/videos"))
+                .willReturn(aResponse().withStatus(200)
+                        .withHeader("content-type", "application/json")
+                        .withBody("{\"id\":\"vid_def\",\"status\":\"queued\"}")));
+        wm.stubFor(get(urlPathMatching("/v1/videos/vid_def"))
+                .willReturn(aResponse().withStatus(200)
+                        .withHeader("content-type", "application/json")
+                        .withBody("{\"id\":\"vid_def\",\"status\":\"completed\"}")));
+        wm.stubFor(get(urlEqualTo("/v1/videos/vid_def/content"))
+                .willReturn(aResponse().withStatus(200)
+                        .withHeader("content-type", "video/mp4")
+                        .withBody(new byte[] { 'M', 'P', '4' })));
+
+        provider.generate(new VideoRequest("sora-2", "A test clip", null, null, 1)).block(Duration.ofMinutes(2));
+
+        // The service prices a request on defaultDurationSeconds(); the two must not drift apart.
+        wm.verify(postRequestedFor(urlEqualTo("/v1/videos"))
+                .withRequestBody(matchingJsonPath("$.seconds",
+                        equalTo(String.valueOf(provider.defaultDurationSeconds())))));
+    }
 }

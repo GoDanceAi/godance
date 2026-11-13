@@ -11,6 +11,7 @@ import static com.github.tomakehurst.wiremock.stubbing.Scenario.STARTED;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -41,13 +42,18 @@ import com.github.tomakehurst.wiremock.verification.LoggedRequest;
 
 import ai.godance.domain.CreditSource;
 import ai.godance.domain.JobStatus;
+import ai.godance.gateway.CostCalculator;
+import ai.godance.gateway.ModelCatalog;
+import ai.godance.gateway.ModelCatalog.ModelInfo;
 import ai.godance.repository.GenerationJobRepository;
+import ai.godance.repository.UsageRecordRepository;
 import ai.godance.repository.UserRepository;
 import ai.godance.security.WebhookSigner;
 import ai.godance.service.CreditLedgerService;
 import ai.godance.web.dto.AuthDtos.AuthResponse;
 import ai.godance.web.dto.ImageDtos.AsyncJobAcknowledged;
 import ai.godance.web.dto.ImageDtos.JobView;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * End-to-end async video gen via {@link ai.godance.gateway.providers.SoraVideoProvider}:
@@ -101,6 +107,10 @@ class VideoGenerationIntegrationTest {
     @Autowired CreditLedgerService ledger;
     @Autowired GenerationJobRepository jobs;
     @Autowired WebhookSigner webhookSigner;
+    @Autowired CostCalculator costs;
+    @Autowired ModelCatalog catalog;
+    @Autowired UsageRecordRepository usage;
+    @Autowired ObjectMapper json;
 
     @BeforeEach
     void reset() {
@@ -153,6 +163,22 @@ class VideoGenerationIntegrationTest {
                 .willReturn(aResponse().withStatus(200)
                         .withHeader("content-type", "video/mp4")
                         .withBody(tinyMp4)));
+    }
+
+    /** Submit, then the first poll already reports {@code completed}: one clip, whatever was asked for. */
+    private static void stubSoraImmediateRun() {
+        openAiMock.stubFor(post(urlEqualTo("/v1/videos"))
+                .willReturn(aResponse().withStatus(200)
+                        .withHeader("content-type", "application/json")
+                        .withBody("{\"id\":\"vid_fast\",\"status\":\"queued\"}")));
+        openAiMock.stubFor(get(urlPathMatching("/v1/videos/vid_fast"))
+                .willReturn(aResponse().withStatus(200)
+                        .withHeader("content-type", "application/json")
+                        .withBody("{\"id\":\"vid_fast\",\"status\":\"completed\"}")));
+        openAiMock.stubFor(get(urlEqualTo("/v1/videos/vid_fast/content"))
+                .willReturn(aResponse().withStatus(200)
+                        .withHeader("content-type", "video/mp4")
+                        .withBody("FAKE-MP4-BYTES".getBytes(StandardCharsets.UTF_8))));
     }
 
     /** Submit succeeds; the upstream poll then reports {@code failed}. */
@@ -291,7 +317,81 @@ class VideoGenerationIntegrationTest {
         assertThat(ledger.authoritativeBalance(u.id())).isEqualTo(1000_00L);
     }
 
+    // ===== Billing matches what was generated =========================
+
+    @Test
+    void videos_secondsOmitted_billsTheDurationSentUpstream() throws Exception {
+        Signed u = signupWithBalance(1000_00L);
+        stubSoraImmediateRun();
+
+        AsyncJobAcknowledged ack = http.post().uri("/v1/videos/generations")
+                .header("Authorization", u.bearer())
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("model", "sora-2", "prompt", "No duration given"))
+                .exchange()
+                .expectStatus().isAccepted()
+                .expectBody(AsyncJobAcknowledged.class).returnResult().getResponseBody();
+
+        JobView done = pollJob(u.bearer(), ack.jobId());
+        assertThat(done.status()).isEqualTo(JobStatus.DONE);
+
+        // Whatever length the provider was asked for is the length that is billed.
+        List<LoggedRequest> submits = openAiMock.findAll(postRequestedFor(urlEqualTo("/v1/videos")));
+        assertThat(submits).hasSize(1);
+        int secondsSentUpstream = json.readTree(submits.get(0).getBodyAsString()).get("seconds").asInt();
+        long expected = costs.videoCostCents(catalog.find("sora-2").orElseThrow(), secondsSentUpstream, 1);
+
+        assertThat(done.estimatedCostCents()).isEqualTo(expected);
+        assertThat(done.actualCostCents()).isEqualTo(expected);
+        awaitBalance(u.id(), 1000_00L - expected);
+    }
+
+    @Test
+    void videos_fewerClipsDeliveredThanRequested_billsTheDeliveredClips() throws Exception {
+        Signed u = signupWithBalance(1000_00L);
+        stubSoraImmediateRun();   // one clip comes back for a request that asked for two
+
+        AsyncJobAcknowledged ack = http.post().uri("/v1/videos/generations")
+                .header("Authorization", u.bearer())
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("model", "sora-2", "prompt", "Two clips, please", "seconds", 5, "n", 2))
+                .exchange()
+                .expectStatus().isAccepted()
+                .expectBody(AsyncJobAcknowledged.class).returnResult().getResponseBody();
+
+        JobView done = pollJob(u.bearer(), ack.jobId());
+        assertThat(done.status()).isEqualTo(JobStatus.DONE);
+
+        ModelInfo sora = catalog.find("sora-2").orElseThrow();
+        long forTwo = costs.videoCostCents(sora, 5, 2);
+        long forOne = costs.videoCostCents(sora, 5, 1);
+        assertThat(forOne).isLessThan(forTwo);
+
+        // Two clips were held up front; one was delivered, so one is charged.
+        assertThat(done.estimatedCostCents()).isEqualTo(forTwo);
+        assertThat(done.actualCostCents()).isEqualTo(forOne);
+        awaitBalance(u.id(), 1000_00L - forOne);
+
+        // The usage row feeds spending caps and revenue reports: it carries the charge, not the hold.
+        assertThat(usage.findByUserIdAndRecordedAtGreaterThanEqual(u.id(), Instant.now().minusSeconds(60)))
+                .singleElement().satisfies(r -> {
+                    assertThat(r.getCostCents()).isEqualTo(forOne);
+                    assertThat(r.getOutputTokens()).isEqualTo(5);                 // seconds of video delivered
+                    assertThat(r.getProviderCostMicrocents()).isEqualTo(sora.perSecondMicrocents() * 5);
+                });
+    }
+
     // ===== Helpers ====================================================
+
+    /** The worker's ledger writes can land just after the job reads as DONE. */
+    private void awaitBalance(UUID userId, long expectedCents) throws InterruptedException {
+        long deadline = System.currentTimeMillis() + 3_000;
+        while (System.currentTimeMillis() < deadline
+                && ledger.authoritativeBalance(userId) != expectedCents) {
+            Thread.sleep(50);
+        }
+        assertThat(ledger.authoritativeBalance(userId)).isEqualTo(expectedCents);
+    }
 
     private JobView pollJob(String bearer, UUID jobId) throws InterruptedException {
         JobView view = null;

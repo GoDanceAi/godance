@@ -86,4 +86,25 @@ class VideoProviderGatewayTest {
         VideoProviderGateway gw = gatewayInRegion("digitalocean", sora);
         assertThat(gw.dispatch(SORA)).isSameAs(sora);
     }
+
+    // ===== Default clip length, read for pricing ======================
+
+    @Test
+    void defaultDurationSeconds_givenAdapterWithItsOwnDefault_returnsIt() {
+        VideoProviderAdapter tenSeconds = new VideoProviderAdapter() {
+            @Override public Provider type() { return Provider.OPENAI; }
+            @Override public int defaultDurationSeconds() { return 10; }
+            @Override public Mono<List<GeneratedVideo>> generate(VideoRequest request) {
+                return Mono.error(new UnsupportedOperationException("stub"));
+            }
+        };
+        VideoProviderGateway gw = gatewayInRegion("digitalocean", tenSeconds);
+        assertThat(gw.defaultDurationSeconds(SORA)).isEqualTo(10);
+    }
+
+    @Test
+    void defaultDurationSeconds_givenNoAdapterForTheProvider_returnsTheStandardLength() {
+        VideoProviderGateway gw = gatewayInRegion("digitalocean", stubAdapter(Provider.KLING));
+        assertThat(gw.defaultDurationSeconds(SORA)).isEqualTo(VideoProviderAdapter.STANDARD_CLIP_SECONDS);
+    }
 }

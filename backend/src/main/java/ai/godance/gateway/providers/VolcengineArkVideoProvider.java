@@ -39,6 +39,7 @@ public class VolcengineArkVideoProvider implements VideoProviderAdapter {
 
     private static final Logger log = LoggerFactory.getLogger(VolcengineArkVideoProvider.class);
     private static final String STATUS_SUCCEEDED = "succeeded";
+    private static final int DEFAULT_DURATION_SECONDS = 5;
 
     private final WebClient apiClient;
     private final WebClient downloadClient;
@@ -64,11 +65,16 @@ public class VolcengineArkVideoProvider implements VideoProviderAdapter {
     }
 
     @Override
+    public int defaultDurationSeconds() {
+        return DEFAULT_DURATION_SECONDS;
+    }
+
+    @Override
     public Mono<List<GeneratedVideo>> generate(VideoRequest request) {
         ArkSubmit body = new ArkSubmit(
                 request.model(),
                 List.of(new ArkContent("text", request.prompt())),
-                request.durationSeconds() == null ? 5 : request.durationSeconds(),
+                request.durationSeconds() == null ? DEFAULT_DURATION_SECONDS : request.durationSeconds(),
                 request.size() == null ? "1280x720" : request.size());
 
         return apiClient.post()

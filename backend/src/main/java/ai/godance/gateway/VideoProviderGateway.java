@@ -53,6 +53,18 @@ public class VideoProviderGateway {
         return adapter;
     }
 
+    /**
+     * The clip length the model's adapter generates for a request that names
+     * none, so the request can be priced before it runs. It reads a constant:
+     * unlike {@link #dispatch} it makes no regional check and never throws. A
+     * model with no adapter gets the standard length, and its job then fails
+     * at dispatch and is refunded.
+     */
+    public int defaultDurationSeconds(ModelInfo model) {
+        VideoProviderAdapter adapter = adapters.get(model.provider());
+        return adapter != null ? adapter.defaultDurationSeconds() : VideoProviderAdapter.STANDARD_CLIP_SECONDS;
+    }
+
     public Region region() {
         return region;
     }
