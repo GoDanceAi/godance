@@ -12,6 +12,7 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import vm from 'node:vm';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const FIXTURES = path.join(ROOT, 'fixtures/gallery/recipes');
@@ -109,6 +110,53 @@ const snippets = (html) =>
     kind: match[1],
     text: decode(match[2]),
   }));
+
+/**
+ * Runs a recipe page's copy script against a stand-in for the page: one Copy
+ * button and the element it names. `clipboard` is what `navigator.clipboard`
+ * is (undefined for a browser that has none).
+ */
+function copyHarness(html, { clipboard }) {
+  const source = [...html.matchAll(/<script(?![^>]*application\/ld\+json)[^>]*>([\s\S]*?)<\/script>/g)]
+    .map((match) => match[1])
+    .find((text) => text.includes('data-copy'));
+  assert.ok(source, 'the page carries the copy script');
+
+  const target = { textContent: 'the text to copy' };
+  const listeners = [];
+  const button = {
+    textContent: 'Copy',
+    attributes: { 'data-copy': 'copy-target' },
+    getAttribute(name) { return this.attributes[name] ?? null; },
+    setAttribute(name, value) { this.attributes[name] = String(value); },
+    addEventListener(type, listener) { if (type === 'click') listeners.push(listener); },
+  };
+  const selected = [];
+  const timers = [];
+  vm.runInNewContext(source, {
+    document: {
+      querySelectorAll: (selector) => (selector === '[data-copy]' ? [button] : []),
+      getElementById: (id) => (id === 'copy-target' ? target : null),
+      createRange: () => ({ selectNodeContents: (node) => selected.push(node) }),
+    },
+    navigator: clipboard === undefined ? {} : { clipboard },
+    window: { getSelection: () => ({ removeAllRanges() {}, addRange() {} }) },
+    setTimeout: (callback) => timers.push(callback),
+    clearTimeout() {},
+  });
+  return {
+    button,
+    target,
+    selected,
+    async click() {
+      for (const listener of listeners) listener({ preventDefault() {} });
+      await new Promise((resolve) => setImmediate(resolve));
+    },
+    runTimers() {
+      for (const callback of timers.splice(0)) callback();
+    },
+  };
+}
 
 // --- the gallery on -----------------------------------------------------------
 
@@ -285,6 +333,54 @@ describe('gallery on, against the fixtures', { timeout: 300_000 }, () => {
     assert.ok(bySlug['handwritten-receipt-note'].prompt.en.includes('</script>'), 'the fixture carries the tag');
     assert.equal(html.match(/<\/script>/g).length, html.match(/<script\b/g).length, 'every </script> closes a real script');
     assert.equal(inner(html, 'id="prompt-en"'), bySlug['handwritten-receipt-note'].prompt.en);
+  });
+
+  test('nothing follows the closing </html> on any gallery page', () => {
+    const pages = walk(dir).filter((file) => file.startsWith('gallery/') && file.endsWith('.html'));
+    assert.ok(pages.length > recipes.length, 'recipe, gallery and model pages');
+    for (const file of pages) {
+      assert.ok(read(dir, file).trimEnd().endsWith('</html>'), `${file} ends with </html>`);
+    }
+  });
+
+  test('Copy writes the named text to the clipboard and says so, then puts its label back', async () => {
+    const written = [];
+    const page = copyHarness(pageOf(dir, 'tin-robot-tea-party'), {
+      clipboard: { writeText: (text) => { written.push(text); return Promise.resolve(); } },
+    });
+    await page.click();
+    assert.deepEqual(written, ['the text to copy']);
+    assert.equal(page.button.textContent, 'Copied');
+    page.runTimers();
+    assert.equal(page.button.textContent, 'Copy');
+  });
+
+  test('a refused clipboard write selects the text for the reader, and says so', async () => {
+    const page = copyHarness(pageOf(dir, 'tin-robot-tea-party'), {
+      clipboard: { writeText: () => Promise.reject(new Error('Write permission denied.')) },
+    });
+    await page.click();
+    assert.deepEqual(page.selected, [page.target], 'the text is selected');
+    assert.equal(page.button.textContent, 'Selected');
+    page.runTimers();
+    assert.equal(page.button.textContent, 'Copy');
+  });
+
+  test('a browser with no clipboard API gets the same fallback', async () => {
+    const page = copyHarness(pageOf(dir, 'tin-robot-tea-party'), { clipboard: undefined });
+    await page.click();
+    assert.deepEqual(page.selected, [page.target]);
+    assert.equal(page.button.textContent, 'Selected');
+  });
+
+  test('clicking Copy twice in a row still puts the original label back', async () => {
+    const page = copyHarness(pageOf(dir, 'tin-robot-tea-party'), {
+      clipboard: { writeText: () => Promise.resolve() },
+    });
+    await page.click();
+    await page.click();
+    page.runTimers();
+    assert.equal(page.button.textContent, 'Copy');
   });
 
   test('"Run this" is absent while it is off, and "Get an API key" links to signup', () => {

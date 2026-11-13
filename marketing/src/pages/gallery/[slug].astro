@@ -254,6 +254,49 @@ const linkStyle = 'color: var(--color-primary)';
   </article>
 
   <script type="application/ld+json" set:html={scriptJson(recipeJsonLd(recipe, Astro.site ?? Astro.url, mediaBase))} />
+
+  <!-- Inside the layout, so it lands in the body and not after </html>. -->
+  <script is:inline>
+    // Copy buttons: each names the element whose text it copies.
+    (function () {
+      // Say what happened on the button, then put its own label back.
+      function answer(button, word) {
+        var label = button.getAttribute('data-label');
+        if (label === null) {
+          label = button.textContent;
+          button.setAttribute('data-label', label);
+        }
+        button.textContent = word;
+        setTimeout(function () { button.textContent = label; }, 1600);
+      }
+
+      // No clipboard API, or the browser refused the write: select the text
+      // and say so, so the reader can copy it themselves.
+      function selectForReader(button, target) {
+        var range = document.createRange();
+        range.selectNodeContents(target);
+        var selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+        answer(button, 'Selected');
+      }
+
+      [].forEach.call(document.querySelectorAll('[data-copy]'), function (button) {
+        button.addEventListener('click', function () {
+          var target = document.getElementById(button.getAttribute('data-copy'));
+          if (!target) return;
+          if (!navigator.clipboard || !navigator.clipboard.writeText) {
+            selectForReader(button, target);
+            return;
+          }
+          navigator.clipboard.writeText(target.textContent || '').then(
+            function () { answer(button, 'Copied'); },
+            function () { selectForReader(button, target); }
+          );
+        });
+      });
+    })();
+  </script>
 </Layout>
 
 <style>
@@ -272,20 +315,3 @@ const linkStyle = 'color: var(--color-primary)';
     overflow-wrap: anywhere;
   }
 </style>
-
-<script is:inline>
-  // Copy buttons: each names the element whose text it copies.
-  (function () {
-    [].forEach.call(document.querySelectorAll('[data-copy]'), function (button) {
-      button.addEventListener('click', function () {
-        var target = document.getElementById(button.getAttribute('data-copy'));
-        if (!target || !navigator.clipboard) return;
-        navigator.clipboard.writeText(target.textContent || '').then(function () {
-          var label = button.textContent;
-          button.textContent = 'Copied';
-          setTimeout(function () { button.textContent = label; }, 1600);
-        });
-      });
-    });
-  })();
-</script>
