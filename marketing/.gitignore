@@ -2,6 +2,9 @@
 .astro/
 dist/
 
+# Gallery import pipeline: working state and generated media, never committed
+.gallery-work/
+
 # Node
 node_modules/
 npm-debug.log*
