@@ -96,6 +96,12 @@ function wholeNumber(flags, name, fallback) {
 }
 
 const plural = (n, noun) => `${n} ${noun}${n === 1 ? '' : 's'}`;
+
+/** A path as it is printed: relative to marketing/ when it is inside it, in full otherwise. */
+function shown(file) {
+  const relative = path.relative(MARKETING_ROOT, file);
+  return relative.startsWith('..') ? file : relative;
+}
 const roundUp = (amount) => Math.ceil(amount - 1e-9);
 
 /** Candidates to run, spread across categories so one category does not take every slot. */
@@ -249,7 +255,13 @@ export async function main(argv, io = {}) {
           const translation = projectTranslate(candidates, { prices, model: modelMap.text.translate });
           translateCents += translation.cents;
           if (standard) classifyCents += projectClassify(candidates, { prices, model: modelMap.text.classify, standard });
-          out(`  translate  ${translation.needModel} of ${candidates.length} need a text model for one language; the list supplies both languages for the other ${candidates.length - translation.needModel}`);
+          out(
+            translation.needModel === 0
+              ? `  translate  none of the ${candidates.length} need a text model: the list supplies both languages`
+              : translation.needModel === candidates.length
+                ? `  translate  all ${candidates.length} need a text model for one language`
+                : `  translate  ${translation.needModel} of ${candidates.length} need a text model for one language; the list supplies both for the other ${candidates.length - translation.needModel}`,
+          );
 
           const items = candidates.map((entry) => {
             const plan = planTranslation(entry);
@@ -301,7 +313,7 @@ export async function main(argv, io = {}) {
             entries: [...earlier.entries.filter((entry) => !ids.has(entry.source)), ...fetched.entries],
             dropped: fetched.dropped,
           });
-          out(`\nwrote ${path.relative(MARKETING_ROOT, work.entries)}`);
+          out(`\nwrote ${shown(work.entries)}`);
         }
         return fetched.sources.some((source) => source.refused) ? 1 : 0;
       }
@@ -349,7 +361,7 @@ export async function main(argv, io = {}) {
         }
         if (apply) {
           await writeJson(work.screened, all);
-          out(`\nwrote ${path.relative(MARKETING_ROOT, work.screened)}`);
+          out(`\nwrote ${shown(work.screened)}`);
         }
         return 0;
       }
@@ -432,7 +444,7 @@ export async function main(argv, io = {}) {
         if (apply) {
           await mkdir(work.review, { recursive: true });
           await writeFile(work.reviewSheet, reviewSheet({ items, standardVersion: version, decisions, builtAt: now().toISOString() }));
-          out(`wrote ${path.relative(MARKETING_ROOT, work.reviewSheet)}: open it in a browser, decide, and save decisions.json beside it`);
+          out(`wrote ${shown(work.reviewSheet)}: open it in a browser, decide, and save decisions.json beside it`);
         }
         return 0;
       }
@@ -440,7 +452,7 @@ export async function main(argv, io = {}) {
       case 'publish': {
         header('publish');
         const decisions = await readJson(work.decisions, null);
-        if (!decisions) throw new Error(`there are no decisions yet: the operator saves ${path.relative(MARKETING_ROOT, work.decisions)} from the review sheet`);
+        if (!decisions) throw new Error(`there are no decisions yet: the operator saves ${shown(work.decisions)} from the review sheet`);
         const wrong = checkDecisions(decisions);
         if (wrong.length > 0) throw new Error(`the decisions file cannot be used:\n  ${wrong.join('\n  ')}`);
         const result = await publish({
@@ -457,7 +469,7 @@ export async function main(argv, io = {}) {
         if (apply) {
           const folder = await readRecipeFolder(contentDir);
           out(folder.problems.length === 0 ? `the gallery folder is valid: ${plural(folder.recipes.length, 'recipe')}` : `the gallery folder has ${plural(folder.problems.length, 'problem')}: run npm run validate`);
-          if (result.media.length > 0) out(`media to upload is listed in ${path.relative(MARKETING_ROOT, work.manifest)} (${plural(result.media.length, 'file')}); media is never committed`);
+          if (result.media.length > 0) out(`media to upload is listed in ${shown(work.manifest)} (${plural(result.media.length, 'file')}); media is never committed`);
           if (folder.problems.length > 0) return 1;
         }
         return result.refused.length > 0 ? 1 : 0;
