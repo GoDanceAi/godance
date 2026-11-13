@@ -52,12 +52,14 @@ public class BillingService {
     private final MailService mail;
     private final AutoRechargeService autoRecharge;
     private final ParentalConsentService parentalConsent;
+    private final ReferralRewardService referralRewards;
 
     public BillingService(StripeService stripe, NowPaymentsService nowPayments,
                           CreditLedgerService ledger, UserRepository users,
                           AuditLogService audit, BillingProperties billing,
                           MailService mail, AutoRechargeService autoRecharge,
-                          ParentalConsentService parentalConsent) {
+                          ParentalConsentService parentalConsent,
+                          ReferralRewardService referralRewards) {
         this.stripe = stripe;
         this.nowPayments = nowPayments;
         this.ledger = ledger;
@@ -67,6 +69,7 @@ public class BillingService {
         this.mail = mail;
         this.autoRecharge = autoRecharge;
         this.parentalConsent = parentalConsent;
+        this.referralRewards = referralRewards;
     }
 
     /**
@@ -290,6 +293,9 @@ public class BillingService {
         // older event must not put back a card the user has since replaced.
         if (result == TopUpResult.APPLIED) {
             capturePaymentMethodIfPresent(userId, session.getId(), ip);
+            // A first paid top-up may complete a referral. Checked after this
+            // commits, apart from it: it can never fail or undo the payment.
+            referralRewards.afterTopUp(userId, event.getId());
         }
     }
 
@@ -471,6 +477,10 @@ public class BillingService {
         audit.record(evtType, AuditOutcome.SUCCESS, userId, ip, Map.of(
                 "amountCents", cents,
                 "paymentId", ipn.paymentId()));
+        if (result == TopUpResult.APPLIED) {
+            // As for a card top-up: after commit, never in the payment's way.
+            referralRewards.afterTopUp(userId, ipn.paymentId());
+        }
     }
 
     public record TopUpIntent(String sessionId, String url, long amountCents) { }

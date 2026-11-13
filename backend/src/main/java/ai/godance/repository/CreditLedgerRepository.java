@@ -17,6 +17,9 @@ public interface CreditLedgerRepository extends JpaRepository<CreditLedger, UUID
     /** Scoped by user so it runs on the user_id index, not a scan of the whole ledger. */
     boolean existsByUserIdAndSourceAndSourceRef(UUID userId, CreditSource source, String sourceRef);
 
+    /** Whether the user holds any entry from one of {@code sources}, e.g. has ever paid. */
+    boolean existsByUserIdAndSourceIn(UUID userId, java.util.Collection<CreditSource> sources);
+
     /**
      * Authoritative balance for a user (in cents). The
      * {@code User.creditBalanceCents} column is a denormalized cache;
