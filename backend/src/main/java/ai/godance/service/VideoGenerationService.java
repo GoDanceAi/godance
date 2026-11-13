@@ -29,6 +29,7 @@ import ai.godance.gateway.VideoDtos.VideoRequest;
 import ai.godance.gateway.VideoProviderAdapter;
 import ai.godance.gateway.VideoProviderGateway;
 import ai.godance.security.WebhookSigner;
+import ai.godance.service.GenerationJobSettlement.StoredOutput;
 import ai.godance.storage.ObjectStorageClient;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
@@ -157,8 +158,10 @@ public class VideoGenerationService {
         List<UploadedVideo> uploaded;
         boolean completed;
         try {
-            uploaded = uploadAll(job.getId(), upstream);
-            completed = settlement.complete(job, uploaded.isEmpty() ? null : uploaded.get(0).url(), cost,
+            Uploads uploads = uploadAll(job.getId(), upstream);
+            uploaded = uploads.videos();
+            completed = settlement.complete(job, uploaded.isEmpty() ? null : uploaded.get(0).url(),
+                    uploads.stored(), cost,
                     buildUsageRecord(userId, apiKeyId, model, cost, job.getRequestId(), duration, upstream.size()));
         } catch (RuntimeException e) {
             log.warn("Video job {} could not be finalised: {}", job.getId(), e.getMessage());
@@ -181,16 +184,23 @@ public class VideoGenerationService {
         return Math.min(job.getEstimatedCostCents(), price);
     }
 
-    private List<UploadedVideo> uploadAll(UUID jobId, List<GeneratedVideo> videos) {
+    /** What was stored: the clips as the webhook shows them, and the rows the job records. */
+    private record Uploads(List<UploadedVideo> videos, List<StoredOutput> stored) { }
+
+    private Uploads uploadAll(UUID jobId, List<GeneratedVideo> videos) {
         List<UploadedVideo> out = new ArrayList<>(videos.size());
+        List<StoredOutput> stored = new ArrayList<>(videos.size());
         for (int i = 0; i < videos.size(); i++) {
             GeneratedVideo v = videos.get(i);
             String ext = mimeToExt(v.mimeType());
             String key = "videos/" + jobId + "/" + i + "." + ext;
             storage.upload(key, v.bytes(), v.mimeType());
             out.add(new UploadedVideo(storage.presignedUrl(key), key));
+            String contentType = v.mimeType() == null || v.mimeType().isBlank()
+                    ? "application/octet-stream" : v.mimeType();
+            stored.add(new StoredOutput(key, contentType, v.bytes().length, null));
         }
-        return out;
+        return new Uploads(out, stored);
     }
 
     private void fireWebhook(UUID userId, String url, UUID jobId,

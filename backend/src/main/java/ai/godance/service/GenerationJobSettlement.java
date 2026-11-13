@@ -9,8 +9,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import ai.godance.domain.GenerationJob;
+import ai.godance.domain.GenerationJobOutput;
 import ai.godance.domain.JobStatus;
 import ai.godance.domain.UsageRecord;
+import ai.godance.repository.GenerationJobOutputRepository;
 import ai.godance.repository.GenerationJobRepository;
 import ai.godance.repository.UsageRecordRepository;
 
@@ -34,13 +36,18 @@ public class GenerationJobSettlement {
     private final GenerationJobRepository jobs;
     private final CreditLedgerService ledger;
     private final UsageRecordRepository usage;
+    private final GenerationJobOutputRepository outputs;
 
     public GenerationJobSettlement(GenerationJobRepository jobs, CreditLedgerService ledger,
-                                   UsageRecordRepository usage) {
+                                   UsageRecordRepository usage, GenerationJobOutputRepository outputs) {
         this.jobs = jobs;
         this.ledger = ledger;
         this.usage = usage;
+        this.outputs = outputs;
     }
+
+    /** A file the worker stored for a job, recorded when the job ends DONE (V23). */
+    public record StoredOutput(String storageKey, String contentType, long sizeBytes, String revisedPrompt) { }
 
     /**
      * Pre-debits the job's estimate, holding it against the caller's spending
@@ -69,9 +76,10 @@ public class GenerationJobSettlement {
     }
 
     /**
-     * Ends an open job DONE and writes its usage row, together. False when
-     * the job already ended; then nothing is written, and the estimate was
-     * already refunded by whoever ended it.
+     * Ends an open job DONE and writes its usage row and one row per stored
+     * output, together. False when the job already ended; then nothing is
+     * written, and the estimate was already refunded by whoever ended it.
+     * {@code stored} is in output order; the first is index 0.
      *
      * <p>{@code actualCostCents} is what the job is charged. When the
      * provider delivered less than the job held for, it is below the
@@ -79,7 +87,8 @@ public class GenerationJobSettlement {
      * never above the estimate: nothing here charges beyond the hold.
      */
     @Transactional
-    public boolean complete(GenerationJob job, String outputUrl, long actualCostCents, UsageRecord usageRecord) {
+    public boolean complete(GenerationJob job, String outputUrl, List<StoredOutput> stored,
+                            long actualCostCents, UsageRecord usageRecord) {
         Long estimate = job.getEstimatedCostCents();
         if (estimate != null && actualCostCents > estimate) {
             throw new IllegalArgumentException("a job is never charged above its hold: estimate "
@@ -88,6 +97,11 @@ public class GenerationJobSettlement {
         Instant now = Instant.now();
         if (jobs.completeIfOpen(job.getId(), outputUrl, actualCostCents, now) == 0) return false;
         usage.save(usageRecord);
+        for (int i = 0; i < stored.size(); i++) {
+            StoredOutput o = stored.get(i);
+            outputs.save(new GenerationJobOutput(job.getId(), i, o.storageKey(), o.contentType(),
+                    o.sizeBytes(), o.revisedPrompt()));
+        }
         if (estimate != null && actualCostCents < estimate) {
             ledger.reconcile(job.getUserId(), estimate, actualCostCents, refundRequestId(job));
         }

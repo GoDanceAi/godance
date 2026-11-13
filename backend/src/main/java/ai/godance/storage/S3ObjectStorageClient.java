@@ -203,6 +203,32 @@ public class S3ObjectStorageClient implements ObjectStorageClient {
         return deleted;
     }
 
+    /** Lists the prefix with ListObjectsV2, following continuation tokens. */
+    @Override
+    public List<StoredObject> list(String prefix) {
+        if (prefix == null || prefix.isBlank()) {
+            throw new IllegalArgumentException("refusing to list by an empty prefix");
+        }
+        List<StoredObject> found = new java.util.ArrayList<>();
+        String continuation = null;
+        try {
+            do {
+                ListObjectsV2Response page = s3.listObjectsV2(ListObjectsV2Request.builder()
+                        .bucket(props.bucket())
+                        .prefix(prefix)
+                        .continuationToken(continuation)
+                        .build());
+                page.contents().forEach(o -> found.add(
+                        new StoredObject(o.key(), o.size() == null ? 0L : o.size())));
+                continuation = Boolean.TRUE.equals(page.isTruncated()) ? page.nextContinuationToken() : null;
+            } while (continuation != null);
+        } catch (SdkException e) {
+            throw new IllegalStateException(
+                    "object storage list failed for prefix=" + prefix + ": " + e.getMessage(), e);
+        }
+        return List.copyOf(found);
+    }
+
     /**
      * Puts the {@code Content-MD5} header back on DeleteObjects requests.
      * Since 2.30 the AWS SDK sends a CRC32 checksum there instead, and MinIO

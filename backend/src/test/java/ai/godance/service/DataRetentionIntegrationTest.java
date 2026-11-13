@@ -103,6 +103,7 @@ class DataRetentionIntegrationTest {
     @Autowired DataRetentionService retention;
     @Autowired UserRepository users;
     @Autowired GenerationJobRepository jobs;
+    @Autowired ai.godance.repository.GenerationJobOutputRepository outputRows;
     @Autowired ConversationRepository conversations;
     @Autowired ConversationMessageRepository messages;
     @Autowired AuditLogEntryRepository audit;
@@ -110,14 +111,16 @@ class DataRetentionIntegrationTest {
     // ===== Generated media and prompts: 90 days =========================
 
     @Test
-    void run_givenEndedJobOlderThan90Days_deletesItsMediaAndRedactsIt() {
+    void run_givenEndedJobOlderThan90Days_deletesItsMediaAndOutputRowsAndRedactsIt() {
         UUID owner = newUser();
         GenerationJob oldImage = job(owner, Modality.IMAGE, JobStatus.DONE, daysAgo(91));
         putObjects("images/" + oldImage.getId() + "/", "0.png", "1.png");
+        recordOutputs(oldImage, "images/", "0.png", "1.png");
         GenerationJob oldVideo = job(owner, Modality.VIDEO, JobStatus.FAILED, daysAgo(91));
         putObjects("videos/" + oldVideo.getId() + "/", "0.mp4");
         GenerationJob recent = job(owner, Modality.IMAGE, JobStatus.DONE, daysAgo(89));
         putObjects("images/" + recent.getId() + "/", "0.png");
+        recordOutputs(recent, "images/", "0.png");
         GenerationJob stillRunning = job(owner, Modality.IMAGE, JobStatus.RUNNING, daysAgo(91));
         putObjects("images/" + stillRunning.getId() + "/", "0.png");
 
@@ -127,6 +130,9 @@ class DataRetentionIntegrationTest {
         assertThat(first.jobsFailed()).isZero();
         assertPurged(oldImage);
         assertThat(keysUnder("images/" + oldImage.getId() + "/")).isEmpty();
+        // The output rows (V23) go with the media.
+        assertThat(outputRows.findByJobIdOrderByOutputIndexAsc(oldImage.getId())).isEmpty();
+        assertThat(outputRows.findByJobIdOrderByOutputIndexAsc(recent.getId())).hasSize(1);
         assertPurged(oldVideo);
         assertThat(keysUnder("videos/" + oldVideo.getId() + "/")).isEmpty();
         assertUntouched(recent);
@@ -267,6 +273,13 @@ class DataRetentionIntegrationTest {
         assertThat(j.getOutputUrl()).isEqualTo("https://storage.invalid/output");
         assertThat(j.getWebhookUrl()).isEqualTo("https://hooks.invalid/godance");
         assertThat(j.getPurgedAt()).isNull();
+    }
+
+    private void recordOutputs(GenerationJob job, String root, String... names) {
+        for (int i = 0; i < names.length; i++) {
+            outputRows.save(new ai.godance.domain.GenerationJobOutput(job.getId(), i,
+                    root + job.getId() + "/" + names[i], "image/png", 3L, null));
+        }
     }
 
     private void putObjects(String prefix, String... names) {

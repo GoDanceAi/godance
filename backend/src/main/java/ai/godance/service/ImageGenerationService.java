@@ -28,6 +28,7 @@ import ai.godance.gateway.ImageProviderGateway;
 import ai.godance.gateway.ModelCatalog;
 import ai.godance.gateway.ModelCatalog.ModelInfo;
 import ai.godance.security.WebhookSigner;
+import ai.godance.service.GenerationJobSettlement.StoredOutput;
 import ai.godance.storage.ObjectStorageClient;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
@@ -194,8 +195,10 @@ public class ImageGenerationService {
         List<UploadedImage> uploaded;
         boolean completed;
         try {
-            uploaded = uploadAll(job.getId(), upstream);
-            completed = settlement.complete(job, uploaded.isEmpty() ? null : uploaded.get(0).url(), cost,
+            Uploads uploads = uploadAll(job.getId(), upstream);
+            uploaded = uploads.images();
+            completed = settlement.complete(job, uploaded.isEmpty() ? null : uploaded.get(0).url(),
+                    uploads.stored(), cost,
                     buildUsageRecord(userId, apiKeyId, model, request, cost, job.getRequestId(), upstream.size()));
         } catch (RuntimeException e) {
             log.warn("Image job {} could not be finalised: {}", job.getId(), e.getMessage());
@@ -222,16 +225,26 @@ public class ImageGenerationService {
         return Math.min(job.getEstimatedCostCents(), price);
     }
 
-    private List<UploadedImage> uploadAll(UUID jobId, List<GeneratedImage> images) {
+    /** What was stored: the images as the response and webhook show them, and the rows the job records. */
+    private record Uploads(List<UploadedImage> images, List<StoredOutput> stored) { }
+
+    private Uploads uploadAll(UUID jobId, List<GeneratedImage> images) {
         List<UploadedImage> out = new ArrayList<>(images.size());
+        List<StoredOutput> stored = new ArrayList<>(images.size());
         for (int i = 0; i < images.size(); i++) {
             GeneratedImage g = images.get(i);
             String ext = mimeToExt(g.mimeType());
             String key = "images/" + jobId + "/" + i + "." + ext;
             storage.upload(key, g.bytes(), g.mimeType());
             out.add(new UploadedImage(storage.presignedUrl(key), key, g.revisedPrompt()));
+            stored.add(new StoredOutput(key, contentTypeOrDefault(g.mimeType()), g.bytes().length,
+                    g.revisedPrompt()));
         }
-        return out;
+        return new Uploads(out, stored);
+    }
+
+    private static String contentTypeOrDefault(String mime) {
+        return mime == null || mime.isBlank() ? "application/octet-stream" : mime;
     }
 
     private void fireWebhook(UUID userId, String url, ImageResult result) {
