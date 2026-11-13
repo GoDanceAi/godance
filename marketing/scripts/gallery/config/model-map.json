@@ -1,0 +1,20 @@
+{
+  "generate": {
+    "gpt-image-2": "gpt-image-2",
+    "seedance-2.0": "seedance-2.0"
+  },
+  "text": {
+    "classify": "gpt-4o-mini",
+    "translate": "gpt-4o-mini"
+  },
+  "image_sizes": {
+    "square": "1024x1024",
+    "portrait": "1024x1536",
+    "landscape": "1536x1024"
+  },
+  "video_sizes": {
+    "square": "1280x720",
+    "portrait": "720x1280",
+    "landscape": "1280x720"
+  }
+}

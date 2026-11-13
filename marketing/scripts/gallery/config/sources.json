@@ -1,0 +1,24 @@
+{
+  "sources": [
+    {
+      "id": "gpt-image-2",
+      "adapter": "gpt-image-2",
+      "repo": "Evolink-AI/awesome-gpt-image-2-API-Prompts",
+      "commit": "e2a269ad1a055a0b4f6c1e170341c6c1aba30faa",
+      "licence": "CC0-1.0",
+      "modality": "IMAGE",
+      "model": "gpt-image-2",
+      "max_prompt_chars": 6000
+    },
+    {
+      "id": "seedance-2",
+      "adapter": "seedance-2",
+      "repo": "YouMind-OpenLab/awesome-seedance-2-prompts",
+      "commit": "ce64a7b8af5713235ee560e1dc321b8d42b8b2c7",
+      "licence": "CC-BY-4.0",
+      "modality": "VIDEO",
+      "model": "seedance-2.0",
+      "max_prompt_chars": 4000
+    }
+  ]
+}
