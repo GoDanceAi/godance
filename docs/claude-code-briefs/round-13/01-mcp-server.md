@@ -121,7 +121,7 @@ Specifics:
 - **Godance runs no agent and makes no tool calls of its own.** It answers
   tool calls from clients.
 - **No tool can do what the key's REST access cannot.** In particular, none
-  manages keys, billing, accounts or webhooks secrets.
+  manages keys, billing, accounts or webhook secrets.
 - **A spending tool never charges more than `max_cost_cents`** when it is
   given. Test it.
 - Tests are named `method_givenX_expectsY` and use Testcontainers.

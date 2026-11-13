@@ -528,7 +528,9 @@ it yours in the Studio, then run it at scale through the same API.*
 
 ## 6. A possible order after round 9
 
-Each round can run as parallel workstreams, as rounds 7–9 do.
+Each round can run as parallel workstreams, as rounds 7–9 do. These rounds
+are drafted as session briefs in `docs/claude-code-briefs/round-10/` to
+`round-14/`.
 
 | Round | Workstreams | Why then |
 |---|---|---|
