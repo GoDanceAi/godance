@@ -5,6 +5,7 @@ declare const __GODANCE_BUILD__: string;
 
 interface ImportMetaEnv {
   readonly VITE_API_URL?: string;
+  readonly VITE_GALLERY_URL?: string;
 }
 
 interface ImportMeta {

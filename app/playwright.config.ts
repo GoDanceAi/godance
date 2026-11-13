@@ -1,10 +1,10 @@
 import { defineConfig, devices } from '@playwright/test';
-import { API_ORIGIN, APP_HOST } from './e2e/api-origin';
+import { API_ORIGIN, APP_HOST, GALLERY_ORIGIN } from './e2e/api-origin';
 
 // Browser journeys against a production build of the app. The API is never
 // real: the build points VITE_API_URL at a fake origin and every test mocks
-// it in the browser with page.route (see e2e/mock-api.ts). Nothing leaves
-// localhost. Cookies are real: the browser keeps and sends the mock's session
+// it in the browser with page.route (see e2e/mock-api.ts). The gallery's
+// VITE_GALLERY_URL is a fake origin too. Nothing leaves localhost. Cookies are real: the browser keeps and sends the mock's session
 // cookie by its own rules.
 // Parallel worktrees on one machine each need their own.
 const PORT = Number(process.env.E2E_PORT ?? 4174);
@@ -38,7 +38,7 @@ export default defineConfig({
       `npx vite build --outDir dist-e2e --emptyOutDir --logLevel warn && ` +
       `npx vite preview --outDir dist-e2e --host 127.0.0.1 --port ${PORT} --strictPort`,
     url: `http://127.0.0.1:${PORT}`,
-    env: { VITE_API_URL: API_ORIGIN },
+    env: { VITE_API_URL: API_ORIGIN, VITE_GALLERY_URL: GALLERY_ORIGIN },
     reuseExistingServer: false,
     timeout: 120_000,
   },

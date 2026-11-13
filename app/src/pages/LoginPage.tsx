@@ -4,6 +4,8 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import { ApiError } from '../lib/api';
 import { startOAuth } from '../lib/oauth';
+import { carryDestination, destinationFrom, keepForSocialSignIn } from '../lib/return-to';
+import RecipeWaitingNote from '../components/RecipeWaitingNote';
 
 // Spring Security OAuth2 Client registration ids (see lib/oauth startOAuth).
 const OAUTH_PROVIDERS: { id: string; label: string; icon: ReactNode }[] = [
@@ -17,12 +19,14 @@ export default function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const state = location.state as {
-    from?: string;
     oauthError?: string;
     notice?: string;
     twoFactorToken?: string;
   } | null;
-  const redirectTo = state?.from ?? '/dashboard';
+  // Where the visitor was going: handed over in navigation state by
+  // ProtectedRoute, the sign-up page or the OAuth callback (lib/return-to).
+  const from = destinationFrom(location.state);
+  const redirectTo = from ?? '/dashboard';
   // Navigation state, not the query string, so a crafted link can't put
   // words in these lines; only OAuthCallbackPage and ResetPasswordPage set them.
   const oauthError = state?.oauthError ?? null;
@@ -73,17 +77,22 @@ export default function LoginPage() {
       <h1 className="text-2xl font-bold tracking-tight text-fg">Sign in</h1>
       <p className="mt-2 text-sm text-fg-muted">
         New here?{' '}
-        <Link to="/signup" className="text-brand-600 hover:text-brand-700 underline">
+        <Link to="/signup" state={carryDestination(from)} className="text-brand-600 hover:text-brand-700 underline">
           Create an account
         </Link>
       </p>
+      <RecipeWaitingNote destination={from} page="sign-in" />
 
       <div className="mt-8 space-y-2">
         {OAUTH_PROVIDERS.map((p) => (
           <button
             key={p.id}
             type="button"
-            onClick={() => startOAuth(p.id)}
+            onClick={() => {
+              // The provider sends the browser back with a full page load: keep the destination for it.
+              keepForSocialSignIn(from);
+              startOAuth(p.id);
+            }}
             className="btn btn-secondary w-full"
           >
             {p.icon}

@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import Layout from './components/Layout';
 import ProtectedRoute from './components/ProtectedRoute';
 import { AuthProvider } from './lib/auth';
@@ -12,6 +12,9 @@ import OAuthCallbackPage from './pages/OAuthCallbackPage';
 import ParentConsentPage from './pages/ParentConsentPage';
 import DashboardPage from './pages/DashboardPage';
 import ChatPage from './pages/ChatPage';
+import StudioPage from './pages/StudioPage';
+import HistoryPage from './pages/HistoryPage';
+import JobPage from './pages/JobPage';
 import ApiKeysPage from './pages/ApiKeysPage';
 import BillingPage from './pages/BillingPage';
 import SettingsPage from './pages/SettingsPage';
@@ -42,6 +45,12 @@ export default function App() {
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
           <Route path="/chat"      element={<ProtectedRoute><ChatPage /></ProtectedRoute>} />
+          {/* One Studio for both kinds; the key gives each its own state. */}
+          <Route path="/create"       element={<CreateRedirect />} />
+          <Route path="/create/image" element={<ProtectedRoute><StudioPage key="IMAGE" modality="IMAGE" /></ProtectedRoute>} />
+          <Route path="/create/video" element={<ProtectedRoute><StudioPage key="VIDEO" modality="VIDEO" /></ProtectedRoute>} />
+          <Route path="/history"        element={<ProtectedRoute><HistoryPage /></ProtectedRoute>} />
+          <Route path="/history/:jobId" element={<ProtectedRoute><JobPage /></ProtectedRoute>} />
           <Route path="/keys"      element={<ProtectedRoute><ApiKeysPage /></ProtectedRoute>} />
           <Route path="/billing"   element={<ProtectedRoute><BillingPage /></ProtectedRoute>} />
           <Route path="/settings"  element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
@@ -63,4 +72,10 @@ export default function App() {
       </AdminProvider>
     </AuthProvider>
   );
+}
+
+/** /create opens the image Studio, keeping any values the link carries. */
+function CreateRedirect() {
+  const { search } = useLocation();
+  return <Navigate to={{ pathname: '/create/image', search }} replace />;
 }
