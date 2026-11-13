@@ -1,7 +1,8 @@
 # Prompt galleries: OpenNana and its competitors
 
-**Date:** 2026-11-13 · **Context:** written after the round 9 briefs, to inform
-what comes next. Rounds 7–9 are designed; on `main` only the round 8 recipe
+**Date:** 2026-11-13, updated the same day with the operator's choice of
+audience · **Context:** written after the round 9 briefs, to inform what
+comes next. Rounds 7–9 are designed; on `main` only the round 8 recipe
 schema has landed.
 
 **Question:** what do OpenNana and the strongest prompt-gallery products, in
@@ -20,25 +21,46 @@ China and elsewhere, tell us about the Godance gallery, Studio and API?
 
 ## 1. Summary
 
+**Who Godance is for** (operator decision, 2026-11-13): *aspiring builders*.
+
+- Experienced developers can assemble providers themselves, with more
+  freedom and options than an aggregator gives them.
+- General consumers will not learn a tool this capable and are better served
+  by consumer assistants.
+- Aspiring builders sit between the two. Most are not coders or game
+  designers. They see that AI lets them make things they could not make a
+  few years ago. They will end up generating video in batches through an
+  API, but only after they have searched for prompts that work and refined
+  them by trial and error dozens of times.
+
+What the research says about serving them:
+
 1. **The prompt is a commodity.** Tens of thousands of prompts for the newest
-   models are free, many under CC0 or CC BY. They are copied between lists, and
-   the same prompts reach every gallery. Godance's round 8 sources are two of
-   these lists, one maintained by YouMind and one by EvoLink.
-2. **The run is not a commodity.** No competitor publishes, for each prompt,
-   the exact API parameters, the cost, and outputs from several models. A
-   multi-model API with a ledger can do that, and this is where the Godance
-   gallery can stand apart. Without it, recipe pages copy their sources.
+   models are free, many under CC0 or CC BY. They are copied between lists,
+   and the same prompts reach every gallery. Godance's round 8 sources are two
+   of these lists, one maintained by YouMind and one by EvoLink.
+2. **Nobody carries a user from a tuned prompt to a batch run.** OpenNana
+   helps people find a prompt. YouMind and MeiGen help them try it and adapt
+   it. fal, kie.ai and EvoLink serve the batch end, and non-coders reach them
+   through third-party n8n templates. In between, users copy text by hand.
+   A Godance recipe (prompt, variables, model, parameters, cost) is the right
+   object to carry them through.
 3. **About a quarter of popular prompts need an input.** In the four lists
    measured, 14–32% of image prompts and 31% of Seedance prompts need an
    uploaded image or clip. The round 8 import has to set these aside, because
-   the API accepts text only. Most of them are about a person's likeness.
-4. **This niche spreads through GitHub lists.** The lists that feed these
-   galleries have 3.9k–17.4k stars, and every entry links back to the
-   operator's site. MeiGen also puts its gallery inside ChatGPT, Claude and
-   Cursor through a remote MCP server.
-5. **The first gap after round 9 is measurement.** Round 8 notes it: nothing
-   records whether a first run started from a recipe. Everything below
-   depends on knowing that.
+   the API accepts text only. Inputs matter twice over for this audience:
+   - **Adapting:** "my product", "my character".
+   - **Cheap iteration:** the standard workflow is to settle the frame in GPT
+     Image 2, then animate it with Seedance 2.0.
+4. **Their developer is often an AI assistant.** It writes standard OpenAI
+   SDK code from memory. That code breaks on Godance's image route today,
+   because every image model answers `202` with a job. For this audience it
+   matters more than for experts that AI assistants can use Godance as-is:
+   standard response shapes, AI-readable docs, and MCP.
+5. **Measure first, and measure graduation.** Track how many Studio users go
+   on to generate through an API key, and how many run a batch. Round 8
+   already notes that nothing records whether a first run started from a
+   recipe.
 
 ## 2. OpenNana
 
@@ -58,7 +80,7 @@ China and elsewhere, tell us about the Godance gallery, Studio and API?
 most-cited Chinese prompt sites in about a year. It did so by keeping up with
 model launches, offering both languages and making entries easy to copy. In
 the README sample, 143 of 145 entries are Nano Banana Pro. That matters for
-Godance: the Alicloud region cannot serve Google or OpenAI models (§5.6).
+Godance: the Alicloud region cannot serve Google or OpenAI models (§5.9).
 
 ## 3. The field, and the top three
 
@@ -68,7 +90,7 @@ Godance: the Alicloud region cannot serve Google or OpenAI models (§5.6).
 | Gallery with generation | **YouMind**, **MeiGen**, OpenArt, Krea | YouMind is the largest. MeiGen is closest to what Godance is building. |
 | API seller with galleries | **EvoLink**, Atlas Cloud, WaveSpeed, kie.ai | EvoLink is the clearest case, and the most like Godance. |
 | The model maker's own app | 即梦 Jimeng and Dreamina (ByteDance) | Native Seedance with an inspiration feed. It sets what users expect ("see it, make the same"), but no third party can match first-party access. |
-| Older Stable Diffusion and Midjourney communities | Civitai, PromptHero, Lexica | Their creator economy is useful background for referrals (§5.8). They are not where people look for prompts for the newest models. |
+| Older Stable Diffusion and Midjourney communities | Civitai, PromptHero, Lexica | Their creator economy is useful background for referrals (§5.11). They are not where people look for prompts for the newest models. |
 
 Each of the three chosen is the strongest of its kind for GPT Image 2,
 Nano Banana and Seedance.
@@ -187,65 +209,81 @@ counts of the whole sites.
 
 ## 5. What this means for Godance
 
-Each item gives the evidence, then what to change.
+### 5.1 The journey, and who covers it
 
-### 5.1 Measure the funnel first
+| Step | What the user does | Who covers it today | Godance after round 9 (as designed) |
+|---|---|---|---|
+| Find | Looks for a prompt that gets an outcome: a product video, a thumbnail, a short scene | OpenNana, YouMind, MeiGen, posts on X | Gallery (round 8) |
+| Adapt | Swaps in their own product, character or wording | YouMind; MeiGen with reference remix | "Run this" fills the Studio. No inputs, and variables are resolved away |
+| Iterate | Dozens of attempts, comparing wording, models and cost | MeiGen and YouMind, mostly by hand | History (round 7) and saved results (round 9). Attempts are not grouped or compared |
+| Lock in | Keeps the setup that works | Nobody, beyond copying text | Nothing |
+| Batch | Runs it over 20–500 rows | fal, kie.ai and EvoLink APIs, through n8n templates where each sheet row is a job | API only, and the image route breaks standard SDK code |
+| Automate | Schedules runs and publishes the results | n8n, Make, or scripts the user's AI assistant writes | Signed webhooks exist; no templates |
 
-Round 8 says: "Not covered by any brief yet: measuring how many first runs
-start from a recipe." None of the competitors' choices can be judged for
-Godance without this.
+The gap is between lock-in and batch. One idea guides everything below:
+**one object all the way through.**
 
-- When the Studio loads `?example=<slug>`, the job it submits should carry
-  where it came from (`studio`, `recipe:<slug>` or `api`). This could be a
-  small nullable column, or a field in the request the Studio sets.
-- Record the sign-up's first-touch source (UTM and recipe slug) the way round
-  9 stores a referral code. Report recipe → sign-up → first run → first
-  top-up.
-- This is cheap and should come first.
+1. A gallery recipe becomes the user's own recipe.
+2. Their attempts hang off it.
+3. The version that works runs in batch.
+4. The same batch is available as code, as an n8n template and through MCP.
 
-### 5.2 Make the run the product, not the prompt
+### 5.2 Measure graduation first
 
-The same prompts appear on youmind.com and evolink.ai, which have far more
-backlinks. A Godance recipe page offers the reader something new only through
-what Godance adds: its own outputs, the parameters, the cost, and other
-models.
+Round 8 notes the gap: "Not covered by any brief yet: measuring how many
+first runs start from a recipe."
 
-- **Developer tab on every recipe.** Generate `curl`, an OpenAI SDK call and a
-  Java `WebClient` call from `run.params`, with the cost and a link to the API
-  docs. Developers want this, and consumer galleries do not offer it.
-- **The same prompt on several models.** The schema already allows several
-  runs. Re-run the best recipes on `gpt-image-2`, `nano-banana`,
-  `seedream-5.0`, `qwen-image-2.0` and `flux-2-pro`. Publish comparison pages
-  ("GPT Image 2 vs Nano Banana Pro: 20 prompts, outputs and costs"). Only a
-  multi-model API can make these cheaply: about 20 × 5 × 6 ¢ ≈ 6 USD for an
-  image set.
-- **A routine for model launches.** When a model enters the catalog, re-run
-  the top recipes on it within 48 hours and publish a comparison. That is
-  when search interest is highest. EvoLink's early-access pages show there is
-  demand to capture.
-- **Stay small and checked.** Do not try to match 24k entries. Review before
-  publishing is the right call; volume is the incumbents' game.
+- **Record where each job came from:** `studio`, `recipe:<slug>`,
+  `my-recipe:<id>` or `api`. A small nullable column, set by the Studio,
+  is enough.
+- **Record each sign-up's first-touch source** (UTM tags and recipe slug), the
+  way round 9 stores a referral code.
+- **Report the funnel:** recipe → sign-up → first Studio run → first top-up →
+  first generation with an API key (*graduation*) → first batch.
 
-### 5.3 Keep templates as templates
+This is cheap. Without it, none of the choices below can be judged.
 
-20–47% of entries have variables. Promptfill, a Chinese tool listed among
-the places Chinese users go for prompts, does nothing but fill in prompt
-templates.
+### 5.3 Make recipes the user's own (adapt and lock in)
 
-- Keep the template next to the resolved text. For example, a
-  `prompt.template` with `{{name}}` markers alongside the existing
-  `prompt.variables`. This edits the schema module, which round 8 froze, so
-  it belongs to a later round.
-- The Studio shows one field per variable, filled with the defaults. "Run
-  this" stays one click; the user can change the product name, brand or
-  language. This suits e-commerce and marketing work: e-commerce, ad and UI
-  mockup cases are 101 of the 462 in the GPT Image 2 list.
+- **Keep templates as templates.** 20–47% of entries have variables. Both
+  global lists use `{argument name="…" default="…"}`, and Promptfill, a
+  Chinese tool, does nothing but fill in templates. Round 8 resolves the
+  variables to their defaults. Keep the template next to the resolved text,
+  for example a `prompt.template` with `{{name}}` markers alongside the
+  existing `prompt.variables`. This edits the schema module, which round 8
+  froze, so it belongs to a later round.
+- **Studio fields.** The Studio shows one field per variable, filled with the
+  defaults. Variables are also what a batch varies (§5.6).
+- **My recipes.** A user can copy a gallery recipe, or save the current
+  Studio setup, as their own. A recipe holds the template, the variable
+  values, the model, the parameters, and later its inputs. Editing it makes a
+  new version. Recipes are private by default.
+- **Jobs record the recipe and version they ran.** Round 9's saved
+  generations keep the outputs; a recipe keeps the setup that made them.
 
-### 5.4 Accept input images and clips
+### 5.4 Make iteration cheap and visible
+
+- **Show attempts together.** Group a recipe's attempts side by side. For
+  each one, show what changed (a diff of the prompt, the model, the
+  parameters) and its cost, with a running total.
+- **Show the cost before every run.** Round 7's estimates endpoint already
+  gives the exact amount that will be held.
+- **Draft before the final run.** For video, settle the frame as an image
+  first, then animate it (needs §5.5). Where a model allows it, draft shorter
+  or at a lower resolution. The GPT Image 2 → Seedance 2.0 workflow is now
+  standard, in both Chinese and English tutorials.
+- **Why it matters, at round 8's rough prices** (about 6 ¢ an image, 16 ¢ a
+  second of Seedance):
+  - 30 attempts at a 10-second clip cost about 48 USD.
+  - 30 stills, then 3 clips from the chosen frame, cost about 6.60 USD.
+- **Optional and cheap: suggest variations.** A low-cost text model proposes
+  versions of a prompt to try, as MeiGen's prompt enhancement does.
+
+### 5.5 Accept input images and clips
 
 This is the largest capability gap: 21–32% of image prompts and 31% of
 Seedance prompts are currently set aside. Every competitor that generates
-accepts inputs.
+accepts inputs, and the image-first video workflow depends on them.
 
 - **API.** Add `POST /v1/images/edits` in OpenAI's multipart shape (`image`,
   or several `image[]`, plus optional `mask`, `prompt`, `model`, `n`,
@@ -254,9 +292,11 @@ accepts inputs.
   `@RequestPart("image") Flux<FilePart>`. For video, add reference and
   first-frame images where the adapter supports them (Seedance 2.0, Sora 2,
   Kling 3.0, Veo 3.1).
+- **Studio.** An upload slot, "Animate this" on an image result, and "describe
+  this image as a prompt" through a vision-capable text model.
 - **Storage and retention.** Inputs go to the existing object storage under
   the job, and are deleted with it through `DataRetentionService`. Saved jobs
-  from round 9 keep them.
+  from round 9, and recipes that use an input, keep it.
 - **Recipes.** Add an `inputs` list with slots ("one product photo on a plain
   background") and a sample input Godance owns. List images are never
   copied, as round 8 already requires.
@@ -269,25 +309,92 @@ accepts inputs.
      the photo is of themselves or that they have consent, with provider
      moderation, and never shown publicly.
 
-### 5.5 Go where this niche spreads: GitHub and agents
+### 5.6 Batch, then hand over
 
-- **An open list Godance maintains.** Publish approved recipes as a separate
-  repository whose README is generated from `marketing/src/content/gallery`
-  by CI, in English and Chinese. Each entry gives the model, parameters, cost
-  and a "Run this" link with UTM tags. The pitch none of the 3.9k–17.4k-star
-  lists can make: *every example was generated through the API with these
-  exact parameters, for this price.* Attribution and licences carry over from
-  the recipe's `source`.
-- **An MCP server.** Tools such as `search_recipes`, `list_models`,
-  `estimate_cost` (the round 7 estimates endpoint), `generate_image`,
-  `generate_video` and `get_job`, over the API Godance already has.
+- **Batch in the Studio.** Run a recipe version over a sheet: paste it or
+  upload a CSV, with one column per variable and later one per input file.
+  - Show the total estimate and hold it. Spend holds already exist (V18).
+  - Run with a bounded number of jobs at once and show progress.
+  - Offer a zip of the outputs and a CSV of the results.
+  - Run it on the server, so closing the tab does not stop it. Quartz and
+    the job sweep already exist.
+- **Every recipe and batch offers the next step:**
+  - **"Copy for your AI assistant":** a ready-written prompt holding the
+    recipe's JSON and a link to the AI-readable docs (§5.7). It asks the
+    assistant for a script that reads the user's sheet. This audience's
+    developer is often an AI, and this audience already knows how to write
+    prompts.
+  - **Code:** `curl`, the Python OpenAI SDK and a Java `WebClient`, generated
+    from the recipe, with the cost.
+  - **An n8n template:** Google Sheets row → Godance job → signed webhook →
+    Drive. Templates in n8n's library are how non-coders find kie.ai and fal
+    today. Godance's async jobs and signed webhooks fit that pattern
+    already. A community node can come later.
+  - **A new API key with a daily cap, in one click.** Per-key daily and
+    monthly caps already exist in `SpendingLimitService`. Show them here,
+    where the fear of a runaway script is greatest.
+- **Later, if there is demand:** OpenAI's `/v1/batches` shape. Not first.
+
+### 5.7 Make Godance usable by AI assistants as-is
+
+- **Images.**
+  - Every image model is flagged async, so standard OpenAI SDK code that
+    reads `data[0].url` fails.
+  - Option: when a request does not ask for async, wait for the job up to a
+    limit (for example 120 seconds, within the SDK's default timeout), then
+    answer in OpenAI's shape. Past the limit, answer `202` as today. In
+    WebFlux this is a non-blocking wait on the job's completion, not a held
+    thread.
+  - This changes what existing image callers receive, so it is an operator
+    decision (§7).
+- **Video.**
+  - OpenAI's own video API is `/v1/videos`, used by `client.videos.create`,
+    then retrieve and download. Godance serves `/v1/videos/generations` and
+    `/v1/jobs/{id}`.
+  - Serving OpenAI's shape as well would let code that an assistant writes
+    work unchanged. Check OpenAI's current shape before designing it.
+- **Docs written for AI.** An `llms-full.txt` with complete request and
+  response examples for images, video and jobs; an OpenAPI file; and a page
+  on asking an AI assistant to use Godance.
+  `docs/openai-dropin-verification.md` checks chat only; add images and video.
+- **An MCP server.**
+  - Tools such as `search_recipes`, `list_models`, `estimate_cost` (the round
+    7 endpoint), `generate_image`, `generate_video`, `get_job` and, once
+    batches exist, `run_recipe_batch`.
+  - MeiGen shows this reaches people inside ChatGPT, Claude and Cursor.
   - The Spring AI MCP server starter has a WebFlux transport; check that it
-    works with Boot 4.1 before choosing it.
-  - Start with API-key authentication.
-  - Let `SpendingLimitService` cap what an agent can spend, and have the
-    tool descriptions ask for an estimate before generating.
+    works with Boot 4.1.
+  - Start with API-key authentication, and let per-key caps limit what an
+    agent can spend.
 
-### 5.6 Models and regions
+### 5.8 Be where people look for prompts
+
+- **Make the run the product, not the prompt.**
+  - The same prompts appear on youmind.com and evolink.ai, which have far
+    more backlinks.
+  - A Godance recipe page offers something new only through what Godance
+    adds: its own outputs, the parameters, the cost, and other models.
+- **The same prompt on several models.**
+  - The schema already allows several runs. Re-run the best recipes on
+    `gpt-image-2`, `nano-banana`, `seedream-5.0`, `qwen-image-2.0` and
+    `flux-2-pro`.
+  - Publish comparison pages, such as "GPT Image 2 vs Nano Banana Pro: 20
+    prompts, outputs and costs". They help people choose a model before they
+    spend.
+  - An image set costs about 20 × 5 × 6 ¢ ≈ 6 USD.
+- **A routine for model launches.** When a model enters the catalog, re-run
+  the top recipes on it within 48 hours and publish a comparison. That is
+  when search interest is highest.
+- **An open list Godance maintains.**
+  - A separate repository whose README is generated from
+    `marketing/src/content/gallery` by CI, in English and Chinese.
+  - Each entry gives the model, parameters, cost and a "Run this" link with
+    UTM tags.
+  - The pitch none of the 3.9k–17.4k-star lists can make: *every example was
+    generated through the API with these exact parameters, for this price.*
+- **Stay small and checked.** Do not try to match 24k entries.
+
+### 5.9 Models and regions
 
 - **Naming.** Catalog id `nano-banana` maps to `gemini-3-pro-image-preview`,
   which the market calls *Nano Banana Pro*, while "Nano Banana" usually means
@@ -297,16 +404,18 @@ accepts inputs.
 - **Freshness.** Check GPT Image 2.5 and Seedance 2.5 against the providers.
   Gallery traffic follows the newest model.
 - **Chinese audience.**
-  - OpenNana's audience mostly uses Nano Banana Pro. The Alicloud region's
-    allowlist excludes Google and OpenAI, and those providers' own terms
-    limit where their users can be. These are separate questions; the
-    operator should answer both.
+  - Aspiring builders are a large group in China: e-commerce sellers,
+    short-drama makers, people with AI side businesses. OpenNana's audience
+    is this group, and it mostly uses Nano Banana Pro.
+  - The Alicloud region's allowlist excludes Google and OpenAI, and those
+    providers' own terms limit where their users can be. These are separate
+    questions; the operator should answer both.
   - In practice: every recipe shown in Chinese should carry at least one run
     on a China-hosted model (`seedream-5.0`, `qwen-image-2.0`,
-    `seedance-2.0`, `kling-3.0`). "Run this" should pick a run whose model is
-    listed in `/v1/models` for the user.
+    `seedance-2.0`, `kling-3.0`). "Run this" should pick a run whose model
+    is listed in `/v1/models` for the user.
 
-### 5.7 Sources and licences
+### 5.10 Sources and licences
 
 - OpenNana's list has no licence, so it is out, correctly.
 - The CC0 and CC BY lists collect posts written by X users. A list's licence
@@ -315,54 +424,62 @@ accepts inputs.
   post URL, offers a removal contact and keeps a removal list. The content
   standard should also say so: a list licence is necessary but not
   sufficient.
-- **A cleaner source over time:** creators submit recipes directly and grant a
-  licence. OpenNana has a `submit.html` page, and YouMind accepts pull
-  requests.
+- **A cleaner source over time:** users publish their own recipes (§5.3) and
+  grant a licence when they do. OpenNana has a `submit.html` page, and
+  YouMind accepts pull requests.
 
-### 5.8 Referrals and creators
+### 5.11 Referrals and creators
 
 - Civitai gave resource creators 25% of generation spend and is now
   reworking that scheme. YouMind and EvoLink credit authors but do not pay
   them.
-- Once round 9's referral has proved itself, a recipe can act as a referral
-  link: a top-up that starts from a creator's recipe credits the creator. It
-  would reuse the `REFERRAL` ledger source, idempotency keys and monthly cap.
+- Once round 9's referral has proved itself, a published recipe can act as
+  a referral link: a top-up that starts from it credits its author. It would
+  reuse the `REFERRAL` ledger source, idempotency keys and monthly cap.
 - Not yet: card disputes are not handled, so paying creators would make the
   exposure round 9 already notes larger.
 
-### 5.9 Positioning
+### 5.12 What not to build for this audience
 
-`marketing/public/llms.txt` says Godance is "an OpenAI-compatible developer
-API, not an end-user product". Rounds 7–9 add a Studio, a gallery, signup
-credit, referrals and saved generations.
-
-- The competitors that last pick one main side: EvoLink is a developer API
-  with content marketing; YouMind is a consumer workspace. MeiGen serves both
-  through its API and MCP.
-- The research favours developer-first for Godance: reproducible recipes,
-  code, cost and MCP. The Studio is where people try a model before they
-  integrate it.
-- Either way, update `llms.txt` and the home page when the Studio ships, so
-  answer engines describe the product correctly.
+- **Social features:** feeds, likes, follows. That is the consumer game.
+- **Expert controls first:** bring-your-own-key, custom routing policies,
+  self-hosting. Experts are not the target.
+- **Volume:** tens of thousands of unchecked entries.
+- **A positioning that contradicts the product.**
+  `marketing/public/llms.txt` says Godance is "an OpenAI-compatible
+  developer API, not an end-user product" that "targets engineering teams".
+  Rewrite it and the home page for aspiring builders when the Studio ships,
+  for example: *find a recipe, make it yours in the Studio, then run it at
+  scale through the same API.*
 
 ## 6. A possible order after round 9
 
-| Round | Work | Why then |
+Each round can run as parallel workstreams, as rounds 7–9 do.
+
+| Round | Workstreams | Why then |
 |---|---|---|
-| 10 | (a) Where jobs and sign-ups came from (§5.1) · (b) developer tab on recipe pages (§5.2) · (c) templates in the schema and Studio fields (§5.3) · (d) a fixed set of categories in three groups, like YouMind's, validated by the schema | Small and mostly in marketing and the app. (a) needs one migration at most. Builds on round 8's data. |
-| 11 | Inputs: `/v1/images/edits`, video reference images, Studio upload, recipe `inputs` slots, the staged policy (§5.4) | The largest content gap. Needs an operator policy decision first. |
-| 12 | Open list repository generated by CI · MCP server · routine for model launches · comparison pages (§5.2, §5.5) | Distribution, once (a) can measure it. |
-| Operator, any time | Catalog naming and freshness, China-hosted runs for Chinese recipes, `llms.txt` positioning (§5.6, §5.9) | No brief needed. |
+| 10 · Adapt and iterate | (a) Where jobs and sign-ups came from, and the graduation report (§5.2) · (b) templates, Studio fields, my recipes with versions, attempts compared with costs (§5.3, §5.4) · (c) synchronous image responses in OpenAI's shape (§5.7), backend only | Builds on rounds 7–9. (a) needs one migration at most. (c) removes the first wall that code written by an AI assistant hits. |
+| 11 · Your own inputs | `/v1/images/edits`, reference and first-frame images for video, Studio upload and "Animate this", recipe `inputs` slots, the staged policy (§5.5) | The largest content gap, and the key to cheap video iteration. Needs an operator policy decision first. |
+| 12 · Batch and hand-over | Batch runs from a sheet, "Copy for your AI assistant", generated code, an n8n template, a capped key in one click (§5.6). OpenAI's video shape, `llms-full.txt`, OpenAPI (§5.7) | Graduation is measured from round 10, so its effect shows. |
+| 13 · Reach | MCP server, open recipe list, model-launch routine, comparison pages (§5.7, §5.8) | Distribution, once the funnel converts. |
+| Operator, any time | Catalog naming and freshness, China-hosted runs for Chinese recipes, `llms.txt` and home page wording (§5.9, §5.12) | No brief needed. |
 
 ## 7. Decisions for the operator
 
-- Developer-first or consumer-first for the gallery (§5.9).
-- Policy for input images: which stages, which account ages, and what
-  confirmation users give (§5.4).
-- Whether to start a separate public repository for the recipe list (§5.5).
-- Whether Chinese recipes must carry a run on a China-hosted model (§5.6).
-- Whether a recipe can earn its creator a referral-style reward, and when
+- ~~Developer-first or consumer-first.~~ Decided: aspiring builders (§1).
+- **Policy for input images:** which stages, which account ages, and what
+  confirmation users give (§5.5).
+- **Whether image requests answer synchronously by default.** This changes
+  the response for existing callers who expect `202`. Alternatively, keep
+  `202` for existing API keys and make new keys synchronous (§5.7).
+- **Limits for batches:** maximum rows, jobs at once, and whether the whole
+  estimate is held up front (§5.6).
+- **n8n templates under the Godance name,** and later a community node (§5.6).
+- **Whether to start a separate public repository** for the recipe list
   (§5.8).
+- **Whether Chinese recipes must carry a run** on a China-hosted model (§5.9).
+- **Whether a published recipe can earn its author** a referral-style reward,
+  and when (§5.11).
 
 ## Sources
 
@@ -384,3 +501,9 @@ credit, referrals and saved generations.
 - Civitai creator compensation plan (June 2026 draft): https://hackmd.io/@civitai/r1F6wi-7Me
 - OpenArt pricing overview: https://www.scopeful.org/tools/openart
 - Jimeng (即梦): https://jimeng.jianying.com/
+- n8n template, Seedance 2 via kie.ai: https://n8n.io/workflows/17438-generate-seedance-2-ai-videos-from-form-input-and-email-links-with-gmail
+- n8n template, Seedance 1.5 Pro via kie.ai: https://n8n.io/workflows/12250-generate-video-from-an-image-with-bytedance-seedance-15-pro-via-kieai/
+- n8n template, Google Sheets rows to videos via fal: https://n8n.io/workflows/5034-create-ai-generated-videos-4x-cheaper-than-veo3-with-google-sheets-and-falai/
+- GPT Image 2 + Seedance 2.0 workflow (DEV): https://dev.to/evan-dong/gpt-image-2-seedance-20-a-practical-workflow-from-static-visuals-to-publishable-shorts-4p02
+- GPT Image 2 + Seedance 2.0 storyboard-grid ad workflow: https://mer.vin/2026/06/gpt-image-2-seedance-2-0-4k-cinematic-ad-workflow-with-a-5x3-storyboard-grid/
+- Chinese write-up of the same workflow (36Kr): https://eu.36kr.com/zh/p/3811398798237187
