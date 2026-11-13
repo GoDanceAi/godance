@@ -119,6 +119,7 @@ class AccountClosureIntegrationTest {
 
     @Autowired UserTwoFactorRepository twoFactors;
     @Autowired WebTestClient http;
+    @Autowired ai.godance.repository.GenerationJobOutputRepository outputRows;
     @Autowired UserRepository users;
     @Autowired CreditLedgerService ledgerService;
     @Autowired CreditLedgerRepository ledger;
@@ -196,6 +197,8 @@ class AccountClosureIntegrationTest {
         conversationService.archive(userId, archived.getId());
         GenerationJob job = doneJob(userId);
         storage.upload("images/" + job.getId() + "/0.png", new byte[] {1, 2, 3}, "image/png");
+        outputRows.save(new ai.godance.domain.GenerationJobOutput(job.getId(), 0,
+                "images/" + job.getId() + "/0.png", "image/png", 3L, "a revised private prompt"));
 
         // Both credentials work before closure.
         http.get().uri("/v1/keys").header("Authorization", bearer).exchange().expectStatus().isOk();
@@ -261,6 +264,7 @@ class AccountClosureIntegrationTest {
         assertThat(purged.getPurgedAt()).isNotNull();
         assertThat(purged.getActualCostCents()).isEqualTo(480L);
         assertThat(keysUnder("images/" + job.getId() + "/")).isEmpty();
+        assertThat(outputRows.findByJobIdOrderByOutputIndexAsc(job.getId())).isEmpty();
 
         // Billing records and the balance are untouched.
         assertThat(users.findById(userId).orElseThrow().getCreditBalanceCents()).isEqualTo(balanceBefore);

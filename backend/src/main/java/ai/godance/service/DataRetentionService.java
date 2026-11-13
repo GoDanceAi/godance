@@ -9,11 +9,14 @@ import java.util.function.IntUnaryOperator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import ai.godance.domain.GenerationJob;
 import ai.godance.repository.AuditLogRetentionRepository;
 import ai.godance.repository.ConversationRepository;
+import ai.godance.repository.GenerationJobOutputRepository;
 import ai.godance.repository.GenerationJobRepository;
 import ai.godance.repository.UnapprovedChildRepository;
 import ai.godance.storage.ObjectStorageClient;
@@ -62,15 +65,30 @@ public class DataRetentionService {
     private final AuditLogRetentionRepository auditRows;
     private final ObjectStorageClient storage;
     private final UnapprovedChildRepository unapprovedChildren;
+    private final GenerationJobOutputRepository outputs;
+    private final TransactionTemplate tx;
 
     public DataRetentionService(GenerationJobRepository jobs, ConversationRepository conversations,
                                 AuditLogRetentionRepository auditRows, ObjectStorageClient storage,
-                                UnapprovedChildRepository unapprovedChildren) {
+                                UnapprovedChildRepository unapprovedChildren,
+                                GenerationJobOutputRepository outputs, PlatformTransactionManager txManager) {
         this.jobs = jobs;
         this.conversations = conversations;
         this.auditRows = auditRows;
         this.storage = storage;
         this.unapprovedChildren = unapprovedChildren;
+        this.outputs = outputs;
+        this.tx = new TransactionTemplate(txManager);
+    }
+
+    /**
+     * When a job's files and prompt are due to be deleted: {@link #JOB_RETENTION}
+     * after it was created. Null once they have been (the job is purged), so
+     * null means "not scheduled for deletion"; clients must accept it.
+     */
+    public static Instant mediaExpiresAt(GenerationJob job) {
+        if (job.getPurgedAt() != null || job.getCreatedAt() == null) return null;
+        return job.getCreatedAt().plus(JOB_RETENTION);
     }
 
     /** How many jobs a pass purged, and how many it could not (left for the next run). */
@@ -103,16 +121,20 @@ public class DataRetentionService {
     }
 
     /**
-     * Deletes one ended job's media objects, then redacts its row. Storage
-     * goes first: if it fails the row is left untouched and the job is tried
-     * again on the next run. False when anything failed.
+     * Deletes one ended job's media objects, then redacts its row and deletes
+     * its output rows (V23) in one transaction. Storage goes first: if it
+     * fails the rows are left untouched and the job is tried again on the
+     * next run. False when anything failed.
      */
     public boolean purgeJob(UUID jobId, Instant now) {
         try {
             for (String prefix : MEDIA_PREFIXES) {
                 storage.deletePrefix(prefix + jobId + "/");
             }
-            jobs.redactPurged(jobId, now);
+            tx.executeWithoutResult(status -> {
+                jobs.redactPurged(jobId, now);
+                outputs.deleteByJobId(jobId);
+            });
             return true;
         } catch (RuntimeException e) {
             log.warn("DataRetention: could not purge generation job {}: {}", jobId, e.getMessage());

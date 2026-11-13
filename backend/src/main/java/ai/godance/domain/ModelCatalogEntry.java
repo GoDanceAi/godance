@@ -1,7 +1,11 @@
 package ai.godance.domain;
 
 import java.time.Instant;
+import java.util.Map;
 import java.util.Objects;
+
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -76,6 +80,22 @@ public class ModelCatalogEntry {
     @Column(name = "last_verified_at")
     private Instant lastVerifiedAt;
 
+    /** A name for people (V24); null when not set. */
+    @Column(name = "display_name")
+    private String displayName;
+
+    @Column(name = "description", columnDefinition = "text")
+    private String description;
+
+    /**
+     * What the model accepts (V24), a JSON object read by
+     * {@link ai.godance.gateway.ModelCapabilities}; null when unknown, as for
+     * a model approved from a pricing proposal.
+     */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "capabilities", columnDefinition = "jsonb")
+    private Map<String, Object> capabilities;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -135,6 +155,15 @@ public class ModelCatalogEntry {
 
     public Instant getLastVerifiedAt() { return lastVerifiedAt; }
     public void setLastVerifiedAt(Instant v) { this.lastVerifiedAt = v; }
+
+    public String getDisplayName() { return displayName; }
+    public void setDisplayName(String v) { this.displayName = v; }
+
+    public String getDescription() { return description; }
+    public void setDescription(String v) { this.description = v; }
+
+    public Map<String, Object> getCapabilities() { return capabilities; }
+    public void setCapabilities(Map<String, Object> v) { this.capabilities = v; }
 
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant v) { this.createdAt = v; }

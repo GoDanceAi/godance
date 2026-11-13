@@ -101,6 +101,40 @@ class AdminCatalogIntegrationTest {
     }
 
     @Test
+    void listModels_givenSeededMetadata_expectsDisplayNameDescriptionAndCapabilitiesReadOnly() {
+        AdminPricingController.CatalogListResponse body = http.get().uri("/v1/admin/pricing/models")
+                .header("Authorization", adminBearer)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody(AdminPricingController.CatalogListResponse.class)
+                .returnResult().getResponseBody();
+        java.util.Map<String, ai.godance.service.admin.AdminCatalogService.CatalogModelView> byName =
+                body.models().stream().collect(java.util.stream.Collectors.toMap(
+                        ai.godance.service.admin.AdminCatalogService.CatalogModelView::modelName, v -> v));
+
+        assertThat(byName.get("flux-1.1-pro").displayName()).isEqualTo("FLUX1.1 [pro]");
+        assertThat(byName.get("flux-1.1-pro").description()).isNotBlank();
+        assertThat(byName.get("flux-1.1-pro").capabilities()).containsEntry("max_n", 1);
+        assertThat(byName.get("sora-2").capabilities()).containsEntry("default_seconds", 10);
+        // A text model has none: null, which is a valid state.
+        assertThat(byName.get("kimi-k2.6").capabilities()).isNull();
+        assertThat(byName.get("kimi-k2.6").displayName()).isNull();
+
+        // Read-only: the PATCH body has no field for them, so sending one changes nothing.
+        ModelCatalogEntry flux = catalogRepo.findByModelName("flux-1.1-pro").orElseThrow();
+        http.patch().uri("/v1/admin/pricing/models/" + flux.getId())
+                .header("Authorization", adminBearer)
+                .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                .bodyValue(java.util.Map.of("enabled", true, "capabilities", java.util.Map.of("max_n", 4),
+                        "displayName", "Renamed"))
+                .exchange()
+                .expectStatus().isOk();
+        ModelCatalogEntry after = catalogRepo.findByModelName("flux-1.1-pro").orElseThrow();
+        assertThat(after.getCapabilities()).containsEntry("max_n", 1);
+        assertThat(after.getDisplayName()).isEqualTo("FLUX1.1 [pro]");
+    }
+
+    @Test
     void updateModel_disable_removesFromLiveCatalog_writesAudit() {
         ModelCatalogEntry glm = catalogRepo.findByModelName("glm-4.7-flash").orElseThrow();
         assertThat(modelCatalog.find("glm-4.7-flash")).isPresent();

@@ -26,4 +26,14 @@ public interface ObjectStorageClient {
      * happen. A blank prefix is refused: it would match the whole bucket.
      */
     int deletePrefix(String prefix);
+
+    /** An object found by {@link #list}: its key and size in bytes. */
+    record StoredObject(String key, long sizeBytes) { }
+
+    /**
+     * Every object whose key starts with {@code prefix}, in key order; empty
+     * when there are none. A failure throws. A blank prefix is refused, as
+     * for {@link #deletePrefix}.
+     */
+    java.util.List<StoredObject> list(String prefix);
 }

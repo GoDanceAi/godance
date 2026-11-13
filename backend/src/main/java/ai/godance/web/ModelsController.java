@@ -1,6 +1,7 @@
 package ai.godance.web;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -13,6 +14,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import ai.godance.gateway.CostCalculator;
 import ai.godance.gateway.ModelCatalog;
 import ai.godance.gateway.ModelCatalog.ModelInfo;
+import ai.godance.gateway.ModelMetadata;
 import ai.godance.routing.RoutingPolicy;
 import ai.godance.routing.RoutingPolicyRegistry;
 import reactor.core.publisher.Mono;
@@ -28,7 +30,10 @@ import reactor.core.publisher.Mono;
  * }</pre>
  *
  * <p>Godance extends each entry with {@code godance: {modality, pricing}}
- * — pure OpenAI clients ignore unknown fields. {@code pricing} is the
+ * — pure OpenAI clients ignore unknown fields. A concrete entry may also
+ * carry {@code display_name}, {@code description} and {@code capabilities}
+ * (sizes, default size, durations, default length, {@code max_n}); each is
+ * left out when the catalog does not know it. {@code pricing} is the
  * provider list price; {@code markup_percent} is the platform fee billed on
  * top of it, resolved by {@link CostCalculator} exactly as at charge time.
  *
@@ -79,11 +84,17 @@ public class ModelsController {
             case IMAGE -> Map.of("per_image_microcents", m.perImageMicrocents());
             case VIDEO -> Map.of("per_second_microcents", m.perSecondMicrocents());
         };
-        Map<String, Object> godance = Map.of(
-                "modality",        m.modality().name(),
-                "requires_async",  m.requiresAsync(),
-                "pricing",         pricing,
-                "markup_percent",  costs.markupPercent(m));
+        Map<String, Object> godance = new LinkedHashMap<>();
+        godance.put("modality",       m.modality().name());
+        godance.put("requires_async", m.requiresAsync());
+        godance.put("pricing",        pricing);
+        godance.put("markup_percent", costs.markupPercent(m));
+        // V24 metadata: each part only when the catalog has it. Absent
+        // capabilities mean unknown, not unlimited; a missing max_n is 1.
+        ModelMetadata meta = catalog.metadata(m.modelName());
+        if (meta.displayName() != null) godance.put("display_name", meta.displayName());
+        if (meta.description() != null) godance.put("description", meta.description());
+        if (!meta.capabilities().isEmpty()) godance.put("capabilities", meta.capabilities().toJson());
         return new ModelEntry(m.modelName(), "model",
                 ownedBy(m.provider()), godance);
     }

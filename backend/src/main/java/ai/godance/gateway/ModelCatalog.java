@@ -90,7 +90,13 @@ public class ModelCatalog {
      * locking; the map itself is immutable post-publish, so no per-entry
      * synchronization is needed either.
      */
-    private volatile Map<String, ModelInfo> catalog = Map.of();
+    private volatile Snapshot snapshot = new Snapshot(Map.of(), Map.of());
+
+    /**
+     * Pricing and descriptions, published together so a reader never sees
+     * one refresh's models with another's metadata.
+     */
+    private record Snapshot(Map<String, ModelInfo> models, Map<String, ModelMetadata> metadata) { }
 
     public ModelCatalog(ModelCatalogEntryRepository entries) {
         this.entries = entries;
@@ -110,6 +116,7 @@ public class ModelCatalog {
     public void refresh() {
         List<ModelCatalogEntry> active = entries.findByStatus(CatalogStatus.ACTIVE);
         Map<String, ModelInfo> next = new HashMap<>(active.size() * 2);
+        Map<String, ModelMetadata> nextMetadata = new HashMap<>(active.size() * 2);
         for (ModelCatalogEntry e : active) {
             ModelInfo info = toModelInfo(e);
             ModelInfo prior = next.put(info.modelName(), info);
@@ -120,20 +127,31 @@ public class ModelCatalog {
                         "duplicate catalog entry for model '" + info.modelName()
                                 + "': " + prior.provider() + " vs " + info.provider());
             }
+            nextMetadata.put(info.modelName(),
+                    ModelMetadata.of(e.getDisplayName(), e.getDescription(), e.getCapabilities()));
         }
-        this.catalog = Map.copyOf(next);
-        log.info("ModelCatalog refreshed: {} ACTIVE models", catalog.size());
+        this.snapshot = new Snapshot(Map.copyOf(next), Map.copyOf(nextMetadata));
+        log.info("ModelCatalog refreshed: {} ACTIVE models", next.size());
     }
 
     public Optional<ModelInfo> find(String modelName) {
-        return Optional.ofNullable(catalog.get(modelName));
+        return Optional.ofNullable(snapshot.models().get(modelName));
     }
 
     /** Read-only snapshot of every registered model, sorted by name. */
     public List<ModelInfo> all() {
-        return catalog.values().stream()
+        return snapshot.models().values().stream()
                 .sorted(java.util.Comparator.comparing(ModelInfo::modelName))
                 .toList();
+    }
+
+    /**
+     * A model's name, description and capabilities (V24). {@link ModelMetadata#NONE}
+     * for a model that has none, such as one approved from a pricing proposal,
+     * or one not in the catalog.
+     */
+    public ModelMetadata metadata(String modelName) {
+        return snapshot.metadata().getOrDefault(modelName, ModelMetadata.NONE);
     }
 
     private static ModelInfo toModelInfo(ModelCatalogEntry e) {

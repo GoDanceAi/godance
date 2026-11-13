@@ -224,6 +224,9 @@ public class SecurityConfig {
                                 .hasAnyAuthority(sessionOr(ApiKeyAuthFilter.API_KEY_AUTHORITY))
                         .pathMatchers(HttpMethod.GET, "/v1/jobs", "/v1/jobs/*", "/v1/usage")
                                 .hasAnyAuthority(sessionOr(ApiKeyAuthFilter.API_KEY_AUTHORITY))
+                        // Price of an image or video request before it is sent; charges nothing.
+                        .pathMatchers(HttpMethod.POST, "/v1/estimates")
+                                .hasAnyAuthority(sessionOr(ApiKeyAuthFilter.API_KEY_AUTHORITY))
                         // Everything else (keys, billing, webhook secret, conversations,
                         // account) needs a signed-in session. Deny by default, so a
                         // leaked key can't mint a key that outlives it, read the webhook

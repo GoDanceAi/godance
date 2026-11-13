@@ -110,6 +110,7 @@ class VideoGenerationIntegrationTest {
     @Autowired CostCalculator costs;
     @Autowired ModelCatalog catalog;
     @Autowired UsageRecordRepository usage;
+    @Autowired ai.godance.repository.ModelCatalogEntryRepository catalogRows;
     @Autowired ObjectMapper json;
 
     @BeforeEach
@@ -351,15 +352,23 @@ class VideoGenerationIntegrationTest {
         Signed u = signupWithBalance(1000_00L);
         stubSoraImmediateRun();   // one clip comes back for a request that asked for two
 
-        AsyncJobAcknowledged ack = http.post().uri("/v1/videos/generations")
-                .header("Authorization", u.bearer())
-                .contentType(MediaType.APPLICATION_JSON)
-                .bodyValue(Map.of("model", "sora-2", "prompt", "Two clips, please", "seconds", 5, "n", 2))
-                .exchange()
-                .expectStatus().isAccepted()
-                .expectBody(AsyncJobAcknowledged.class).returnResult().getResponseBody();
-
-        JobView done = pollJob(u.bearer(), ack.jobId());
+        // Every seeded video model returns one clip and allows n = 1 (V24). A
+        // model whose catalog entry allows two can still deliver fewer; this
+        // gives sora-2 that entry for the duration of the test.
+        JobView done;
+        Map<String, Object> seeded = setCapabilities("sora-2", Map.of("default_seconds", 10, "max_n", 2));
+        try {
+            AsyncJobAcknowledged ack = http.post().uri("/v1/videos/generations")
+                    .header("Authorization", u.bearer())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .bodyValue(Map.of("model", "sora-2", "prompt", "Two clips, please", "seconds", 5, "n", 2))
+                    .exchange()
+                    .expectStatus().isAccepted()
+                    .expectBody(AsyncJobAcknowledged.class).returnResult().getResponseBody();
+            done = pollJob(u.bearer(), ack.jobId());
+        } finally {
+            setCapabilities("sora-2", seeded);
+        }
         assertThat(done.status()).isEqualTo(JobStatus.DONE);
 
         ModelInfo sora = catalog.find("sora-2").orElseThrow();
@@ -381,7 +390,34 @@ class VideoGenerationIntegrationTest {
                 });
     }
 
+    @Test
+    void videos_givenNAboveModelMaxN_expects400AndNoLedgerRow() {
+        Signed u = signupWithBalance(1000_00L);
+
+        http.post().uri("/v1/videos/generations")
+                .header("Authorization", u.bearer())
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("model", "sora-2", "prompt", "Two clips, please", "seconds", 5, "n", 2))
+                .exchange()
+                .expectStatus().isBadRequest()
+                .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON);
+
+        assertThat(ledger.authoritativeBalance(u.id())).isEqualTo(1000_00L);
+        assertThat(jobs.findByUserIdOrderByCreatedAtDesc(u.id())).isEmpty();
+        assertThat(openAiMock.getAllServeEvents()).isEmpty();
+    }
+
     // ===== Helpers ====================================================
+
+    /** Replaces a model's stored capabilities and reloads the catalog; returns what was there. */
+    private Map<String, Object> setCapabilities(String model, Map<String, Object> capabilities) {
+        ai.godance.domain.ModelCatalogEntry row = catalogRows.findByModelName(model).orElseThrow();
+        Map<String, Object> before = row.getCapabilities();
+        row.setCapabilities(capabilities);
+        catalogRows.save(row);
+        catalog.refresh();
+        return before;
+    }
 
     /** The worker's ledger writes can land just after the job reads as DONE. */
     private void awaitBalance(UUID userId, long expectedCents) throws InterruptedException {

@@ -11,7 +11,9 @@ const endpoints = [
   { id: 'chat-completions', label: 'POST /v1/chat/completions', summary: 'streaming + non-streaming' },
   { id: 'images', label: 'POST /v1/images/generations', summary: 'async: returns a job_id to poll, or pass webhook_url' },
   { id: 'videos', label: 'POST /v1/videos/generations', summary: 'async-only, signed webhook' },
-  { id: 'jobs', label: 'GET /v1/jobs/{id}', summary: 'async job status' },
+  { id: 'jobs', label: 'GET /v1/jobs/{id}', summary: 'async job status, outputs and history' },
+  { id: 'estimates', label: 'POST /v1/estimates', summary: 'price an image or video request before sending it' },
+  { id: 'models', label: 'GET /v1/models', summary: 'catalog, prices and what each model accepts' },
   { id: 'keys', label: 'CRUD /v1/keys', summary: 'API key management' },
   { id: 'billing', label: 'POST /v1/billing/topup', summary: 'credit top-up via Stripe Checkout' },
   { id: 'webhooks', label: 'GET /v1/webhooks/secret', summary: 'signing secret + verification guide' },
@@ -42,6 +44,43 @@ const acceptedSnippet = `HTTP/1.1 202 Accepted
   "job_id": "6f1c0b9e-2d4a-4c3b-9a57-0e8d4b2f7c11",
   "status": "QUEUED",
   "poll_url": "/v1/jobs/6f1c0b9e-2d4a-4c3b-9a57-0e8d4b2f7c11"
+}`;
+
+const jobSnippet = `{
+  "id": "6f1c0b9e-2d4a-4c3b-9a57-0e8d4b2f7c11",
+  "status": "DONE",
+  "modality": "IMAGE",
+  "model": "gpt-image-2",
+  "prompt": "a lighthouse at dusk, watercolor",
+  "params": { "size": "1024x1024", "n": 2 },
+  "outputs": [
+    { "index": 0, "url": "https://…signed…", "contentType": "image/png",
+      "sizeBytes": 812345, "revisedPrompt": null },
+    { "index": 1, "url": "https://…signed…", "contentType": "image/png",
+      "sizeBytes": 798110, "revisedPrompt": null }
+  ],
+  "outputUrl": "https://…signed…",
+  "purged": false,
+  "mediaExpiresAt": "2027-02-10T09:00:00Z",
+  "estimatedCostCents": 12,
+  "actualCostCents": 12,
+  …
+}`;
+
+const estimateSnippet = `curl https://api.godance.ai/v1/estimates \\
+  -H "Authorization: Bearer $GODANCE_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{ "model": "flux-1.1-pro", "n": 1, "size": "1024x1024" }'
+
+{ "model": "flux-1.1-pro", "modality": "IMAGE", "n": 1, "seconds": null,
+  "estimated_cost_cents": 4, "currency": "USD" }`;
+
+const capabilitiesSnippet = `"godance": {
+  "modality": "VIDEO",
+  "display_name": "Runway Gen-4",
+  "description": "Runway's Gen-4 text-to-video model. One clip per request.",
+  "capabilities": { "default_size": "1280x720", "default_seconds": 5, "max_n": 1 },
+  …
 }`;
 
 const verifySnippet = `import hmac, hashlib
@@ -127,6 +166,7 @@ def verify(payload, header, secret):
     <ul class="mt-4 space-y-2 text-fg-muted">
       <li><code class="code-chip">model</code>, <code class="code-chip">prompt</code> (required).</li>
       <li><code class="code-chip">size</code>, <code class="code-chip">n</code>, <code class="code-chip">style</code>, <code class="code-chip">quality</code> — optional, as in OpenAI's API; <code class="code-chip">n</code> defaults to 1.</li>
+      <li><code class="code-chip">n</code> can be at most the model's <code class="code-chip">max_n</code> (see <a href="#models" class="underline" style="color: var(--color-primary)">GET /v1/models</a>; 1 when a model doesn't state one). A larger <code class="code-chip">n</code> answers <code class="code-chip">400</code> before anything is reserved.</li>
       <li><code class="code-chip">webhook_url</code> — optional Godance extension; where to POST the completion event.</li>
     </ul>
     <p class="mt-4 text-fg-muted">
@@ -150,37 +190,85 @@ def verify(payload, header, secret):
       <li><code class="code-chip">model</code>, <code class="code-chip">prompt</code> (required).</li>
       <li><code class="code-chip">size</code> — optional output resolution.</li>
       <li><code class="code-chip">seconds</code> — optional clip length. Left out, the model's standard length is used: 5 seconds for most models, 10 for the Sora models and 6 for <code class="code-chip">minimax-hailuo-2.3</code>.</li>
-      <li><code class="code-chip">n</code> — optional number of clips, defaults to 1.</li>
+      <li><code class="code-chip">n</code> — optional number of clips, defaults to 1. Every video model returns one clip per request today (<code class="code-chip">max_n</code> 1), so a larger <code class="code-chip">n</code> answers <code class="code-chip">400</code> before anything is reserved.</li>
       <li><code class="code-chip">webhook_url</code> — optional; where to POST the completion event.</li>
     </ul>
     <p class="mt-4 text-fg-muted">
       Cost is the model's per-second rate × clip length × <code class="code-chip">n</code>,
       reserved up front and refunded if generation fails. Send <code class="code-chip">seconds</code>
       to fix both the length and the price. A model that returns fewer clips than
-      <code class="code-chip">n</code> is charged for the clips it returned.
+      <code class="code-chip">n</code> is charged for the clips it returned. To see the price
+      first, send the same fields to
+      <a href="#estimates" class="underline" style="color: var(--color-primary)"><code class="code-chip">POST /v1/estimates</code></a>.
     </p>
 
     <!-- ===== Jobs ===== -->
     <h2 id="jobs" class="scroll-mt-24 text-2xl font-bold mt-16 mb-4 text-fg">GET /v1/jobs/&#123;id&#125;</h2>
     <p class="text-fg-muted">
-      Returns one async job. <code class="code-chip">GET /v1/jobs</code> lists all of your jobs,
-      newest first. A job ID that isn't yours returns <code class="code-chip">404</code>.
-      Fields are camelCase:
+      Returns one async job: its status, what was asked for and every file it produced. A job
+      ID that isn't yours returns <code class="code-chip">404</code>. Fields are camelCase:
     </p>
     <ul class="mt-4 space-y-2 text-fg-muted">
       <li><code class="code-chip">status</code> — <code class="code-chip">QUEUED</code> → <code class="code-chip">RUNNING</code> → <code class="code-chip">DONE</code> or <code class="code-chip">FAILED</code>.</li>
-      <li><code class="code-chip">outputUrl</code> — set once <code class="code-chip">DONE</code>: a time-limited signed URL to the first output, so copy the file to your own storage. When <code class="code-chip">n</code> &gt; 1, the webhook payload lists every output.</li>
+      <li><code class="code-chip">prompt</code>, <code class="code-chip">params</code> — the request, with its own field names: <code class="code-chip">size</code>, <code class="code-chip">n</code>, <code class="code-chip">style</code>, <code class="code-chip">quality</code> for images; <code class="code-chip">size</code>, <code class="code-chip">seconds</code>, <code class="code-chip">n</code> for video (<code class="code-chip">seconds</code> is the length generated, also when you left it out).</li>
+      <li><code class="code-chip">outputs</code> — every file, in order: <code class="code-chip">index</code>, <code class="code-chip">url</code>, <code class="code-chip">contentType</code>, <code class="code-chip">sizeBytes</code>, <code class="code-chip">revisedPrompt</code> (null unless the model rewrote the prompt). Empty until the job is <code class="code-chip">DONE</code>. Each <code class="code-chip">url</code> is signed when you read the job and expires after a while, so read the job again for a fresh link rather than storing one.</li>
+      <li><code class="code-chip">outputUrl</code> — the first output's link, signed the same way. Kept for clients written before <code class="code-chip">outputs</code>.</li>
+      <li><code class="code-chip">mediaExpiresAt</code> — when the files and prompt are due to be deleted: 90 days after the job was created. Copy anything you want to keep before then. May be null, meaning nothing is scheduled.</li>
+      <li><code class="code-chip">purged</code> — true once the files and prompt have been deleted; <code class="code-chip">prompt</code> is then null, <code class="code-chip">params</code> is <code class="code-chip">&#123;&#125;</code> and <code class="code-chip">outputs</code> is empty. The cost fields stay.</li>
       <li><code class="code-chip">errorMessage</code> — set when <code class="code-chip">FAILED</code>; the reserved credit is refunded.</li>
       <li><code class="code-chip">estimatedCostCents</code>, <code class="code-chip">actualCostCents</code> — integer cents: the amount reserved when the job was accepted, and the amount charged once it is <code class="code-chip">DONE</code>.</li>
       <li><code class="code-chip">id</code>, <code class="code-chip">modality</code>, <code class="code-chip">provider</code>, <code class="code-chip">model</code>, <code class="code-chip">createdAt</code>, <code class="code-chip">startedAt</code>, <code class="code-chip">completedAt</code> — timestamps are ISO 8601.</li>
     </ul>
+    <pre class="code-block mt-4"><code>{jobSnippet}</code></pre>
+    <p class="mt-4 text-fg-muted">
+      <code class="code-chip">GET /v1/jobs</code> returns your jobs as a JSON array of the same
+      objects, newest first. Without parameters it returns all of them. Optional query
+      parameters:
+    </p>
+    <ul class="mt-4 space-y-2 text-fg-muted">
+      <li><code class="code-chip">limit</code> — 1 to 100 jobs per page.</li>
+      <li><code class="code-chip">before</code> — a job <code class="code-chip">id</code>: only jobs older than it. Pass the last <code class="code-chip">id</code> of a page to get the next one; an empty array means there are no more. An <code class="code-chip">id</code> that isn't one of your jobs returns <code class="code-chip">400</code>.</li>
+      <li><code class="code-chip">modality</code> — <code class="code-chip">IMAGE</code> or <code class="code-chip">VIDEO</code>.</li>
+      <li><code class="code-chip">status</code> — <code class="code-chip">QUEUED</code>, <code class="code-chip">RUNNING</code>, <code class="code-chip">DONE</code> or <code class="code-chip">FAILED</code>.</li>
+    </ul>
+
+    <!-- ===== Estimates ===== -->
+    <h2 id="estimates" class="scroll-mt-24 text-2xl font-bold mt-16 mb-4 text-fg">POST /v1/estimates</h2>
+    <p class="text-fg-muted">
+      The price of an image or video request before you send it. Nothing is charged and no job
+      is created. Send the fields that set the price, with the same names as the generation
+      request: <code class="code-chip">model</code> (required), <code class="code-chip">n</code>,
+      <code class="code-chip">size</code> and, for video, <code class="code-chip">seconds</code>.
+      <code class="code-chip">estimated_cost_cents</code> is exactly what the same generation
+      request would reserve, with <code class="code-chip">n</code> and
+      <code class="code-chip">seconds</code> filled in as the job would fill them
+      (<code class="code-chip">seconds</code> is null for images). An unknown model returns
+      <code class="code-chip">404</code>; a text model, or an <code class="code-chip">n</code>
+      above the model's <code class="code-chip">max_n</code>, returns
+      <code class="code-chip">400</code>. Works with an API key or a signed-in session.
+    </p>
+    <pre class="code-block mt-4"><code>{estimateSnippet}</code></pre>
+
+    <!-- ===== Models ===== -->
+    <h2 id="models" class="scroll-mt-24 text-2xl font-bold mt-16 mb-4 text-fg">GET /v1/models</h2>
+    <p class="text-fg-muted">
+      OpenAI's model list, public, no key needed. Each entry carries a
+      <code class="code-chip">godance</code> object with its modality, list price
+      (<code class="code-chip">pricing</code>) and platform fee
+      (<code class="code-chip">markup_percent</code>). Image and video models may also carry:
+    </p>
+    <ul class="mt-4 space-y-2 text-fg-muted">
+      <li><code class="code-chip">display_name</code>, <code class="code-chip">description</code> — for showing the model to people.</li>
+      <li><code class="code-chip">capabilities</code> — what the model accepts: <code class="code-chip">sizes</code>, <code class="code-chip">default_size</code>, <code class="code-chip">durations</code>, <code class="code-chip">default_seconds</code> (the length used when a video request leaves out <code class="code-chip">seconds</code>) and <code class="code-chip">max_n</code> (the most outputs one request can ask for). Each key is optional, and a missing one means not known, not unlimited. A model without <code class="code-chip">max_n</code> allows 1. <code class="code-chip">sizes</code> and <code class="code-chip">durations</code> are guidance; requests are not rejected on them.</li>
+    </ul>
+    <pre class="code-block mt-4"><code>{capabilitiesSnippet}</code></pre>
 
     <!-- ===== API keys ===== -->
     <h2 id="keys" class="scroll-mt-24 text-2xl font-bold mt-16 mb-4 text-fg">CRUD /v1/keys</h2>
     <p class="text-fg-muted">
       Send your key as <code class="code-chip">Authorization: Bearer gd_live_…</code>.
       A key calls the model API only: chat completions, image and video generations,
-      jobs and usage. Everything else, these endpoints included, needs a signed-in
+      estimates, jobs and usage. Everything else, these endpoints included, needs a signed-in
       session; a key gets <code class="code-chip">403</code> there.
       Create keys in the dashboard or with these endpoints:
     </p>
@@ -298,8 +386,8 @@ def verify(payload, header, secret):
       <li>
         <strong class="text-fg">Works unchanged:</strong> chat completions, streaming and
         non-streaming, and <code class="code-chip">GET /v1/models</code>. Catalog entries carry an
-        extra <code class="code-chip">godance</code> object (modality, list price, platform fee)
-        that OpenAI clients ignore.
+        extra <code class="code-chip">godance</code> object (modality, list price, platform fee
+        and, for image and video models, what the model accepts) that OpenAI clients ignore.
       </li>
       <li>
         <strong class="text-fg">Same request, different response:</strong> image and video

@@ -1,10 +1,8 @@
 package ai.godance.web;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
-import static com.github.tomakehurst.wiremock.client.WireMock.get;
 import static com.github.tomakehurst.wiremock.client.WireMock.post;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
-import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.Base64;
@@ -122,6 +120,7 @@ class ImageGenerationIntegrationTest {
     @Autowired ai.godance.repository.UsageRecordRepository usage;
     @Autowired CostCalculator costs;
     @Autowired ModelCatalog catalog;
+    @Autowired ai.godance.repository.CreditLedgerRepository ledgerRows;
 
     @BeforeEach
     void reset() {
@@ -270,34 +269,23 @@ class ImageGenerationIntegrationTest {
     @Test
     void generate_fewerImagesDeliveredThanRequested_billsTheDeliveredImages() throws Exception {
         Signed u = signupWithBalance(100_00L);
-        // Flux returns one image per request, whatever n is.
-        bflMock.stubFor(post(urlEqualTo("/v1/flux-pro-1.1"))
-                .willReturn(aResponse().withStatus(200)
-                        .withHeader("content-type", "application/json")
-                        .withBody("{\"id\":\"job-n2\",\"polling_url\":\"unused\"}")));
-        bflMock.stubFor(get(urlPathEqualTo("/v1/get_result"))
-                .willReturn(aResponse().withStatus(200)
-                        .withHeader("content-type", "application/json")
-                        .withBody("{\"id\":\"job-n2\",\"status\":\"Ready\","
-                                + "\"result\":{\"sample\":\"" + bflMock.baseUrl() + "/_test/n2.png\"}}")));
-        bflMock.stubFor(get(urlEqualTo("/_test/n2.png"))
-                .willReturn(aResponse().withStatus(200)
-                        .withHeader("content-type", "image/png")
-                        .withBody(TINY_PNG)));
+        // gpt-image-2 accepts n = 2; this upstream answers with one image.
+        stubOneB64Image(openAiMock, "/v1/images/generations");
 
         AsyncJobAcknowledged ack = submitImage(u.bearer(),
-                Map.of("model", "flux-1.1-pro", "prompt", "Two boats, please", "n", 2));
+                Map.of("model", "gpt-image-2", "prompt", "Two boats, please", "n", 2));
         JobView done = pollUntilTerminal(ack.jobId(), u.bearer());
         assertThat(done.status()).isEqualTo(JobStatus.DONE);
 
-        ModelInfo flux = catalog.find("flux-1.1-pro").orElseThrow();
-        long forTwo = costs.imageCostCents(flux, 2);
-        long forOne = costs.imageCostCents(flux, 1);
+        ModelInfo model = catalog.find("gpt-image-2").orElseThrow();
+        long forTwo = costs.imageCostCents(model, 2);
+        long forOne = costs.imageCostCents(model, 1);
         assertThat(forOne).isLessThan(forTwo);
 
         // Two images were held up front; one was delivered, so one is charged.
         assertThat(done.estimatedCostCents()).isEqualTo(forTwo);
         assertThat(done.actualCostCents()).isEqualTo(forOne);
+        assertThat(done.outputs()).hasSize(1);
         awaitBalance(u.id(), 100_00L - forOne);
 
         // The usage row feeds spending caps and revenue reports: it carries the charge, not the hold.
@@ -306,6 +294,29 @@ class ImageGenerationIntegrationTest {
                     assertThat(r.getCostCents()).isEqualTo(forOne);
                     assertThat(r.getOutputTokens()).isEqualTo(1);     // images delivered
                 });
+    }
+
+    // ===== Output count checked before any charge =====================
+
+    @Test
+    void generate_givenNAboveModelMaxN_expects400AndNoLedgerRow() {
+        Signed u = signupWithBalance(100_00L);
+
+        // Flux returns one image whatever n is, so its catalog entry allows one.
+        http.post().uri("/v1/images/generations")
+                .header("Authorization", u.bearer())
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("model", "flux-1.1-pro", "prompt", "Two boats, please", "n", 2))
+                .exchange()
+                .expectStatus().isBadRequest()
+                .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON);
+
+        // Only the seed top-up is on the ledger: no pre-debit, no refund.
+        assertThat(ledgerRows.findByUserIdOrderByOccurredAtDesc(u.id(),
+                org.springframework.data.domain.PageRequest.of(0, 10)).getTotalElements()).isEqualTo(1);
+        assertThat(ledger.authoritativeBalance(u.id())).isEqualTo(100_00L);
+        assertThat(jobs.findByUserIdOrderByCreatedAtDesc(u.id())).isEmpty();
+        assertThat(bflMock.getAllServeEvents()).isEmpty();
     }
 
     // ===== Refund on upstream failure =================================

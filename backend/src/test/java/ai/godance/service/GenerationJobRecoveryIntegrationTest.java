@@ -12,6 +12,7 @@ import static org.mockito.Mockito.when;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -89,6 +90,11 @@ class GenerationJobRecoveryIntegrationTest {
     @Autowired GenerationJobRepository jobs;
     @Autowired UsageRecordRepository usage;
     @Autowired GenerationJobSettlement settlement;
+    @Autowired ai.godance.repository.GenerationJobOutputRepository outputRows;
+
+    private static final List<GenerationJobSettlement.StoredOutput> TWO_OUTPUTS = List.of(
+            new GenerationJobSettlement.StoredOutput("images/x/0.png", "image/png", 10L, "first"),
+            new GenerationJobSettlement.StoredOutput("images/x/1.png", "image/png", 20L, null));
 
     @BeforeEach
     void reset() {
@@ -196,12 +202,14 @@ class GenerationJobRecoveryIntegrationTest {
         settlement.start(job);
         GenerationJobSweepJob.sweep(settlement);
 
-        boolean completed = settlement.complete(job, "https://storage.invalid/late.png", 500L, new UsageRecord());
+        boolean completed = settlement.complete(job, "https://storage.invalid/late.png", TWO_OUTPUTS,
+                500L, new UsageRecord());
 
         assertThat(completed).isFalse();
         GenerationJob after = jobs.findById(job.getId()).orElseThrow();
         assertThat(after.getStatus()).isEqualTo(JobStatus.FAILED);
         assertThat(after.getOutputUrl()).isNull();
+        assertThat(outputRows.findByJobIdOrderByOutputIndexAsc(job.getId())).isEmpty();
         assertThat(usage.findByUserIdAndRecordedAtGreaterThanEqual(u.id(), Instant.now().minusSeconds(60))).isEmpty();
         assertThat(balance(u.id())).isEqualTo(100_00L);
     }
@@ -214,7 +222,8 @@ class GenerationJobRecoveryIntegrationTest {
         settlement.start(job);
         GenerationJobSweepJob.sweep(settlement);   // the whole hold is already back
 
-        boolean completed = settlement.complete(job, "https://storage.invalid/late.png", 200L, new UsageRecord());
+        boolean completed = settlement.complete(job, "https://storage.invalid/late.png", List.of(),
+                200L, new UsageRecord());
 
         assertThat(completed).isFalse();
         assertThat(balance(u.id())).isEqualTo(100_00L);
@@ -227,11 +236,52 @@ class GenerationJobRecoveryIntegrationTest {
         settlement.accept(job, null);
         settlement.start(job);
 
-        assertThatThrownBy(() -> settlement.complete(job, "https://storage.invalid/over.png", 600L, new UsageRecord()))
+        assertThatThrownBy(() -> settlement.complete(job, "https://storage.invalid/over.png", TWO_OUTPUTS,
+                600L, new UsageRecord()))
                 .isInstanceOf(IllegalArgumentException.class);
 
         assertThat(jobs.findById(job.getId()).orElseThrow().getStatus()).isEqualTo(JobStatus.RUNNING);
+        assertThat(outputRows.findByJobIdOrderByOutputIndexAsc(job.getId())).isEmpty();
         assertThat(balance(u.id())).isEqualTo(100_00L - 500L);
+    }
+
+    // ===== Outputs are recorded with the DONE that ends the job (V23) ===
+
+    @Test
+    void complete_givenTwoStoredOutputs_expectsBothRowsInOrderAndOnlyOnce() {
+        Signed u = signupWithBalance(100_00L);
+        GenerationJob job = job(u.id(), 500L, "img_" + UUID.randomUUID(), Instant.now().plus(Duration.ofMinutes(10)));
+        settlement.accept(job, null);
+        settlement.start(job);
+
+        assertThat(settlement.complete(job, "https://storage.invalid/0.png", TWO_OUTPUTS, 500L,
+                usageFor(u.id(), job))).isTrue();
+        // A second ending (a late worker, or the sweep) writes nothing more.
+        assertThat(settlement.complete(job, "https://storage.invalid/0.png", TWO_OUTPUTS, 500L,
+                usageFor(u.id(), job))).isFalse();
+
+        assertThat(outputRows.findByJobIdOrderByOutputIndexAsc(job.getId()))
+                .extracting(o -> o.getOutputIndex(), o -> o.getStorageKey(), o -> o.getSizeBytes(),
+                        o -> o.getRevisedPrompt())
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple(0, "images/x/0.png", 10L, "first"),
+                        org.assertj.core.groups.Tuple.tuple(1, "images/x/1.png", 20L, null));
+        assertThat(usage.findByUserIdAndRecordedAtGreaterThanEqual(u.id(), Instant.now().minusSeconds(60)))
+                .hasSize(1);
+        assertThat(balance(u.id())).isEqualTo(100_00L - 500L);
+    }
+
+    private static UsageRecord usageFor(UUID userId, GenerationJob job) {
+        UsageRecord r = new UsageRecord();
+        r.setUserId(userId);
+        r.setModality(Modality.IMAGE);
+        r.setModelName(job.getModel());
+        r.setProvider(Provider.OPENAI);
+        r.setOutputTokens(2);
+        r.setCostCents(500L);
+        r.setRegion(ai.godance.domain.Region.LOCAL);
+        r.setRequestId(job.getRequestId());
+        return r;
     }
 
     // ===== Storage fails after the provider delivered (R-05) ==========

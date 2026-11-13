@@ -116,4 +116,32 @@ class S3ObjectStorageClientIntegrationTest {
         assertThatThrownBy(() -> client.deletePrefix(null)).isInstanceOf(IllegalArgumentException.class);
         assertThat(keysUnder(keep)).containsExactly(keep);
     }
+    @Test
+    void list_givenObjectsUnderPrefix_returnsOnlyThoseWithSizesInKeyOrder() {
+        String job = UUID.randomUUID().toString();
+        client.upload("images/" + job + "/1.png", new byte[] {1, 2, 3, 4, 5}, "image/png");
+        client.upload("images/" + job + "/0.png", new byte[] {1, 2}, "image/png");
+        put("images/" + job + "-other/0.png");
+        put("videos/" + job + "/0.mp4");
+
+        assertThat(client.list("images/" + job + "/")).containsExactly(
+                new ObjectStorageClient.StoredObject("images/" + job + "/0.png", 2L),
+                new ObjectStorageClient.StoredObject("images/" + job + "/1.png", 5L));
+        assertThat(client.list("images/" + UUID.randomUUID() + "/")).isEmpty();
+    }
+
+    @Test
+    void list_givenMoreKeysThanOneListingPage_returnsThemAll() {
+        String prefix = "bulk-list/" + UUID.randomUUID() + "/";
+        IntStream.range(0, 1_003).parallel().forEach(i -> put(prefix + i + ".bin"));
+
+        assertThat(client.list(prefix)).hasSize(1_003);
+    }
+
+    @Test
+    void list_givenBlankPrefix_refuses() {
+        assertThatThrownBy(() -> client.list("")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> client.list("  ")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> client.list(null)).isInstanceOf(IllegalArgumentException.class);
+    }
 }

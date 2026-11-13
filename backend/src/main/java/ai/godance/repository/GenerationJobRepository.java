@@ -16,6 +16,29 @@ import ai.godance.domain.JobStatus;
 
 public interface GenerationJobRepository extends JpaRepository<GenerationJob, UUID> {
     List<GenerationJob> findByUserIdOrderByCreatedAtDesc(UUID userId);
+
+    /**
+     * One page of a user's jobs, newest first by {@code (created_at, id)}:
+     * those strictly older than the cursor ({@code beforeCreatedAt},
+     * {@code beforeId}), optionally of one modality and one status. An empty
+     * {@code modality} or {@code status} matches any. Callers pass a cursor
+     * after every job for the first page; nothing here is ever bound as null.
+     */
+    @Query(value = """
+            SELECT * FROM generation_jobs j
+             WHERE j.user_id = :userId
+               AND (:modality = '' OR j.modality = :modality)
+               AND (:status = '' OR j.status = :status)
+               AND (j.created_at, j.id) < (:beforeCreatedAt, :beforeId)
+             ORDER BY j.created_at DESC, j.id DESC
+             LIMIT :limit
+            """, nativeQuery = true)
+    List<GenerationJob> findPageForUser(@Param("userId") UUID userId,
+                                        @Param("modality") String modality,
+                                        @Param("status") String status,
+                                        @Param("beforeCreatedAt") Instant beforeCreatedAt,
+                                        @Param("beforeId") UUID beforeId,
+                                        @Param("limit") int limit);
     List<GenerationJob> findByStatus(JobStatus status);
 
     // Status changes are conditional updates, so a worker and the sweep can

@@ -69,7 +69,11 @@ public class AdminCatalogService {
             boolean requiresAsync,
             String costSource,
             Instant lastVerifiedAt,
-            Instant updatedAt
+            Instant updatedAt,
+            // Read-only here (V24); no admin route edits them.
+            String displayName,
+            String description,
+            Map<String, Object> capabilities
     ) { }
 
     @Transactional(readOnly = true)
@@ -171,7 +175,8 @@ public class AdminCatalogService {
                 e.getPerImageMicrocents(), e.getPerSecondMicrocents(),
                 e.getMarkupOverride(),
                 effectiveMarkup(e),
-                e.isRequiresAsync(), e.getCostSource(), e.getLastVerifiedAt(), e.getUpdatedAt());
+                e.isRequiresAsync(), e.getCostSource(), e.getLastVerifiedAt(), e.getUpdatedAt(),
+                e.getDisplayName(), e.getDescription(), e.getCapabilities());
     }
 
     /** Mirrors {@link ai.godance.gateway.CostCalculator}'s markup resolution. */

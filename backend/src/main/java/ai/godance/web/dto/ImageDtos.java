@@ -1,7 +1,9 @@
 package ai.godance.web.dto;
 
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
@@ -73,6 +75,23 @@ public final class ImageDtos {
 
     // ===== Job poll endpoint =========================================
 
+    /**
+     * A job as {@code GET /v1/jobs} and {@code GET /v1/jobs/{id}} return it.
+     * The fields up to {@code completedAt} are the original shape; the rest
+     * were added in round 7 and are additions only.
+     *
+     * <ul>
+     *   <li>{@code prompt} and {@code params}: what was asked for, with the
+     *       request's field names ({@code size}, {@code n}, {@code style},
+     *       {@code quality} for images; {@code size}, {@code seconds},
+     *       {@code n} for video). After the purge, null and {@code {}}.</li>
+     *   <li>{@code outputs}: every stored file, each link signed when the job
+     *       is read. Empty until the job is DONE, and again once purged.</li>
+     *   <li>{@code outputUrl}: the first output, freshly signed.</li>
+     *   <li>{@code mediaExpiresAt}: when the files and prompt are due to be
+     *       deleted; null when they are not scheduled for deletion.</li>
+     * </ul>
+     */
     public record JobView(
             UUID id,
             JobStatus status,
@@ -85,14 +104,65 @@ public final class ImageDtos {
             String errorMessage,
             Instant createdAt,
             Instant startedAt,
-            Instant completedAt
+            Instant completedAt,
+            String prompt,
+            Map<String, Object> params,
+            List<JobOutputView> outputs,
+            boolean purged,
+            Instant mediaExpiresAt
     ) {
-        public static JobView from(GenerationJob j) {
+        /**
+         * {@code outputs} carry links already signed; {@code outputUrl} is the
+         * first of them, or the stored link for a job that has none recorded.
+         */
+        public static JobView from(GenerationJob j, List<JobOutputView> outputs, Instant mediaExpiresAt) {
+            boolean purged = j.getPurgedAt() != null;
+            List<JobOutputView> shown = purged ? List.of() : outputs;
+            String outputUrl = shown.isEmpty() ? j.getOutputUrl() : shown.get(0).url();
             return new JobView(
                     j.getId(), j.getStatus(), j.getModality(), j.getProvider(),
                     j.getModel(), j.getEstimatedCostCents(), j.getActualCostCents(),
-                    j.getOutputUrl(), j.getErrorMessage(),
-                    j.getCreatedAt(), j.getStartedAt(), j.getCompletedAt());
+                    outputUrl, j.getErrorMessage(),
+                    j.getCreatedAt(), j.getStartedAt(), j.getCompletedAt(),
+                    purged ? null : promptOf(j),
+                    purged ? Map.of() : paramsOf(j),
+                    shown, purged, purged ? null : mediaExpiresAt);
+        }
+
+        private static String promptOf(GenerationJob j) {
+            Map<String, Object> stored = j.getPrompt();
+            return stored != null && stored.get("prompt") instanceof String p ? p : null;
+        }
+
+        /** The stored request, keyed by the request's field names; video's length is {@code seconds}. */
+        private static Map<String, Object> paramsOf(GenerationJob j) {
+            Map<String, Object> stored = j.getPrompt() == null ? Map.of() : j.getPrompt();
+            Map<String, Object> params = new LinkedHashMap<>();
+            if (j.getModality() == Modality.VIDEO) {
+                copy(stored, "size", params, "size");
+                copy(stored, "duration_seconds", params, "seconds");
+                copy(stored, "n", params, "n");
+            } else {
+                copy(stored, "size", params, "size");
+                copy(stored, "n", params, "n");
+                copy(stored, "style", params, "style");
+                copy(stored, "quality", params, "quality");
+            }
+            return params;
+        }
+
+        private static void copy(Map<String, Object> from, String key, Map<String, Object> to, String as) {
+            Object v = from.get(key);
+            if (v != null) to.put(as, v);
         }
     }
+
+    /** One stored file of a job; {@code url} is signed when the job is read. */
+    public record JobOutputView(
+            int index,
+            String url,
+            String contentType,
+            long sizeBytes,
+            String revisedPrompt
+    ) { }
 }
