@@ -4,6 +4,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import { apiFetch, ApiError } from '../lib/api';
 import { birthMonthParam, needsParentalConsent } from '../lib/age';
+import { useCaptureReferral } from '../lib/referral';
 import { carryDestination, destinationFrom } from '../lib/return-to';
 import RecipeWaitingNote from '../components/RecipeWaitingNote';
 import { Field } from './LoginPage';
@@ -21,6 +22,7 @@ const YEARS = Array.from({ length: THIS_YEAR - 1900 + 1 }, (_, i) => THIS_YEAR -
 export default function SignupPage() {
   const { signup } = useAuth();
   const navigate = useNavigate();
+  useCaptureReferral();   // an invite link: /signup?ref=<code>
   // Where the visitor was going, handed over by the sign-in page in navigation
   // state (lib/return-to). A new account waiting for a parent's approval still
   // gets the waiting screen there, from ProtectedRoute.

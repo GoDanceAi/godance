@@ -3,6 +3,7 @@ import Layout from './components/Layout';
 import ProtectedRoute from './components/ProtectedRoute';
 import { AuthProvider } from './lib/auth';
 import { AdminProvider } from './lib/admin';
+import { ReferralProvider } from './lib/referral';
 import LoginPage from './pages/LoginPage';
 import SignupPage from './pages/SignupPage';
 import VerifyEmailPage from './pages/VerifyEmailPage';
@@ -18,6 +19,7 @@ import JobPage from './pages/JobPage';
 import ApiKeysPage from './pages/ApiKeysPage';
 import BillingPage from './pages/BillingPage';
 import SettingsPage from './pages/SettingsPage';
+import ReferralPage from './pages/ReferralPage';
 import AdminLayout from './pages/admin/AdminLayout';
 import ProposalsPage from './pages/admin/ProposalsPage';
 import CatalogPage from './pages/admin/CatalogPage';
@@ -28,6 +30,7 @@ export default function App() {
   return (
     <AuthProvider>
       <AdminProvider>
+      <ReferralProvider>
       <Layout>
         <Routes>
           {/* Public */}
@@ -54,6 +57,8 @@ export default function App() {
           <Route path="/keys"      element={<ProtectedRoute><ApiKeysPage /></ProtectedRoute>} />
           <Route path="/billing"   element={<ProtectedRoute><BillingPage /></ProtectedRoute>} />
           <Route path="/settings"  element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
+          {/* Only while referrals are on; otherwise it leads back to the dashboard. */}
+          <Route path="/referral"  element={<ProtectedRoute><ReferralPage /></ProtectedRoute>} />
 
           {/* Admin console — nav + routes render only after /v1/admin/me
               returns 200; the server-side role gate stays the real one. */}
@@ -69,6 +74,7 @@ export default function App() {
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
       </Layout>
+      </ReferralProvider>
       </AdminProvider>
     </AuthProvider>
   );
