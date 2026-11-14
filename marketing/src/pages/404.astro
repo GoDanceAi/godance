@@ -1,0 +1,35 @@
+---
+/**
+ * The not-found page. Astro writes it to 404.html at the top of the build,
+ * and Cloudflare Pages answers any path it has no file for with that page and
+ * a 404. Without it Pages treats the site as a single-page app and answers
+ * every unknown path with the home page and a 200.
+ *
+ * It is served at any address, so every link and asset URL on it must start
+ * at the root.
+ */
+import Layout from '../layouts/Layout.astro';
+
+const title = 'Page not found — Godance';
+const description = 'There is no page at this address on godance.ai.';
+---
+
+<Layout {title} {description} canonicalPath="/404" noindex>
+  <section class="mx-auto max-w-3xl px-6 py-24" data-not-found>
+    <p class="font-mono text-sm text-fg-subtle">404</p>
+    <h1 class="mt-2 text-4xl font-bold tracking-tight text-fg">Page not found</h1>
+    <p class="mt-4 max-w-xl text-fg-muted">
+      There is no page at this address. The link may be out of date, or the address may have a typo.
+    </p>
+    <div class="mt-8 flex flex-wrap gap-3">
+      <a href="/" class="btn btn-primary btn-lg">Go to the home page</a>
+      <a href="/docs" class="btn btn-secondary btn-lg">Read the docs</a>
+    </div>
+    <p class="mt-8 text-sm text-fg-subtle">
+      Or see the
+      <a href="/models" class="underline" style="color: var(--color-primary)">model catalog</a>,
+      <a href="/pricing" class="underline" style="color: var(--color-primary)">pricing</a> or
+      <a href="/status" class="underline" style="color: var(--color-primary)">status</a>.
+    </p>
+  </section>
+</Layout>
