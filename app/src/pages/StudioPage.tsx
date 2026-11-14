@@ -9,6 +9,7 @@ import { controlsFor, groupByProvider, loadCatalog, mediaModels, modelName, pric
 import { listSavedRecipes, saveRecipe, unsaveRecipe } from '../lib/saved-recipes';
 import { sendError, type SendError } from '../lib/send-error';
 import {
+  galleryRecipeOf,
   generationBody,
   generationPath,
   PROMPT_MAX_LENGTH,
@@ -157,7 +158,9 @@ export default function StudioPage({ modality }: { modality: MediaModality }) {
 
   const model = models?.find((m) => m.id === values.model);
   const controls = controlsFor(model, modality);
-  const request = ready && model ? generationBody(modality, values, controls) : null;
+  // Sent with the run while the form is still the gallery recipe it was loaded from.
+  const galleryRecipe = galleryRecipeOf(recipe?.recipe ?? null, values);
+  const request = ready && model ? generationBody(modality, values, controls, galleryRecipe) : null;
   const price = useEstimate(request);
   const canSubmit = request !== null && values.prompt.trim() !== '' && !submitting;
 

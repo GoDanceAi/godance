@@ -8,6 +8,7 @@ import {
 } from './api';
 import { mediaModality } from './jobs';
 import type { Controls } from './media-models';
+import type { GalleryRecipe } from './recipe';
 
 // The generation requests the Studio sends: the same calls an API key makes.
 
@@ -32,6 +33,7 @@ export interface GenerationBody {
   seconds?: number;
   style?: string;
   quality?: string;
+  gallery_recipe?: string;   // the gallery recipe this is a run of (galleryRecipeOf)
   async?: true;
 }
 
@@ -44,13 +46,37 @@ function withAsync(modality: MediaModality, body: GenerationBody): GenerationBod
   return modality === 'IMAGE' ? { ...body, async: true } : body;
 }
 
-/** The request for the form: the model, the prompt, and only what the model's controls offer. */
-export function generationBody(modality: MediaModality, values: StudioValues, controls: Controls): GenerationBody {
+/**
+ * The request for the form: the model, the prompt, and only what the model's
+ * controls offer. `galleryRecipe` is the recipe it is still a run of, if any.
+ */
+export function generationBody(
+  modality: MediaModality,
+  values: StudioValues,
+  controls: Controls,
+  galleryRecipe: string | null = null,
+): GenerationBody {
   const body: GenerationBody = { model: values.model, prompt: values.prompt };
   if (controls.sizes && values.size) body.size = values.size;
   if (controls.maxN) body.n = values.n;
   if (controls.durations && values.seconds) body.seconds = values.seconds;
+  if (galleryRecipe) body.gallery_recipe = galleryRecipe;
   return withAsync(modality, body);
+}
+
+/**
+ * The slug to send as `gallery_recipe`: the recipe the form was loaded from,
+ * for as long as the form is still that recipe. It stops being one when the
+ * prompt is no longer the recipe's text in either language, or the model is
+ * not the one the recipe was run on. Size, count and duration may change.
+ */
+export function galleryRecipeOf(recipe: GalleryRecipe | null, values: StudioValues): string | null {
+  if (!recipe || values.model !== recipe.run.model) return null;
+  const unedited = (['en', 'zh'] as const).some((lang) => {
+    const text = recipe.prompt[lang];
+    return text !== null && values.prompt === text.slice(0, PROMPT_MAX_LENGTH);
+  });
+  return unedited ? recipe.slug : null;
 }
 
 function positiveInt(value: unknown): value is number {

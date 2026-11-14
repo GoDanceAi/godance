@@ -384,7 +384,12 @@ export interface JobView {
   purged?: boolean;
   mediaExpiresAt?: string | null;      // null: the files are not scheduled for deletion
   saved?: boolean;                     // kept past the deletion date; absent from an API without saving
+  channel?: JobChannel | null;         // how it was made; null for a job from before this was recorded
+  galleryRecipe?: string | null;       // the gallery recipe it was a run of, by slug
 }
+
+/** STUDIO: made by a signed-in session. API: made with an API key. The API decides which. */
+export type JobChannel = 'STUDIO' | 'API';
 
 /** GET /v1/jobs/saved: how many generations the account has saved, and the most it can. */
 export interface SavedJobs {
@@ -526,4 +531,37 @@ export interface AdminUsageSummary {
   days: AdminDailyPoint[];
   topModels: AdminTopModel[];
   topUsers: AdminTopUser[];
+}
+
+/** How many of a group of sign-ups reached each step. Counts only; a group under 5 people is left out. */
+export interface AdminFunnelStages {
+  signed_up: number;
+  first_studio_job: number;
+  first_paid_top_up: number;
+  first_api_job: number;
+}
+
+/** Sign-ups of one UTC ISO week, e.g. "2026-W47". */
+export interface AdminFunnelCohort extends AdminFunnelStages {
+  week: string;
+  median_days_to_api_job: number | null;   // null: nobody in the week has made an API job
+}
+
+/** Sign-ups by what brought them: gallery, referral, utm:<source>, utm:other or none. */
+export interface AdminFunnelSource extends AdminFunnelStages {
+  source: string;
+}
+
+export interface AdminFunnelRecipe {
+  slug: string;
+  users: number;
+  jobs: number;
+  users_with_api_job: number;
+}
+
+/** GET /v1/admin/funnel?from=&to= */
+export interface AdminFunnel {
+  cohorts: AdminFunnelCohort[];
+  by_source: AdminFunnelSource[];
+  gallery_recipes: AdminFunnelRecipe[];
 }

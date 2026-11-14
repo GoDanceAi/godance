@@ -91,7 +91,9 @@ export class MockApi {
       // Asked once signed in. Referrals ship off, so by default the API says so.
       .on('GET', '/v1/referrals/me', { json: { enabled: false } })
       // The Studio reads the gallery recipes an account saved; it has none until a test says so.
-      .on('GET', '/v1/saved-recipes', { json: [] });
+      .on('GET', '/v1/saved-recipes', { json: [] })
+      // Handed in once after a sign-in that follows a signed-out page load (lib/first-touch).
+      .on('POST', '/v1/attribution/first-touch', { status: 204 });
   }
 
   async install(): Promise<void> {
