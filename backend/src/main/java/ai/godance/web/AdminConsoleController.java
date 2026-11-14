@@ -20,13 +20,14 @@ import ai.godance.domain.UserRole;
 import ai.godance.security.AdminAuthorizationFilter;
 import ai.godance.security.AdminRoles;
 import ai.godance.service.admin.AdminConsoleService;
+import ai.godance.service.admin.FunnelService;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
 /**
  * Admin console: user lookup / credit adjustment / revenue-vs-cost
- * overview, plus the {@code /me} probe the SPA uses to decide what to
- * render. Lives under {@code /v1/admin/**} so
+ * overview and the sign-up funnel, plus the {@code /me} probe the SPA uses
+ * to decide what to render. Lives under {@code /v1/admin/**} so
  * {@link AdminAuthorizationFilter} gates every route on its
  * {@link AdminRoles} — reaching a handler here implies the caller's account
  * has a verified email and a declared role, and the filter hands over the
@@ -41,9 +42,11 @@ import reactor.core.scheduler.Schedulers;
 public class AdminConsoleController {
 
     private final AdminConsoleService console;
+    private final FunnelService funnel;
 
-    public AdminConsoleController(AdminConsoleService console) {
+    public AdminConsoleController(AdminConsoleService console, FunnelService funnel) {
         this.console = console;
+        this.funnel = funnel;
     }
 
     /**
@@ -98,6 +101,23 @@ public class AdminConsoleController {
         LocalDate toDate = parseDate(to, LocalDate.now(java.time.ZoneOffset.UTC));
         LocalDate fromDate = parseDate(from, toDate.minusDays(29));
         return Mono.fromCallable(() -> console.usageSummary(fromDate, toDate))
+                .subscribeOn(Schedulers.boundedElastic());
+    }
+
+    /**
+     * How many of the people who signed up between {@code from} and
+     * {@code to} went on to a Studio job, a paid top-up and an API job; the
+     * same range defaults and checks as the usage summary. Counts only: see
+     * {@link FunnelService}.
+     */
+    @GetMapping("/funnel")
+    @AdminRoles({UserRole.SUPPORT, UserRole.FINANCE, UserRole.ADMIN})
+    public Mono<FunnelService.Funnel> funnel(
+            @RequestParam(value = "from", required = false) String from,
+            @RequestParam(value = "to", required = false) String to) {
+        LocalDate toDate = parseDate(to, LocalDate.now(java.time.ZoneOffset.UTC));
+        LocalDate fromDate = parseDate(from, toDate.minusDays(29));
+        return Mono.fromCallable(() -> funnel.funnel(fromDate, toDate))
                 .subscribeOn(Schedulers.boundedElastic());
     }
 
