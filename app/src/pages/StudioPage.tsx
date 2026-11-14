@@ -13,20 +13,43 @@ import {
   generationBody,
   generationPath,
   PROMPT_MAX_LENGTH,
+  recipeRefOf,
   startGeneration,
   useEstimate,
+  withRecipe,
   type StudioValues,
 } from '../lib/studio';
-import { fitValues, readPrefill, resolvePrefill, type Prefill } from '../lib/studio-prefill';
+import {
+  fitValues,
+  readPrefill,
+  resolvePrefill,
+  templateFromRecipe,
+  type OwnRecipe,
+  type Prefill,
+} from '../lib/studio-prefill';
 import type { GalleryRecipe, RecipeLang } from '../lib/recipe';
+import {
+  checkTemplate,
+  makeVariable,
+  renderForm,
+  TEMPLATE_MAX_LENGTH,
+  variablesToSave,
+  withText,
+  withValue,
+  type FormTemplate,
+} from '../lib/template';
+import { paramsOf, type RecipeSetup } from '../lib/user-recipes';
 import CopyButton from '../components/CopyButton';
 import GalleryExamples from '../components/GalleryExamples';
 import { JobOutputs } from '../components/JobMedia';
 import JobStatusPill from '../components/JobStatusPill';
+import MakeVariable from '../components/MakeVariable';
 import RecipeSource from '../components/RecipeSource';
 import SaveJobButton from '../components/SaveJobButton';
+import SaveRecipe from '../components/SaveRecipe';
 import SavedRecipes from '../components/SavedRecipes';
 import SendErrorNotice from '../components/SendErrorNotice';
+import VariableFields from '../components/VariableFields';
 
 const WORDS = {
   IMAGE: {
@@ -44,6 +67,15 @@ const WORDS = {
 } as const;
 
 const NO_VALUES: StudioValues = { model: '', prompt: '', size: null, n: 1, seconds: null };
+
+const TEMPLATE_OFF = 'Editing the prompt here turns the template off: its variables go away and the '
+  + 'prompt becomes plain text. Turn the template off?';
+
+/** A title to offer for a recipe saved from a plain prompt: the start of its first line. */
+function titleFrom(prompt: string): string {
+  const line = prompt.trim().split('\n')[0].replace(/\s+/g, ' ');
+  return line.length > 60 ? `${line.slice(0, 59).trimEnd()}…` : line;
+}
 
 /** The job the result panel shows: known by id once accepted, read in full from its first poll. */
 interface Current {
@@ -77,6 +109,11 @@ export default function StudioPage({ modality }: { modality: MediaModality }) {
   const [codeOpen, setCodeOpen] = useState(false);
   // The gallery recipe the form was filled from (?example=), and its prompt's language.
   const [recipe, setRecipe] = useState<{ recipe: GalleryRecipe; lang: RecipeLang } | null>(null);
+  // The template the form holds: its text, its variables and the value each has. Null for a plain prompt.
+  const [template, setTemplate] = useState<FormTemplate | null>(null);
+  const [templateOpen, setTemplateOpen] = useState(false);
+  // One of the user's own recipes in the form: loaded with ?recipe=, or saved from here.
+  const [own, setOwn] = useState<OwnRecipe | null>(null);
   // Opened with nothing to load, or with nothing that could be: the Studio offers examples.
   const [startedEmpty, setStartedEmpty] = useState(false);
   // The gallery recipes this account saved. Null until read, and when the API has no such list.
@@ -85,6 +122,8 @@ export default function StudioPage({ modality }: { modality: MediaModality }) {
   // The query this page wrote itself after a submit, which needs no loading.
   const ownSearch = useRef<string | null>(null);
   const resultRef = useRef<HTMLElement>(null);
+  const promptRef = useRef<HTMLTextAreaElement>(null);
+  const templateRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -128,7 +167,10 @@ export default function StudioPage({ modality }: { modality: MediaModality }) {
     setValues(fitted.values);
     setNote(prefill.note ?? fitted.note ?? null);
     setRecipe(prefill.recipe ? { recipe: prefill.recipe, lang: prefill.recipe.run.promptLang } : null);
-    setStartedEmpty(!prefill.job && !prefill.recipe && Object.keys(prefill.values).length === 0);
+    setTemplate(prefill.template ?? null);
+    setTemplateOpen(false);
+    setOwn(prefill.own ?? null);
+    setStartedEmpty(!prefill.job && !prefill.recipe && !prefill.own && Object.keys(prefill.values).length === 0);
     setPrefill(null);
     setReady(true);
   }, [prefill, models, modality]);
@@ -158,11 +200,30 @@ export default function StudioPage({ modality }: { modality: MediaModality }) {
 
   const model = models?.find((m) => m.id === values.model);
   const controls = controlsFor(model, modality);
+  // The prompt as it will be sent: the template filled in, or the plain text. Null while the template can't be rendered.
+  const promptText = template ? renderForm(template) : values.prompt;
+  const templateProblems = template ? checkTemplate(template.text, template.variables.map((v) => v.name)) : [];
+  const tooLong = promptText !== null && promptText.length > PROMPT_MAX_LENGTH;
+  const hasPrompt = promptText !== null && promptText.trim() !== '';
   // Sent with the run while the form is still the gallery recipe it was loaded from.
-  const galleryRecipe = galleryRecipeOf(recipe?.recipe ?? null, values);
-  const request = ready && model ? generationBody(modality, values, controls, galleryRecipe) : null;
+  const galleryRecipe = galleryRecipeOf(recipe?.recipe ?? null, values, template);
+  const plainRequest = ready && model && promptText !== null
+    ? generationBody(modality, { ...values, prompt: promptText }, controls, galleryRecipe)
+    : null;
+  // One of the user's own recipes runs by reference, so the API renders it and counts the attempt.
+  const recipeRef = recipeRefOf(own?.version ?? null, template, values.prompt);
+  const request = plainRequest && recipeRef ? withRecipe(plainRequest, recipeRef) : plainRequest;
   const price = useEstimate(request);
-  const canSubmit = request !== null && values.prompt.trim() !== '' && !submitting;
+  const canSubmit = request !== null && hasPrompt && !tooLong && !submitting;
+  // What saving the form as a recipe keeps: each variable's value in the form is its default.
+  const setup: RecipeSetup | null = plainRequest && hasPrompt && templateProblems.length === 0
+    ? {
+        template: template ? template.text : values.prompt,
+        variables: template ? variablesToSave(template) : [],
+        model: values.model,
+        params: paramsOf(plainRequest),
+      }
+    : null;
 
   if (!user) return null;
 
@@ -193,6 +254,37 @@ export default function StudioPage({ modality }: { modality: MediaModality }) {
     if (!recipe || !text) return;
     setRecipe({ ...recipe, lang });
     update({ prompt: text.slice(0, PROMPT_MAX_LENGTH) });
+    // A recipe with variables comes back as its template in that language. A value
+    // typed here is kept; one still at its default becomes that language's default.
+    const next = templateFromRecipe(recipe.recipe, lang);
+    if (next && template) {
+      const before = templateFromRecipe(recipe.recipe, recipe.lang);
+      for (const variable of next.variables) {
+        const typed = template.values[variable.name];
+        if (typed !== undefined && typed !== before?.values[variable.name]) next.values[variable.name] = typed;
+      }
+    }
+    setTemplate(next);
+  };
+  // The prompt box edits a plain prompt. Over a template it shows the filled-in
+  // prompt, and typing there gives the template up, once the user agrees.
+  const editPrompt = (text: string) => {
+    if (template) {
+      if (!window.confirm(TEMPLATE_OFF)) return;
+      setTemplate(null);
+      setTemplateOpen(false);
+    }
+    update({ prompt: text });
+  };
+  const setVariable = (name: string, value: string) => setTemplate((t) => (t ? withValue(t, name, value) : t));
+  const editTemplate = (text: string) => setTemplate((t) => (t ? withText(t, text) : t));
+  // Turns the selected text into a variable; a plain prompt becomes a template by it.
+  const addVariable = (start: number, end: number, name: string): string | null => {
+    const made = makeVariable(template ?? { text: values.prompt, variables: [], values: {} }, start, end, name);
+    if ('refused' in made) return made.refused;
+    setTemplate(made.template);
+    setTemplateOpen(true);
+    return null;
   };
 
   const submit = async (e: FormEvent) => {
@@ -202,7 +294,7 @@ export default function StudioPage({ modality }: { modality: MediaModality }) {
     setSubmitError(null);
     try {
       const ack = await startGeneration(modality, request);
-      setCurrent({ id: ack.job_id, status: ack.status ?? 'QUEUED', job: null, prompt: request.prompt });
+      setCurrent({ id: ack.job_id, status: ack.status ?? 'QUEUED', job: null, prompt: promptText ?? '' });
       // In the URL, so a reload picks the run back up.
       const next = new URLSearchParams({ job: ack.job_id });
       ownSearch.current = next.toString();
@@ -267,20 +359,84 @@ export default function StudioPage({ modality }: { modality: MediaModality }) {
               saveError={recipeSaveError}
             />
           )}
+          {own && <OwnRecipeLine own={own} counted={recipeRef !== null} />}
+          {template && (
+            <VariableFields
+              template={template}
+              onValue={setVariable}
+              disabled={!ready}
+              lang={recipe?.lang === 'zh' ? 'zh-Hans' : undefined}
+            />
+          )}
           <div>
             <label htmlFor="studio-prompt" className="block text-sm font-medium text-fg">Prompt</label>
             <textarea
               id="studio-prompt"
+              ref={promptRef}
               lang={recipe?.lang === 'zh' ? 'zh-Hans' : undefined}
-              value={values.prompt}
-              onChange={(e) => update({ prompt: e.target.value })}
-              maxLength={PROMPT_MAX_LENGTH}
+              value={template ? promptText ?? '' : values.prompt}
+              onChange={(e) => editPrompt(e.target.value)}
+              maxLength={template ? undefined : PROMPT_MAX_LENGTH}
               rows={5}
               placeholder={words.placeholder}
               disabled={!ready}
+              aria-describedby={template ? 'studio-prompt-filled' : undefined}
               className="input mt-1.5 resize-y"
             />
+            {template ? (
+              <p id="studio-prompt-filled" className="mt-1.5 text-xs text-fg-subtle">
+                Filled in from the template as you change its variables. Editing the prompt here turns the template off.
+              </p>
+            ) : (
+              <MakeVariable field={promptRef} onMake={addVariable} disabled={!ready} />
+            )}
+            {tooLong && promptText !== null && (
+              <p role="alert" className="mt-1.5 text-xs text-danger">
+                The filled-in prompt is {promptText.length.toLocaleString('en-US')} characters. The Studio takes up
+                to {PROMPT_MAX_LENGTH.toLocaleString('en-US')}: shorten a value or the template.
+              </p>
+            )}
           </div>
+
+          {template && (
+            <div>
+              <button
+                type="button"
+                onClick={() => setTemplateOpen((open) => !open)}
+                aria-expanded={templateOpen}
+                aria-controls="studio-template-editor"
+                className="btn btn-ghost btn-sm px-0"
+              >
+                Edit template {templateOpen ? '▴' : '▾'}
+              </button>
+              {templateOpen && (
+                <div id="studio-template-editor" className="mt-2">
+                  <label htmlFor="studio-template" className="block text-sm font-medium text-fg">Template</label>
+                  <textarea
+                    id="studio-template"
+                    ref={templateRef}
+                    lang={recipe?.lang === 'zh' ? 'zh-Hans' : undefined}
+                    value={template.text}
+                    onChange={(e) => editTemplate(e.target.value)}
+                    maxLength={TEMPLATE_MAX_LENGTH}
+                    rows={5}
+                    disabled={!ready}
+                    className="input mt-1.5 resize-y font-mono text-[13px]"
+                  />
+                  <p className="mt-1.5 text-xs text-fg-subtle">
+                    A variable is written <code className="code-chip">{'{{name}}'}</code>. Type one, or select text
+                    and make it one.
+                  </p>
+                  <MakeVariable field={templateRef} onMake={addVariable} disabled={!ready} />
+                </div>
+              )}
+              {templateProblems.map((problem) => (
+                <p key={`${problem.kind}-${problem.name ?? problem.index}`} role="alert" className="mt-1.5 text-xs text-danger">
+                  {problem.message}
+                </p>
+              ))}
+            </div>
+          )}
 
           <div>
             <label htmlFor="studio-model" className="block text-sm font-medium text-fg">Model</label>
@@ -363,6 +519,17 @@ export default function StudioPage({ modality }: { modality: MediaModality }) {
           </div>
 
           <div className="border-t border-border pt-4">
+            <SaveRecipe
+              own={own}
+              setup={setup}
+              modality={modality}
+              suggestedTitle={recipe ? recipe.recipe.title.en ?? recipe.recipe.title.zh ?? '' : titleFrom(promptText ?? '')}
+              galleryRecipe={recipe?.recipe.slug ?? null}
+              onSaved={setOwn}
+            />
+          </div>
+
+          <div className="border-t border-border pt-4">
             <button
               type="button"
               onClick={() => setCodeOpen((open) => !open)}
@@ -403,6 +570,27 @@ export default function StudioPage({ modality }: { modality: MediaModality }) {
           />
         </section>
       </div>
+    </div>
+  );
+}
+
+/** The line saying the form holds one of the user's own recipes, and whether a run still counts as its attempt. */
+function OwnRecipeLine({ own, counted }: { own: OwnRecipe; counted: boolean }) {
+  return (
+    <div className="rounded-md border border-border bg-surface-alt px-3 py-2">
+      <p className="min-w-0 break-words text-sm text-fg-muted">
+        Your recipe:{' '}
+        <Link to={`/recipes/${own.recipe.id}`} className="font-medium text-brand-600 hover:underline">
+          {own.recipe.title}
+        </Link>{' '}
+        <span className="whitespace-nowrap text-fg-subtle">· version {own.version.number}</span>
+      </p>
+      {!counted && (
+        <p className="mt-1 text-xs text-warning">
+          The prompt here is no longer this version&apos;s. A run now is kept in History, but it isn&apos;t counted
+          with the recipe until you save a new version.
+        </p>
+      )}
     </div>
   );
 }

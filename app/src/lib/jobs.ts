@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { apiFetch, ApiError, type JobStatus, type JobView, type MediaModality, type SavedJobs } from './api';
 import { formatCents } from './auth';
+import { isUuid } from './ids';
 
 // Generation jobs: reading them, watching one until it ends, and what to show.
 
@@ -21,11 +22,9 @@ export function mediaModality(job: JobView): MediaModality | null {
   return job.modality === 'IMAGE' || job.modality === 'VIDEO' ? job.modality : null;
 }
 
-const JOB_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
 /** Job ids are UUIDs. Anything else is never sent to the API. */
 export function isJobId(value: string): boolean {
-  return JOB_ID.test(value);
+  return isUuid(value);
 }
 
 export function fetchJob(id: string, signal?: AbortSignal): Promise<JobView> {
@@ -37,6 +36,7 @@ export interface JobListQuery {
   before?: string;           // a job id: only jobs older than it
   modality?: MediaModality;
   saved?: boolean;           // true: only saved jobs
+  recipe?: string;           // a recipe id: only the jobs that ran one of its versions
 }
 
 /** GET /v1/jobs: the caller's jobs, newest first. */
@@ -45,6 +45,7 @@ export function listJobs(query: JobListQuery, signal?: AbortSignal): Promise<Job
   if (query.before) params.set('before', query.before);
   if (query.modality) params.set('modality', query.modality);
   if (query.saved) params.set('saved', 'true');
+  if (query.recipe) params.set('recipe', query.recipe);
   return apiFetch<JobView[]>(`/v1/jobs?${params}`, { signal });
 }
 
