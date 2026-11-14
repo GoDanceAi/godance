@@ -4,6 +4,10 @@ import Layout from '../../layouts/Layout.astro';
 // Placeholder until the real Privacy Policy is written and reviewed.
 // When it lands: replace the notice below, drop `noindex`, and remove the
 // /legal/ sitemap filter in astro.config.mjs.
+//
+// The section on generated content is not a placeholder. It states what the
+// service does today (backend DataRetentionService and JobSaveService), and
+// the full policy must carry it over.
 const title = 'Privacy Policy — Godance';
 const description = 'Godance Privacy Policy (placeholder until the full policy is published).';
 ---
@@ -19,6 +23,32 @@ const description = 'Godance Privacy Policy (placeholder until the full policy i
         <!--email_off--><a href="mailto:hello@godance.ai" class="underline" style="color: var(--color-primary)">hello@godance.ai</a><!--/email_off-->.
       </p>
     </div>
+
+    <h2 id="generated-content" class="scroll-mt-24 text-2xl font-bold mt-12 mb-4 text-fg">How long we keep what you generate</h2>
+    <p class="text-fg-muted">This part is already in effect.</p>
+    <ul class="mt-4 list-disc space-y-2 pl-5 text-fg-muted">
+      <li>
+        The images and videos you generate, and the prompts you wrote for them, are deleted
+        90 days after you made them. A clean-up runs once a day, so deletion normally
+        follows within a day of that date.
+      </li>
+      <li>
+        If you save a generation, we keep its files and prompt until you un-save it or your
+        account is closed. An account can save a limited number of generations.
+      </li>
+      <li>
+        If you un-save a generation that is already more than 90 days old, it is deleted at
+        the next daily clean-up.
+      </li>
+      <li>
+        When an account is closed, all of its generations are deleted, saved or not.
+      </li>
+      <li>
+        After a generation is deleted we keep the record that it was made, with its date,
+        model and cost, as a billing record. The files and the prompt are not kept.
+      </li>
+    </ul>
+
     <p class="mt-8 text-sm text-fg-subtle">
       See also our <a href="/legal/terms" class="underline" style="color: var(--color-primary)">Terms of Service</a>.
     </p>

@@ -23,10 +23,17 @@
 - POST /v1/videos/generations — async only, signed webhook callback
 - GET /v1/jobs/{id} — status of an async generation, with its prompt and params,
   every output (outputs[]: index, url, contentType, sizeBytes, revisedPrompt; each url
-  signed at read time), purged, and mediaExpiresAt (files and prompt deleted 90 days
-  after creation)
+  signed at read time), purged, saved, and mediaExpiresAt (files and prompt deleted 90
+  days after creation; null while the job is saved)
 - GET /v1/jobs — your jobs, newest first, as a bare array; optional limit (1-100),
-  before (a job id: older jobs only), modality (IMAGE | VIDEO), status
+  before (a job id: older jobs only), modality (IMAGE | VIDEO), status, saved (true:
+  only saved jobs; false: only the others)
+- PUT /v1/jobs/{id}/saved, DELETE /v1/jobs/{id}/saved — save a DONE job to keep its
+  files and prompt past the 90 days, or un-save it; 204 and idempotent. Saving answers
+  409 with code job_not_saveable (not DONE, or files already deleted) or
+  saved_limit_reached (an account can save up to 500 jobs). Un-saving puts the 90 days
+  back: a job already older than that is deleted at the next nightly clean-up
+- GET /v1/jobs/saved — {count, limit}: how many jobs you have saved, and the most you can
 - POST /v1/estimates — price of an image or video request before sending it
   ({model, n, size, seconds} → estimated_cost_cents, the exact amount the request would
   reserve); no charge, no job
