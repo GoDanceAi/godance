@@ -5,6 +5,9 @@ import { useAuth } from '../lib/auth';
 import { Icon } from '../components/Brand';
 import ResendEmailButton from '../components/ResendEmailButton';
 import TwoFactorSection from '../components/TwoFactorSection';
+import { AcceptInputTerms, InputTermsText } from '../components/InputTerms';
+import { INPUT_TERMS } from '../lib/input-terms';
+import { formatDateTime } from '../lib/time';
 
 interface SecretResponse {
   secret: string;
@@ -59,6 +62,8 @@ export default function SettingsPage() {
       <EmailSection />
 
       <TwoFactorSection />
+
+      <InputsSection />
 
       <section className="mt-8 card">
         <h2 className="font-semibold text-fg">Webhook signing secret</h2>
@@ -134,6 +139,58 @@ def verify_godance(payload: str, header: str, secret: str) -> bool:
         </pre>
       </section>
     </div>
+  );
+}
+
+/**
+ * Image inputs: the terms a user accepts before uploading an image to use in
+ * a generation. Rendered only while the API says inputs are switched on, so
+ * with them off the page is exactly as it was.
+ */
+function InputsSection() {
+  const { user } = useAuth();
+  const inputs = user?.inputs;
+  if (!user || !inputs?.enabled) return null;
+
+  const adult = user.ageStatus === 'ADULT';
+  const current = inputs.terms_version === INPUT_TERMS.version;
+
+  return (
+    <section className="mt-8 card" aria-labelledby="inputs-heading">
+      <h2 id="inputs-heading" className="font-semibold text-fg">Inputs</h2>
+      {!adult ? (
+        <p className="mt-1 text-sm text-fg-muted">
+          Using your own images in a generation is not available for this account.
+        </p>
+      ) : (
+        <>
+          <p className="mt-1 text-sm text-fg-muted">
+            Use your own images in a generation: a product photo to place in a scene, or a
+            picture to animate.
+            {!inputs.allow_people && ' Images of people are not accepted yet.'}
+          </p>
+          {inputs.accepted ? (
+            <p className="mt-4 text-sm text-success">
+              You accepted the input terms (version {inputs.terms_version})
+              {inputs.accepted_at ? ` on ${formatDateTime(inputs.accepted_at)}` : ''}.
+            </p>
+          ) : current ? (
+            <>
+              <div className="mt-4 embedded-surface p-4">
+                <InputTermsText />
+              </div>
+              <div className="mt-4">
+                <AcceptInputTerms />
+              </div>
+            </>
+          ) : (
+            <p className="mt-4 text-sm text-fg-muted">
+              The input terms have changed. Reload this page to read the current version.
+            </p>
+          )}
+        </>
+      )}
+    </section>
   );
 }
 
