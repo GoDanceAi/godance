@@ -23,7 +23,7 @@ import { generate, heldByRuns, planRun } from './stages/generate.js';
 import { publish, remove } from './stages/publish.js';
 import { retemplate } from './stages/retemplate.js';
 import { checkDecisions, reviewItems, reviewSheet, standardVersionOf } from './stages/review.js';
-import { REASONS, classifyEntries, compileTerms, countReasons, projectClassify, screenEntries } from './stages/screen.js';
+import { INPUT_MODES, REASONS, classifyEntries, compilePeopleTerms, compileTerms, countReasons, personSamplesAllowed, projectClassify, screenEntries } from './stages/screen.js';
 import { planTranslation, projectTranslate, translateEntries } from './stages/translate.js';
 
 export const STANDARD_FILE = path.join(MARKETING_ROOT, '..', 'docs', 'gallery-content-standard.md');
@@ -54,6 +54,11 @@ Options
   --video-seconds <n>      Clip length when a prompt names none (default 5).
   --max-video-seconds <n>  Set aside prompts written for longer clips (default 10).
   --classify               screen: also ask a text model (paid).
+  --inputs <mode>          What to do with entries that need an input image:
+                           none (default) sets them aside; objects lets through
+                           the ones about a product or an object; people lets
+                           the rest through too, and is refused unless the
+                           content standard says person samples are allowed.
   --retry-failed           generate: run failed entries again.
   --retry-uncertain        generate: submit again entries whose first request got
                            no clear answer. Check GET /v1/jobs first: this can pay twice.
@@ -66,7 +71,7 @@ Environment
   GODANCE_API_KEY          Read from the environment only. Never written anywhere.
   GODANCE_API_BASE         Defaults to https://api.godance.ai`;
 
-const FLAGS_WITH_VALUE = new Set(['max-spend-cents', 'source', 'images', 'videos', 'video-seconds', 'max-video-seconds', 'reason', 'work-dir', 'config-dir', 'content-dir']);
+const FLAGS_WITH_VALUE = new Set(['max-spend-cents', 'source', 'images', 'videos', 'video-seconds', 'max-video-seconds', 'reason', 'work-dir', 'config-dir', 'content-dir', 'inputs']);
 const FLAGS = new Set([...FLAGS_WITH_VALUE, 'apply', 'classify', 'retry-failed', 'retry-uncertain', 'offline', 'all', 'help']);
 
 class Misuse extends Error {}
@@ -100,7 +105,7 @@ function wholeNumber(flags, name, fallback) {
   return value;
 }
 
-const plural = (n, noun) => `${n} ${noun}${n === 1 ? '' : 's'}`;
+const plural = (n, noun, many = `${noun}s`) => `${n} ${n === 1 ? noun : many}`;
 
 /** A path as it is printed: relative to marketing/ when it is inside it, in full otherwise. */
 function shown(file) {
@@ -185,8 +190,24 @@ export async function main(argv, io = {}) {
     const modelMap = await readJson(config.modelMap);
     const terms = compileTerms(await readJson(config.screenTerms, { rules: {} }));
     const removed = (await readJson(config.removalList, { removed: [] })).removed;
-    const screenOptions = { terms, maxVideoSeconds, maxPromptChars: Object.fromEntries(allSources.map((source) => [source.id, source.max_prompt_chars])) };
     const standard = await readFile(STANDARD_FILE, 'utf8').catch(() => null);
+
+    // Entries that need an input image. Nothing passes unless it is asked for,
+    // and person entries only when the content standard allows person samples.
+    const inputs = flags.inputs ?? 'none';
+    if (!INPUT_MODES.includes(inputs)) throw new Misuse(`--inputs must be one of ${INPUT_MODES.join(', ')}`);
+    const peopleTerms = compilePeopleTerms(await readJson(config.screenTerms, { rules: {} }));
+    if (inputs !== 'none' && peopleTerms.length === 0) {
+      throw new Error(`--inputs ${inputs} needs the list of words that mark a person (input_people in ${path.basename(config.screenTerms)}), and it is empty`);
+    }
+    if (inputs === 'people' && !personSamplesAllowed(standard)) {
+      const version = standardVersionOf(standard);
+      throw new Error(
+        `--inputs people is refused: the content standard${version === null ? '' : ` (version ${version})`} does not allow person samples. ` +
+          'Nothing was read, screened or spent. Use --inputs objects, or have the operator raise the standard.',
+      );
+    }
+    const screenOptions = { terms, maxVideoSeconds, inputs, peopleTerms, maxPromptChars: Object.fromEntries(allSources.map((source) => [source.id, source.max_prompt_chars])) };
 
     const header = (what) => out(apply ? `gallery ${what}` : `gallery ${what}: dry run. Nothing is written and no paid call is made. Add --apply to do it.`);
 
@@ -235,6 +256,12 @@ export async function main(argv, io = {}) {
       const counts = countReasons(screened, aside);
       for (const [rule, n] of Object.entries(counts).sort((a, b) => b[1] - a[1])) out(`${indent}           ${String(n).padStart(5)}  ${REASONS[rule] ?? rule}`);
       if (aside.length > 0) out(`${indent}           (an entry set aside for several reasons counts under each)`);
+      const withInputs = ids.filter((id) => screened[id].status === 'candidate' && screened[id].input);
+      if (withInputs.length > 0) {
+        const people = withInputs.filter((id) => screened[id].input === 'person').length;
+        out(`${indent}           of the candidates, ${plural(withInputs.length, 'needs an input image', 'need an input image')}: ` +
+          `${withInputs.length - people} about an object, ${people} about a person`);
+      }
     }
 
     switch (command) {

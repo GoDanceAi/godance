@@ -1,6 +1,8 @@
 # Gallery content standard
 
-**Version:** 1
+**Version:** 2
+
+**Person samples:** not allowed
 
 **Status:** draft, for the operator's approval. No review starts until it is approved.
 
@@ -65,6 +67,39 @@ shows the template, the names of its variables and their defaults.
 What a visitor later types into a variable is not gallery content. The
 reviewer checks what the gallery shows.
 
+## Recipes with inputs, and their samples
+
+Some prompts work from an image the visitor supplies: a product to place in
+a scene, a still to animate. A recipe says so with input slots. Each slot
+has a hint that tells a visitor what to put in it, and a sample input that
+the gallery shows beside the output.
+
+- **A sample input is generated on Godance.** It is made for the recipe,
+  from a prompt written for the purpose, and the recipe records the model,
+  the prompt and the cost. It is never taken from a source list, and never
+  a photograph of anything real.
+- **Every rule applies to a sample,** exactly as it applies to an output.
+  The reviewer sees each sample beside the output it produced.
+- **An object sample shows no person.** No face, no body, no hands. A sample
+  for a product slot is the product alone, on a plain background.
+- **Person samples are not allowed** in this version. The line
+  "Person samples" at the top of this document says so, and the import tool
+  reads it: while it says "not allowed", an entry whose input is about a
+  person is not screened in, not sampled and not published.
+
+  When the operator allows them, by raising the version and changing that
+  line to "allowed", a person sample depicts a fictional adult who
+  resembles no real or public person. Rules 1 and 4 apply as everywhere
+  else.
+- **The hint never asks for a real person's name, a child, or anyone who has
+  not consented.** "A portrait of your favourite actor" fails rule 1, and
+  "a photo of your child" fails rule 4, whatever the sample shows. "One
+  product on a plain background" is fine.
+
+What a visitor later uploads into a slot is not gallery content. It is
+covered by the terms a visitor accepts before uploading, not by this
+standard.
+
 ## How it is applied
 
 1. **Screening.** The import tool sets aside entries that plainly fail,
@@ -88,7 +123,11 @@ Any change to the rules raises the version number at the top. Recipes
 approved under an earlier version keep the version they were checked
 against, so it is always possible to tell which need another look.
 
-## For the operator to decide before approving version 1
+- **Version 2** added "Recipes with inputs, and their samples", and the
+  "Person samples" line. Nothing in version 1's rules changed, so a recipe
+  approved under version 1 needs no second look.
+
+## For the operator to decide before approving this standard
 
 These are judgement calls the draft leaves open. Each changes how strict
 screening is, not what the tool can do.
@@ -102,3 +141,10 @@ screening is, not what the tool can do.
 - **Invented interfaces (rule 6).** A mock-up of an app that does not exist
   passes; one that names a real service does not. Many entries in the image
   list's `ui` category are the second kind.
+- **Person samples.** Whether, and when, a recipe may show a sample input of
+  a fictional adult. Until the line at the top says "allowed", none can be
+  imported.
+- **What counts as an input about a person.** The import tool decides with a
+  list of words kept beside it (`input_people` in `screen-terms.json`), and
+  the list is broad: a product recipe that mentions a hand holding the
+  product is treated as a person recipe and set aside.
