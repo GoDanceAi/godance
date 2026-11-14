@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import ai.godance.gateway.VideoDtos.VideoRequest;
 import ai.godance.security.JwtService;
+import ai.godance.service.JobOrigin;
 import ai.godance.service.VideoGenerationService;
 import ai.godance.web.dto.ImageDtos.AsyncJobAcknowledged;
 import ai.godance.web.dto.VideoDtos.VideoGenerationRequest;
@@ -45,7 +46,9 @@ public class VideoController {
                 req.model(), req.prompt(), req.size(), req.seconds(), req.n());
 
         UUID apiKeyId = apiKeyId(jwt);
-        return Mono.fromCallable(() -> service.submit(userId, apiKeyId, domain, req.webhookUrl()))
+        // The channel comes from the credentials; a malformed gallery_recipe is a 400 before any charge.
+        JobOrigin origin = JobOrigin.of(apiKeyId, req.galleryRecipe());
+        return Mono.fromCallable(() -> service.submit(userId, apiKeyId, domain, req.webhookUrl(), origin))
                 .subscribeOn(Schedulers.boundedElastic())
                 .map(jobId -> ResponseEntity.accepted().body(AsyncJobAcknowledged.forJob(jobId)));
     }

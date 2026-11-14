@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.RestController;
 import ai.godance.gateway.ImageDtos.ImageRequest;
 import ai.godance.security.JwtService;
 import ai.godance.service.ImageGenerationService;
+import ai.godance.service.JobOrigin;
 import ai.godance.web.dto.ImageDtos.AsyncJobAcknowledged;
 import ai.godance.web.dto.ImageDtos.ImageGenerationRequest;
 import ai.godance.web.dto.ImageDtos.ImageGenerationResponse;
@@ -43,6 +44,8 @@ public class ImageController {
             @AuthenticationPrincipal Jwt jwt) {
         UUID userId = JwtService.userIdFromSubject(jwt.getSubject());
         UUID apiKeyId = apiKeyId(jwt);
+        // The channel comes from the credentials; a malformed gallery_recipe is a 400 before any charge.
+        JobOrigin origin = JobOrigin.of(apiKeyId, req.galleryRecipe());
         ImageRequest domain = toDomain(req);
 
         // Auto-promote to async if the model requires it (e.g. gpt-image-1-hd
@@ -50,13 +53,13 @@ public class ImageController {
         boolean forceAsync = service.requiresAsyncFor(domain);
         if (Boolean.TRUE.equals(req.async()) || forceAsync) {
             return Mono.fromCallable(() ->
-                            service.executeAsync(userId, apiKeyId, domain, req.webhookUrl()))
+                            service.executeAsync(userId, apiKeyId, domain, req.webhookUrl(), origin))
                     .subscribeOn(Schedulers.boundedElastic())
                     .map(jobId -> ResponseEntity.accepted()
                             .<Object>body(AsyncJobAcknowledged.forJob(jobId)));
         }
 
-        return Mono.fromCallable(() -> service.execute(userId, apiKeyId, domain))
+        return Mono.fromCallable(() -> service.execute(userId, apiKeyId, domain, origin))
                 .subscribeOn(Schedulers.boundedElastic())
                 .map(result -> ResponseEntity.status(HttpStatus.OK)
                         .<Object>body(ImageGenerationResponse.from(result)));
