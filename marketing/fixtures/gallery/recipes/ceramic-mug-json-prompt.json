@@ -1,0 +1,70 @@
+{
+  "slug": "ceramic-mug-json-prompt",
+  "title": {
+    "en": "Ceramic mug, written as JSON",
+    "zh": "陶瓷马克杯（JSON 提示词）"
+  },
+  "modality": "IMAGE",
+  "tags": [
+    "product"
+  ],
+  "prompt": {
+    "en": "{\"shot\":\"studio product photo\",\"subject\":{\"object\":\"ceramic mug\",\"glaze\":\"speckled cream\"},\"light\":{\"key\":\"soft window light\",\"background\":\"warm grey\"}}",
+    "zh": "{\"shot\":\"棚拍产品照\",\"subject\":{\"object\":\"陶瓷马克杯\",\"glaze\":\"带斑点的奶油色\"},\"light\":{\"key\":\"柔和的窗光\",\"background\":\"暖灰色\"}}",
+    "zh_origin": "machine",
+    "template": {
+      "en": "{\"shot\":\"studio product photo\",\"subject\":{\"object\":\"ceramic mug\",\"glaze\":\"{{glaze}}\"},\"light\":{\"key\":\"soft window light\",\"background\":\"{{background}}\"}}",
+      "zh": "{\"shot\":\"棚拍产品照\",\"subject\":{\"object\":\"陶瓷马克杯\",\"glaze\":\"{{glaze}}\"},\"light\":{\"key\":\"柔和的窗光\",\"background\":\"{{background}}\"}}"
+    },
+    "variables": [
+      {
+        "name": "glaze",
+        "default": "speckled cream",
+        "zh_default": "带斑点的奶油色"
+      },
+      {
+        "name": "background",
+        "default": "warm grey",
+        "zh_default": "暖灰色"
+      }
+    ]
+  },
+  "runs": [
+    {
+      "model": "gpt-image-2",
+      "prompt_lang": "en",
+      "params": {
+        "size": "1024x1024",
+        "n": 1
+      },
+      "cost_cents": 6,
+      "generated_on": "2026-11-06",
+      "outputs": [
+        {
+          "file": "ceramic-mug-json-prompt/gpt-image-2-0.webp",
+          "thumb": "ceramic-mug-json-prompt/gpt-image-2-0-480.webp",
+          "content_type": "image/webp",
+          "width": 1024,
+          "height": 1024
+        }
+      ]
+    }
+  ],
+  "source": {
+    "list": "example-org/invented-image-prompts",
+    "list_commit": "0000000000000000000000000000000000000000",
+    "licence": "MIT",
+    "author": "fixture_ana",
+    "author_url": "https://example.com/@fixture_ana",
+    "original_url": "https://example.com/@fixture_ana/posts/11034",
+    "changes": [
+      "placeholders rewritten as {{name}}",
+      "translated to Chinese"
+    ]
+  },
+  "review": {
+    "approved_on": "2026-11-10",
+    "standard_version": 1
+  },
+  "published_on": "2026-11-08"
+}

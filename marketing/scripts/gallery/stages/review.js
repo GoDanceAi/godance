@@ -12,7 +12,12 @@
  *
  * Prompts and titles are third-party text. The page never builds HTML from
  * them: the data is embedded as JSON and put on the page as text.
+ *
+ * A prompt that keeps its blanks shows its template in both languages, each
+ * {{name}} marker marked, and the default of every variable in English and
+ * in Chinese: the defaults are held to the content standard like the prompt.
  */
+import { parseTemplate } from '../../../src/lib/gallery-template.js';
 
 /** JSON safe inside a <script> element. */
 const embed = (data) =>
@@ -35,10 +40,15 @@ export function reviewItems({ entries, screened, translated, runs }) {
       category: entry.category ?? null,
       title: record.title,
       prompt: record.prompt,
+      // The templates cut at their markers here, so the page only has to put text on the page.
+      template: record.prompt.template
+        ? { en: parseTemplate(record.prompt.template.en).parts, zh: parseTemplate(record.prompt.template.zh).parts }
+        : null,
       changes: record.changes,
       run: { model: run.model, prompt_lang: run.prompt_lang, params: run.params, cost_cents: run.cost_cents, generated_on: run.generated_on, outputs: run.outputs },
       source: { list: entry.list, list_commit: entry.list_commit, licence: entry.licence, author: entry.author, author_url: entry.author_url, original_url: entry.original_url },
-      notes: screened[entry.id]?.notes ?? [],
+      // What screening noted, then what translation did: a template that could not be kept says why.
+      notes: [...(screened[entry.id]?.notes ?? []), ...(record.notes ?? [])],
     });
   }
   return items;
@@ -82,6 +92,10 @@ export function reviewSheet({ items, standardVersion, decisions = null, mediaBas
   .decide { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; border-top: 1px solid var(--line); padding-top: 12px; }
   .decide input[type=text] { flex: 1 1 240px; font: inherit; padding: 6px 8px; }
   .warn { color: var(--no); font-size: 13px; }
+  mark { background: #f5c54255; color: inherit; border-radius: 3px; padding: 0 2px; font-weight: 600; }
+  table.vars { border-collapse: collapse; font-size: 13px; margin: 4px 0 8px; }
+  table.vars th, table.vars td { border: 1px solid var(--line); padding: 3px 8px; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+  table.vars th { color: var(--muted); font-weight: 600; }
 </style>
 </head>
 <body>
@@ -162,11 +176,29 @@ export function reviewSheet({ items, standardVersion, decisions = null, mediaBas
     body.append(el('div', { className: 'label', textContent: 'Prompt, English' }), el('pre', { textContent: item.prompt.en }));
     body.append(el('div', { className: 'label', textContent: 'Prompt, Chinese (' + (item.prompt.zh_origin === 'machine' ? 'machine-translated' : 'from the list') + ')' }),
       el('pre', { lang: 'zh-Hans', textContent: item.prompt.zh }));
-    if (item.prompt.variables?.length) {
+    if (item.template) {
+      // The template with its variables marked, then every default in both languages.
+      const marked = (parts, lang) => {
+        const pre = el('pre', lang ? { lang } : {});
+        for (const part of parts) pre.append('name' in part ? el('mark', { textContent: '{{' + part.name + '}}' }) : part.text);
+        return pre;
+      };
+      body.append(el('div', { className: 'label', textContent: 'Template, English' }), marked(item.template.en));
+      body.append(el('div', { className: 'label', textContent: 'Template, Chinese' }), marked(item.template.zh, 'zh-Hans'));
+      body.append(el('div', { className: 'label', textContent: 'Variables and their defaults (the standard applies to these too)' }));
+      const table = el('table', { className: 'vars' });
+      table.append(el('tr', {}, el('th', { textContent: 'Variable' }), el('th', { textContent: 'Default, English' }), el('th', { textContent: 'Default, Chinese' })));
+      for (const v of item.prompt.variables) {
+        const zh = v.zh_default === undefined ? v.default : v.zh_default;
+        table.append(el('tr', {}, el('td', { textContent: v.name }), el('td', { textContent: v.default === '' ? '(empty)' : v.default }),
+          el('td', { lang: 'zh-Hans', textContent: (zh === '' ? '(empty)' : zh) + (v.zh_default === undefined ? ' (same)' : '') })));
+      }
+      body.append(table);
+    } else if (item.prompt.variables?.length) {
       body.append(el('div', { className: 'meta', textContent: 'Blanks filled with their defaults: ' + item.prompt.variables.map((v) => v.name + ' = ' + v.default).join('; ') }));
     }
     if (item.notes.length) {
-      body.append(el('div', { className: 'label', textContent: 'Screening notes' }));
+      body.append(el('div', { className: 'label', textContent: 'Notes' }));
       const list = el('ul', { className: 'notes' });
       for (const note of item.notes) list.append(el('li', { textContent: note }));
       body.append(list);
