@@ -16,7 +16,8 @@ import { priceBook } from './lib/pricing.js';
 import { readJson } from './lib/work.js';
 import { buildRecipe, publish, remove } from './stages/publish.js';
 import { checkDecisions, reviewItems, reviewSheet, standardVersionOf } from './stages/review.js';
-import { planTranslation, translateEntries, translationMessages } from './stages/translate.js';
+import { renderTemplate, defaultsIn } from '../../src/lib/gallery-template.js';
+import { defaultsMessages, markerFault, planTranslation, projectTranslate, readDefaults, templateMessages, translateEntries, translationMessages } from './stages/translate.js';
 import { API_BASE, CATALOGUE, FAKE_KEY, fakeWorld, noSleep, tempDir } from './testing.js';
 
 const imageEntry = (overrides = {}) => ({
@@ -40,6 +41,34 @@ const translatedImage = () => ({
   prompt: { en: 'A flat poster of a small harbour, red boats.', zh: '一张小港口的扁平海报，红色的船。', zh_origin: 'machine', variables: [{ name: 'boat colour', default: 'red' }] },
   prompt_lang: 'en', changes: ['placeholders resolved', 'translated to Chinese'],
 });
+/** The same entry translated with its template kept. */
+const templatedImage = () => ({
+  status: 'done', slug: 'harbour-poster', title: { en: 'Harbour Poster', zh: '港口海报' },
+  prompt: {
+    en: 'A flat poster of a small harbour, red boats.', zh: '一张小港口的扁平海报，红色的船。', zh_origin: 'machine',
+    template: { en: 'A flat poster of a small harbour, {{boat colour}} boats.', zh: '一张小港口的扁平海报，{{boat colour}}的船。' },
+    variables: [{ name: 'boat colour', default: 'red', zh_default: '红色' }],
+  },
+  prompt_lang: 'en', changes: ['placeholders rewritten as {{name}}', 'translated to Chinese'],
+});
+
+/**
+ * A stand-in translator. `template` and `defaults` are what it answers when
+ * asked for a template and for the defaults; an array is one answer per
+ * request, the last repeating. Anything else gets `plain`.
+ */
+function translator({ template = '一张小港口的扁平海报，{{boat colour}}的船。', defaults = '{"boat colour": "红色"}', plain = '一张小港口的扁平海报，红色的船。' } = {}) {
+  const asked = { template: 0, defaults: 0, plain: 0 };
+  const next = (answers, n) => (Array.isArray(answers) ? answers[Math.min(n, answers.length - 1)] : answers);
+  const reply = (messages) => {
+    if (/values that fill the blanks/.test(messages[0].content)) return next(defaults, asked.defaults++);
+    if (/placeholders written in double braces/.test(messages[0].content)) return next(template, asked.template++);
+    return next(plain, asked.plain++);
+  };
+  reply.asked = asked;
+  return reply;
+}
+
 const imageRun = () => ({
   status: 'done', job_id: 'job-1', slug: 'harbour-poster', model: 'gpt-image-2', params: { size: '1024x1024', n: 1 }, prompt_lang: 'en', hold_cents: 6,
   cost_cents: 6, generated_on: '2026-11-20',
@@ -85,14 +114,17 @@ describe('translate', () => {
     return { state, world, budget, result };
   }
 
-  test('plans from what the list supplies: which language is missing, and the variables', () => {
+  test('plans from what the list supplies: which language is missing, the variables and the template', () => {
     const plan = planTranslation(imageEntry());
     assert.deepEqual(plan.prompt, { en: 'A flat poster of a small harbour, red boats.' });
     assert.deepEqual(plan.variables, [{ name: 'boat colour', default: 'red' }]);
     assert.equal(plan.missing, 'zh');
     assert.equal(plan.zhOrigin, 'machine');
-    assert.deepEqual(plan.changes, ['placeholders resolved']);
-    assert.deepEqual({ missing: planTranslation(videoEntry()).missing, zhOrigin: planTranslation(videoEntry()).zhOrigin }, { missing: null, zhOrigin: 'list' });
+    // The blank is kept as a marker; the Chinese side is still to be translated.
+    assert.deepEqual(plan.template, { ready: false, en: 'A flat poster of a small harbour, {{boat colour}} boats.', variables: [{ name: 'boat colour', default: 'red' }], changes: [] });
+    assert.deepEqual(plan.changes, ['placeholders rewritten as {{name}}']);
+    assert.deepEqual({ missing: planTranslation(videoEntry()).missing, zhOrigin: planTranslation(videoEntry()).zhOrigin, template: planTranslation(videoEntry()).template },
+      { missing: null, zhOrigin: 'list', template: null });
   });
 
   test("uses the list's own text in both languages when it has them, and calls no model", async (t) => {
@@ -103,10 +135,12 @@ describe('translate', () => {
   });
 
   test('translates the missing language with a text model, and records that it did', async (t) => {
-    const { state, world, budget } = await run(t, [imageEntry()], { onChat: () => '一张小港口的扁平海报，红色的船。' });
+    const plain = imageEntry({ prompt: 'A flat poster of a small harbour, red boats.', variants: { en: 'A flat poster of a small harbour, red boats.' } });
+    const { state, world, budget } = await run(t, [plain], { onChat: () => '一张小港口的扁平海报，红色的船。' });
     assert.equal(world.chats.length, 1);
     assert.match(world.chats[0].messages[1].content, /^Translate into Simplified Chinese:\n\n<prompt>\nA flat poster of a small harbour, red boats\.\n<\/prompt>$/);
-    assert.deepEqual(state['x-1001'], translatedImage());
+    const { variables: _none, ...prompt } = translatedImage().prompt;
+    assert.deepEqual(state['x-1001'], { ...translatedImage(), prompt, changes: ['translated to Chinese'] });
     assert.ok(budget.spent > 0);
   });
 
@@ -141,8 +175,216 @@ describe('translate', () => {
 
   test('slugs do not collide with each other or with published recipes', async (t) => {
     const twin = imageEntry({ id: 'x-1009', original_url: 'https://x.com/other/status/1009' });
-    const { state } = await run(t, [imageEntry(), twin], { onChat: () => '一张小港口的扁平海报，红色的船。', taken: new Set(['harbour-poster']) });
+    const { state } = await run(t, [imageEntry(), twin], { onChat: translator(), taken: new Set(['harbour-poster']) });
     assert.deepEqual([state['x-1001'].slug, state['x-1009'].slug], ['harbour-poster-2', 'harbour-poster-3']);
+  });
+
+  // ----- templates (round 10) -------------------------------------------
+
+  test('a prompt with blanks keeps them: the template is translated with its markers, and its defaults', async (t) => {
+    const onChat = translator();
+    const { state, world } = await run(t, [imageEntry()], { onChat });
+    assert.deepEqual(state['x-1001'], templatedImage());
+    // Two requests: the template, then its defaults. The filled prompt is never sent.
+    assert.deepEqual(onChat.asked, { template: 1, defaults: 1, plain: 0 });
+    assert.match(world.chats[0].messages[1].content, /<prompt>\nA flat poster of a small harbour, \{\{boat colour\}\} boats\.\n<\/prompt>$/);
+    assert.match(world.chats[0].messages[0].content, /Copy every placeholder exactly as it is/);
+    assert.match(world.chats[1].messages[1].content, /"boat colour": "red"/);
+    // Filled with its defaults, each template is the prompt in its language.
+    const { template, variables, en, zh } = state['x-1001'].prompt;
+    assert.equal(renderTemplate(template.en, defaultsIn(variables, 'en')), en);
+    assert.equal(renderTemplate(template.zh, defaultsIn(variables, 'zh')), zh);
+  });
+
+  test('a default that is not words gets no zh_default, and fills the Chinese as it is', async (t) => {
+    const entry = imageEntry({ variants: { en: 'A poster, {argument name="ratio" default="3:4"} ratio, brand {argument name="brand" default="PURE CRUNCH"}.' } });
+    const onChat = translator({ template: '一张海报，比例{{ratio}}，品牌{{brand}}。', defaults: '{"ratio": null, "brand": null}' });
+    const { state } = await run(t, [entry], { onChat });
+    assert.deepEqual(state['x-1001'].prompt.variables, [{ name: 'ratio', default: '3:4' }, { name: 'brand', default: 'PURE CRUNCH' }]);
+    assert.equal(state['x-1001'].prompt.zh, '一张海报，比例3:4，品牌PURE CRUNCH。');
+  });
+
+  test('a translation that loses a marker is asked for once more', async (t) => {
+    const onChat = translator({ template: ['一张小港口的扁平海报，红色的船。', '一张小港口的扁平海报，{{boat colour}}的船。'] });
+    const { state } = await run(t, [imageEntry()], { onChat });
+    assert.deepEqual(onChat.asked, { template: 2, defaults: 1, plain: 0 });
+    assert.deepEqual(state['x-1001'], templatedImage());
+  });
+
+  for (const [what, reply, why] of [
+    ['loses a marker', '一张小港口的扁平海报，红色的船。', 'the variable "boat colour" is declared but the template never uses it'],
+    ['translates a marker', '一张小港口的扁平海报，{{船的颜色}}的船。', 'the "{{" at position 11 does not begin a variable'],
+    ['renames a marker', '一张小港口的扁平海报，{{boat color}}的船。', '{{boat color}} is not a declared variable'],
+    ['repeats a marker', '一张{{boat colour}}小港口的扁平海报，{{boat colour}}的船。', 'a marker appears a different number of times than in the original'],
+  ]) {
+    test(`a translation that ${what} twice falls back to the filled prompt, with a review note`, async (t) => {
+      const onChat = translator({ template: reply });
+      const { state } = await run(t, [imageEntry()], { onChat });
+      // Two tries at the template, then the filled prompt is translated as before.
+      assert.deepEqual(onChat.asked, { template: 2, defaults: 0, plain: 1 });
+      const record = state['x-1001'];
+      assert.deepEqual({ ...record, notes: undefined }, { ...translatedImage(), notes: undefined });
+      assert.equal(record.prompt.template, undefined);
+      assert.equal(record.notes.length, 1);
+      assert.ok(record.notes[0].startsWith('template not kept: the Chinese translation lost or changed a {{name}} marker twice ('), record.notes[0]);
+      assert.ok(record.notes[0].includes(why), record.notes[0]);
+    });
+  }
+
+  test('defaults that come back unusable twice fall back the same way', async (t) => {
+    const onChat = translator({ defaults: 'Here are the translations: 红色' });
+    const { state } = await run(t, [imageEntry()], { onChat });
+    assert.deepEqual(onChat.asked, { template: 1, defaults: 2, plain: 1 });
+    assert.equal(state['x-1001'].prompt.template, undefined);
+    assert.deepEqual(state['x-1001'].changes, ['placeholders resolved', 'translated to Chinese']);
+    assert.deepEqual(state['x-1001'].notes, ['template not kept: the defaults could not be translated into Chinese: the answer was not usable, twice']);
+  });
+
+  test('a Chinese template is translated into English: default is the English, zh_default the list’s own', async (t) => {
+    const zh = '一张茶叶包装标签，{argument name="hill colour" default="绿色"}山丘，{argument name="ratio" default="3:4"}。';
+    const entry = imageEntry({ id: 'x-1002', title: 'Tea Label', title_zh: undefined, lang: 'zh', prompt: zh, variants: { zh } });
+    const onChat = translator({ template: 'A tea packaging label with {{hill colour}} hills, {{ratio}}.', defaults: '{"hill colour": "green", "ratio": null}' });
+    const { state } = await run(t, [entry], { onChat });
+    assert.deepEqual(state['x-1002'].prompt, {
+      en: 'A tea packaging label with green hills, 3:4.',
+      zh: '一张茶叶包装标签，绿色山丘，3:4。',
+      zh_origin: 'list',
+      template: { en: 'A tea packaging label with {{hill colour}} hills, {{ratio}}.', zh: '一张茶叶包装标签，{{hill colour}}山丘，{{ratio}}。' },
+      variables: [{ name: 'hill colour', default: 'green', zh_default: '绿色' }, { name: 'ratio', default: '3:4' }],
+    });
+    assert.deepEqual(state['x-1002'].changes, ['placeholders rewritten as {{name}}', 'translated to English']);
+    assert.equal(state['x-1002'].prompt_lang, 'zh');
+  });
+
+  test('a list that supplies both languages with the same blanks needs no model', async (t) => {
+    const entry = videoEntry({
+      variants: {
+        en: 'A {argument name="kite colour" default="red"} kite drifts over a white salt flat at noon.',
+        zh: '正午时分，一只{argument name="kite colour" default="红色"}风筝飘过白色盐滩。',
+      },
+      prompt: '正午时分，一只{argument name="kite colour" default="红色"}风筝飘过白色盐滩。',
+    });
+    const { state, world } = await run(t, [entry]);
+    assert.equal(world.chats.length, 0);
+    assert.deepEqual(state['x-2002'].prompt, {
+      en: 'A red kite drifts over a white salt flat at noon.',
+      zh: '正午时分，一只红色风筝飘过白色盐滩。',
+      zh_origin: 'list',
+      template: { en: 'A {{kite colour}} kite drifts over a white salt flat at noon.', zh: '正午时分，一只{{kite colour}}风筝飘过白色盐滩。' },
+      variables: [{ name: 'kite colour', default: 'red', zh_default: '红色' }],
+    });
+    assert.deepEqual(state['x-2002'].changes, ['placeholders rewritten as {{name}}']);
+  });
+
+  test('a list whose two languages have different blanks keeps no template, and says so', async (t) => {
+    const entry = videoEntry({
+      variants: { en: 'A {argument name="kite colour" default="red"} kite over a salt flat.', zh: '正午时分，一只红色风筝飘过{argument name="place" default="盐滩"}。' },
+      prompt: '正午时分，一只红色风筝飘过{argument name="place" default="盐滩"}。',
+    });
+    const { state, world } = await run(t, [entry]);
+    assert.equal(world.chats.length, 0);
+    assert.equal(state['x-2002'].prompt.template, undefined);
+    assert.deepEqual(state['x-2002'].changes, ['placeholders resolved']);
+    assert.deepEqual(state['x-2002'].notes, ["template not kept: the list's English and Chinese prompts do not have the same blanks"]);
+  });
+
+  test('names the template rules refuse are replaced, and source.changes lists each change', async (t) => {
+    const en = 'Two friends: one with {argument name="hair color" default="dark brown"} hair, one with {argument name="hair color" default="black"} hair, holding a {argument name="Main Subject!" default="kite"}.';
+    const onChat = translator({
+      template: '两位朋友：一位{{hair color}}头发，一位{{hair color 2}}头发，拿着{{Main Subject}}。',
+      defaults: '{"hair color": "深棕色", "hair color 2": "黑色", "Main Subject": "风筝"}',
+    });
+    const { state } = await run(t, [imageEntry({ variants: { en }, prompt: en })], { onChat });
+    const record = state['x-1001'];
+    assert.equal(record.prompt.template.en, 'Two friends: one with {{hair color}} hair, one with {{hair color 2}} hair, holding a {{Main Subject}}.');
+    assert.deepEqual(record.prompt.variables.map((variable) => variable.name), ['hair color', 'hair color 2', 'Main Subject']);
+    assert.deepEqual(record.changes, [
+      'placeholders rewritten as {{name}}',
+      'placeholder "hair color" has more than one default; the one that defaults to "black" is "hair color 2"',
+      'placeholder "Main Subject!" renamed "Main Subject"',
+      'translated to Chinese',
+    ]);
+    assert.equal(record.prompt.en, 'Two friends: one with dark brown hair, one with black hair, holding a kite.');
+    assert.equal(record.prompt.zh, '两位朋友：一位深棕色头发，一位黑色头发，拿着风筝。');
+  });
+
+  test('a prompt that is JSON keeps its template, and is still JSON in both languages', async (t) => {
+    // In a JSON prompt the list escapes the quotes of its placeholders.
+    const en = '{"scene":{"subject":"a mug on a kitchen shelf in morning light","colour":"{argument name=\\"colour\\" default=\\"teal\\"}"}}';
+    const onChat = translator({ template: '{"scene":{"subject":"晨光中厨房架子上的一个马克杯","colour":"{{colour}}"}}', defaults: '{"colour": "青绿色"}' });
+    const { state } = await run(t, [imageEntry({ variants: { en }, prompt: en })], { onChat });
+    const { prompt } = state['x-1001'];
+    assert.equal(prompt.template.en, '{"scene":{"subject":"a mug on a kitchen shelf in morning light","colour":"{{colour}}"}}');
+    assert.deepEqual(prompt.variables, [{ name: 'colour', default: 'teal', zh_default: '青绿色' }]);
+    // Filled, each ends in "}}" and parses.
+    assert.deepEqual(JSON.parse(prompt.en), { scene: { subject: 'a mug on a kitchen shelf in morning light', colour: 'teal' } });
+    assert.deepEqual(JSON.parse(prompt.zh), { scene: { subject: '晨光中厨房架子上的一个马克杯', colour: '青绿色' } });
+  });
+
+  test('a translated default that would break a JSON prompt gives the template up', async (t) => {
+    const en = '{"scene":{"subject":"a mug on a kitchen shelf in morning light","colour":"{argument name=\\"colour\\" default=\\"teal\\"}"}}';
+    const onChat = translator({
+      template: '{"scene":{"subject":"晨光中厨房架子上的一个马克杯","colour":"{{colour}}"}}',
+      defaults: '{"colour": "青绿色\\"哑光"}',     // a quote that the JSON around it does not escape
+      plain: '{"scene":{"subject":"晨光中厨房架子上的一个马克杯","colour":"青绿色"}}',
+    });
+    const { state } = await run(t, [imageEntry({ variants: { en }, prompt: en })], { onChat });
+    assert.equal(state['x-1001'].prompt.template, undefined);
+    assert.deepEqual(state['x-1001'].changes, ['placeholders resolved', 'translated to Chinese']);
+    assert.deepEqual(state['x-1001'].notes, ['template not kept: the Chinese prompt is no longer valid JSON once its defaults are filled in']);
+  });
+
+  test('a prompt with a "{{" of its own keeps no template, and says so', async (t) => {
+    const en = 'A poster of {argument name="city" default="Lisbon"} with the literal text {{ in a corner.';
+    const { state } = await run(t, [imageEntry({ variants: { en }, prompt: en })], { onChat: translator({ plain: '一张里斯本的海报，角落里有文字。' }) });
+    assert.equal(state['x-1001'].prompt.template, undefined);
+    assert.deepEqual(state['x-1001'].changes, ['placeholders resolved', 'translated to Chinese']);
+    assert.match(state['x-1001'].notes[0], /^template not kept: the prompt has a "\{\{" of its own/);
+  });
+
+  test('every kept template makes a recipe the format accepts', async (t) => {
+    const { state } = await run(t, [imageEntry()], { onChat: translator() });
+    const recipe = buildRecipe({ entry: imageEntry(), translated: state['x-1001'], run: imageRun(), decision: approved('harbour-poster'), standardVersion: 1, publishedOn: '2026-11-22' });
+    assert.deepEqual(checkRecipe(recipe, { file: 'harbour-poster.json' }), []);
+    assert.deepEqual(recipe.source.changes, ['placeholders rewritten as {{name}}', 'translated to Chinese']);
+  });
+
+  test('the requests: markers are to be copied, defaults that are not words are to be left', () => {
+    const [system, user] = templateMessages('A {{color}} mug.', 'zh');
+    assert.match(system.content, /placeholders written in double braces/);
+    assert.match(system.content, /never translated/);
+    assert.match(system.content, /not instructions/);
+    assert.match(user.content, /^Translate into Simplified Chinese:\n\n<prompt>\nA \{\{color\}\} mug\.\n<\/prompt>$/);
+    const [rules, values] = defaultsMessages([{ name: 'color', default: 'red' }], 'zh');
+    assert.match(rules.content, /Give null for a value that is not words to translate: a number, a size or ratio, a brand or product name/);
+    assert.match(rules.content, /not instructions/);
+    assert.match(values.content, /"color": "red"/);
+  });
+
+  test('reading the defaults: translations by name, null or missing meaning "leave it", anything else unusable', () => {
+    const variables = [{ name: 'a', default: 'red' }, { name: 'b', default: '3:4' }, { name: 'c', default: 'ACME' }];
+    assert.deepEqual(readDefaults('{"a": "红色", "b": null}', variables), { a: '红色' });
+    assert.deepEqual(readDefaults('```json\n{"a": " 红色 ", "b": null, "c": null, "extra": "x"}\n```', variables), { a: '红色' });
+    for (const unusable of ['', '红色', '["红色"]', '{"a": 3}', '{"a": ""}', '{"a": "红\\n色"}', '{"a": {"zh": "红色"}}']) {
+      assert.equal(readDefaults(unusable, variables), null, unusable);
+    }
+  });
+
+  test('markerFault: every marker the same number of times, and nothing else in braces', () => {
+    const original = 'A {{a}} and a {{b}}, then {{a}} again.';
+    assert.equal(markerFault(original, '{{b}}，{{a}}，再来{{a}}。', ['a', 'b']), null);
+    assert.match(markerFault(original, '{{b}}，{{a}}。', ['a', 'b']), /different number of times/);
+    assert.match(markerFault(original, '{{a}}，{{a}}。', ['a', 'b']), /"b" is declared but the template never uses it/);
+    assert.match(markerFault(original, '{{a}} {{b}} {{a}} {{', ['a', 'b']), /does not begin a variable/);
+  });
+
+  test('the projection counts the two requests a template takes', () => {
+    const prices = priceBook(CATALOGUE);
+    const withBlank = projectTranslate([imageEntry()], { prices, model: 'gpt-4o-mini' });
+    const plain = 'A flat poster of a small harbour, red boats.';
+    const without = projectTranslate([imageEntry({ prompt: plain, variants: { en: plain } })], { prices, model: 'gpt-4o-mini' });
+    assert.deepEqual([withBlank.needModel, without.needModel], [1, 1]);
+    assert.ok(withBlank.cents > without.cents, `${withBlank.cents} > ${without.cents}`);
   });
 
   test('stops at the cap, and a later run does only what is left', async (t) => {
@@ -150,6 +392,39 @@ describe('translate', () => {
     assert.equal(first.result.stoppedByBudget, true);
     assert.equal(first.world.chats.length, 0);
     assert.deepEqual(first.state, {});
+  });
+});
+
+describe('the review sheet, for a prompt with a template', () => {
+  const fallen = { ...translatedImage(), notes: ['template not kept: the Chinese translation lost or changed a {{name}} marker twice (…)'] };
+  const items = reviewItems({
+    entries: [imageEntry(), imageEntry({ id: 'x-1010' })],
+    screened: { 'x-1001': { status: 'candidate', reasons: [], notes: ['classifier: nothing found against the standard'] }, 'x-1010': { status: 'candidate', reasons: [], notes: [] } },
+    translated: { 'x-1001': templatedImage(), 'x-1010': fallen },
+    runs: { 'x-1001': imageRun(), 'x-1010': imageRun() },
+  });
+
+  test('carries the template cut at its markers, in both languages', () => {
+    assert.deepEqual(items[0].template, {
+      en: [{ text: 'A flat poster of a small harbour, ' }, { name: 'boat colour' }, { text: ' boats.' }],
+      zh: [{ text: '一张小港口的扁平海报，' }, { name: 'boat colour' }, { text: '的船。' }],
+    });
+    assert.equal(items[1].template, null);
+  });
+
+  test('a template that could not be kept says why in the notes, after the screening notes', () => {
+    assert.deepEqual(items[0].notes, ['classifier: nothing found against the standard']);
+    assert.deepEqual(items[1].notes, ['template not kept: the Chinese translation lost or changed a {{name}} marker twice (…)']);
+  });
+
+  test('the sheet marks each variable and lists the defaults in both languages', () => {
+    const html = reviewSheet({ items, standardVersion: 1 });
+    // The page marks variables and builds the table from data: the data carries what it needs.
+    for (const expected of ['"name":"boat colour"', '"zh_default":"红色"', "el('mark'", 'Default, English', 'Default, Chinese', 'Template, Chinese', 'the standard applies to these too', 'template not kept']) {
+      assert.ok(html.includes(expected), `the sheet is missing ${expected}`);
+    }
+    // Third-party text is still never written into the page as markup.
+    assert.equal(/<mark>/.test(html), false);
   });
 });
 
