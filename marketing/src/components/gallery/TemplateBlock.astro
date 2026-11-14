@@ -40,8 +40,11 @@ const { parts } = parseTemplate(template);
     font-family: system-ui, -apple-system, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei',
       'Noto Sans CJK SC', 'Source Han Sans SC', sans-serif;
   }
-  /* A variable: marked, in the monospace of code, and never broken across lines mid-name where it can be helped. */
+  /* A variable: marked, in the monospace of code. It stays on one line when it fits one, and wraps inside itself when it cannot. */
   .gallery-variable {
+    display: inline-block;
+    max-width: 100%;
+    line-height: 1.4;
     font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
     font-size: 0.86em;
     padding: 0.15em 0.45em;
