@@ -103,8 +103,8 @@ public class OpenAIProvider implements ProviderAdapter {
     }
 
     private static OpenAIChatRequest buildBody(ChatRequest request, boolean stream) {
-        List<OpenAIMessage> messages = request.messages().stream()
-                .map(m -> new OpenAIMessage(m.role(), m.content()))
+        List<OpenAIRequestMessage> messages = request.messages().stream()
+                .map(m -> new OpenAIRequestMessage(m.role(), OpenAIContent.of(m)))
                 .toList();
         // stream_options.include_usage is required to get token counts in the final chunk
         OpenAIStreamOptions streamOpts = stream ? new OpenAIStreamOptions(true) : null;
@@ -136,7 +136,7 @@ public class OpenAIProvider implements ProviderAdapter {
     @JsonInclude(JsonInclude.Include.NON_NULL)
     record OpenAIChatRequest(
             String model,
-            List<OpenAIMessage> messages,
+            List<OpenAIRequestMessage> messages,
             @JsonProperty("max_tokens") Integer maxTokens,
             Double temperature,
             boolean stream,
@@ -144,6 +144,13 @@ public class OpenAIProvider implements ProviderAdapter {
     ) { }
 
     record OpenAIStreamOptions(@JsonProperty("include_usage") boolean includeUsage) { }
+
+    /**
+     * A message as it is sent. {@code content} is a string for a message of
+     * text, exactly as before images existed, and a list of parts only for a
+     * message that carries an image ({@link OpenAIContent}).
+     */
+    record OpenAIRequestMessage(String role, Object content) { }
 
     record OpenAIMessage(String role, String content) { }
 
