@@ -234,7 +234,14 @@ export interface ApiKeySummary {
   createdAt: string;
   lastUsedAt: string | null;
   expiresAt: string | null;
+  image_response?: ImageResponse;   // absent from an API without the setting
 }
+
+/**
+ * How image requests made with a key answer. sync: they wait for the result
+ * and answer as OpenAI's API does. async: they return a job to poll.
+ */
+export type ImageResponse = 'async' | 'sync';
 
 export interface ChatChunk {
   id: string;

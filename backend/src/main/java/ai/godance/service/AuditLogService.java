@@ -49,6 +49,8 @@ public class AuditLogService {
     public static final String EVT_AUTH_PARENTAL_CONSENT_GRANTED   = "auth.parental_consent.granted";
     public static final String EVT_API_KEY_CREATED    = "apikey.created";
     public static final String EVT_API_KEY_DELETED    = "apikey.deleted";
+    /** A key's setting was changed; the detail names the field and its new value. */
+    public static final String EVT_API_KEY_UPDATED    = "apikey.updated";
     public static final String EVT_BILLING_TOPUP_INTENT      = "billing.topup.intent";
     public static final String EVT_BILLING_TOPUP_SUCCEEDED   = "billing.topup.succeeded";
     public static final String EVT_BILLING_TOPUP_DUPLICATE   = "billing.topup.duplicate";

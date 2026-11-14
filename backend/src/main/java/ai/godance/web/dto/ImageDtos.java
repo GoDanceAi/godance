@@ -44,6 +44,9 @@ public final class ImageDtos {
             @Min(1) Integer n,
             String style,
             String quality,
+            // OpenAI's: "url" or "b64_json". Shapes a response that carries the images;
+            // does nothing for one that answers with a job.
+            @JsonProperty("response_format") String responseFormat,
             Boolean async,                                       // Godance extension
             @JsonProperty("webhook_url") String webhookUrl,      // Godance extension
             @JsonProperty("gallery_recipe") String galleryRecipe, // Godance extension
@@ -66,12 +69,17 @@ public final class ImageDtos {
         }
 
         private static ImageData toData(UploadedImage u) {
-            return new ImageData(u.url(), u.revisedPrompt());
+            return new ImageData(u.url(), null, u.revisedPrompt());
         }
     }
 
+    /**
+     * One image, as OpenAI's API returns it: a link, the image itself as
+     * base64, or both. Whichever is absent is left out of the JSON.
+     */
     public record ImageData(
-            String url,
+            @JsonInclude(JsonInclude.Include.NON_NULL) String url,
+            @JsonInclude(JsonInclude.Include.NON_NULL) @JsonProperty("b64_json") String b64Json,
             @JsonProperty("revised_prompt") String revisedPrompt
     ) { }
 
@@ -83,6 +91,11 @@ public final class ImageDtos {
     ) {
         public static AsyncJobAcknowledged forJob(UUID jobId) {
             return new AsyncJobAcknowledged(jobId, "QUEUED", "/v1/jobs/" + jobId);
+        }
+
+        /** The same body for a job a request waited on and that is still open: its status as last read. */
+        public static AsyncJobAcknowledged forOpenJob(UUID jobId, JobStatus status) {
+            return new AsyncJobAcknowledged(jobId, status.name(), "/v1/jobs/" + jobId);
         }
     }
 
