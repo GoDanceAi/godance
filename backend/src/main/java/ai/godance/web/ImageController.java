@@ -18,6 +18,10 @@ import ai.godance.service.ImageResponseFormat;
 import ai.godance.service.ImageSyncService;
 import ai.godance.security.JwtService;
 import ai.godance.service.ImageGenerationService;
+import ai.godance.domain.Modality;
+import ai.godance.service.JobOrigin;
+import ai.godance.service.RecipeRunService;
+import ai.godance.service.RecipeRunService.RunPrompt;
 import ai.godance.web.dto.ImageDtos.AsyncJobAcknowledged;
 import ai.godance.web.dto.ImageDtos.ImageGenerationRequest;
 import ai.godance.web.dto.ImageDtos.ImageGenerationResponse;
@@ -46,10 +50,12 @@ public class ImageController {
     static final int RETRY_AFTER_SECONDS = 5;
 
     private final ImageGenerationService service;
+    private final RecipeRunService recipes;
     private final ImageSyncService sync;
 
-    public ImageController(ImageGenerationService service, ImageSyncService sync) {
+    public ImageController(ImageGenerationService service, RecipeRunService recipes, ImageSyncService sync) {
         this.service = service;
+        this.recipes = recipes;
         this.sync = sync;
     }
 
@@ -60,6 +66,8 @@ public class ImageController {
             @RequestHeader(name = "Prefer", required = false) String prefer) {
         UUID userId = JwtService.userIdFromSubject(jwt.getSubject());
         UUID apiKeyId = apiKeyId(jwt);
+        // The channel comes from the credentials; a malformed gallery_recipe is a 400 before any charge.
+        JobOrigin origin = JobOrigin.of(apiKeyId, req.galleryRecipe());
         ImageRequest domain = toDomain(req);
 
         // Auto-promote to async if the model requires it (e.g. gpt-image-1-hd
@@ -71,13 +79,20 @@ public class ImageController {
         boolean mayWait = apiKeyId != null && forceAsync
                 && !Boolean.TRUE.equals(req.async()) && !prefersAsync(prefer);
         if (Boolean.TRUE.equals(req.async()) || forceAsync) {
-            return Mono.fromCallable(() ->
-                            service.executeAsync(userId, apiKeyId, domain, req.webhookUrl()))
+            return Mono.fromCallable(() -> {
+                        // A recipe is rendered here, before anything is priced or charged.
+                        RunPrompt run = recipes.resolve(userId, Modality.IMAGE, req.prompt(), req.recipe());
+                        return service.executeAsync(userId, apiKeyId, withPrompt(domain, run.prompt()),
+                                req.webhookUrl(), run.origin(origin));
+                    })
                     .subscribeOn(Schedulers.boundedElastic())
                     .flatMap(jobId -> mayWait ? answerFor(apiKeyId, jobId, format) : Mono.just(accepted(jobId)));
         }
 
-        return Mono.fromCallable(() -> service.execute(userId, apiKeyId, domain))
+        return Mono.fromCallable(() -> {
+                    RunPrompt run = recipes.resolve(userId, Modality.IMAGE, req.prompt(), req.recipe());
+                    return service.execute(userId, apiKeyId, withPrompt(domain, run.prompt()), run.origin(origin));
+                })
                 .subscribeOn(Schedulers.boundedElastic())
                 .map(result -> ResponseEntity.status(HttpStatus.OK)
                         .<Object>body(inlines(format, domain.model())
@@ -133,6 +148,11 @@ public class ImageController {
     private static UUID apiKeyId(Jwt jwt) {
         String claim = jwt.getClaimAsString("api_key_id");
         return claim == null ? null : UUID.fromString(claim);
+    }
+
+    /** The request with the prompt that is run: the one it was sent with, or its recipe rendered. */
+    private static ImageRequest withPrompt(ImageRequest request, String prompt) {
+        return new ImageRequest(request.model(), prompt, request.size(), request.n(), request.style(), request.quality());
     }
 
     private static ImageRequest toDomain(ImageGenerationRequest req) {

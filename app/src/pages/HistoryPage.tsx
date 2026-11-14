@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { ApiError, type JobView, type MediaModality, type SavedJobs } from '../lib/api';
 import { useAuth } from '../lib/auth';
+import { COMPARE_MAX, COMPARE_MIN, compareLink, toggleSelected } from '../lib/compare';
 import { costText, fetchSavedJobs, listJobs, useWatchedJob } from '../lib/jobs';
 import { formatAge, formatDateTime } from '../lib/time';
 import { Icon } from '../components/Brand';
@@ -24,7 +25,8 @@ function filterFrom(param: string | null): MediaModality | null {
 /**
  * Every generation, newest first, a page at a time. `?saved=1` is the saved
  * view: only the generations kept past their deletion date, with how many
- * there are against the account's limit.
+ * there are against the account's limit. "Select" picks up to four to
+ * compare side by side.
  */
 export default function HistoryPage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -40,6 +42,9 @@ export default function HistoryPage() {
   const listId = useRef(0);
   // The saved view's count against the limit; null until read, or when it can't be.
   const [savedJobs, setSavedJobs] = useState<SavedJobs | null>(null);
+  // Select mode: the generations ticked to compare, in the order they were ticked.
+  const [selecting, setSelecting] = useState(false);
+  const [selected, setSelected] = useState<string[]>([]);
 
   // What a page adds to the list, and whether another may follow. In the
   // saved view every job the API sends is saved; one that isn't means the
@@ -112,12 +117,27 @@ export default function HistoryPage() {
     if (savedOnly) readSavedJobs();
   };
   const atLimit = savedJobs !== null && savedJobs.count >= savedJobs.limit;
+  const toggleSelecting = () => {
+    setSelecting((on) => !on);
+    setSelected([]);
+  };
+  const selectionFull = selected.length >= COMPARE_MAX;
 
   return (
     <div className="mx-auto max-w-6xl px-6 py-8">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-bold tracking-tight text-fg">History</h1>
         <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            aria-pressed={selecting}
+            onClick={toggleSelecting}
+            title="Pick generations to compare side by side"
+            className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-[13px] font-semibold transition-colors ${
+              selecting ? 'border-brand-600 bg-brand-600 text-white' : 'border-border bg-surface text-fg-muted hover:text-fg'}`}
+          >
+            Select
+          </button>
           <button
             type="button"
             aria-pressed={savedOnly}
@@ -166,6 +186,24 @@ export default function HistoryPage() {
         </p>
       )}
 
+      {selecting && (
+        <div role="group" aria-label="Compare" className="mt-4 flex flex-wrap items-center gap-3 rounded-md border border-border bg-surface-alt px-3 py-2">
+          <p aria-live="polite" className="text-sm text-fg-muted">
+            {selected.length === 0
+              ? 'Tick two to four generations to see them side by side.'
+              : `${selected.length} selected${selectionFull ? ', the most that fit side by side' : ''}.`}
+          </p>
+          <div className="ml-auto flex items-center gap-2">
+            {selected.length >= COMPARE_MIN ? (
+              <Link to={compareLink(selected)} className="btn btn-primary btn-sm">Compare {selected.length}</Link>
+            ) : (
+              <button type="button" disabled className="btn btn-primary btn-sm">Compare</button>
+            )}
+            <button type="button" onClick={toggleSelecting} className="btn btn-ghost btn-sm">Cancel</button>
+          </div>
+        </div>
+      )}
+
       {error && <p role="alert" className="mt-6 text-sm text-danger">{error}</p>}
       {!error && jobs === null && <p className="mt-6 text-sm text-fg-faint">Loading…</p>}
       {jobs?.length === 0 && !hasMore
@@ -174,7 +212,19 @@ export default function HistoryPage() {
       {jobs !== null && (jobs.length > 0 || hasMore) && (
         <>
           <ul className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-            {jobs.map((job) => <JobCard key={job.id} initial={job} onSavedChange={onSavedChange} />)}
+            {jobs.map((job) => (
+              <JobCard
+                key={job.id}
+                initial={job}
+                onSavedChange={onSavedChange}
+                select={selecting ? {
+                  selected: selected.includes(job.id),
+                  // Past four, only a ticked one can change.
+                  enabled: !selectionFull || selected.includes(job.id),
+                  toggle: () => setSelected((cur) => toggleSelected(cur, job.id)),
+                } : null}
+              />
+            ))}
           </ul>
           {hasMore && (
             <div className="mt-8 flex flex-col items-center gap-2">
@@ -225,9 +275,14 @@ function NothingSaved({ modality }: { modality: MediaModality | null }) {
 
 /**
  * One generation. Polls while it runs, so the card turns to its result on
- * its own. A finished one can be saved from here.
+ * its own. A finished one can be saved from here. In select mode (`select`)
+ * it carries a tick box to pick it for a comparison.
  */
-function JobCard({ initial, onSavedChange }: { initial: JobView; onSavedChange: (job: JobView) => void }) {
+function JobCard({ initial, onSavedChange, select }: {
+  initial: JobView;
+  onSavedChange: (job: JobView) => void;
+  select: { selected: boolean; enabled: boolean; toggle: () => void } | null;
+}) {
   const { refresh } = useAuth();
   const watched = useWatchedJob(initial, () => void refresh());
   // What a save or un-save made here changed. Only a finished job has the
@@ -241,7 +296,21 @@ function JobCard({ initial, onSavedChange }: { initial: JobView; onSavedChange: 
   };
 
   return (
-    <li className="card relative flex flex-col overflow-hidden p-0 card-hover">
+    <li className={`card relative flex flex-col overflow-hidden p-0 card-hover ${select?.selected ? 'ring-2 ring-brand-600' : ''}`}>
+      {select && (
+        // Above the card's link, which covers the whole card.
+        <label className="absolute left-2 top-2 z-10 inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-2 py-1 text-xs font-semibold text-fg shadow-sm">
+          <input
+            type="checkbox"
+            checked={select.selected}
+            disabled={!select.enabled}
+            onChange={select.toggle}
+            aria-label={`Compare: ${title}`}
+            className="h-4 w-4 accent-[var(--color-primary)]"
+          />
+          <span aria-hidden="true">Compare</span>
+        </label>
+      )}
       <JobThumb job={job} />
       <div className="flex flex-1 flex-col gap-2 p-3">
         <Link

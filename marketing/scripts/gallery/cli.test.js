@@ -6,7 +6,7 @@
  */
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
-import { mkdir, readdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { describe, test } from 'node:test';
 import { readRecipeFolder } from '../gallery-schema/read-recipes.js';
@@ -194,6 +194,51 @@ describe('a paid stage', () => {
     assert.equal(screened['x-1006'].status, 'set-aside');
     assert.equal(screened['x-1001'].status, 'candidate');
     assert.equal(world.chats.length, chats, 're-screening did not pay again');
+  });
+});
+
+describe('the whole pipeline, with a translator that keeps the markers', () => {
+  /** Answers each kind of request the translate stage makes. */
+  const keepsMarkers = (messages) =>
+    /short title/.test(messages[0].content) ? 'Invented Title'
+    : /values that fill the blanks/.test(messages[0].content) ? '{"boat colour": "红色"}'
+    : /placeholders written in double braces/.test(messages[0].content) ? '一张黎明时分小港口的扁平海报，{{boat colour}}的船，3:4比例。'
+    : /Translate into English/.test(messages[1].content) ? 'A tea packaging label with green hills, minimal style, tall frame.'
+    : '一段用于测试的中文译文，描述画面的内容与风格。';
+
+  test('a prompt with a blank is published with its template, and the run used the filled prompt', async (t) => {
+    const { cli, dirs, world } = await workspace(t, { world: fakeWorld({ lists, onChat: keepsMarkers }) });
+    for (const stage of [['fetch'], ['screen'], ['translate', '--max-spend-cents', '500'], ['generate', '--max-spend-cents', '500'], ['review']]) {
+      const result = await cli(...stage, '--apply');
+      assert.equal(result.code, 0, result.text);
+    }
+    assert.match(await readFile(path.join(dirs.work, 'review', 'index.html'), 'utf8'), /"template":\{"en":\[\{"text":"A flat poster of a small harbour at dawn, "\},\{"name":"boat colour"\}/);
+    await writeFile(path.join(dirs.work, 'review', 'decisions.json'), JSON.stringify({
+      standard_version: 1,
+      decisions: { 'x-1001': { slug: 'harbour-poster', decision: 'approved', reason: '', decided_on: '2026-11-21' } },
+    }));
+    const published = await cli('publish', '--apply');
+    assert.equal(published.code, 0, published.text);
+
+    const { recipes, problems } = await readRecipeFolder(dirs.content);
+    assert.deepEqual(problems, []);
+    assert.deepEqual(recipes[0].data.prompt, {
+      en: 'A flat poster of a small harbour at dawn, red boats, 3:4 ratio.',
+      zh: '一张黎明时分小港口的扁平海报，红色的船，3:4比例。',
+      zh_origin: 'machine',
+      template: {
+        en: 'A flat poster of a small harbour at dawn, {{boat colour}} boats, 3:4 ratio.',
+        zh: '一张黎明时分小港口的扁平海报，{{boat colour}}的船，3:4比例。',
+      },
+      variables: [{ name: 'boat colour', default: 'red', zh_default: '红色' }],
+    });
+    assert.deepEqual(recipes[0].data.source.changes, ['placeholders rewritten as {{name}}', 'translated to Chinese']);
+    // The model was sent the author's text with the blank filled, as before: the output is of that prompt.
+    assert.equal(world.submissions.find((sent) => sent.body.prompt.includes('harbour')).body.prompt, 'A flat poster of a small harbour at dawn, red boats, 3:4 ratio.');
+
+    // A recipe published with its template has nothing left for retemplate to do.
+    const again = await cli('retemplate', '--all');
+    assert.match(again.text, /= harbour-poster: left as it is: it already has a template/);
   });
 });
 

@@ -23,6 +23,7 @@ import ai.godance.repository.ApiKeyRepository;
 import ai.godance.repository.ConversationRepository;
 import ai.godance.repository.GenerationJobRepository;
 import ai.godance.repository.OAuthIdentityRepository;
+import ai.godance.repository.RecipeRepository;
 import ai.godance.repository.SavedRecipeRepository;
 import ai.godance.repository.UserRepository;
 import ai.godance.repository.UserTwoFactorRepository;
@@ -39,14 +40,16 @@ import ai.godance.repository.UserTwoFactorRepository;
  *   <li>replaces the email with {@code closed-<id>@closed.invalid} and the
  *       name with "Closed account"; removes the password hash, social
  *       logins, the pending email change, email-verification and
- *       password-reset tokens, the webhook signing secrets, and the
- *       two-factor secret and recovery codes;</li>
+ *       password-reset tokens, the webhook signing secrets, the
+ *       two-factor secret and recovery codes, and the record of what
+ *       brought the account here (its first touch, V28);</li>
  *   <li>disables the account and bumps its session version, so its JWTs
  *       fail at once, drops any staff role, and deletes its API keys;</li>
  *   <li>turns auto-recharge off and forgets the saved payment method, so the
  *       card is never charged again;</li>
- *   <li>deletes every conversation and its messages, and the list of
- *       gallery recipes the owner saved;</li>
+ *   <li>deletes every conversation and its messages, the list of
+ *       gallery recipes the owner saved, and the owner's own recipes with
+ *       all their versions;</li>
  *   <li>ends any job still running (FAILED, estimate refunded, as the sweep
  *       would) and purges every job now, saved or not: media objects
  *       deleted, prompt and URLs redacted, costs kept;</li>
@@ -74,6 +77,7 @@ public class AccountClosureService {
     private final OAuthIdentityRepository identities;
     private final ConversationRepository conversations;
     private final SavedRecipeRepository savedRecipes;
+    private final RecipeRepository recipes;
     private final GenerationJobRepository jobs;
     private final GenerationJobSettlement settlement;
     private final DataRetentionService retention;
@@ -84,6 +88,7 @@ public class AccountClosureService {
                                  ApiKeyRepository apiKeys,
                                  OAuthIdentityRepository identities, ConversationRepository conversations,
                                  SavedRecipeRepository savedRecipes,
+                                 RecipeRepository recipes,
                                  GenerationJobRepository jobs, GenerationJobSettlement settlement,
                                  DataRetentionService retention, AuditLogService audit,
                                  PlatformTransactionManager txManager) {
@@ -93,6 +98,7 @@ public class AccountClosureService {
         this.identities = identities;
         this.conversations = conversations;
         this.savedRecipes = savedRecipes;
+        this.recipes = recipes;
         this.jobs = jobs;
         this.settlement = settlement;
         this.retention = retention;
@@ -182,12 +188,16 @@ public class AccountClosureService {
         u.setActive(false);
         u.setSessionVersion(u.getSessionVersion() + 1);
         users.save(u);
+        // What brought the account here goes with the rest of what describes its owner.
+        users.clearFirstTouch(userId);
 
         twoFactors.deleteById(userId);
         int keys = apiKeys.deleteByUserId(userId);
         int links = identities.deleteByUserId(userId);
         int convs = conversations.deleteByUserId(userId);
         savedRecipes.deleteByUserId(userId);
+        // The owner's own recipes go, with their versions. Their jobs are purged below.
+        recipes.deleteByUserId(userId);
 
         Map<String, Object> detail = new LinkedHashMap<>();
         detail.put("actorUserId", actorId == null ? null : actorId.toString());

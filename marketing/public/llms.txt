@@ -35,6 +35,17 @@
   saved_limit_reached (an account can save up to 500 jobs). Un-saving puts the 90 days
   back: a job already older than that is deleted at the next nightly clean-up
 - GET /v1/jobs/saved — {count, limit}: how many jobs you have saved, and the most you can
+- /v1/recipes — keep a prompt template as a recipe with numbered versions: POST creates
+  one ({title, modality, template, variables: [{name, default}], model, params}); GET
+  lists (limit, before); GET, PATCH {title} and DELETE /v1/recipes/{id}; GET and POST
+  /v1/recipes/{id}/versions (POST writes a version only when something changed, else
+  200 with the latest). A variable is written {{name}}. Each recipe carries attempts
+  and spent_cents. Up to 500 recipes per account and 200 versions per recipe (409
+  recipe_limit_reached)
+- Run a recipe: on POST /v1/images/generations or /v1/videos/generations send
+  recipe: {version_id, variables: {name: value}} in place of prompt (both → 400
+  prompt_and_recipe). The filled-in template is the job's prompt and price. The job
+  then has recipe: {id, version, variables}; GET /v1/jobs?recipe={id} lists its jobs
 - POST /v1/estimates — price of an image or video request before sending it
   ({model, n, size, seconds} → estimated_cost_cents, the exact amount the request would
   reserve); no charge, no job

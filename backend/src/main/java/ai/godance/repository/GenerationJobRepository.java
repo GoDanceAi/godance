@@ -64,6 +64,33 @@ public interface GenerationJobRepository extends JpaRepository<GenerationJob, UU
                                              @Param("beforeCreatedAt") Instant beforeCreatedAt,
                                              @Param("beforeId") UUID beforeId,
                                              @Param("limit") int limit);
+    /**
+     * {@link #findPageForUser} over the jobs that ran any version of one
+     * recipe (V29). The user's own jobs only, so another user's recipe id
+     * matches nothing. {@code saved} is {@code 'any'}, {@code 'saved'} or
+     * {@code 'unsaved'}.
+     */
+    @Query(value = """
+            SELECT j.* FROM generation_jobs j
+              JOIN recipe_versions v ON v.id = j.recipe_version_id
+             WHERE j.user_id = :userId
+               AND v.recipe_id = :recipeId
+               AND (:modality = '' OR j.modality = :modality)
+               AND (:status = '' OR j.status = :status)
+               AND (:saved = 'any' OR (:saved = 'saved') = (j.saved_at IS NOT NULL))
+               AND (j.created_at, j.id) < (:beforeCreatedAt, :beforeId)
+             ORDER BY j.created_at DESC, j.id DESC
+             LIMIT :limit
+            """, nativeQuery = true)
+    List<GenerationJob> findPageForRecipe(@Param("userId") UUID userId,
+                                          @Param("recipeId") UUID recipeId,
+                                          @Param("modality") String modality,
+                                          @Param("status") String status,
+                                          @Param("saved") String saved,
+                                          @Param("beforeCreatedAt") Instant beforeCreatedAt,
+                                          @Param("beforeId") UUID beforeId,
+                                          @Param("limit") int limit);
+
     List<GenerationJob> findByStatus(JobStatus status);
 
     // Status changes are conditional updates, so a worker and the sweep can

@@ -10,9 +10,13 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 import ai.godance.domain.GenerationJob;
+import ai.godance.domain.JobChannel;
 import ai.godance.domain.JobStatus;
 import ai.godance.domain.Modality;
 import ai.godance.domain.Provider;
+import ai.godance.domain.RecipeVersion;
+import ai.godance.service.JobOrigin;
+import ai.godance.web.dto.RecipeDtos.RecipeRef;
 import ai.godance.service.ImageGenerationService.ImageResult;
 import ai.godance.service.ImageGenerationService.UploadedImage;
 import jakarta.validation.constraints.Min;
@@ -23,12 +27,19 @@ public final class ImageDtos {
     private ImageDtos() { }
 
     /**
-     * OpenAI-compatible request shape. Two Godance extensions
-     * ({@code async}, {@code webhook_url}) pure OpenAI clients ignore.
+     * OpenAI-compatible request shape. Three Godance extensions
+     * ({@code async}, {@code webhook_url}, {@code gallery_recipe}) pure
+     * OpenAI clients ignore. {@code gallery_recipe} is the slug of the
+     * gallery recipe this request is a run of; the job records it.
+     *
+     * <p>A request carries {@code prompt} or {@code recipe}, never both:
+     * {@code recipe} names a version of one of the caller's recipes and
+     * values for its variables, and the server renders the prompt from it
+     * ({@link ai.godance.service.RecipeRunService}).
      */
     public record ImageGenerationRequest(
             @NotBlank String model,
-            @NotBlank String prompt,
+            String prompt,
             String size,
             @Min(1) Integer n,
             String style,
@@ -37,7 +48,9 @@ public final class ImageDtos {
             // does nothing for one that answers with a job.
             @JsonProperty("response_format") String responseFormat,
             Boolean async,                                       // Godance extension
-            @JsonProperty("webhook_url") String webhookUrl       // Godance extension
+            @JsonProperty("webhook_url") String webhookUrl,      // Godance extension
+            @JsonProperty("gallery_recipe") String galleryRecipe, // Godance extension
+            RecipeRef recipe                                      // Godance extension, in place of prompt
     ) { }
 
     /** Sync response — OpenAI-shaped. */
@@ -107,6 +120,15 @@ public final class ImageDtos {
      *       deletes them.</li>
      *   <li>{@code saved}: the owner has saved the job, which keeps it past
      *       the retention period ({@code PUT /v1/jobs/{id}/saved}).</li>
+     *   <li>{@code channel}: how the job was made, {@code STUDIO} for a
+     *       signed-in session and {@code API} for an API key; null for a job
+     *       from before this was recorded (round 10). Kept after the purge.</li>
+     *   <li>{@code galleryRecipe}: the slug of the gallery recipe the request
+     *       named, or null. Kept after the purge.</li>
+     *   <li>{@code recipe}: the version of the owner's recipe the job ran and
+     *       the value each variable had, or null for a plain prompt. After
+     *       the purge the values are null; once the recipe is deleted, the
+     *       whole field is.</li>
      * </ul>
      */
     public record JobView(
@@ -127,13 +149,17 @@ public final class ImageDtos {
             List<JobOutputView> outputs,
             boolean purged,
             Instant mediaExpiresAt,
-            boolean saved
+            boolean saved,
+            JobChannel channel,
+            String galleryRecipe,
+            RecipeRunView recipe
     ) {
         /**
          * {@code outputs} carry links already signed; {@code outputUrl} is the
          * first of them, or the stored link for a job that has none recorded.
          */
-        public static JobView from(GenerationJob j, List<JobOutputView> outputs, Instant mediaExpiresAt) {
+        public static JobView from(GenerationJob j, List<JobOutputView> outputs, Instant mediaExpiresAt,
+                                   RecipeVersion recipeVersion) {
             boolean purged = j.getPurgedAt() != null;
             List<JobOutputView> shown = purged ? List.of() : outputs;
             String outputUrl = shown.isEmpty() ? j.getOutputUrl() : shown.get(0).url();
@@ -145,7 +171,19 @@ public final class ImageDtos {
                     purged ? null : promptOf(j),
                     purged ? Map.of() : paramsOf(j),
                     shown, purged, purged ? null : mediaExpiresAt,
-                    !purged && j.getSavedAt() != null);
+                    !purged && j.getSavedAt() != null,
+                    j.getChannel(), j.getGalleryRecipe(),
+                    recipeVersion == null ? null : new RecipeRunView(recipeVersion.getRecipeId(),
+                            recipeVersion.getNumber(), purged ? null : recipeVariablesOf(j)));
+        }
+
+        /** The value each variable had in this run, as the job's request stored them. */
+        private static Map<String, String> recipeVariablesOf(GenerationJob j) {
+            Object stored = j.getPrompt() == null ? null : j.getPrompt().get(JobOrigin.RECIPE_VARIABLES_KEY);
+            if (!(stored instanceof Map<?, ?> values)) return Map.of();
+            Map<String, String> out = new LinkedHashMap<>();
+            values.forEach((name, value) -> out.put(String.valueOf(name), value == null ? null : String.valueOf(value)));
+            return out;
         }
 
         private static String promptOf(GenerationJob j) {
@@ -175,6 +213,17 @@ public final class ImageDtos {
             if (v != null) to.put(as, v);
         }
     }
+
+    /**
+     * {@code recipe} on a job: the recipe it ran, the number of the version,
+     * and the value each variable had. {@code variables} is null once the
+     * job's prompt has been deleted.
+     */
+    public record RecipeRunView(
+            UUID id,
+            int version,
+            @JsonInclude(JsonInclude.Include.ALWAYS) Map<String, String> variables
+    ) { }
 
     /**
      * {@code GET /v1/jobs/saved}: how many generations the caller has saved,

@@ -49,6 +49,31 @@ export const imageRecipe = () => ({
   published_on: '2026-11-21',
 });
 
+/**
+ * The same recipe with its template kept, as the round-10 coordination notes
+ * show it: {{name}} markers in both languages, and a Chinese default.
+ */
+export const templatedRecipe = () => {
+  const recipe = imageRecipe();
+  recipe.prompt = {
+    en: 'A warm red paper lantern over a narrow street at dusk, 35mm photo.',
+    zh: '黄昏时分，狭窄街道上方一盏暖红色的纸灯笼，35毫米胶片照片。',
+    zh_origin: 'machine',
+    template: {
+      en: 'A {{lantern color}} paper lantern over a narrow street at dusk, {{lens}} photo.',
+      zh: '黄昏时分，狭窄街道上方一盏{{lantern color}}的纸灯笼，{{lens}}胶片照片。',
+    },
+    variables: [
+      { name: 'lantern color', default: 'warm red', zh_default: '暖红色' },
+      // Not words: the Chinese prompt uses the same default, so it has no zh_default... except here,
+      // where the Chinese writes the unit differently.
+      { name: 'lens', default: '35mm', zh_default: '35毫米' },
+    ],
+  };
+  recipe.source.changes = ['placeholders rewritten as {{name}}', 'translated to Chinese'];
+  return recipe;
+};
+
 /** A video recipe in the same format: no Chinese title, no variables, a poster. */
 export const videoRecipe = () => ({
   slug: 'kite-over-a-salt-flat',

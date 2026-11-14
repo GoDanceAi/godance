@@ -5,11 +5,20 @@
  *   GET <gallery>/gallery/index.json   { recipes: [{ slug, title, modality, model, tags, thumb, published_on }] }
  *   GET <gallery>/gallery/<slug>.json  { slug, title, modality, prompt, run: { model, prompt_lang, params }, url }
  *
+ * and, since round 10, a recipe with variables carries inside `prompt`:
+ *
+ *   template: { en, zh }, variables: [{ name, default, zh_default? }]
+ *
+ * where each language's template, filled with its defaults, is that
+ * language's prompt (lib/template has the rules).
+ *
  * Whatever arrives is untrusted input. These parsers keep only the fields the
  * app uses, with the types and sizes it expects, and drop the rest; a recipe
  * whose shape doesn't match is ignored whole. Nothing in this module touches
  * the network, storage or the page, so the tests run it directly.
  */
+
+import { checkTemplate, isVariableName, MAX_VARIABLES, renderTemplate, type TemplateVariable, VALUE_MAX_LENGTH } from './template';
 
 export type RecipeModality = 'IMAGE' | 'VIDEO';
 export type RecipeLang = 'en' | 'zh';
@@ -31,12 +40,31 @@ export interface RecipeParams {
   seconds?: number;
 }
 
+/** A variable of a gallery recipe: its default in English, and in Chinese where that differs. */
+export interface GalleryVariable {
+  name: string;
+  default: string;
+  zhDefault: string | null;
+}
+
+/**
+ * A gallery recipe's template: its text in every language the prompt has,
+ * and its variables. Filled with a language's defaults it is that language's
+ * prompt, which parseRecipe checks.
+ */
+export interface GalleryTemplate {
+  text: RecipeText;
+  variables: GalleryVariable[];
+}
+
 export interface GalleryRecipe {
   slug: string;
   title: RecipeText;
   modality: RecipeModality;
   /** Always has text in the language the run used, `run.promptLang`. */
   prompt: RecipeText;
+  /** Null for a recipe without variables, and for one whose template doesn't hold together. */
+  template: GalleryTemplate | null;
   run: { model: string; promptLang: RecipeLang; params: RecipeParams };
   /** The recipe's page, and only when it is on the gallery's own origin. */
   url: string | null;
@@ -73,7 +101,8 @@ export function isRecipeSlug(value: unknown): value is string {
 /**
  * The recipe an in-app path opens: `/create/image?example=<slug>` or
  * `/create/video?example=<slug>`, with a valid slug. A `?job=` wins over
- * `?example=` in the Studio, so a path that has both is not a recipe link.
+ * `?example=` in the Studio, and so does a `?recipe=` (one of the user's own
+ * recipes), so a path that has either is not a link to a gallery recipe.
  */
 export function recipeLinkOf(path: string): { modality: RecipeModality; slug: string } | null {
   const base = 'https://app.invalid';
@@ -88,7 +117,7 @@ export function recipeLinkOf(path: string): { modality: RecipeModality; slug: st
   const pathname = url.pathname.toLowerCase().replace(/\/$/, '');
   const modality = pathname === '/create/image' ? 'IMAGE' : pathname === '/create/video' ? 'VIDEO' : null;
   const slug = url.searchParams.get('example');
-  if (!modality || url.searchParams.has('job') || !isRecipeSlug(slug)) return null;
+  if (!modality || url.searchParams.has('job') || url.searchParams.has('recipe') || !isRecipeSlug(slug)) return null;
   return { modality, slug };
 }
 
@@ -109,6 +138,7 @@ export function parseRecipe(json: unknown, expected: { slug: string; galleryOrig
     title,
     modality,
     prompt,
+    template: templateOf(json.prompt, prompt),
     run: { model, promptLang, params: paramsOf(json.run.params) },
     url: pageUrlOf(json.url, expected.galleryOrigin),
   };
@@ -148,6 +178,49 @@ function localized(value: unknown, max: number, oneLine: boolean): RecipeText | 
   const en = textOf(value.en, max, oneLine);
   const zh = textOf(value.zh, max, oneLine);
   return en !== null || zh !== null ? { en, zh } : null;
+}
+
+/** A gallery recipe's variables with the default each has in one language. */
+export function defaultsIn(variables: readonly GalleryVariable[], lang: RecipeLang): TemplateVariable[] {
+  return variables.map((v) => ({ name: v.name, default: lang === 'zh' && v.zhDefault !== null ? v.zhDefault : v.default }));
+}
+
+/** A variable's default: any text up to the API's limit on a value, and it may be empty. */
+function defaultOf(value: unknown): string | null {
+  if (typeof value !== 'string' || value.length > VALUE_MAX_LENGTH) return null;
+  return value.replace(DISGUISING, '');
+}
+
+/**
+ * The template inside `prompt`, or null. It is kept only when it holds
+ * together: valid, uniquely named variables, a template for every language
+ * the prompt has, and each one giving exactly that prompt when filled with
+ * its defaults. Anything less and the recipe is still a recipe, with a
+ * plain prompt.
+ */
+function templateOf(value: unknown, prompt: RecipeText): GalleryTemplate | null {
+  if (!isRecord(value) || !isRecord(value.template) || !Array.isArray(value.variables)) return null;
+  if (value.variables.length === 0 || value.variables.length > MAX_VARIABLES) return null;
+
+  const variables: GalleryVariable[] = [];
+  for (const item of value.variables) {
+    if (!isRecord(item) || !isVariableName(item.name) || variables.some((v) => v.name === item.name)) return null;
+    const fallback = defaultOf(item.default);
+    const zhDefault = item.zh_default === undefined ? null : defaultOf(item.zh_default);
+    if (fallback === null || (item.zh_default !== undefined && zhDefault === null)) return null;
+    variables.push({ name: item.name, default: fallback, zhDefault });
+  }
+
+  const text: RecipeText = { en: null, zh: null };
+  const names = variables.map((v) => v.name);
+  for (const lang of ['en', 'zh'] as const) {
+    if (prompt[lang] === null) continue;
+    const template = textOf(value.template[lang], PROMPT_MAX, false);
+    if (template === null || checkTemplate(template, names).length > 0) return null;
+    if (renderTemplate(template, defaultsIn(variables, lang)) !== prompt[lang]) return null;
+    text[lang] = template;
+  }
+  return { text, variables };
 }
 
 function modalityOf(value: unknown): RecipeModality | null {

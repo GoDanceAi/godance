@@ -229,6 +229,10 @@ public class SecurityConfig {
                                 .hasAnyAuthority(sessionOr(ApiKeyAuthFilter.API_KEY_AUTHORITY))
                         .pathMatchers(HttpMethod.DELETE, "/v1/jobs/*/saved")
                                 .hasAnyAuthority(sessionOr(ApiKeyAuthFilter.API_KEY_AUTHORITY))
+                        // A user's own recipes: the owner, with a session or an API key,
+                        // so a script can read and run the recipes the Studio saved.
+                        .pathMatchers("/v1/recipes", "/v1/recipes/*", "/v1/recipes/*/versions")
+                                .hasAnyAuthority(sessionOr(ApiKeyAuthFilter.API_KEY_AUTHORITY))
                         // Price of an image or video request before it is sent; charges nothing.
                         .pathMatchers(HttpMethod.POST, "/v1/estimates")
                                 .hasAnyAuthority(sessionOr(ApiKeyAuthFilter.API_KEY_AUTHORITY))

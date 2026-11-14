@@ -21,6 +21,7 @@ import { JobOutputs } from '../components/JobMedia';
 import JobStatusPill from '../components/JobStatusPill';
 import SaveJobButton from '../components/SaveJobButton';
 import SendErrorNotice from '../components/SendErrorNotice';
+import VariableValues from '../components/VariableValues';
 
 type Load = { job: JobView } | { missing: true } | { failed: string };
 
@@ -173,6 +174,15 @@ function JobDetail({ initial }: { initial: JobView }) {
         </section>
       )}
 
+      {job.recipe && !job.purged && job.recipe.variables && Object.keys(job.recipe.variables).length > 0 && (
+        <section className="mt-6">
+          <h2 className="text-sm font-semibold text-fg">Variables</h2>
+          <div className="mt-2 card">
+            <VariableValues recipe={job.recipe} className="text-sm" />
+          </div>
+        </section>
+      )}
+
       <section className="mt-6">
         <h2 className="text-sm font-semibold text-fg">Details</h2>
         <dl className="mt-2 card grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 text-sm">
@@ -181,6 +191,16 @@ function JobDetail({ initial }: { initial: JobView }) {
           {shownParams.map((p) => (
             <Detail key={p.key} label={p.label} value={`${params[p.key]}${p.unit ?? ''}`} />
           ))}
+          {job.recipe && (
+            <>
+              <dt className="text-fg-subtle">Recipe</dt>
+              <dd className="text-fg">
+                <Link to={`/recipes/${job.recipe.id}`} className="text-brand-600 hover:underline">
+                  Your recipe, version {job.recipe.version}
+                </Link>
+              </dd>
+            </>
+          )}
           <Detail label="Cost" value={costText(job)} />
           <Detail label="Created" value={formatDateTime(job.createdAt)} />
           {job.completedAt && <Detail label="Finished" value={formatDateTime(job.completedAt)} />}

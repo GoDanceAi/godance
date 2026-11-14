@@ -21,6 +21,7 @@ import { DEFAULT_CONFIG_DIR, DEFAULT_CONTENT_DIR, DEFAULT_WORK_DIR, MARKETING_RO
 import { createListReader, fetchEntries } from './stages/fetch.js';
 import { generate, heldByRuns, planRun } from './stages/generate.js';
 import { publish, remove } from './stages/publish.js';
+import { retemplate } from './stages/retemplate.js';
 import { checkDecisions, reviewItems, reviewSheet, standardVersionOf } from './stages/review.js';
 import { REASONS, classifyEntries, compileTerms, countReasons, projectClassify, screenEntries } from './stages/screen.js';
 import { planTranslation, projectTranslate, translateEntries } from './stages/translate.js';
@@ -38,6 +39,9 @@ const HELP = `Gallery import. Every command is a dry run unless --apply is given
   review               Build the review sheet.
   publish              Write the recipes the operator approved.
   remove <slug>        Take a recipe down and keep it from coming back.
+  retemplate <slug>    Give a published recipe its template, when the template
+                       filled with its defaults is the published prompt exactly.
+                       --all does every recipe. Makes no paid call.
   status               What each stage has done, and what has been spent.
 
 Options
@@ -55,6 +59,7 @@ Options
                            no clear answer. Check GET /v1/jobs first: this can pay twice.
   --offline                Use seed prices; do not ask the API for the catalogue.
   --reason <text>          remove: why, for the removal list.
+  --all                    retemplate: every recipe in the gallery folder.
   --work-dir, --config-dir, --content-dir <path>
 
 Environment
@@ -62,7 +67,7 @@ Environment
   GODANCE_API_BASE         Defaults to https://api.godance.ai`;
 
 const FLAGS_WITH_VALUE = new Set(['max-spend-cents', 'source', 'images', 'videos', 'video-seconds', 'max-video-seconds', 'reason', 'work-dir', 'config-dir', 'content-dir']);
-const FLAGS = new Set([...FLAGS_WITH_VALUE, 'apply', 'classify', 'retry-failed', 'retry-uncertain', 'offline', 'help']);
+const FLAGS = new Set([...FLAGS_WITH_VALUE, 'apply', 'classify', 'retry-failed', 'retry-uncertain', 'offline', 'all', 'help']);
 
 class Misuse extends Error {}
 
@@ -483,6 +488,40 @@ export async function main(argv, io = {}) {
         out(`${apply ? 'added' : 'would add'} ${result.original_url} to the removal list`);
         out(`${plural(result.media.length, 'media file')} ${apply ? 'listed' : 'would be listed'} for deletion from public storage`);
         if (apply) out('commit the deleted recipe and config/removal-list.json together');
+        return 0;
+      }
+
+      case 'retemplate': {
+        if (flags.all ? positional.length > 0 : positional.length !== 1) throw new Misuse('retemplate takes one slug, or --all');
+        out(apply
+          ? 'gallery retemplate. No paid call is made: only the lists and the recipes are read.'
+          : 'gallery retemplate: dry run. Nothing is written and no paid call is made. Add --apply to do it.');
+        const results = await retemplate({
+          slugs: flags.all ? null : positional,
+          contentDir,
+          sources: allSources,
+          reader: createListReader({ fetch, cacheDir: work.sources, save: apply }),
+          apply,
+        });
+        if (results.length === 0) {
+          out(`there are no recipes in ${shown(contentDir)}`);
+          return 0;
+        }
+        for (const result of results) {
+          out(result.added
+            ? `  + ${result.slug}: ${apply ? 'template added' : 'would add a template'}, ${plural(result.variables.length, 'variable')} (${result.variables.join(', ')})`
+            : `  = ${result.slug}: left as it is: ${result.why}`);
+        }
+        const added = results.filter((result) => result.added).length;
+        out(`${plural(results.length, 'recipe')}: ${added} ${apply ? 'gained' : 'would gain'} a template, ${results.length - added} left as ${results.length - added === 1 ? 'it is' : 'they are'}`);
+        if (added > 0) {
+          out('a template is added only when, filled with its defaults, it is the published prompt exactly, so outputs, costs and reviews stay as they are');
+          if (apply) {
+            const folder = await readRecipeFolder(contentDir);
+            out(folder.problems.length === 0 ? `the gallery folder is valid: ${plural(folder.recipes.length, 'recipe')}` : `the gallery folder has ${plural(folder.problems.length, 'problem')}: run npm run validate`);
+            if (folder.problems.length > 0) return 1;
+          }
+        }
         return 0;
       }
 

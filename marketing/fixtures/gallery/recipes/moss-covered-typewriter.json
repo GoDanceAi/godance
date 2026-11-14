@@ -12,7 +12,13 @@
   "prompt": {
     "en": "An old typewriter overgrown with moss and tiny ferns on a forest floor, overcast light, muted greens.",
     "zh": "森林地面上一台长满苔藓和小蕨类的旧打字机，阴天光线，柔和的绿色调。",
-    "zh_origin": "machine"
+    "zh_origin": "machine",
+    "variables": [
+      {
+        "name": "light",
+        "default": "overcast light"
+      }
+    ]
   },
   "runs": [
     {
@@ -43,6 +49,7 @@
     "author_url": "https://example.com/@fixture_dee",
     "original_url": "https://example.com/@fixture_dee/posts/11011",
     "changes": [
+      "placeholders resolved",
       "translated to Chinese"
     ]
   },

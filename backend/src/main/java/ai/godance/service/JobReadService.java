@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 
 import org.slf4j.Logger;
@@ -17,8 +18,10 @@ import ai.godance.domain.GenerationJob;
 import ai.godance.domain.GenerationJobOutput;
 import ai.godance.domain.JobStatus;
 import ai.godance.domain.Modality;
+import ai.godance.domain.RecipeVersion;
 import ai.godance.repository.GenerationJobOutputRepository;
 import ai.godance.repository.GenerationJobRepository;
+import ai.godance.repository.RecipeVersionRepository;
 import ai.godance.storage.ObjectStorageClient;
 import ai.godance.storage.ObjectStorageClient.StoredObject;
 import ai.godance.web.dto.ImageDtos.JobOutputView;
@@ -49,12 +52,14 @@ public class JobReadService {
     private final GenerationJobRepository jobs;
     private final GenerationJobOutputRepository outputs;
     private final ObjectStorageClient storage;
+    private final RecipeVersionRepository recipeVersions;
 
     public JobReadService(GenerationJobRepository jobs, GenerationJobOutputRepository outputs,
-                          ObjectStorageClient storage) {
+                          ObjectStorageClient storage, RecipeVersionRepository recipeVersions) {
         this.jobs = jobs;
         this.outputs = outputs;
         this.storage = storage;
+        this.recipeVersions = recipeVersions;
     }
 
     /** One of the caller's jobs; 404 for an unknown id or another user's job. */
@@ -64,7 +69,9 @@ public class JobReadService {
                 // 404 (not 403) on cross-user lookup — same leak-prevention
                 // pattern as ApiKeyService.delete.
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "job not found"));
-        return view(job, outputs.findByJobIdOrderByOutputIndexAsc(job.getId()));
+        RecipeVersion version = job.getRecipeVersionId() == null ? null
+                : recipeVersions.findById(job.getRecipeVersionId()).orElse(null);
+        return view(job, outputs.findByJobIdOrderByOutputIndexAsc(job.getId()), version);
     }
 
     /**
@@ -72,9 +79,11 @@ public class JobReadService {
      * before paging existed. {@code before} is one of the caller's job ids
      * (400 otherwise) and returns only jobs older than it. Null filters match
      * any; {@code saved} true keeps only saved jobs, false only the others.
+     * {@code recipeId} keeps only the jobs that ran a version of that recipe;
+     * a recipe that is not the caller's matches none.
      */
     public List<JobView> list(UUID userId, Integer limit, UUID before, Modality modality, JobStatus status,
-                              Boolean saved) {
+                              Boolean saved, UUID recipeId) {
         if (limit != null && (limit < 1 || limit > MAX_LIMIT)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "limit must be between 1 and " + MAX_LIMIT);
@@ -92,11 +101,21 @@ public class JobReadService {
         String kind = modality == null ? "" : modality.name();
         String state = status == null ? "" : status.name();
         int pageSize = limit == null ? Integer.MAX_VALUE : limit;
-        List<GenerationJob> page = Boolean.TRUE.equals(saved)
-                ? jobs.findSavedPageForUser(userId, kind, state, beforeCreatedAt, beforeId, pageSize)
-                : jobs.findPageForUser(userId, kind, state, Boolean.FALSE.equals(saved),
-                        beforeCreatedAt, beforeId, pageSize);
+        List<GenerationJob> page = recipeId != null
+                ? jobs.findPageForRecipe(userId, recipeId, kind, state,
+                        saved == null ? "any" : saved ? "saved" : "unsaved", beforeCreatedAt, beforeId, pageSize)
+                : Boolean.TRUE.equals(saved)
+                        ? jobs.findSavedPageForUser(userId, kind, state, beforeCreatedAt, beforeId, pageSize)
+                        : jobs.findPageForUser(userId, kind, state, Boolean.FALSE.equals(saved),
+                                beforeCreatedAt, beforeId, pageSize);
         if (page.isEmpty()) return List.of();
+
+        // The recipe versions these jobs ran, in one read.
+        Map<UUID, RecipeVersion> versions = new HashMap<>();
+        List<UUID> versionIds = page.stream().map(GenerationJob::getRecipeVersionId).filter(Objects::nonNull).distinct().toList();
+        if (!versionIds.isEmpty()) {
+            for (RecipeVersion v : recipeVersions.findAllById(versionIds)) versions.put(v.getId(), v);
+        }
 
         Map<UUID, List<GenerationJobOutput>> byJob = new HashMap<>();
         for (GenerationJobOutput o : outputs.findByJobIdInOrderByJobIdAscOutputIndexAsc(
@@ -104,11 +123,11 @@ public class JobReadService {
             byJob.computeIfAbsent(o.getJobId(), k -> new ArrayList<>()).add(o);
         }
         return page.stream()
-                .map(j -> view(j, byJob.getOrDefault(j.getId(), List.of())))
+                .map(j -> view(j, byJob.getOrDefault(j.getId(), List.of()), versions.get(j.getRecipeVersionId())))
                 .toList();
     }
 
-    private JobView view(GenerationJob job, List<GenerationJobOutput> recorded) {
+    private JobView view(GenerationJob job, List<GenerationJobOutput> recorded, RecipeVersion recipeVersion) {
         List<GenerationJobOutput> rows = recorded;
         if (rows.isEmpty() && needsBackfill(job)) {
             rows = backfill(job);
@@ -117,7 +136,7 @@ public class JobReadService {
                 .map(o -> new JobOutputView(o.getOutputIndex(), storage.presignedUrl(o.getStorageKey()),
                         o.getContentType(), o.getSizeBytes(), o.getRevisedPrompt()))
                 .toList();
-        return JobView.from(job, shown, DataRetentionService.mediaExpiresAt(job));
+        return JobView.from(job, shown, DataRetentionService.mediaExpiresAt(job), recipeVersion);
     }
 
     /** A DONE, unpurged job with no rows finished before V23: every DONE job stored at least one file. */

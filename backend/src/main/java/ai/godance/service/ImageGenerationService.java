@@ -98,8 +98,8 @@ public class ImageGenerationService {
      * Synchronous image gen: blocks on upstream + upload, returns the
      * fully-resolved URLs. Use for OpenAI-compat clients.
      */
-    public ImageResult execute(UUID userId, UUID apiKeyId, ImageRequest request) {
-        return executeInternal(userId, apiKeyId, request, null);
+    public ImageResult execute(UUID userId, UUID apiKeyId, ImageRequest request, JobOrigin origin) {
+        return executeInternal(userId, apiKeyId, request, null, origin);
     }
 
     /**
@@ -118,13 +118,15 @@ public class ImageGenerationService {
      * Async image gen: returns immediately with the {@link UUID} of a
      * {@code QUEUED} GenerationJob; processing continues on a
      * bounded-elastic worker. Client polls {@code GET /v1/jobs/{id}}
-     * or receives a POST at {@code webhookUrl} on completion.
+     * or receives a POST at {@code webhookUrl} on completion. {@code origin}
+     * is where the request came from; the job row records it.
      */
-    public UUID executeAsync(UUID userId, UUID apiKeyId, ImageRequest request, String webhookUrl) {
+    public UUID executeAsync(UUID userId, UUID apiKeyId, ImageRequest request, String webhookUrl,
+                             JobOrigin origin) {
         webhookDestinations.requireAllowed(webhookUrl);   // before any charge (spec risk R-02)
         Quote quote = quotes.image(request.model(), request.n());   // 404 / 400 before any charge
         ModelInfo model = quote.model();
-        GenerationJob job = acceptJob(userId, apiKeyId, quote, request, webhookUrl);
+        GenerationJob job = acceptJob(userId, apiKeyId, quote, request, webhookUrl, origin);
 
         // Kick off async processing. The pre-debit and the job row are already
         // committed together; if this worker dies, GenerationJobSweepJob fails
@@ -136,9 +138,10 @@ public class ImageGenerationService {
         return job.getId();
     }
 
-    private ImageResult executeInternal(UUID userId, UUID apiKeyId, ImageRequest request, String webhookUrl) {
+    private ImageResult executeInternal(UUID userId, UUID apiKeyId, ImageRequest request, String webhookUrl,
+                                        JobOrigin origin) {
         Quote quote = quotes.image(request.model(), request.n());   // 404 / 400 before any charge
-        GenerationJob job = acceptJob(userId, apiKeyId, quote, request, webhookUrl);
+        GenerationJob job = acceptJob(userId, apiKeyId, quote, request, webhookUrl, origin);
         return runJob(job, userId, apiKeyId, quote.model(), request, webhookUrl);
     }
 
@@ -148,8 +151,9 @@ public class ImageGenerationService {
      * {@code POST /v1/estimates} returns.
      */
     private GenerationJob acceptJob(UUID userId, UUID apiKeyId, Quote quote, ImageRequest request,
-                                    String webhookUrl) {
+                                    String webhookUrl, JobOrigin origin) {
         GenerationJob job = newJob(userId, quote.model(), request, quote.costCents(), newRequestId(), webhookUrl);
+        origin.applyTo(job);
         if (!settlement.accept(job, apiKeyId)) {
             throw new InsufficientCreditException();
         }

@@ -2,6 +2,7 @@ package ai.godance.web.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+import ai.godance.web.dto.RecipeDtos.RecipeRef;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 
@@ -13,13 +14,18 @@ public final class VideoDtos {
      * OpenAI-compatible-ish video request. Mirrors {@code /v1/videos}
      * convention: {@code seconds} for duration, {@code size} for
      * resolution. Always async — see {@link AsyncJobAcknowledged} response.
+     * {@code gallery_recipe} is the slug of the gallery recipe this request
+     * is a run of; the job records it. A request carries {@code prompt} or
+     * {@code recipe}, never both, as for images.
      */
     public record VideoGenerationRequest(
             @NotBlank String model,
-            @NotBlank String prompt,
+            String prompt,
             String size,
             @Min(1) Integer seconds,
             @Min(1) Integer n,
-            @JsonProperty("webhook_url") String webhookUrl
+            @JsonProperty("webhook_url") String webhookUrl,
+            @JsonProperty("gallery_recipe") String galleryRecipe,
+            RecipeRef recipe
     ) { }
 }

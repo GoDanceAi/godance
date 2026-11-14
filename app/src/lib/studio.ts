@@ -5,9 +5,12 @@ import {
   type Estimate,
   type JobView,
   type MediaModality,
+  type UserRecipeVersion,
 } from './api';
 import { mediaModality } from './jobs';
 import type { Controls } from './media-models';
+import type { GalleryRecipe } from './recipe';
+import type { FormTemplate } from './template';
 
 // The generation requests the Studio sends: the same calls an API key makes.
 
@@ -23,15 +26,23 @@ export interface StudioValues {
   seconds: number | null;
 }
 
-/** A body for POST /v1/images/generations or /v1/videos/generations. */
+/** `recipe` on a generation request: a version of one of the caller's recipes, and values for its variables. */
+export interface RecipeRef {
+  version_id: string;
+  variables: Record<string, string>;
+}
+
+/** A body for POST /v1/images/generations or /v1/videos/generations: `prompt`, or `recipe` in its place. */
 export interface GenerationBody {
   model: string;
-  prompt: string;
+  prompt?: string;
+  recipe?: RecipeRef;        // the API renders the prompt from the recipe's template
   size?: string;
   n?: number;
   seconds?: number;
   style?: string;
   quality?: string;
+  gallery_recipe?: string;   // the gallery recipe this is a run of (galleryRecipeOf)
   async?: true;
 }
 
@@ -44,13 +55,81 @@ function withAsync(modality: MediaModality, body: GenerationBody): GenerationBod
   return modality === 'IMAGE' ? { ...body, async: true } : body;
 }
 
-/** The request for the form: the model, the prompt, and only what the model's controls offer. */
-export function generationBody(modality: MediaModality, values: StudioValues, controls: Controls): GenerationBody {
+/**
+ * The request for the form: the model, the prompt, and only what the model's
+ * controls offer. `galleryRecipe` is the recipe it is still a run of, if any.
+ */
+export function generationBody(
+  modality: MediaModality,
+  values: StudioValues,
+  controls: Controls,
+  galleryRecipe: string | null = null,
+): GenerationBody {
   const body: GenerationBody = { model: values.model, prompt: values.prompt };
   if (controls.sizes && values.size) body.size = values.size;
   if (controls.maxN) body.n = values.n;
   if (controls.durations && values.seconds) body.seconds = values.seconds;
+  if (galleryRecipe) body.gallery_recipe = galleryRecipe;
   return withAsync(modality, body);
+}
+
+/**
+ * The slug to send as `gallery_recipe`: the recipe the form was loaded from,
+ * for as long as the form is still that recipe. It stops being one when the
+ * prompt is no longer the recipe's text in either language, or the model is
+ * not the one the recipe was run on. Size, count and duration may change.
+ *
+ * A recipe with variables is still that recipe whatever values fill them:
+ * `template` is the form's template, and it counts while its text is the
+ * recipe's template in either language.
+ */
+export function galleryRecipeOf(
+  recipe: GalleryRecipe | null,
+  values: StudioValues,
+  template: FormTemplate | null = null,
+): string | null {
+  if (!recipe || values.model !== recipe.run.model) return null;
+  const unedited = (['en', 'zh'] as const).some((lang) => {
+    if (template) return recipe.template !== null && template.text === recipe.template.text[lang];
+    const text = recipe.prompt[lang];
+    return text !== null && values.prompt === text.slice(0, PROMPT_MAX_LENGTH);
+  });
+  return unedited ? recipe.slug : null;
+}
+
+/** The request with `recipe` in place of its prompt: the API renders the template with these values. */
+export function withRecipe(body: GenerationBody, recipe: RecipeRef): GenerationBody {
+  const out: Record<string, unknown> = { model: body.model, recipe };
+  for (const [key, value] of Object.entries(body)) {
+    if (key !== 'model' && key !== 'prompt') out[key] = value;
+  }
+  return out as unknown as GenerationBody;
+}
+
+/**
+ * What to send as `recipe`: the version of the user's recipe the form holds,
+ * with the form's values, for as long as the form's text is still that
+ * version's. Null once the template was edited or turned off, or the plain
+ * prompt of a version without variables was changed: then the run is a
+ * plain prompt until the form is saved as a new version. The model and the
+ * other settings may change; a version's are what the form starts from.
+ */
+export function recipeRefOf(
+  version: UserRecipeVersion | null,
+  template: FormTemplate | null,
+  prompt: string,
+): RecipeRef | null {
+  if (!version) return null;
+  if (!template) {
+    return version.variables.length === 0 && prompt === version.template
+      ? { version_id: version.id, variables: {} }
+      : null;
+  }
+  const names = version.variables.map((v) => v.name);
+  const same = template.text === version.template
+    && template.variables.length === names.length
+    && template.variables.every((v) => names.includes(v.name));
+  return same ? { version_id: version.id, variables: { ...template.values } } : null;
 }
 
 function positiveInt(value: unknown): value is number {
