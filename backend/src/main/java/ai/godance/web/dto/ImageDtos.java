@@ -25,9 +25,6 @@ public final class ImageDtos {
     /**
      * OpenAI-compatible request shape. Two Godance extensions
      * ({@code async}, {@code webhook_url}) pure OpenAI clients ignore.
-     * {@code response_format} is OpenAI's: {@code "url"} or
-     * {@code "b64_json"}. It shapes a response that carries the images, and
-     * does nothing for one that answers with a job.
      */
     public record ImageGenerationRequest(
             @NotBlank String model,
@@ -36,6 +33,8 @@ public final class ImageDtos {
             @Min(1) Integer n,
             String style,
             String quality,
+            // OpenAI's: "url" or "b64_json". Shapes a response that carries the images;
+            // does nothing for one that answers with a job.
             @JsonProperty("response_format") String responseFormat,
             Boolean async,                                       // Godance extension
             @JsonProperty("webhook_url") String webhookUrl       // Godance extension
