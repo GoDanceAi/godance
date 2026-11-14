@@ -1,0 +1,241 @@
+---
+/**
+ * The browsable grid: a filter bar over a CSS-columns grid of recipe cards.
+ * Used by /gallery and by each model page.
+ *
+ * Without JavaScript every card is listed and the model filter works, because
+ * each model is a link to its own page. With it, the type and tag filters and
+ * the search box appear; their state lives in the query string
+ * (?type=video&tag=street&q=fog), so a filtered view can be linked and
+ * survives a reload. Search data is fetched the first time search is used.
+ */
+import RecipeCard from './RecipeCard.astro';
+import { GALLERY_PATH, galleryTags, modelPath, type Recipe } from '../../lib/gallery-recipes';
+
+interface Props {
+  /** The recipes to list, newest first. */
+  recipes: Recipe[];
+  mediaBase: string;
+  /** Every model in the gallery, for the model filter. */
+  models: { id: string; count: number }[];
+  /** The model this page is for, when it is a model page. */
+  activeModel?: string;
+}
+
+const { recipes, mediaBase, models, activeModel } = Astro.props;
+const tags = galleryTags(recipes);
+const hasImages = recipes.some((r) => r.modality === 'IMAGE');
+const hasVideos = recipes.some((r) => r.modality === 'VIDEO');
+const noun = (n: number) => `${n} recipe${n === 1 ? '' : 's'}`;
+---
+
+<div data-gallery data-search-url={`${GALLERY_PATH}/_search.json`} data-total={recipes.length}>
+  <div class="space-y-3">
+    <nav class="gallery-filter-row" aria-label="Filter by model">
+      <span class="gallery-filter-label">Model</span>
+      <a
+        href={GALLERY_PATH}
+        class:list={['pill', { 'pill-violet': !activeModel }]}
+        aria-current={!activeModel ? 'page' : undefined}
+        data-model-link
+      >All</a>
+      {models.map((m) => (
+        <a
+          href={modelPath(m.id)}
+          class:list={['pill', { 'pill-violet': activeModel === m.id }]}
+          aria-current={activeModel === m.id ? 'page' : undefined}
+          data-model-link
+        >{m.id}</a>
+      ))}
+    </nav>
+
+    <!-- Shown by the script below; these need JavaScript. -->
+    <div data-gallery-js hidden class="space-y-3">
+      {hasImages && hasVideos && (
+        <div class="gallery-filter-row" role="group" aria-label="Filter by type">
+          <span class="gallery-filter-label">Type</span>
+          <a href="?" class="pill" data-filter="type" data-value="">All</a>
+          <a href="?type=image" class="pill" data-filter="type" data-value="image">Images</a>
+          <a href="?type=video" class="pill" data-filter="type" data-value="video">Videos</a>
+        </div>
+      )}
+      {tags.length > 0 && (
+        <div class="gallery-filter-row" role="group" aria-label="Filter by tag">
+          <span class="gallery-filter-label">Tag</span>
+          <a href="?" class="pill" data-filter="tag" data-value="">All</a>
+          {tags.map(({ tag }) => (
+            <a href={`?tag=${encodeURIComponent(tag)}`} class="pill" data-filter="tag" data-value={tag}>{tag}</a>
+          ))}
+        </div>
+      )}
+      <div class="gallery-filter-row">
+        <label class="gallery-filter-label" for="gallery-search">Search</label>
+        <input
+          id="gallery-search"
+          type="search"
+          class="input max-w-sm"
+          placeholder="Titles and prompts, English or 中文"
+          autocomplete="off"
+          data-gallery-search
+        />
+      </div>
+    </div>
+  </div>
+
+  <p class="mt-6 text-sm text-fg-subtle" data-gallery-count aria-live="polite">{noun(recipes.length)}</p>
+
+  <div class="mt-4 columns-2 md:columns-3 lg:columns-4 gap-4 [&>a]:mb-4">
+    {recipes.map((recipe) => <RecipeCard {recipe} {mediaBase} model={activeModel} />)}
+  </div>
+
+  <p class="mt-6 text-fg-muted" data-gallery-empty hidden>
+    No recipe matches these filters. <a href="?" class="underline" style="color: var(--color-primary)" data-gallery-clear>Clear them</a>.
+  </p>
+</div>
+
+<style>
+  .gallery-filter-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+  }
+  .gallery-filter-label {
+    width: 3.75rem;
+    flex: none;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--color-fg-subtle);
+  }
+  .gallery-filter-row :global(a.pill) {
+    padding-top: 4px;
+    padding-bottom: 4px;
+    font-size: 12px;
+    transition: border-color 0.15s;
+  }
+  .gallery-filter-row :global(a.pill:hover) {
+    box-shadow: inset 0 0 0 1px var(--color-primary);
+  }
+</style>
+
+<script is:inline>
+  (function () {
+    var root = document.querySelector('[data-gallery]');
+    if (!root) return;
+    var cards = [].slice.call(root.querySelectorAll('[data-recipe]'));
+    var filters = [].slice.call(root.querySelectorAll('[data-filter]'));
+    var modelLinks = [].slice.call(root.querySelectorAll('[data-model-link]'));
+    var input = root.querySelector('[data-gallery-search]');
+    var count = root.querySelector('[data-gallery-count]');
+    var empty = root.querySelector('[data-gallery-empty]');
+    var total = cards.length;
+    var texts = null; // slug -> searchable text, once fetched
+    var asked = false;
+
+    var tagsOf = {};
+    cards.forEach(function (card) {
+      try { tagsOf[card.dataset.recipe] = JSON.parse(card.dataset.tags || '[]'); }
+      catch (e) { tagsOf[card.dataset.recipe] = []; }
+    });
+
+    function read() {
+      var p = new URLSearchParams(location.search);
+      return { type: p.get('type') || '', tag: p.get('tag') || '', q: p.get('q') || '' };
+    }
+
+    function query(state) {
+      var p = new URLSearchParams();
+      if (state.type) p.set('type', state.type);
+      if (state.tag) p.set('tag', state.tag);
+      if (state.q) p.set('q', state.q);
+      var s = p.toString();
+      return s ? '?' + s : '';
+    }
+
+    // Search data is fetched the first time it is needed, not with the page.
+    function loadSearch() {
+      if (asked) return;
+      asked = true;
+      fetch(root.getAttribute('data-search-url'))
+        .then(function (res) { if (!res.ok) throw new Error(String(res.status)); return res.json(); })
+        .then(function (data) {
+          texts = {};
+          data.recipes.forEach(function (r) { texts[r.slug] = r.text; });
+          apply();
+        })
+        .catch(function () { asked = false; });
+    }
+
+    function apply() {
+      var state = read();
+      var terms = state.q.toLowerCase().split(/\s+/).filter(Boolean);
+      if (terms.length) loadSearch();
+
+      var shown = 0;
+      cards.forEach(function (card) {
+        var slug = card.dataset.recipe;
+        var ok = (!state.type || card.dataset.modality === state.type) &&
+                 (!state.tag || tagsOf[slug].indexOf(state.tag) !== -1);
+        if (ok && terms.length && texts) {
+          var text = texts[slug] || '';
+          ok = terms.every(function (term) { return text.indexOf(term) !== -1; });
+        }
+        card.hidden = !ok;
+        if (ok) shown += 1;
+      });
+
+      filters.forEach(function (link) {
+        var on = state[link.dataset.filter] === link.dataset.value;
+        link.classList.toggle('pill-violet', on);
+        if (on) link.setAttribute('aria-current', 'true');
+        else link.removeAttribute('aria-current');
+      });
+      // Moving to another model keeps the other filters.
+      modelLinks.forEach(function (link) {
+        link.setAttribute('href', link.pathname + query(state));
+      });
+      if (input && document.activeElement !== input) input.value = state.q;
+      count.textContent = shown === total
+        ? total + (total === 1 ? ' recipe' : ' recipes')
+        : shown + ' of ' + total + (total === 1 ? ' recipe' : ' recipes');
+      empty.hidden = shown !== 0;
+    }
+
+    function go(state, replace) {
+      var url = location.pathname + query(state);
+      if (replace) history.replaceState(null, '', url);
+      else history.pushState(null, '', url);
+      apply();
+    }
+
+    filters.forEach(function (link) {
+      link.addEventListener('click', function (event) {
+        event.preventDefault();
+        var state = read();
+        var key = link.dataset.filter;
+        // Choosing the active filter again clears it.
+        state[key] = state[key] === link.dataset.value ? '' : link.dataset.value;
+        go(state, false);
+      });
+    });
+
+    var clear = root.querySelector('[data-gallery-clear]');
+    if (clear) clear.addEventListener('click', function (event) {
+      event.preventDefault();
+      go({ type: '', tag: '', q: '' }, false);
+    });
+
+    if (input) {
+      input.addEventListener('focus', loadSearch);
+      input.addEventListener('input', function () {
+        var state = read();
+        state.q = input.value.trim();
+        go(state, true);
+      });
+    }
+
+    window.addEventListener('popstate', apply);
+    root.querySelector('[data-gallery-js]').hidden = false;
+    apply();
+  })();
+</script>

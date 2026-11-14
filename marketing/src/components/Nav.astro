@@ -1,6 +1,11 @@
 ---
+import { loadGallery } from '../lib/gallery-recipes';
+
+// The gallery link appears only while the gallery is switched on.
+const gallery = await loadGallery();
 const nav = [
   { href: '/', label: 'Home' },
+  ...(gallery.on ? [{ href: '/gallery', label: 'Gallery' }] : []),
   { href: '/models', label: 'Models' },
   { href: '/pricing', label: 'Pricing' },
   { href: '/docs', label: 'Docs' },

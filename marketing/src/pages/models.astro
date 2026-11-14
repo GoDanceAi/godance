@@ -1,6 +1,7 @@
 ---
 import Layout from '../layouts/Layout.astro';
 import { loadCatalog } from '../lib/catalog';
+import { galleryModels, loadGallery, modelPath } from '../lib/gallery-recipes';
 
 const title = 'Model catalog — Godance';
 const description =
@@ -12,6 +13,9 @@ const description =
 // this page never drifts from the backend. Falls back to a static snapshot if
 // the API is unreachable during the build.
 const catalog = await loadCatalog();
+
+// Models with recipes in the gallery link to their examples. Empty while the gallery is off.
+const withExamples = new Set(galleryModels((await loadGallery()).recipes).map((m) => m.id));
 
 // Itemized list for AI-agent consumption (LLMs scraping Markdown-shaped data).
 const itemList = {
@@ -62,6 +66,9 @@ const itemList = {
                   {m.id}
                   {m.requiresAsync && (
                     <span class="pill pill-violet ml-2 align-middle">async</span>
+                  )}
+                  {withExamples.has(m.id) && (
+                    <a href={modelPath(m.id)} class="ml-2 align-middle font-sans text-xs underline" style="color: var(--color-primary)">examples</a>
                   )}
                 </td>
                 <td class="px-4 py-3 text-fg-muted">{m.provider}</td>

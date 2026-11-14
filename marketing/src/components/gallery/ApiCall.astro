@@ -1,0 +1,54 @@
+---
+/**
+ * The two requests that reproduce a run: the one that starts the job and the
+ * one that polls it, shown the way the docs page shows API calls.
+ */
+import { createSnippet, pollSnippet } from '../../lib/gallery-api';
+import type { Recipe, Run } from '../../lib/gallery-recipes';
+
+interface Props {
+  recipe: Recipe;
+  run: Run;
+  /** Makes the element ids unique when a page shows more than one run. */
+  idPrefix: string;
+}
+
+const { recipe, run, idPrefix } = Astro.props;
+const create = createSnippet(recipe, run);
+---
+
+<div class="space-y-4">
+  <div class="gallery-snippet">
+    <button type="button" class="btn btn-sm gallery-snippet-copy" data-copy={`${idPrefix}-create`}>Copy</button>
+    <pre class="code-block"><code id={`${idPrefix}-create`} data-api-snippet="create">{create}</code></pre>
+  </div>
+  <p class="text-sm text-fg-muted">
+    The request answers <code class="code-chip">202</code> with a <code class="code-chip">job_id</code>.
+    Poll the job until its <code class="code-chip">status</code> is <code class="code-chip">DONE</code>, then
+    read <code class="code-chip">outputUrl</code>:
+  </p>
+  <div class="gallery-snippet">
+    <button type="button" class="btn btn-sm gallery-snippet-copy" data-copy={`${idPrefix}-poll`}>Copy</button>
+    <pre class="code-block"><code id={`${idPrefix}-poll`} data-api-snippet="poll">{pollSnippet}</code></pre>
+  </div>
+</div>
+
+<style>
+  .gallery-snippet {
+    position: relative;
+  }
+  .gallery-snippet-copy {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    color: #e5e7eb;
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.18);
+  }
+  .gallery-snippet-copy:hover {
+    background: rgba(255, 255, 255, 0.18);
+  }
+  .gallery-snippet pre {
+    padding-top: 2.75rem;
+  }
+</style>

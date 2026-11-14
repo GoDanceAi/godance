@@ -1,0 +1,66 @@
+{
+  "slug": "neon-noodle-cart-poster",
+  "title": {
+    "en": "Neon noodle cart poster",
+    "zh": "霓虹面摊海报"
+  },
+  "modality": "IMAGE",
+  "tags": [
+    "poster",
+    "street"
+  ],
+  "prompt": {
+    "en": "A flat-colour poster of a night noodle cart under a teal neon sign that reads \"Midnight Ramen\", steam rising, bold shapes.",
+    "zh": "一张平涂风格的夜间面摊海报，青绿色霓虹招牌上写着“Midnight Ramen”，热气升腾，大块几何造型。",
+    "zh_origin": "machine",
+    "variables": [
+      {
+        "name": "sign colour",
+        "default": "teal"
+      },
+      {
+        "name": "sign text",
+        "default": "Midnight Ramen"
+      }
+    ]
+  },
+  "runs": [
+    {
+      "model": "gpt-image-2",
+      "prompt_lang": "en",
+      "params": {
+        "size": "1536x1024",
+        "n": 1,
+        "quality": "high"
+      },
+      "cost_cents": 12,
+      "generated_on": "2026-11-05",
+      "outputs": [
+        {
+          "file": "neon-noodle-cart-poster/gpt-image-2-0.webp",
+          "thumb": "neon-noodle-cart-poster/gpt-image-2-0-480.webp",
+          "content_type": "image/webp",
+          "width": 1536,
+          "height": 1024
+        }
+      ]
+    }
+  ],
+  "source": {
+    "list": "example-org/invented-image-prompts",
+    "list_commit": "0000000000000000000000000000000000000000",
+    "licence": "MIT",
+    "author": "fixture_eli",
+    "author_url": "https://example.com/@fixture_eli",
+    "original_url": "https://example.com/@fixture_eli/posts/11021",
+    "changes": [
+      "placeholders resolved",
+      "translated to Chinese"
+    ]
+  },
+  "review": {
+    "approved_on": "2026-11-10",
+    "standard_version": 1
+  },
+  "published_on": "2026-11-07"
+}

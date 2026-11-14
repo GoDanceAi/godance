@@ -1,0 +1,53 @@
+{
+  "slug": "origami-crane-unfolding",
+  "title": {
+    "en": "Origami crane unfolding"
+  },
+  "modality": "VIDEO",
+  "tags": [
+    "paper",
+    "macro"
+  ],
+  "prompt": {
+    "en": "A paper crane slowly unfolds itself back into a flat square sheet, macro shot on a dark slate table.",
+    "zh": "一只纸鹤缓缓展开，变回一张平整的方形纸，深色石板桌面上的微距镜头。",
+    "zh_origin": "machine"
+  },
+  "runs": [
+    {
+      "model": "seedance-2.0",
+      "prompt_lang": "en",
+      "params": {
+        "seconds": 4,
+        "size": "720x1280"
+      },
+      "cost_cents": 64,
+      "generated_on": "2026-11-07",
+      "outputs": [
+        {
+          "file": "origami-crane-unfolding/seedance-2.0-0.webm",
+          "content_type": "video/webm",
+          "duration_seconds": 4,
+          "width": 720,
+          "height": 1280
+        }
+      ]
+    }
+  ],
+  "source": {
+    "list": "example-org/invented-video-prompts",
+    "list_commit": "0000000000000000000000000000000000000000",
+    "licence": "CC-BY-4.0",
+    "author": "fixture_cy",
+    "author_url": "https://example.com/@fixture_cy",
+    "original_url": "https://example.com/@fixture_cy/posts/10011",
+    "changes": [
+      "translated to Chinese"
+    ]
+  },
+  "review": {
+    "approved_on": "2026-11-10",
+    "standard_version": 1
+  },
+  "published_on": "2026-11-09"
+}

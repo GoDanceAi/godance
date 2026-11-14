@@ -1,0 +1,71 @@
+{
+  "slug": "glass-whale-over-rooftops",
+  "title": {
+    "en": "Glass whale over rooftops",
+    "zh": "屋顶上空的玻璃鲸"
+  },
+  "modality": "IMAGE",
+  "tags": [
+    "surreal",
+    "street"
+  ],
+  "prompt": {
+    "en": "A whale made of clear glass drifting above terracotta rooftops at sunrise, long shadows, quiet streets below.",
+    "zh": "日出时分，一头透明玻璃鲸漂浮在赤陶屋顶上空，长长的影子，下方是安静的街道。",
+    "zh_origin": "list"
+  },
+  "runs": [
+    {
+      "model": "gpt-image-2",
+      "prompt_lang": "en",
+      "params": {
+        "size": "1024x1024",
+        "n": 1
+      },
+      "cost_cents": 6,
+      "generated_on": "2026-11-04",
+      "outputs": [
+        {
+          "file": "glass-whale-over-rooftops/gpt-image-2-0.webp",
+          "thumb": "glass-whale-over-rooftops/gpt-image-2-0-480.webp",
+          "content_type": "image/webp",
+          "width": 1024,
+          "height": 1024
+        }
+      ]
+    },
+    {
+      "model": "flux-2",
+      "prompt_lang": "zh",
+      "params": {
+        "size": "1344x768",
+        "n": 1
+      },
+      "cost_cents": 5,
+      "generated_on": "2026-11-05",
+      "outputs": [
+        {
+          "file": "glass-whale-over-rooftops/flux-2-0.webp",
+          "thumb": "glass-whale-over-rooftops/flux-2-0-480.webp",
+          "content_type": "image/webp",
+          "width": 1344,
+          "height": 768
+        }
+      ]
+    }
+  ],
+  "source": {
+    "list": "example-org/invented-image-prompts",
+    "list_commit": "0000000000000000000000000000000000000000",
+    "licence": "Apache-2.0",
+    "author": "fixture_fen",
+    "author_url": "https://example.com/@fixture_fen",
+    "original_url": "https://example.com/@fixture_fen/posts/11001",
+    "changes": []
+  },
+  "review": {
+    "approved_on": "2026-11-10",
+    "standard_version": 1
+  },
+  "published_on": "2026-11-06"
+}

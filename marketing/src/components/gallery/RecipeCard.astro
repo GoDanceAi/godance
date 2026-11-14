@@ -1,0 +1,74 @@
+---
+/**
+ * One recipe in a grid: its picture, title and model, with a mark on videos.
+ * The picture is the first output of the run shown (the first run unless
+ * `model` picks another).
+ *
+ * Styled with utilities only, no <style> block: the home page imports this
+ * card through its strip, and a scoped style would be written into the home
+ * page even while the gallery is off.
+ */
+import { isVideoOutput, mediaUrl, recipePath, thumbFile, type Recipe } from '../../lib/gallery-recipes';
+
+interface Props {
+  recipe: Recipe;
+  mediaBase: string;
+  /** Show the run on this model instead of the first run. */
+  model?: string;
+}
+
+const { recipe, mediaBase, model } = Astro.props;
+const run = recipe.runs.find((r) => r.model === model) ?? recipe.runs[0];
+const output = run.outputs[0];
+const thumb = thumbFile(output);
+const isVideo = isVideoOutput(output);
+---
+
+<a
+  href={recipePath(recipe.slug)}
+  class="card card-hover block overflow-hidden p-0 break-inside-avoid"
+  data-recipe={recipe.slug}
+  data-modality={recipe.modality.toLowerCase()}
+  data-tags={JSON.stringify(recipe.tags)}
+>
+  <div class="relative bg-bg-muted">
+    {thumb ? (
+      <img
+        src={mediaUrl(mediaBase, thumb)}
+        alt={recipe.title.en}
+        width={output.width}
+        height={output.height}
+        loading="lazy"
+        decoding="async"
+        class="block w-full h-auto"
+      />
+    ) : (
+      <div
+        class="flex w-full items-center justify-center text-fg-faint"
+        style={`aspect-ratio: ${output.width} / ${output.height}; background: linear-gradient(135deg, var(--color-bg-muted), var(--color-border))`}
+        role="img"
+        aria-label={`${recipe.title.en} (video, no preview picture)`}
+      >
+        <svg width="36" height="36" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z" /></svg>
+      </div>
+    )}
+    {isVideo && (
+      <span
+        class="absolute left-2 bottom-2 inline-flex items-center gap-1 rounded-full px-2 py-[3px] text-[11px] font-semibold text-white"
+        style="line-height: 1.2; background: rgba(17, 24, 39, 0.72)"
+        aria-hidden="true"
+        data-video-mark
+      >
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor"><path d="M2 1l7 4-7 4z" /></svg>
+        Video
+      </span>
+    )}
+  </div>
+  <div class="px-3 py-2.5">
+    <p class="text-sm font-semibold text-fg leading-snug">{recipe.title.en}</p>
+    <p class="mt-0.5 font-mono text-[11px] text-fg-subtle">
+      {run.model}{isVideo && <span class="sr-only"> · video</span>}
+    </p>
+  </div>
+</a>
+

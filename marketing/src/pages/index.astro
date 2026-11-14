@@ -1,5 +1,6 @@
 ---
 import Layout from '../layouts/Layout.astro';
+import GalleryStrip from '../components/gallery/HomeStrip.astro';
 
 const title = 'Godance — every AI model, one OpenAI-compatible API';
 const description =
@@ -127,6 +128,9 @@ const providerNames = [
       </ul>
     </div>
   </section>
+
+  <!-- ===== Gallery strip (nothing while the gallery is off) ===== -->
+  <GalleryStrip />
 
   <!-- ===== Why ===== -->
   <section class="py-24">

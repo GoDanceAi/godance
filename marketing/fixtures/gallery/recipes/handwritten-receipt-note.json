@@ -1,0 +1,60 @@
+{
+  "slug": "handwritten-receipt-note",
+  "title": {
+    "en": "Receipt with a handwritten note"
+  },
+  "modality": "IMAGE",
+  "tags": [
+    "still-life",
+    "text"
+  ],
+  "prompt": {
+    "en": "A crumpled café receipt on a marble counter.\nPrinted total: $4.50 (not $HOME, not ${TOTAL}).\nHandwritten in blue ink: \"Don't forget the `oat` milk!\" — signed 'M'.\nJSON\nA stray tag </script> and a backslash \\ in the margin.",
+    "zh": "大理石台面上一张揉皱的咖啡店小票。\n打印的合计：$4.50。\n蓝色墨水手写：“别忘了 `燕麦` 奶！”——署名 'M'。",
+    "zh_origin": "machine"
+  },
+  "runs": [
+    {
+      "model": "gpt-image-2",
+      "prompt_lang": "en",
+      "params": {
+        "size": "1024x1024",
+        "n": 2
+      },
+      "cost_cents": 12,
+      "generated_on": "2026-11-03",
+      "outputs": [
+        {
+          "file": "handwritten-receipt-note/gpt-image-2-0.webp",
+          "thumb": "handwritten-receipt-note/gpt-image-2-0-480.webp",
+          "content_type": "image/webp",
+          "width": 1024,
+          "height": 1024
+        },
+        {
+          "file": "handwritten-receipt-note/gpt-image-2-1.webp",
+          "thumb": "handwritten-receipt-note/gpt-image-2-1-480.webp",
+          "content_type": "image/webp",
+          "width": 1024,
+          "height": 1024
+        }
+      ]
+    }
+  ],
+  "source": {
+    "list": "example-org/invented-image-prompts",
+    "list_commit": "0000000000000000000000000000000000000000",
+    "licence": "CC0-1.0",
+    "author": "fixture_gus",
+    "author_url": "https://example.com/@fixture_gus",
+    "original_url": "https://example.com/@fixture_gus/posts/11011",
+    "changes": [
+      "translated to Chinese"
+    ]
+  },
+  "review": {
+    "approved_on": "2026-11-10",
+    "standard_version": 1
+  },
+  "published_on": "2026-11-05"
+}

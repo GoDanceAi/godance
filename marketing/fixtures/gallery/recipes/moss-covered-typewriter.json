@@ -1,0 +1,54 @@
+{
+  "slug": "moss-covered-typewriter",
+  "title": {
+    "en": "Moss-covered typewriter",
+    "zh": "长满苔藓的打字机"
+  },
+  "modality": "IMAGE",
+  "tags": [
+    "still-life",
+    "nature"
+  ],
+  "prompt": {
+    "en": "An old typewriter overgrown with moss and tiny ferns on a forest floor, overcast light, muted greens.",
+    "zh": "森林地面上一台长满苔藓和小蕨类的旧打字机，阴天光线，柔和的绿色调。",
+    "zh_origin": "machine"
+  },
+  "runs": [
+    {
+      "model": "gpt-image-2",
+      "prompt_lang": "en",
+      "params": {
+        "size": "1024x1536",
+        "n": 1
+      },
+      "cost_cents": 9,
+      "generated_on": "2026-11-06",
+      "outputs": [
+        {
+          "file": "moss-covered-typewriter/gpt-image-2-0.webp",
+          "thumb": "moss-covered-typewriter/gpt-image-2-0-480.webp",
+          "content_type": "image/webp",
+          "width": 1024,
+          "height": 1536
+        }
+      ]
+    }
+  ],
+  "source": {
+    "list": "example-org/invented-image-prompts",
+    "list_commit": "0000000000000000000000000000000000000000",
+    "licence": "CC0-1.0",
+    "author": "fixture_dee",
+    "author_url": "https://example.com/@fixture_dee",
+    "original_url": "https://example.com/@fixture_dee/posts/11011",
+    "changes": [
+      "translated to Chinese"
+    ]
+  },
+  "review": {
+    "approved_on": "2026-11-10",
+    "standard_version": 1
+  },
+  "published_on": "2026-11-08"
+}
