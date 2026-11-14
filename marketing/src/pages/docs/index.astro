@@ -1,5 +1,10 @@
 ---
 import Layout from '../../layouts/Layout.astro';
+import { loadGallery } from '../../lib/gallery-recipes';
+
+// What the API says about recipes is shown only while the gallery is switched
+// on: with it off, nothing on the site mentions it.
+const recipesOn = (await loadGallery()).on;
 
 const title = 'Docs — Godance';
 const description =
@@ -63,6 +68,7 @@ const jobSnippet = `{
   "purged": false,
   "mediaExpiresAt": "2027-02-10T09:00:00Z",
   "saved": false,
+  "channel": "API",${recipesOn ? '\n  "galleryRecipe": null,' : ''}
   "estimatedCostCents": 12,
   "actualCostCents": 12,
   …
@@ -230,7 +236,11 @@ def verify(payload, header, secret):
       <li><code class="code-chip">outputUrl</code> — the first output's link, signed the same way. Kept for clients written before <code class="code-chip">outputs</code>.</li>
       <li><code class="code-chip">mediaExpiresAt</code> — when the files and prompt are due to be deleted: 90 days after the job was created. Copy anything you want to keep before then, or <a href="#saving-a-job" class="underline" style="color: var(--color-primary)">save the job</a>. Null means nothing is scheduled, which is the case for a saved job.</li>
       <li><code class="code-chip">saved</code> — true when you have saved the job, which keeps its files and prompt past the 90 days.</li>
-      <li><code class="code-chip">purged</code> — true once the files and prompt have been deleted; <code class="code-chip">prompt</code> is then null, <code class="code-chip">params</code> is <code class="code-chip">&#123;&#125;</code> and <code class="code-chip">outputs</code> is empty. The cost fields stay.</li>
+      <li><code class="code-chip">channel</code> — how the job was made: <code class="code-chip">API</code> with an API key, <code class="code-chip">STUDIO</code> from the web app. Godance sets it from the credentials the request used; no request field changes it. Null on a job made before this was recorded.</li>
+      {recipesOn && (
+        <li><code class="code-chip">galleryRecipe</code> — the slug of the gallery recipe the job was a run of, or null. To set it, send <code class="code-chip">gallery_recipe</code> in the body of <code class="code-chip">POST /v1/images/generations</code> or <code class="code-chip">POST /v1/videos/generations</code>: a recipe's slug, which is lowercase letters, digits and hyphens, at most 80 characters. Any other value returns <code class="code-chip">400</code> with <code class="code-chip">code: "invalid_gallery_recipe"</code> and nothing is charged. It is optional and changes nothing about the result or its price.</li>
+      )}
+      <li><code class="code-chip">purged</code> — true once the files and prompt have been deleted; <code class="code-chip">prompt</code> is then null, <code class="code-chip">params</code> is <code class="code-chip">&#123;&#125;</code> and <code class="code-chip">outputs</code> is empty. The cost fields and <code class="code-chip">channel</code> stay{recipesOn && <>, and so does <code class="code-chip">galleryRecipe</code></>}.</li>
       <li><code class="code-chip">errorMessage</code> — set when <code class="code-chip">FAILED</code>; the reserved credit is refunded.</li>
       <li><code class="code-chip">estimatedCostCents</code>, <code class="code-chip">actualCostCents</code> — integer cents: the amount reserved when the job was accepted, and the amount charged once it is <code class="code-chip">DONE</code>.</li>
       <li><code class="code-chip">id</code>, <code class="code-chip">modality</code>, <code class="code-chip">provider</code>, <code class="code-chip">model</code>, <code class="code-chip">createdAt</code>, <code class="code-chip">startedAt</code>, <code class="code-chip">completedAt</code> — timestamps are ISO 8601.</li>

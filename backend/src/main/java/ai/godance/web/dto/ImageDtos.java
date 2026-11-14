@@ -10,6 +10,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 import ai.godance.domain.GenerationJob;
+import ai.godance.domain.JobChannel;
 import ai.godance.domain.JobStatus;
 import ai.godance.domain.Modality;
 import ai.godance.domain.Provider;
@@ -23,8 +24,10 @@ public final class ImageDtos {
     private ImageDtos() { }
 
     /**
-     * OpenAI-compatible request shape. Two Godance extensions
-     * ({@code async}, {@code webhook_url}) pure OpenAI clients ignore.
+     * OpenAI-compatible request shape. Three Godance extensions
+     * ({@code async}, {@code webhook_url}, {@code gallery_recipe}) pure
+     * OpenAI clients ignore. {@code gallery_recipe} is the slug of the
+     * gallery recipe this request is a run of; the job records it.
      */
     public record ImageGenerationRequest(
             @NotBlank String model,
@@ -34,7 +37,8 @@ public final class ImageDtos {
             String style,
             String quality,
             Boolean async,                                       // Godance extension
-            @JsonProperty("webhook_url") String webhookUrl       // Godance extension
+            @JsonProperty("webhook_url") String webhookUrl,      // Godance extension
+            @JsonProperty("gallery_recipe") String galleryRecipe // Godance extension
     ) { }
 
     /** Sync response — OpenAI-shaped. */
@@ -94,6 +98,11 @@ public final class ImageDtos {
      *       deletes them.</li>
      *   <li>{@code saved}: the owner has saved the job, which keeps it past
      *       the retention period ({@code PUT /v1/jobs/{id}/saved}).</li>
+     *   <li>{@code channel}: how the job was made, {@code STUDIO} for a
+     *       signed-in session and {@code API} for an API key; null for a job
+     *       from before this was recorded (round 10). Kept after the purge.</li>
+     *   <li>{@code galleryRecipe}: the slug of the gallery recipe the request
+     *       named, or null. Kept after the purge.</li>
      * </ul>
      */
     public record JobView(
@@ -114,7 +123,9 @@ public final class ImageDtos {
             List<JobOutputView> outputs,
             boolean purged,
             Instant mediaExpiresAt,
-            boolean saved
+            boolean saved,
+            JobChannel channel,
+            String galleryRecipe
     ) {
         /**
          * {@code outputs} carry links already signed; {@code outputUrl} is the
@@ -132,7 +143,8 @@ public final class ImageDtos {
                     purged ? null : promptOf(j),
                     purged ? Map.of() : paramsOf(j),
                     shown, purged, purged ? null : mediaExpiresAt,
-                    !purged && j.getSavedAt() != null);
+                    !purged && j.getSavedAt() != null,
+                    j.getChannel(), j.getGalleryRecipe());
         }
 
         private static String promptOf(GenerationJob j) {

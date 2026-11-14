@@ -234,6 +234,12 @@ godance:
       qualifying-sources:    ${PROMO_REFERRAL_QUALIFYING_SOURCES:STRIPE} # STRIPE (card) and/or NOWPAYMENTS (USDT)
       claim-limit-per-account: 5    # claims tried per account per hour
       claim-limit-per-ip:      20   # claims tried per client IP per hour
+  attribution:
+    # A sign-up's first touch (AttributionService): the campaign tags, gallery
+    # recipe, landing page and referring site the app saw before sign-in. It is
+    # written once, and only this long after the account was created. 0 = never.
+    first-touch-window-hours: ${ATTRIBUTION_FIRST_TOUCH_WINDOW_HOURS:168}
+    first-touch-limit-per-account: 20   # calls per account per hour; the app makes one per sign-in
   retention:
     # The most generations one account can save (JobSaveService). A saved
     # generation is kept past the 90-day deletion, at no charge, for as long

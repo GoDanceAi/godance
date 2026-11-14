@@ -3,6 +3,7 @@ import Layout from './components/Layout';
 import ProtectedRoute from './components/ProtectedRoute';
 import { AuthProvider } from './lib/auth';
 import { AdminProvider } from './lib/admin';
+import { useFirstTouch } from './lib/first-touch';
 import { ReferralProvider } from './lib/referral';
 import LoginPage from './pages/LoginPage';
 import SignupPage from './pages/SignupPage';
@@ -29,6 +30,7 @@ import OverviewPage from './pages/admin/OverviewPage';
 export default function App() {
   return (
     <AuthProvider>
+      <FirstTouch />
       <AdminProvider>
       <ReferralProvider>
       <Layout>
@@ -78,6 +80,12 @@ export default function App() {
       </AdminProvider>
     </AuthProvider>
   );
+}
+
+/** Keeps what brought a visitor here, and hands it in once they are signed in (lib/first-touch). */
+function FirstTouch() {
+  useFirstTouch();
+  return null;
 }
 
 /** /create opens the image Studio, keeping any values the link carries. */

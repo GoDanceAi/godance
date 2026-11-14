@@ -13,6 +13,8 @@ public final class VideoDtos {
      * OpenAI-compatible-ish video request. Mirrors {@code /v1/videos}
      * convention: {@code seconds} for duration, {@code size} for
      * resolution. Always async — see {@link AsyncJobAcknowledged} response.
+     * {@code gallery_recipe} is the slug of the gallery recipe this request
+     * is a run of; the job records it.
      */
     public record VideoGenerationRequest(
             @NotBlank String model,
@@ -20,6 +22,7 @@ public final class VideoDtos {
             String size,
             @Min(1) Integer seconds,
             @Min(1) Integer n,
-            @JsonProperty("webhook_url") String webhookUrl
+            @JsonProperty("webhook_url") String webhookUrl,
+            @JsonProperty("gallery_recipe") String galleryRecipe
     ) { }
 }

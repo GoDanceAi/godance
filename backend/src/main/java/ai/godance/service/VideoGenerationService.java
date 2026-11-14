@@ -86,8 +86,10 @@ public class VideoGenerationService {
      * Submit + return immediately with the {@link GenerationJob} id.
      * Processing continues on a bounded-elastic worker; client polls
      * {@code GET /v1/jobs/{id}} or receives a signed webhook POST.
+     * {@code origin} is where the request came from; the job row records it.
      */
-    public UUID submit(UUID userId, UUID apiKeyId, VideoRequest submitted, String webhookUrl) {
+    public UUID submit(UUID userId, UUID apiKeyId, VideoRequest submitted, String webhookUrl,
+                       JobOrigin origin) {
         webhookDestinations.requireAllowed(webhookUrl);   // before any charge (spec risk R-02)
         // 404 / 400 (including an n the model cannot return) before any charge.
         // The quote is the pre-debit, the same figure POST /v1/estimates returns.
@@ -103,6 +105,7 @@ public class VideoGenerationService {
         String requestId = "vid_" + UUID.randomUUID().toString().replace("-", "").substring(0, 24);
 
         GenerationJob job = newJob(userId, model, request, duration, cost, requestId, webhookUrl);
+        origin.applyTo(job);
         if (!settlement.accept(job, apiKeyId)) {
             throw new InsufficientCreditException();
         }

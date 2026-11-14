@@ -1,8 +1,8 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
+import { useAfterSignIn, useSignedInAccountId } from './after-sign-in';
 import { apiFetch } from './api';
-import { useAuth } from './auth';
 
 // Referrals: a user shares <app>/signup?ref=<code>, and when someone who
 // signs up with it first tops up, both are credited. The server decides who
@@ -115,17 +115,15 @@ const ReferralContext = createContext<ReferralState>({ info: null, loading: fals
 /**
  * For each signed-in account: hand in a kept code, then read the account's
  * referral view. An account waiting for a parent's approval can reach
- * neither, so it is left alone.
+ * neither, so it is left alone (lib/after-sign-in).
  */
 export function ReferralProvider({ children }: { children: ReactNode }) {
-  const { user } = useAuth();
-  const userId = user && user.ageStatus !== 'CONSENT_PENDING' ? user.id : null;
+  const userId = useSignedInAccountId();
   // Whose view this is, so a newly signed-in account reads as loading from
   // its very first render, before the request below has even started.
   const [loaded, setLoaded] = useState<{ userId: string; info: ReferralInfo | null } | null>(null);
 
-  useEffect(() => {
-    if (!userId) return;
+  useAfterSignIn((account) => {
     let current = true;
     void (async () => {
       await claimStoredReferralCode();
@@ -135,12 +133,12 @@ export function ReferralProvider({ children }: { children: ReactNode }) {
       } catch {
         info = null;
       }
-      if (current) setLoaded({ userId, info });
+      if (current) setLoaded({ userId: account, info });
     })();
     return () => {
       current = false;
     };
-  }, [userId]);
+  });
 
   const state = useMemo<ReferralState>(() => {
     if (!userId) return { info: null, loading: false };
