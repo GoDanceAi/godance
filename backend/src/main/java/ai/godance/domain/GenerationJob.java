@@ -108,6 +108,14 @@ public class GenerationJob {
     @Column(name = "gallery_recipe", updatable = false)
     private String galleryRecipe;
 
+    /**
+     * The version of the owner's recipe the job was run from (V29), or null.
+     * Set when the job is created. The database clears it when the recipe is
+     * deleted; nothing here writes it afterwards.
+     */
+    @Column(name = "recipe_version_id", updatable = false)
+    private UUID recipeVersionId;
+
     @PrePersist
     void onCreate() {
         if (createdAt == null) createdAt = Instant.now();
@@ -168,6 +176,9 @@ public class GenerationJob {
 
     public JobChannel getChannel() { return channel; }
     public void setChannel(JobChannel channel) { this.channel = channel; }
+
+    public UUID getRecipeVersionId() { return recipeVersionId; }
+    public void setRecipeVersionId(UUID recipeVersionId) { this.recipeVersionId = recipeVersionId; }
 
     public String getGalleryRecipe() { return galleryRecipe; }
     public void setGalleryRecipe(String galleryRecipe) { this.galleryRecipe = galleryRecipe; }
