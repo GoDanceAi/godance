@@ -13,10 +13,15 @@
     "en": "A flat-colour poster of a night noodle cart under a teal neon sign that reads \"Midnight Ramen\", steam rising, bold shapes.",
     "zh": "一张平涂风格的夜间面摊海报，青绿色霓虹招牌上写着“Midnight Ramen”，热气升腾，大块几何造型。",
     "zh_origin": "machine",
+    "template": {
+      "en": "A flat-colour poster of a night noodle cart under a {{sign colour}} neon sign that reads \"{{sign text}}\", steam rising, bold shapes.",
+      "zh": "一张平涂风格的夜间面摊海报，{{sign colour}}霓虹招牌上写着“{{sign text}}”，热气升腾，大块几何造型。"
+    },
     "variables": [
       {
         "name": "sign colour",
-        "default": "teal"
+        "default": "teal",
+        "zh_default": "青绿色"
       },
       {
         "name": "sign text",
@@ -54,7 +59,7 @@
     "author_url": "https://example.com/@fixture_eli",
     "original_url": "https://example.com/@fixture_eli/posts/11021",
     "changes": [
-      "placeholders resolved",
+      "placeholders rewritten as {{name}}",
       "translated to Chinese"
     ]
   },

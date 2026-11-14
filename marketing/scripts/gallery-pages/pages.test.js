@@ -11,6 +11,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
+import { defaultsIn, renderTemplate } from '../../src/lib/gallery-template.js';
 import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 
@@ -251,12 +252,63 @@ describe('gallery on, against the fixtures', { timeout: 300_000 }, () => {
   test('variables are listed with their defaults, only on recipes that have them', () => {
     for (const recipe of recipes) {
       const html = pageOf(dir, recipe.slug);
-      const section = /<section\b[^>]*data-variables[^>]*>([\s\S]*?)<\/section>/.exec(html);
-      assert.equal(section !== null, Boolean(recipe.prompt.variables?.length), recipe.slug);
+      const listed = /<(section|div)\b[^>]*data-variables[^>]*>([\s\S]*?)<\/\1>/.exec(html);
+      assert.equal(listed !== null, Boolean(recipe.prompt.variables?.length), recipe.slug);
       for (const variable of recipe.prompt.variables ?? []) {
-        const text = decode(section[1].replace(/<[^>]+>/g, '\n'));
+        const text = decode(listed[2].replace(/<[^>]+>/g, '\n'));
         assert.ok(text.includes(variable.name) && text.includes(variable.default), `${recipe.slug}: ${variable.name}`);
       }
+    }
+  });
+
+  test('the fixtures cover a template, a JSON-shaped one, and a recipe from before templates', () => {
+    assert.ok(recipes.some((r) => r.prompt.template && r.prompt.variables.length === 2 && r.prompt.variables.some((v) => v.zh_default)), 'two variables, one with a Chinese default');
+    assert.ok(recipes.some((r) => r.prompt.template?.en.endsWith('}}') && r.prompt.template.zh.endsWith('}}')), 'a template that ends in "}}"');
+    assert.ok(recipes.some((r) => !r.prompt.template && r.prompt.variables?.length), 'variables and no template');
+    assert.ok(recipes.some((r) => !r.prompt.template && !r.prompt.variables), 'no variables at all');
+  });
+
+  test('a recipe with a template shows it, each variable a marked chip, only where there is one', () => {
+    for (const recipe of recipes) {
+      const html = pageOf(dir, recipe.slug);
+      const section = /<section\b[^>]*data-template(?=[\s>])[^>]*>([\s\S]*?)<\/section>\s*<\/div>\s*<div\b[^>]*data-variables/.exec(html);
+      assert.equal(section !== null, Boolean(recipe.prompt.template), recipe.slug);
+      assert.equal(/data-template-block/.test(html), Boolean(recipe.prompt.template), recipe.slug);
+      if (!recipe.prompt.template) continue;
+
+      for (const [lang, id] of [['en', 'template-en'], ['zh', 'template-zh']]) {
+        // The text of the block is the template itself, character for character: that is what Copy template copies.
+        assert.equal(inner(html, `id="${id}"`), recipe.prompt.template[lang], `${recipe.slug}: ${lang} template`);
+        const block = new RegExp(`<p\\b[^>]*id="${id}"[^>]*>([\\s\\S]*?)</p>`).exec(html)[1];
+        const chips = [...block.matchAll(/<mark\b[^>]*data-variable="([^"]*)"[^>]*>([\s\S]*?)<\/mark>/g)].map((m) => [decode(m[1]), decode(m[2])]);
+        const markers = [...recipe.prompt.template[lang].matchAll(/\{\{([^{}]+)\}\}/g)].map((m) => m[1]);
+        assert.deepEqual(chips, markers.map((name) => [name, `{{${name}}}`]), `${recipe.slug}: one chip per marker, in order`);
+      }
+      assert.equal(attr(tags(html, 'p').find((tag) => attr(tag, 'id') === 'template-zh'), 'lang'), 'zh-Hans');
+      assert.equal(html.match(/data-copy="template-(en|zh)"/g)?.length, 2, `${recipe.slug}: a Copy template button each`);
+      assert.equal(html.match(/>Copy template</g)?.length, 2, recipe.slug);
+      assert.match(inner(html, 'data-template'), /In the Studio, each variable gets a field of its own\./);
+    }
+  });
+
+  test('the variables table gives each default, in English and in Chinese', () => {
+    for (const recipe of recipes.filter((r) => r.prompt.template)) {
+      const html = pageOf(dir, recipe.slug);
+      for (const variable of recipe.prompt.variables) {
+        const row = new RegExp(`<tr\\b[^>]*data-variable-row="${variable.name}"[^>]*>([\\s\\S]*?)</tr>`).exec(html);
+        assert.ok(row, `${recipe.slug}: a row for ${variable.name}`);
+        const cells = [...row[1].matchAll(/<t[hd]\b[^>]*>([\s\S]*?)<\/t[hd]>/g)].map((m) => decode(m[1].replace(/<[^>]+>/g, '')).trim());
+        assert.deepEqual(cells, [variable.name, variable.default, variable.zh_default ?? 'the same'], `${recipe.slug}: ${variable.name}`);
+      }
+    }
+  });
+
+  test('Copy on the prompt still copies the prompt with its blanks filled, not the template', () => {
+    for (const recipe of recipes.filter((r) => r.prompt.template)) {
+      const html = pageOf(dir, recipe.slug);
+      assert.equal(inner(html, 'id="prompt-en"'), recipe.prompt.en, recipe.slug);
+      assert.ok(!inner(html, 'id="prompt-en"').includes('{{'), recipe.slug);
+      assert.equal(html.match(/data-copy="prompt-(en|zh)"/g)?.length, 2);
     }
   });
 
@@ -388,7 +440,8 @@ describe('gallery on, against the fixtures', { timeout: 300_000 }, () => {
       const html = pageOf(dir, recipe.slug);
       assert.ok(!/Run this/.test(html) && !html.includes('?example='), recipe.slug);
       const cta = tags(html, 'a').find((tag) => attr(tag, 'data-get-key') !== null);
-      assert.equal(attr(cta, 'href'), 'https://app.godance.ai/signup', recipe.slug);
+      // It says which recipe page the visit came from.
+      assert.equal(attr(cta, 'href'), `https://app.godance.ai/signup?utm_source=godance&utm_medium=gallery&utm_campaign=${recipe.slug}`, recipe.slug);
     }
   });
 
@@ -407,7 +460,9 @@ describe('gallery on, against the fixtures', { timeout: 300_000 }, () => {
         const heredoc = /<<'JSON'\n([\s\S]*)\nJSON$/.exec(text);
         assert.ok(heredoc, `${recipe.slug}: a quoted here-document`);
         const body = JSON.parse(heredoc[1]);
-        assert.deepEqual(body, { model: run.model, prompt: recipe.prompt[run.prompt_lang], ...run.params });
+        // The run as it was sent, and the recipe it is a run of, which the API records on the job.
+        assert.deepEqual(body, { model: run.model, prompt: recipe.prompt[run.prompt_lang], ...run.params, gallery_recipe: recipe.slug });
+        assert.equal(Object.keys(body).at(-1), 'gallery_recipe');
 
         const poll = found[i * 2 + 1];
         assert.equal(poll.kind, 'poll');
@@ -564,10 +619,14 @@ describe('gallery on, against the fixtures', { timeout: 300_000 }, () => {
           tags: recipe.tags,
           thumb: thumb === null ? null : MEDIA + thumb,
           published_on: recipe.published_on,
+          ...(recipe.prompt.template ? { has_variables: true } : {}),
         };
       }),
     );
     assert.ok(data.recipes.some((r) => r.thumb === null), 'a video without a poster has a null thumb');
+    // has_variables is true where there is a template to fill in, and absent everywhere else.
+    assert.deepEqual(data.recipes.filter((r) => 'has_variables' in r).map((r) => [r.slug, r.has_variables]).sort(),
+      recipes.filter((r) => r.prompt.template).map((r) => [r.slug, true]).sort());
   });
 
   test('/gallery/<slug>.json matches the coordination shape', () => {
@@ -577,13 +636,41 @@ describe('gallery on, against the fixtures', { timeout: 300_000 }, () => {
         slug: recipe.slug,
         title: recipe.title,
         modality: recipe.modality,
-        prompt: { en: recipe.prompt.en, zh: recipe.prompt.zh },
+        prompt: {
+          en: recipe.prompt.en,
+          zh: recipe.prompt.zh,
+          ...(recipe.prompt.template ? { template: recipe.prompt.template, variables: recipe.prompt.variables } : {}),
+        },
         run: { model: run.model, prompt_lang: run.prompt_lang, params: run.params },
         url: `${SITE}/gallery/${recipe.slug}`,
       });
     }
     const json = readdirSync(path.join(dir, 'gallery')).filter((name) => name.endsWith('.json'));
     assert.deepEqual(json.sort(), ['_search.json', 'index.json', ...recipes.map((r) => `${r.slug}.json`)].sort());
+  });
+
+  test('a recipe with variables serves its template as the round-10 contract has it', () => {
+    const data = JSON.parse(read(dir, 'gallery/neon-noodle-cart-poster.json'));
+    assert.deepEqual(data.prompt, {
+      en: 'A flat-colour poster of a night noodle cart under a teal neon sign that reads "Midnight Ramen", steam rising, bold shapes.',
+      zh: '一张平涂风格的夜间面摊海报，青绿色霓虹招牌上写着“Midnight Ramen”，热气升腾，大块几何造型。',
+      template: {
+        en: 'A flat-colour poster of a night noodle cart under a {{sign colour}} neon sign that reads "{{sign text}}", steam rising, bold shapes.',
+        zh: '一张平涂风格的夜间面摊海报，{{sign colour}}霓虹招牌上写着“{{sign text}}”，热气升腾，大块几何造型。',
+      },
+      variables: [
+        { name: 'sign colour', default: 'teal', zh_default: '青绿色' },
+        { name: 'sign text', default: 'Midnight Ramen' },
+      ],
+    });
+    // What the contract promises a reader of this file: the templates give back the prompts.
+    for (const recipe of recipes.filter((r) => r.prompt.template)) {
+      const { prompt } = JSON.parse(read(dir, `gallery/${recipe.slug}.json`));
+      assert.equal(renderTemplate(prompt.template.en, defaultsIn(prompt.variables, 'en')), prompt.en, recipe.slug);
+      assert.equal(renderTemplate(prompt.template.zh, defaultsIn(prompt.variables, 'zh')), prompt.zh, recipe.slug);
+    }
+    // A recipe from before templates serves no variables: there is nothing to fill them into.
+    assert.deepEqual(Object.keys(JSON.parse(read(dir, 'gallery/moss-covered-typewriter.json')).prompt), ['en', 'zh']);
   });
 
   test('search data covers titles and prompts in both languages', () => {
@@ -658,7 +745,8 @@ describe('gallery on, with "Run this" on', { timeout: 300_000 }, () => {
       const html = pageOf(dir, recipe.slug);
       const cta = tags(html, 'a').find((tag) => attr(tag, 'data-run-this') !== null);
       const kind = recipe.modality === 'VIDEO' ? 'video' : 'image';
-      assert.equal(attr(cta, 'href'), `https://app.godance.ai/create/${kind}?example=${recipe.slug}`, recipe.slug);
+      assert.equal(attr(cta, 'href'),
+        `https://app.godance.ai/create/${kind}?example=${recipe.slug}&utm_source=godance&utm_medium=gallery&utm_campaign=${recipe.slug}`, recipe.slug);
       assert.ok(!/Get an API key/.test(html), recipe.slug);
     }
   });

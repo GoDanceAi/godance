@@ -22,12 +22,18 @@ const SITE_NAME = 'Godance';
 // The API call
 // ---------------------------------------------------------------------------
 
-/** The request body that reproduces a run: the model, the prompt as it was sent, then the parameters. */
+/**
+ * The request body that reproduces a run: the model, the prompt as it was
+ * sent, the parameters, and `gallery_recipe`, the recipe's slug. The API
+ * records that last field on the job, so a run that starts from a pasted
+ * example is known to have started here. It changes nothing else.
+ */
 export function requestBody(recipe: Recipe, run: Run): Record<string, unknown> {
   const body: Record<string, unknown> = { model: run.model, prompt: recipe.prompt[run.prompt_lang] };
   for (const [key, value] of Object.entries(run.params)) {
     if (!(key in body)) body[key] = value;
   }
+  body.gallery_recipe = recipe.slug;
   return body;
 }
 
@@ -81,6 +87,8 @@ export function indexJson(recipes: Recipe[], mediaBase: string) {
         tags: recipe.tags,
         thumb: thumb === null ? null : mediaUrl(mediaBase, thumb),
         published_on: recipe.published_on,
+        // Present, and true, only for a recipe whose prompt has a template to fill in.
+        ...(recipe.prompt.template ? { has_variables: true } : {}),
       };
     }),
   };
@@ -93,7 +101,24 @@ export function recipeJson(recipe: Recipe, site: URL | string) {
     slug: recipe.slug,
     title: recipe.title,
     modality: recipe.modality,
-    prompt: { en: recipe.prompt.en, zh: recipe.prompt.zh },
+    prompt: {
+      en: recipe.prompt.en,
+      zh: recipe.prompt.zh,
+      // The template and its variables, together, for a recipe that has a
+      // template (round-10 coordination notes). Rendering template.en with
+      // the defaults gives prompt.en; template.zh gives prompt.zh, using
+      // zh_default where a variable has one.
+      ...(recipe.prompt.template
+        ? {
+            template: { en: recipe.prompt.template.en, zh: recipe.prompt.template.zh },
+            variables: (recipe.prompt.variables ?? []).map((variable) => ({
+              name: variable.name,
+              default: variable.default,
+              ...(variable.zh_default === undefined ? {} : { zh_default: variable.zh_default }),
+            })),
+          }
+        : {}),
+    },
     run: { model: run.model, prompt_lang: run.prompt_lang, params: run.params },
     url: new URL(recipePath(recipe.slug), site).toString(),
   };

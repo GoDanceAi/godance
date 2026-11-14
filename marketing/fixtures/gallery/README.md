@@ -4,7 +4,7 @@ Invented recipes for building and testing the gallery pages without real
 content. Nothing here comes from a source list: the titles, prompts, authors
 and links are made up, and the media is abstract shapes drawn for the purpose.
 
-- `recipes/` — seven recipes in the gallery format. Point the collection at
+- `recipes/` — eight recipes in the gallery format. Point the collection at
   it with `GALLERY_CONTENT_DIR=fixtures/gallery/recipes`.
 - `media/` — stand-in media, laid out as the recipes name it. The images are
   drawn by `make-media.mjs`; the two `.webm` clips are a second of canvas
@@ -15,8 +15,9 @@ and links are made up, and the media is abstract shapes drawn for the purpose.
 | `tin-robot-tea-party` | an image; Chinese prompt from the list |
 | `harbour-fog-timelapse` | a video with a poster; the run sent the Chinese prompt |
 | `origami-crane-unfolding` | a video without a poster; no Chinese title |
-| `moss-covered-typewriter` | a machine-translated prompt; a portrait image |
-| `neon-noodle-cart-poster` | a prompt with variables |
+| `moss-covered-typewriter` | a machine-translated prompt; a portrait image; published before templates, so its blank is filled and only listed |
+| `neon-noodle-cart-poster` | a template with two variables in both languages; one has a Chinese default |
+| `ceramic-mug-json-prompt` | a prompt that is JSON, whose template ends in `}}` |
 | `glass-whale-over-rooftops` | two runs, on two models |
 | `handwritten-receipt-note` | a prompt with quotes, `$`, a backtick, newlines and `</script>`; two outputs |
 

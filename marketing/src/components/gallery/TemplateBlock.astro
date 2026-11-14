@@ -1,0 +1,53 @@
+---
+/**
+ * A recipe's template in one language: the prompt with each blank shown as
+ * a marked chip, and a "Copy template" button. The chips hold the markers
+ * as they are written, so what is copied is the template itself. The button
+ * is wired up by the script on the recipe page.
+ */
+import { parseTemplate } from '../../lib/gallery-template.js';
+
+interface Props {
+  /** Unique on the page; the Copy button points at it. */
+  id: string;
+  heading: string;
+  template: string;
+  /** The language of the text, when it is not the page's. */
+  lang?: string;
+}
+
+const { id, heading, template, lang } = Astro.props;
+const { parts } = parseTemplate(template);
+---
+
+<section class="card p-0 overflow-hidden" data-template-block={lang ?? 'en'}>
+  <header class="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-border bg-bg-muted">
+    <h4 class="text-sm font-semibold text-fg">{heading}</h4>
+    <button type="button" class="btn btn-secondary btn-sm" data-copy={id}>Copy template</button>
+  </header>
+  {/* One line, so no whitespace is added between the parts: the text is the template. */}
+  <p id={id} lang={lang} class="gallery-template px-4 py-3.5 text-fg">{parts.map((part) => ('name' in part ? <mark class="gallery-variable" data-variable={part.name}>{`{{${part.name}}}`}</mark> : part.text))}</p>
+</section>
+
+<style>
+  .gallery-template {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-size: 15px;
+    line-height: 1.9;
+  }
+  .gallery-template:lang(zh) {
+    font-family: system-ui, -apple-system, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei',
+      'Noto Sans CJK SC', 'Source Han Sans SC', sans-serif;
+  }
+  /* A variable: marked, in the monospace of code, and never broken across lines mid-name where it can be helped. */
+  .gallery-variable {
+    font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+    font-size: 0.86em;
+    padding: 0.15em 0.45em;
+    border-radius: 0.4em;
+    color: var(--color-primary);
+    background: color-mix(in srgb, var(--color-primary) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--color-primary) 35%, transparent);
+  }
+</style>
