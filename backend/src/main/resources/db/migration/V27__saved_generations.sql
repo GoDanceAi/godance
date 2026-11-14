@@ -1,4 +1,4 @@
--- V27: saved generations (round 9).
+-- V27: saved generations, and saved recipes (round 9).
 --
 -- Every job's files and prompt are deleted 90 days after it was created
 -- (DataRetentionService). A user can save a finished generation to keep it
@@ -34,3 +34,24 @@ DROP INDEX ix_generation_jobs_purge_candidates;
 CREATE INDEX ix_generation_jobs_purge_candidates
     ON generation_jobs (created_at, id)
     WHERE purged_at IS NULL AND saved_at IS NULL AND status IN ('DONE', 'FAILED', 'CANCELLED');
+
+-- Saved recipes. A recipe is a gallery page on the marketing site that the
+-- Studio can load by its slug (/create/image?example=<slug>). A user can
+-- keep a list of the ones they want to come back to. Only the slug is
+-- stored: the recipe itself stays in the gallery, so a row costs nothing to
+-- keep and is not counted against the saved-generations limit.
+--
+-- Closing an account deletes its rows (AccountClosureService). The cascade
+-- covers the unapproved child accounts the retention job deletes.
+
+CREATE TABLE saved_recipes (
+    id        BIGSERIAL     PRIMARY KEY,
+    user_id   UUID          NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    slug      VARCHAR(80)   NOT NULL CHECK (slug ~ '^[a-z0-9-]{1,80}$'),
+    saved_at  TIMESTAMPTZ   NOT NULL DEFAULT now(),
+    CONSTRAINT uq_saved_recipes_user_slug UNIQUE (user_id, slug)
+);
+
+-- A user's list, newest first.
+CREATE INDEX ix_saved_recipes_user_saved_at
+    ON saved_recipes (user_id, saved_at DESC, id DESC);

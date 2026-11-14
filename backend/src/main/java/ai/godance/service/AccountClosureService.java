@@ -23,6 +23,7 @@ import ai.godance.repository.ApiKeyRepository;
 import ai.godance.repository.ConversationRepository;
 import ai.godance.repository.GenerationJobRepository;
 import ai.godance.repository.OAuthIdentityRepository;
+import ai.godance.repository.SavedRecipeRepository;
 import ai.godance.repository.UserRepository;
 import ai.godance.repository.UserTwoFactorRepository;
 
@@ -44,10 +45,11 @@ import ai.godance.repository.UserTwoFactorRepository;
  *       fail at once, drops any staff role, and deletes its API keys;</li>
  *   <li>turns auto-recharge off and forgets the saved payment method, so the
  *       card is never charged again;</li>
- *   <li>deletes every conversation and its messages;</li>
+ *   <li>deletes every conversation and its messages, and the list of
+ *       gallery recipes the owner saved;</li>
  *   <li>ends any job still running (FAILED, estimate refunded, as the sweep
- *       would) and purges every job now: media objects deleted, prompt and
- *       URLs redacted, costs kept;</li>
+ *       would) and purges every job now, saved or not: media objects
+ *       deleted, prompt and URLs redacted, costs kept;</li>
  *   <li>writes an {@code admin.account.closed} audit row.</li>
  * </ul>
  * Kept: credit ledger, usage records, auto-recharge attempts, the Stripe
@@ -71,6 +73,7 @@ public class AccountClosureService {
     private final ApiKeyRepository apiKeys;
     private final OAuthIdentityRepository identities;
     private final ConversationRepository conversations;
+    private final SavedRecipeRepository savedRecipes;
     private final GenerationJobRepository jobs;
     private final GenerationJobSettlement settlement;
     private final DataRetentionService retention;
@@ -80,6 +83,7 @@ public class AccountClosureService {
     public AccountClosureService(UserRepository users, UserTwoFactorRepository twoFactors,
                                  ApiKeyRepository apiKeys,
                                  OAuthIdentityRepository identities, ConversationRepository conversations,
+                                 SavedRecipeRepository savedRecipes,
                                  GenerationJobRepository jobs, GenerationJobSettlement settlement,
                                  DataRetentionService retention, AuditLogService audit,
                                  PlatformTransactionManager txManager) {
@@ -88,6 +92,7 @@ public class AccountClosureService {
         this.apiKeys = apiKeys;
         this.identities = identities;
         this.conversations = conversations;
+        this.savedRecipes = savedRecipes;
         this.jobs = jobs;
         this.settlement = settlement;
         this.retention = retention;
@@ -182,6 +187,7 @@ public class AccountClosureService {
         int keys = apiKeys.deleteByUserId(userId);
         int links = identities.deleteByUserId(userId);
         int convs = conversations.deleteByUserId(userId);
+        savedRecipes.deleteByUserId(userId);
 
         Map<String, Object> detail = new LinkedHashMap<>();
         detail.put("actorUserId", actorId == null ? null : actorId.toString());

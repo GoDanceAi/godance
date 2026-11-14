@@ -130,6 +130,7 @@ class AccountClosureIntegrationTest {
     @Autowired ConversationRepository conversations;
     @Autowired ConversationMessageRepository messages;
     @Autowired GenerationJobRepository jobs;
+    @Autowired ai.godance.repository.SavedRecipeRepository savedRecipes;
     @Autowired GenerationJobSettlement settlement;
     @Autowired AuditLogEntryRepository audit;
     @Autowired ObjectStorageClient storage;
@@ -396,6 +397,29 @@ class AccountClosureIntegrationTest {
             assertThat(purged.getActualCostCents()).isEqualTo(480L);
         }
         assertThat(jobs.countSavedByUserId(userId)).isZero();
+    }
+
+    @Test
+    void close_givenSavedRecipes_deletesTheList() {
+        String email = "recipes-" + UUID.randomUUID() + "@godance.test";
+        String bearer = signUpOrLogIn(email);
+        UUID userId = users.findByEmail(email).orElseThrow().getId();
+        for (String slug : List.of("paper-lantern-street-at-dusk", "koi-pond-in-the-rain")) {
+            http.put().uri("/v1/saved-recipes/{slug}", slug).header("Authorization", bearer)
+                    .exchange().expectStatus().isNoContent();
+        }
+        // Someone else's list is not touched.
+        String otherEmail = "recipes-other-" + UUID.randomUUID() + "@godance.test";
+        String otherBearer = signUpOrLogIn(otherEmail);
+        UUID otherId = users.findByEmail(otherEmail).orElseThrow().getId();
+        http.put().uri("/v1/saved-recipes/{slug}", "koi-pond-in-the-rain").header("Authorization", otherBearer)
+                .exchange().expectStatus().isNoContent();
+        assertThat(savedRecipes.countByUserId(userId)).isEqualTo(2);
+
+        closeAs(adminBearer, userId).expectStatus().isOk();
+
+        assertThat(savedRecipes.countByUserId(userId)).isZero();
+        assertThat(savedRecipes.countByUserId(otherId)).isEqualTo(1);
     }
 
     @Test
