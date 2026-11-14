@@ -22,6 +22,7 @@ export function workPaths(root = DEFAULT_WORK_DIR) {
     entries: path.join(root, 'entries.json'), // fetch
     screened: path.join(root, 'screened.json'), // screen
     translated: path.join(root, 'translated.json'), // translate
+    samples: path.join(root, 'samples.json'), // sample: slots and a sample input for each input recipe
     runs: path.join(root, 'runs.json'), // generate: one record per entry, job id included
     ledger: path.join(root, 'ledger.json'), // every cent spent, by any stage
     media: path.join(root, 'media'), // generated files, in the layout recipes refer to

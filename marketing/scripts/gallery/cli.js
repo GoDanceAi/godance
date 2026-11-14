@@ -19,9 +19,10 @@ import { priceBook } from './lib/pricing.js';
 import { oneLine } from './lib/text.js';
 import { DEFAULT_CONFIG_DIR, DEFAULT_CONTENT_DIR, DEFAULT_WORK_DIR, MARKETING_ROOT, configPaths, readJson, workPaths, writeJson } from './lib/work.js';
 import { createListReader, fetchEntries } from './stages/fetch.js';
-import { generate, heldByRuns, planRun } from './stages/generate.js';
+import { InputsUnavailable, checkInputsAccount, generate, heldByRuns, planRun } from './stages/generate.js';
 import { publish, remove } from './stages/publish.js';
 import { retemplate } from './stages/retemplate.js';
+import { heldBySamples, projectSample, recipeInputs, sampleEntries, samplePlan } from './stages/sample.js';
 import { checkDecisions, reviewItems, reviewSheet, standardVersionOf } from './stages/review.js';
 import { INPUT_MODES, REASONS, classifyEntries, compilePeopleTerms, compileTerms, countReasons, personSamplesAllowed, projectClassify, screenEntries } from './stages/screen.js';
 import { planTranslation, projectTranslate, translateEntries } from './stages/translate.js';
@@ -35,6 +36,8 @@ const HELP = `Gallery import. Every command is a dry run unless --apply is given
   fetch                Read entries from each list at its pinned commit.
   screen               Set aside what cannot be used. --classify adds a text model.
   translate            Complete each prompt in English and Chinese.
+  sample               For each entry that needs an input image: propose its
+                       slots and generate a sample input for each, on Godance.
   generate             Run each candidate on Godance and save the output.
   review               Build the review sheet.
   publish              Write the recipes the operator approved.
@@ -223,13 +226,22 @@ export async function main(argv, io = {}) {
       out(prices.source === 'live' ? `prices: the live catalogue at ${api.origin}` : 'prices: seed prices (the catalogue was not asked, or could not be reached)');
 
     /** A paid stage: needs the key and a cap, and gets a budget over everything spent so far. */
-    async function paidStage(runs = {}) {
+    async function paidStage(runs = {}, samples = {}) {
       if (cap === null) throw new Misuse('a run that spends money needs --max-spend-cents');
       if (!api.hasKey) throw new Error('GODANCE_API_KEY is not set');
       const ledger = await openLedger(work.ledger, { now });
-      const budget = createBudget({ cap, spent: ledger.spent, held: heldByRuns(runs) });
+      // Jobs an earlier run left in flight still hold their money, whichever stage started them.
+      const budget = createBudget({ cap, spent: ledger.spent, held: heldByRuns(runs) + heldBySamples(samples) });
       return { ledger, budget };
     }
+
+    /** The prompt an entry is run with, once translated: what a sample is proposed from. */
+    const promptOf = (record) => record.prompt[record.prompt_lang];
+    /** Translated candidates that need an input image, as the sample stage takes them. */
+    const inputItems = (entries, screened, translated) =>
+      candidatesOf(entries, screened)
+        .filter((entry) => screened[entry.id].input && translated[entry.id]?.status === 'done')
+        .map((entry) => ({ entry, slug: translated[entry.id].slug, prompt: promptOf(translated[entry.id]), person: screened[entry.id].input === 'person' }));
     const spendLine = (budget, before) =>
       out(`spent: ${cents(roundUp(budget.spent - before))} in this run; ${cents(roundUp(budget.spent))} in total against a cap of ${cents(budget.cap)}` +
         (budget.held > 0 ? `; ${cents(budget.held)} still held by unfinished jobs` : ''));
@@ -274,6 +286,7 @@ export async function main(argv, io = {}) {
         const runs = await readJson(work.runs, {});
         let translateCents = 0;
         let classifyCents = 0;
+        let sampleCents = 0;
         const lines = [];
         let generateCents = 0;
 
@@ -297,13 +310,29 @@ export async function main(argv, io = {}) {
 
           const items = candidates.map((entry) => {
             const plan = planTranslation(entry);
-            return { entry, translated: { prompt: { ...plan.prompt, [entry.lang]: plan.prompt[entry.lang] ?? entry.prompt }, prompt_lang: entry.lang } };
+            // An entry that needs an input image is run with one sample per slot; one slot is assumed here.
+            return { entry, translated: { prompt: { ...plan.prompt, [entry.lang]: plan.prompt[entry.lang] ?? entry.prompt }, prompt_lang: entry.lang },
+              inputs: screened[entry.id].input ? [{}] : null };
           });
           const picked = pickForGeneration(items, runs, limits).filter(({ entry }) => entry.source === source.id);
+          const withInputs = picked.filter((item) => item.inputs);
+          if (withInputs.length > 0) {
+            const projection = projectSample(withInputs.map(({ entry, translated }) => ({ entry, prompt: translated.prompt[translated.prompt_lang] })),
+              { prices, modelMap, textModel: modelMap.text.sample ?? modelMap.text.translate });
+            sampleCents += projection.text + projection.images;
+            out(`  sample     ${plural(withInputs.length, 'input recipe')} would get slots and a sample input each, one slot assumed: about ${cents(roundUp(projection.text + projection.images))}`);
+            for (const { entry, translated } of withInputs.slice(0, 10)) {
+              const prompt = translated.prompt[translated.prompt_lang];
+              const sample = samplePlan(entry, { prices, modelMap, prompt });
+              const run = planRun(entry, translated, { prices, modelMap, videoSeconds, inputs: [{}] });
+              out(`             ${oneLine(entry.title, 44).padEnd(44)}  sample ${sample.error ? 'cannot be made' : `${cents(sample.hold)} on ${sample.model}`} + run ${run.error ? 'cannot be made' : `${cents(run.hold)} on ${run.model}`}`);
+            }
+            if (withInputs.length > 10) out(`             … and ${withInputs.length - 10} more`);
+          }
           const byHold = new Map();
           let unserved = 0;
-          for (const { entry, translated } of picked) {
-            const planned = planRun(entry, translated, { prices, modelMap, videoSeconds });
+          for (const { entry, translated, inputs: slots } of picked) {
+            const planned = planRun(entry, translated, { prices, modelMap, videoSeconds, inputs: slots });
             if (planned.error) {
               unserved++;
               continue;
@@ -324,7 +353,8 @@ export async function main(argv, io = {}) {
         out('\nprojected spend');
         for (const line of lines) out(line);
         out(`${'  translate (text model)'.padEnd(58)}${String(roundUp(translateCents)).padStart(6)} cents`);
-        out(`${'  total without the classifier'.padEnd(58)}${String(generateCents + roundUp(translateCents)).padStart(6)} cents`);
+        if (sampleCents > 0) out(`${'  sample (slots by a text model, and a sample input each)'.padEnd(58)}${String(roundUp(sampleCents)).padStart(6)} cents`);
+        out(`${'  total without the classifier'.padEnd(58)}${String(generateCents + roundUp(translateCents) + roundUp(sampleCents)).padStart(6)} cents`);
         if (standard) out(`${'  optional: screen --classify (text model)'.padEnd(58)}${String(roundUp(classifyCents)).padStart(6)} cents`);
         else out('  the content standard is not in docs/ yet, so the classifier cannot be projected');
         out('\nA projection, from catalogue prices. What is recorded for a run is its job\'s actualCostCents.');
@@ -426,6 +456,51 @@ export async function main(argv, io = {}) {
         return result.stoppedByBudget ? 1 : 0;
       }
 
+      case 'sample': {
+        if (apply && cap === null) throw new Misuse('a run that spends money needs --max-spend-cents');
+        header('sample');
+        const entries = inSources((await needState(work.entries, 'fetch')).entries);
+        const screened = await needState(work.screened, 'screen');
+        const translated = await needState(work.translated, 'translate');
+        const samples = await readJson(work.samples, {});
+        if (flags['retry-failed'] && apply) for (const [id, record] of Object.entries(samples)) if (record.status === 'failed') delete samples[id];
+        const prices = await loadPrices();
+        describePrices(prices);
+        const textModel = modelMap.text.sample ?? modelMap.text.translate;
+
+        const items = inputItems(entries, screened, translated);
+        const todo = items.filter(({ entry }) => samples[entry.id]?.status !== 'done' && samples[entry.id]?.status !== 'failed');
+        const count = (status) => items.filter(({ entry }) => samples[entry.id]?.status === status).length;
+        const people = items.filter((item) => item.person).length;
+        out(`${plural(items.length, 'translated candidate needs', 'translated candidates need')} an input image (${items.length - people} about an object, ${people} about a person); ` +
+          `${count('done')} sampled, ${count('failed')} failed, ${todo.length} still to do`);
+        if (items.length === 0) out('none passed screening: "screen --inputs objects --apply" lets entries about a product or an object through');
+        const fresh = todo.filter(({ entry }) => !samples[entry.id]);
+        const projection = projectSample(fresh, { prices, modelMap, textModel });
+        for (const { entry, slug, prompt } of fresh.slice(0, 10)) {
+          const plan = samplePlan(entry, { prices, modelMap, prompt });
+          out(`  ${slug.padEnd(40)}  slots by ${textModel}, then a sample ${plan.error ? `that cannot be made: ${plan.error}` : `on ${plan.model} holding ${cents(plan.hold)}`}`);
+        }
+        if (fresh.length > 10) out(`  … and ${fresh.length - 10} more`);
+        out(`projected: about ${cents(roundUp(projection.text + projection.images))} (${cents(roundUp(projection.text))} for the slots, ${cents(projection.images)} for one sample each; an entry with more slots costs more)`);
+        if (!apply) return 0;
+
+        const { ledger, budget } = await paidStage(await readJson(work.runs, {}), samples);
+        const before = budget.spent;
+        const result = await sampleEntries(todo, samples, {
+          api, prices, budget, ledger, modelMap, mediaDir: work.media, textModel, peopleTerms, terms,
+          retryUncertain: Boolean(flags['retry-uncertain']),
+          save: () => writeJson(work.samples, samples),
+          sleep: io.sleep, now, log: out,
+        });
+        await writeJson(work.samples, samples);
+        out(`sampled ${result.done} · failed ${result.failed} · still running ${result.pending} · uncertain ${result.uncertain}` + (result.stoppedByBudget ? ' · stopped at the cap' : ''));
+        for (const [id, record] of Object.entries(samples)) if (record.status === 'failed') out(`  failed ${id}: ${oneLine(record.reason ?? '', 160)}`);
+        if (result.uncertain > 0) out('uncertain: a request was sent and no clear answer came back. Check GET /v1/jobs before using --retry-uncertain.');
+        spendLine(budget, before);
+        return result.stoppedByBudget ? 1 : 0;
+      }
+
       case 'generate': {
         if (apply && cap === null) throw new Misuse('a run that spends money needs --max-spend-cents');
         header('generate');
@@ -433,22 +508,44 @@ export async function main(argv, io = {}) {
         const screened = await needState(work.screened, 'screen');
         const translated = await needState(work.translated, 'translate');
         const runs = await readJson(work.runs, {});
+        const samples = await readJson(work.samples, {});
         if (flags['retry-failed'] && apply) for (const [id, run] of Object.entries(runs)) if (run.status === 'failed') delete runs[id];
         const prices = await loadPrices();
         describePrices(prices);
 
-        const ready = candidatesOf(entries, screened).filter((entry) => translated[entry.id]?.status === 'done').map((entry) => ({ entry, translated: translated[entry.id] }));
+        // An entry that needs an input image is ready once it has its slots and samples.
+        const translatedCandidates = candidatesOf(entries, screened).filter((entry) => translated[entry.id]?.status === 'done');
+        const unsampled = translatedCandidates.filter((entry) => screened[entry.id].input && samples[entry.id]?.status !== 'done');
+        const ready = translatedCandidates
+          .filter((entry) => !unsampled.includes(entry))
+          .map((entry) => ({ entry, translated: translated[entry.id], inputs: screened[entry.id].input ? recipeInputs(samples[entry.id]) : null }));
+        if (unsampled.length > 0) out(`${plural(unsampled.length, 'candidate needs', 'candidates need')} an input image and ${unsampled.length === 1 ? 'has' : 'have'} no finished sample yet: run "sample" first`);
         const picked = pickForGeneration(ready, runs, limits);
         const fresh = picked.filter(({ entry }) => !runs[entry.id]);
         let projected = 0;
-        for (const { entry, translated: record } of fresh) projected += planRun(entry, record, { prices, modelMap, videoSeconds }).hold ?? 0;
+        for (const { entry, translated: record, inputs: slots } of fresh) projected += planRun(entry, record, { prices, modelMap, videoSeconds, inputs: slots }).hold ?? 0;
         const byStatus = (status) => Object.values(runs).filter((run) => run.status === status).length;
         out(`${plural(ready.length, 'candidate')} translated; ${byStatus('done')} done, ${byStatus('accepted') + byStatus('downloading')} to resume, ${byStatus('submitting')} uncertain, ${byStatus('failed')} failed`);
         out(`${plural(fresh.length, 'new run')} would start, holding ${cents(projected)}`);
         if (!apply) return 0;
 
-        const { ledger, budget } = await paidStage(runs);
+        const { ledger, budget } = await paidStage(runs, samples);
         const before = budget.spent;
+
+        // Input recipes need an account that may use inputs. One free upload says so, before any job is submitted.
+        const firstWithInputs = fresh.find((item) => item.inputs);
+        if (firstWithInputs) {
+          const slot = firstWithInputs.inputs[0];
+          try {
+            await checkInputsAccount(api, { bytes: await readFile(path.join(work.media, slot.sample.file)), contentType: slot.sample.content_type });
+          } catch (error) {
+            if (!(error instanceof InputsUnavailable)) throw error;
+            out(`generate: ${error.message}`);
+            spendLine(budget, before);
+            return 1;
+          }
+          out('inputs: this account can use inputs (checked with one upload, which is free)');
+        }
         const ffmpeg = await hasFfmpeg();
         if (!ffmpeg && picked.some(({ entry }) => entry.modality === 'VIDEO')) out('warning: ffmpeg is not installed, so videos get no poster');
         const result = await generate(picked, runs, {
@@ -468,7 +565,7 @@ export async function main(argv, io = {}) {
       case 'review': {
         header('review');
         const entries = inSources((await needState(work.entries, 'fetch')).entries);
-        const items = reviewItems({ entries, screened: await needState(work.screened, 'screen'), translated: await needState(work.translated, 'translate'), runs: await needState(work.runs, 'generate') });
+        const items = reviewItems({ entries, screened: await needState(work.screened, 'screen'), translated: await needState(work.translated, 'translate'), runs: await needState(work.runs, 'generate'), samples: await readJson(work.samples, {}) });
         const version = standardVersionOf(standard);
         if (version === null) throw new Error('docs/gallery-content-standard.md is missing or states no version: the review needs one to record');
         const decisions = await readJson(work.decisions, null);
@@ -491,6 +588,7 @@ export async function main(argv, io = {}) {
           entries: (await needState(work.entries, 'fetch')).entries,
           translated: await needState(work.translated, 'translate'),
           runs: await needState(work.runs, 'generate'),
+          samples: await readJson(work.samples, {}),
           decisions, contentDir, manifestFile: work.manifest, apply, now,
         });
         const made = Object.values(decisions.decisions);
@@ -561,6 +659,7 @@ export async function main(argv, io = {}) {
         const screened = await readJson(work.screened, {});
         const translated = await readJson(work.translated, {});
         const runs = await readJson(work.runs, {});
+        const samples = await readJson(work.samples, {});
         const decisions = await readJson(work.decisions, { decisions: {} });
         const ledger = await openLedger(work.ledger, { now });
         for (const source of fetched.sources) {
@@ -569,6 +668,7 @@ export async function main(argv, io = {}) {
           if (entries.some((entry) => screened[entry.id])) printScreen(entries.filter((entry) => screened[entry.id]), screened);
           const count = (test) => entries.filter(test).length;
           out(`  translate  ${count((e) => translated[e.id]?.status === 'done')} done · ${count((e) => translated[e.id]?.status === 'failed')} failed`);
+          if (entries.some((e) => samples[e.id])) out(`  sample     ${count((e) => samples[e.id]?.status === 'done')} done · ${count((e) => samples[e.id]?.status === 'sampling')} unfinished · ${count((e) => samples[e.id]?.status === 'failed')} failed`);
           out(`  generate   ${count((e) => runs[e.id]?.status === 'done')} done · ${count((e) => ['accepted', 'downloading'].includes(runs[e.id]?.status))} unfinished · ${count((e) => runs[e.id]?.status === 'submitting')} uncertain · ${count((e) => runs[e.id]?.status === 'failed')} failed`);
           out(`  review     ${count((e) => decisions.decisions[e.id]?.decision === 'approved')} approved · ${count((e) => decisions.decisions[e.id]?.decision === 'rejected')} rejected`);
         }
