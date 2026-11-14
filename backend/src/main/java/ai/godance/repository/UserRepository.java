@@ -54,6 +54,31 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     int changeRole(@Param("id") UUID id, @Param("from") ai.godance.domain.UserRole from,
                    @Param("to") ai.godance.domain.UserRole to, @Param("now") java.time.Instant now);
 
+    /**
+     * Writes an account's first touch (V28) when it has none and was created
+     * after {@code createdAfter}: 1 when written, 0 when it already has one
+     * or is past the window. One conditional UPDATE, so of two calls at once
+     * only the first writes. {@code touch} is a JSON object.
+     */
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query(value = """
+            UPDATE users
+               SET first_touch = cast(:touch AS jsonb),
+                   first_touch_at = :now
+             WHERE id = :id
+               AND first_touch_at IS NULL
+               AND created_at > :createdAfter
+            """, nativeQuery = true)
+    int recordFirstTouch(@Param("id") UUID id, @Param("touch") String touch,
+                         @Param("now") java.time.Instant now,
+                         @Param("createdAfter") java.time.Instant createdAfter);
+
+    /** Forgets an account's first touch; closing the account does this. */
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query(value = "UPDATE users SET first_touch = NULL, first_touch_at = NULL WHERE id = :id",
+           nativeQuery = true)
+    int clearFirstTouch(@Param("id") UUID id);
+
     /** Can anyone act as {@code role}? The same conditions the admin gate applies. */
     boolean existsByRoleAndActiveTrueAndEmailVerifiedTrue(ai.godance.domain.UserRole role);
 
