@@ -13,7 +13,7 @@ import {
   recipeFileName,
   recipeSchema,
 } from '../../src/lib/gallery-schema.js';
-import { imageRecipe, videoRecipe } from './example-recipes.js';
+import { imageRecipe, templatedRecipe, videoRecipe } from './example-recipes.js';
 
 /** The rule and path of every problem, which is what the tests compare. */
 const found = (data, options) => checkRecipe(data, options).map(({ rule, path }) => `${rule} @ ${path}`);
@@ -34,6 +34,11 @@ describe('a valid recipe', () => {
   test('parsing changes nothing: no key is dropped, added or rewritten', () => {
     assert.deepEqual(recipeSchema.parse(imageRecipe()), imageRecipe());
     assert.deepEqual(recipeSchema.parse(videoRecipe()), videoRecipe());
+    assert.deepEqual(recipeSchema.parse(templatedRecipe()), templatedRecipe());
+  });
+
+  test('a recipe with a template, as in the round-10 contract, is accepted', () => {
+    assert.deepEqual(checkRecipe(templatedRecipe(), { file: 'paper-lantern-street-at-dusk.json' }), []);
   });
 
   test('title.zh, prompt.variables and a video poster are optional; tags and changes may be empty', () => {
@@ -166,7 +171,58 @@ const VIDEO_BREAKS = [
   ['shape', 'an image content type on a video', (r) => (r.runs[0].outputs[0].content_type = 'image/webp'), 'runs[0].outputs[0].content_type'],
 ];
 
+/** The same, starting from the recipe that has a template (round 10). */
+const TEMPLATE_BREAKS = [
+  // prompt.template has both languages
+  ['template-languages', 'a template with no Chinese', (r) => delete r.prompt.template.zh, 'prompt.template.zh'],
+  ['template-languages', 'a template with no English', (r) => delete r.prompt.template.en, 'prompt.template.en'],
+  ['template-languages', 'an empty template', (r) => (r.prompt.template.en = '  '), 'prompt.template.en'],
+  ['template-languages', 'a template that is one text, not two', (r) => (r.prompt.template = r.prompt.template.en), 'prompt.template'],
+
+  // a template comes with its variables
+  ['template-variables', 'a template with no variables', (r) => delete r.prompt.variables, 'prompt.variables'],
+  ['template-variables', 'a template with an empty list of variables', (r) => (r.prompt.variables = []), 'prompt.variables'],
+  ['template-variables', 'a zh_default on a prompt with no template',
+    (r) => { delete r.prompt.template; delete r.prompt.variables[1].zh_default; }, 'prompt.variables[0].zh_default'],
+
+  // names follow the naming rule, and are unique
+  ['variable-name', 'a name with punctuation', (r) => (r.prompt.variables[0].name = 'lantern color!'), 'prompt.variables[0].name'],
+  ['variable-name', 'a name that is not ASCII', (r) => (r.prompt.variables[0].name = '灯笼颜色'), 'prompt.variables[0].name'],
+  ['variable-name', 'a name that starts with a space', (r) => (r.prompt.variables[1].name = ' lens'), 'prompt.variables[1].name'],
+  ['variable-name', 'a name that ends with a hyphen', (r) => (r.prompt.variables[1].name = 'lens-'), 'prompt.variables[1].name'],
+  ['variable-name', 'a name of 41 characters', (r) => (r.prompt.variables[1].name = 'a'.repeat(41)), 'prompt.variables[1].name'],
+  ['variable-unique', 'two variables with one name', (r) => (r.prompt.variables[1].name = r.prompt.variables[0].name), 'prompt.variables[1].name'],
+
+  // every "{{" begins a declared variable, and every variable is used
+  ['template-markers', 'a stray "{{"', (r) => { r.prompt.template.en += ' {{'; r.prompt.en += ' {{'; }, 'prompt.template.en'],
+  ['template-markers', 'a marker with spaces inside its braces', (r) => (r.prompt.template.en += ' {{ lens }}'), 'prompt.template.en'],
+  ['template-markers', 'a marker that is never closed', (r) => (r.prompt.template.zh += '{{lens}'), 'prompt.template.zh'],
+  ['template-markers', 'a variable that is not declared',
+    (r) => (r.prompt.template.en = r.prompt.template.en.replace('{{lens}}', '{{lens}} {{film}}')), 'prompt.template.en'],
+  ['template-markers', 'a variable the Chinese template never uses',
+    (r) => (r.prompt.template.zh = r.prompt.template.zh.replace('{{lens}}', '35毫米')), 'prompt.template.zh'],
+
+  // rendered with its defaults, a template is the prompt
+  ['template-render', 'an English template whose render is not prompt.en',
+    (r) => (r.prompt.template.en = r.prompt.template.en.replace('paper lantern', 'paper kite')), 'prompt.template.en'],
+  ['template-render', 'a Chinese template whose render is not prompt.zh',
+    (r) => (r.prompt.template.zh += '。'), 'prompt.template.zh'],
+  ['template-render', 'a default that is not the one in the prompt',
+    (r) => (r.prompt.variables[0].default = 'cold blue'), 'prompt.template.en'],
+  ['template-render', 'a Chinese prompt that needs a zh_default the variable lacks',
+    (r) => delete r.prompt.variables[1].zh_default, 'prompt.template.zh'],
+  ['template-render', 'a prompt edited after its template was made', (r) => (r.prompt.en += ' '), 'prompt.template.en'],
+];
+
 describe('each rule rejects a recipe that breaks it', () => {
+  for (const [rule, what, breakIt, path] of TEMPLATE_BREAKS) {
+    test(`${rule}: ${what}`, () => {
+      const recipe = templatedRecipe();
+      breakIt(recipe);
+      assert.deepEqual(found(recipe), [`${rule} @ ${path}`]);
+    });
+  }
+
   for (const [rule, what, breakIt, path] of BREAKS) {
     test(`${rule}: ${what}`, () => {
       const recipe = imageRecipe();
@@ -200,6 +256,29 @@ describe('each rule rejects a recipe that breaks it', () => {
     assert.ok(checkRecipe(video).length > 0);
   });
 
+  test('a template with two faults reports both, under the one rule', () => {
+    const recipe = templatedRecipe();
+    recipe.prompt.template.en = recipe.prompt.template.en.replace('{{lens}}', '{{ lens }}');
+    assert.deepEqual(checkRecipe(recipe).map(({ rule, path, message }) => `${rule} @ ${path}: ${message.slice(0, 34)}`), [
+      'template-markers @ prompt.template.en: the "{{" at position 64 does not b',
+      'template-markers @ prompt.template.en: the variable "lens" is declared bu',
+    ]);
+  });
+
+  test('each language of a template is checked on its own', () => {
+    const recipe = templatedRecipe();
+    recipe.prompt.template.en += ' {{';
+    recipe.prompt.template.zh += '！';
+    assert.deepEqual(found(recipe), ['template-markers @ prompt.template.en', 'template-render @ prompt.template.zh']);
+  });
+
+  test('a render that differs says where', () => {
+    const recipe = templatedRecipe();
+    recipe.prompt.variables[0].default = 'cold blue';
+    assert.match(checkRecipe(recipe)[0].message,
+      /^rendered with its defaults it must be prompt\.en exactly; they differ at character 2: the template gives "cold blue paper lantern " where the prompt has "warm red paper lantern o"$/);
+  });
+
   test('every problem in a recipe is reported, not only the first', () => {
     const recipe = imageRecipe();
     recipe.slug = 'Bad Slug';
@@ -215,7 +294,7 @@ describe('each rule rejects a recipe that breaks it', () => {
   }
 
   test('the table above covers every rule a single recipe can break', () => {
-    const covered = new Set([...BREAKS, ...VIDEO_BREAKS].map(([rule]) => rule));
+    const covered = new Set([...BREAKS, ...VIDEO_BREAKS, ...TEMPLATE_BREAKS].map(([rule]) => rule));
     const folderRules = ['slug-file-name', 'json', 'duplicate-slug', 'folder']; // covered below and in validate.test.js
     for (const rule of Object.keys(RULES)) {
       if (!folderRules.includes(rule)) assert.ok(covered.has(rule), `no test breaks the rule "${rule}"`);

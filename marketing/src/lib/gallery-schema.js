@@ -11,6 +11,7 @@
  * ships it), so `node` can import it directly as well as Astro.
  */
 import { z } from 'astro/zod';
+import { NAME_MAX_LENGTH, checkTemplate, defaultsIn, isVariableName, renderTemplate } from './gallery-template.js';
 
 /** Environment variable that points the gallery at another folder, e.g. fixtures. */
 export const GALLERY_DIR_ENV = 'GALLERY_CONTENT_DIR';
@@ -33,6 +34,12 @@ export const RULES = Object.freeze({
   'slug-format': 'slug uses lowercase letters, digits and hyphens only',
   'slug-file-name': 'slug equals the file name: the recipe lives at <slug>.json',
   'prompt-languages': 'prompt.en and prompt.zh are both present and not empty',
+  'template-languages': 'prompt.template, when a recipe has one, has both "en" and "zh", and neither is empty',
+  'template-variables': 'a template comes with the variables it uses, and zh_default belongs to a template variable',
+  'variable-name': `a template variable's name is 1–${NAME_MAX_LENGTH} ASCII letters, digits, spaces, hyphens or underscores, starting and ending with a letter or digit`,
+  'variable-unique': 'no two template variables share a name',
+  'template-markers': 'every "{{" in a template begins a declared variable, and each template uses every variable',
+  'template-render': 'a template rendered with its defaults is the prompt in that language, exactly',
   'runs-min': 'a recipe has at least one run',
   'run-cost': 'every run states cost_cents',
   'run-outputs': 'every run has at least one output',
@@ -137,6 +144,80 @@ const contentType = (family) => {
 const pixels = () => wholeNumber(1, tag('shape', 'must be a whole number of pixels, at least 1'));
 
 // ---------------------------------------------------------------------------
+// The prompt, and its template when it has one
+// ---------------------------------------------------------------------------
+
+/** Where two texts first differ, quoted for a message. @param {string} a @param {string} b */
+function firstDifference(a, b) {
+  let at = 0;
+  while (at < a.length && at < b.length && a[at] === b[at]) at++;
+  const quote = (/** @type {string} */ text) => JSON.stringify(text.slice(at, at + 24));
+  return `at character ${at}: the template gives ${quote(a)} where the prompt has ${quote(b)}`;
+}
+
+/**
+ * The checks that tie a template to its variables and to the prompt. They
+ * run once the prompt's own shape is right, so a missing key is reported
+ * once, as what it is.
+ *
+ * A recipe published before templates has variables and no template: the
+ * blanks its source had, with the values that filled them. That stays valid,
+ * so nothing here applies until a recipe has a template or a zh_default.
+ *
+ * @param {{ en: string, zh: string, template?: { en: string, zh: string }, variables?: { name: string, default: string, zh_default?: string }[] }} prompt
+ * @param {{ addIssue: (issue: { code: 'custom', message: string, path: (string | number)[] }) => void }} ctx
+ */
+function checkTemplateOf(prompt, ctx) {
+  /** @param {RuleId} rule @param {(string | number)[]} path @param {string} text */
+  const problem = (rule, path, text) => ctx.addIssue({ code: 'custom', message: tag(rule, text), path });
+  const variables = prompt.variables ?? [];
+
+  if (!prompt.template) {
+    variables.forEach((variable, i) => {
+      if (variable.zh_default !== undefined) {
+        problem('template-variables', ['variables', i, 'zh_default'],
+          'zh_default is the Chinese default of a template variable, and this prompt has no template');
+      }
+    });
+    return;
+  }
+  if (variables.length === 0) {
+    problem('template-variables', ['variables'], 'a template comes with variables: list each {{name}} it uses, with its default');
+    return;
+  }
+
+  let namesAreSound = true;
+  const seen = new Set();
+  variables.forEach((variable, i) => {
+    if (!isVariableName(variable.name)) {
+      namesAreSound = false;
+      problem('variable-name', ['variables', i, 'name'],
+        `must be 1–${NAME_MAX_LENGTH} ASCII letters, digits, spaces, hyphens or underscores, starting and ending with a letter or digit`);
+    } else if (seen.has(variable.name)) {
+      namesAreSound = false;
+      problem('variable-unique', ['variables', i, 'name'], `"${variable.name}" is declared more than once`);
+    }
+    seen.add(variable.name);
+  });
+  // The markers can only be judged against names that are themselves sound.
+  if (!namesAreSound) return;
+
+  const names = variables.map((variable) => variable.name);
+  for (const lang of /** @type {const} */ (['en', 'zh'])) {
+    // A missing or blank template is already reported as that.
+    if (typeof prompt.template[lang] !== 'string' || !/\S/.test(prompt.template[lang])) continue;
+    const faults = checkTemplate(prompt.template[lang], names);
+    for (const fault of faults) problem('template-markers', ['template', lang], fault.message);
+    if (faults.length > 0) continue;
+    const rendered = renderTemplate(prompt.template[lang], defaultsIn(variables, lang));
+    if (rendered !== prompt[lang]) {
+      problem('template-render', ['template', lang],
+        `rendered with its defaults it must be prompt.${lang} exactly; they differ ${firstDifference(rendered, prompt[lang])}`);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Outputs and runs. An image recipe and a video recipe differ only in their
 // outputs and in what their params must state.
 // ---------------------------------------------------------------------------
@@ -223,25 +304,38 @@ const recipeOf = (modality, run) =>
 
     tags: z.array(text(), { error: tag('shape', 'required: a list of tags, which may be empty') }),
 
-    prompt: z.strictObject(
-      {
-        en: text('prompt-languages'),
-        zh: text('prompt-languages'),
-        // "list": the source list supplied the Chinese text. "machine": it was machine-translated.
-        zh_origin: z.enum(['list', 'machine'], { error: tag('shape', 'must be "list" or "machine"') }),
-        // The placeholders a templated prompt had, with the defaults that produced prompt.en.
-        variables: z
-          .array(
-            z.strictObject({
-              name: text(),
-              default: z.string({ error: tag('shape', 'required, as text') }),
-            }),
-            { error: tag('shape', 'must be a list of { "name", "default" }') },
-          )
-          .optional(),
-      },
-      { error: whenMissing(tag('prompt-languages', 'required, with both "en" and "zh"')) },
-    ),
+    prompt: z
+      .strictObject(
+        {
+          en: text('prompt-languages'),
+          zh: text('prompt-languages'),
+          // "list": the source list supplied the Chinese text. "machine": it was machine-translated.
+          zh_origin: z.enum(['list', 'machine'], { error: tag('shape', 'must be "list" or "machine"') }),
+          // The prompt with its blanks kept as {{name}} markers, in both languages
+          // (src/lib/gallery-template.js). Rendered with the defaults below, each
+          // gives the prompt in its language exactly.
+          template: z
+            .strictObject(
+              { en: text('template-languages'), zh: text('template-languages') },
+              { error: whenMissing(tag('template-languages', 'must be { "en", "zh" }, with both')) },
+            )
+            .optional(),
+          // The blanks of a templated prompt. `default` produced prompt.en; `zh_default`,
+          // where the Chinese prompt uses other words, produced prompt.zh.
+          variables: z
+            .array(
+              z.strictObject({
+                name: text(),
+                default: z.string({ error: tag('shape', 'required, as text') }),
+                zh_default: z.string({ error: tag('shape', 'must be text') }).optional(),
+              }),
+              { error: tag('shape', 'must be a list of { "name", "default" }, with an optional "zh_default"') },
+            )
+            .optional(),
+        },
+        { error: whenMissing(tag('prompt-languages', 'required, with both "en" and "zh"')) },
+      )
+      .superRefine(checkTemplateOf),
 
     runs: z
       .array(run, { error: tag('runs-min', 'a recipe has at least one run') })
