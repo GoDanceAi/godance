@@ -22,6 +22,7 @@ import GalleryExamples from '../components/GalleryExamples';
 import { JobOutputs } from '../components/JobMedia';
 import JobStatusPill from '../components/JobStatusPill';
 import RecipeSource from '../components/RecipeSource';
+import SaveJobButton from '../components/SaveJobButton';
 import SendErrorNotice from '../components/SendErrorNotice';
 
 const WORDS = {
@@ -342,7 +343,11 @@ export default function StudioPage({ modality }: { modality: MediaModality }) {
         </form>
 
         <section ref={resultRef} aria-label="Result" className="card scroll-mt-4">
-          <Result current={current} modality={modality} />
+          <Result
+            current={current}
+            modality={modality}
+            onJobChange={(job) => setCurrent((cur) => (cur?.id === job.id ? { ...cur, job } : cur))}
+          />
         </section>
       </div>
     </div>
@@ -393,7 +398,11 @@ function statusLine(current: Current, words: (typeof WORDS)[MediaModality]): str
   }
 }
 
-function Result({ current, modality }: { current: Current | null; modality: MediaModality }) {
+function Result({ current, modality, onJobChange }: {
+  current: Current | null;
+  modality: MediaModality;
+  onJobChange: (job: JobView) => void;   // the job was saved or un-saved here
+}) {
   const words = WORDS[modality];
   const job = current?.job ?? null;
   const prompt = job?.prompt ?? current?.prompt ?? '';
@@ -440,6 +449,7 @@ function Result({ current, modality }: { current: Current | null; modality: Medi
       {current && (isTerminal(current.status) || current.gone) && (
         <div className="mt-4 flex flex-wrap gap-2">
           {prompt && <CopyButton text={prompt} label="Copy prompt" />}
+          {job && !current.gone && <SaveJobButton job={job} onChange={onJobChange} />}
           <Link to={`/history/${current.id}`} className="btn btn-ghost btn-sm">Open in History</Link>
         </div>
       )}
