@@ -34,13 +34,14 @@ other host, and it is removed from anything printed or saved.
 |---|---|---|
 | `fetch` | Reads each list at its pinned commit, after checking its licence file. Drops posts already seen and posts on the removal list. | no |
 | `screen` | Sets aside what cannot be used, with a reason for each. `--classify` also has a text model read what is left against the content standard. | only with `--classify` |
-| `translate` | Completes each prompt in English and Chinese, resolves placeholders, and gives each candidate its slug. | when a list supplies one language only |
+| `translate` | Completes each prompt in English and Chinese, keeps its blanks as a template, and gives each candidate its slug. | when a list supplies one language only |
 | `generate` | Runs each candidate on Godance, downloads the output at once, and records the cost. | yes |
 | `review` | Builds the review sheet. | no |
 | `publish` | Writes a recipe for each entry the operator approved. | no |
 
-Also: `remove <slug>` takes a recipe down, and `status` shows what each
-stage has done and what has been spent.
+Also: `remove <slug>` takes a recipe down, `retemplate <slug>` gives a
+published recipe its template, and `status` shows what each stage has done
+and what has been spent.
 
 A first batch, once the operator has given the go-ahead and a cap:
 
@@ -65,6 +66,32 @@ when it is broken in the list, needs an input image, video or audio, is in
 a language other than English or Chinese, has a blank with no default, is
 too long, is written for a longer clip than `--max-video-seconds` (default
 10), or mentions a term in `config/screen-terms.json`.
+
+### translate and templates
+
+Some lists mark a blank in a prompt as
+`{argument name="lantern color" default="warm red"}`. The recipe keeps it:
+
+- `prompt.template` holds the prompt in both languages with each blank as a
+  `{{lantern color}}` marker, and `prompt.variables` holds each blank's
+  default, with a `zh_default` where the Chinese uses other words.
+- Filled with the defaults, each template is the prompt in its language,
+  exactly. The run is made with that filled prompt, so the output is of the
+  prompt as its author wrote it.
+- A name the template rules refuse is replaced by one they accept, and a
+  name the list uses with two defaults becomes two variables.
+  `source.changes` lists each change, after "placeholders rewritten as
+  {{name}}".
+
+A machine translation has to bring every marker back unchanged. When one is
+lost or changed, the request is made once more. If that fails too, the
+filled prompt is translated as before, the recipe has no template
+(`source.changes` then says "placeholders resolved"), and the review sheet's
+notes say why. Defaults that are words are translated; numbers, sizes and
+brand names are left as they are.
+
+The rules for a template are in `src/lib/gallery-template.js`, and the
+schema checks every recipe against them.
 
 ### generate
 
@@ -116,6 +143,30 @@ Media is never committed. `publish` lists the files to upload in
 `.gallery-work/manifest.json`; uploading them to public storage is the
 operator's step. The files are in `.gallery-work/media/`, in the layout the
 recipes refer to.
+
+### retemplate
+
+`retemplate <slug>`, or `retemplate --all`, gives a recipe that was
+published before templates its template. It reads the entry the recipe came
+from, in its list at the commit the recipe pins, and builds the template as
+`translate` does.
+
+It writes only when the template, filled with its defaults, is the published
+prompt exactly, in English and in Chinese. Outputs, costs and the review
+stay as they are, and **no paid call is made**: the language the list does
+not supply is not translated again. Its template is made from the published
+text, which works when each default stands in it as written (a number, a
+size, a brand name). A recipe whose default was translated is left as it
+is, and the report says so for each recipe:
+
+```
+  + harbour-card: would add a template, 2 variables (ratio, brand)
+  = harbour-poster: left as it is: the Chinese prompt does not contain the
+    default of {{boat colour}} as written ("red"): it was translated, and a
+    Chinese template cannot be made without translating again
+```
+
+Like every command it is a dry run unless `--apply` is given.
 
 ### remove
 
