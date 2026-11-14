@@ -78,7 +78,7 @@ public final class ImageDtos {
     /**
      * A job as {@code GET /v1/jobs} and {@code GET /v1/jobs/{id}} return it.
      * The fields up to {@code completedAt} are the original shape; the rest
-     * were added in round 7 and are additions only.
+     * were added in rounds 7 and 9 and are additions only.
      *
      * <ul>
      *   <li>{@code prompt} and {@code params}: what was asked for, with the
@@ -89,7 +89,11 @@ public final class ImageDtos {
      *       is read. Empty until the job is DONE, and again once purged.</li>
      *   <li>{@code outputUrl}: the first output, freshly signed.</li>
      *   <li>{@code mediaExpiresAt}: when the files and prompt are due to be
-     *       deleted; null when they are not scheduled for deletion.</li>
+     *       deleted; null when they are not scheduled for deletion, which a
+     *       saved job is not. A date in the past means the next nightly run
+     *       deletes them.</li>
+     *   <li>{@code saved}: the owner has saved the job, which keeps it past
+     *       the retention period ({@code PUT /v1/jobs/{id}/saved}).</li>
      * </ul>
      */
     public record JobView(
@@ -109,7 +113,8 @@ public final class ImageDtos {
             Map<String, Object> params,
             List<JobOutputView> outputs,
             boolean purged,
-            Instant mediaExpiresAt
+            Instant mediaExpiresAt,
+            boolean saved
     ) {
         /**
          * {@code outputs} carry links already signed; {@code outputUrl} is the
@@ -126,7 +131,8 @@ public final class ImageDtos {
                     j.getCreatedAt(), j.getStartedAt(), j.getCompletedAt(),
                     purged ? null : promptOf(j),
                     purged ? Map.of() : paramsOf(j),
-                    shown, purged, purged ? null : mediaExpiresAt);
+                    shown, purged, purged ? null : mediaExpiresAt,
+                    !purged && j.getSavedAt() != null);
         }
 
         private static String promptOf(GenerationJob j) {
@@ -156,6 +162,12 @@ public final class ImageDtos {
             if (v != null) to.put(as, v);
         }
     }
+
+    /**
+     * {@code GET /v1/jobs/saved}: how many generations the caller has saved,
+     * and the most the account can ({@code godance.retention.saved-limit}).
+     */
+    public record SavedJobsView(long count, int limit) { }
 
     /** One stored file of a job; {@code url} is signed when the job is read. */
     public record JobOutputView(

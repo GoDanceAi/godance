@@ -96,6 +96,11 @@ public class AuditLogService {
     public static final String EVT_REFERRAL_SKIPPED  = "referral.skipped";
     /** Paying a reward threw; the top-up that asked for it stands, and the sweep retries. */
     public static final String EVT_REFERRAL_FAILED   = "referral.failed";
+    // Saved generations (round 9)
+    /** A user saved a generation, which keeps it past the retention period; the job id is in the detail. */
+    public static final String EVT_JOB_SAVED   = "job.saved";
+    /** A user un-saved a generation, which puts it back under the retention period. */
+    public static final String EVT_JOB_UNSAVED = "job.unsaved";
 
     private final AuditLogEntryRepository repo;
 

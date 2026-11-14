@@ -1,6 +1,8 @@
 package ai.godance.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.reset;
 
@@ -10,6 +12,8 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -52,9 +56,10 @@ import software.amazon.awssdk.services.s3.model.S3Object;
 
 /**
  * The Privacy Policy's retention schedule as {@link DataRetentionJob} runs it:
- * media and prompts of ended jobs go after 90 days, archived conversations
- * 30 days after archiving, audit rows after a year. Each test seeds rows on
- * either side of its cutoff and runs one full pass.
+ * media and prompts of ended jobs go after 90 days unless the owner saved
+ * the job, archived conversations 30 days after archiving, audit rows after
+ * a year. Each test seeds rows on either side of its cutoff and runs one
+ * full pass.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.MOCK)
 @Testcontainers
@@ -107,6 +112,7 @@ class DataRetentionIntegrationTest {
     @Autowired ConversationRepository conversations;
     @Autowired ConversationMessageRepository messages;
     @Autowired AuditLogEntryRepository audit;
+    @Autowired JobSaveService saves;
 
     // ===== Generated media and prompts: 90 days =========================
 
@@ -168,6 +174,119 @@ class DataRetentionIntegrationTest {
 
         assertThat(retried.jobsPurged()).isEqualTo(1);
         assertPurged(job);
+        assertThat(keysUnder(prefix)).isEmpty();
+    }
+
+    // ===== Saved generations: kept past 90 days (V27) ===================
+
+    @Test
+    void run_givenSavedJobOlderThan90Days_keepsItsFilesPromptAndOutputs() {
+        UUID owner = newUser();
+        GenerationJob saved = job(owner, Modality.IMAGE, JobStatus.DONE, daysAgo(200));
+        String prefix = "images/" + saved.getId() + "/";
+        putObjects(prefix, "0.png", "1.png");
+        recordOutputs(saved, "images/", "0.png", "1.png");
+        saves.save(owner, saved.getId(), null);
+        GenerationJob notSaved = job(owner, Modality.IMAGE, JobStatus.DONE, daysAgo(200));
+        putObjects("images/" + notSaved.getId() + "/", "0.png");
+
+        DataRetentionJob.Summary summary = DataRetentionJob.run(retention, Instant.now());
+
+        assertThat(summary.jobsPurged()).isEqualTo(1);
+        assertThat(summary.jobsFailed()).isZero();
+        assertUntouched(saved);
+        assertThat(keysUnder(prefix)).containsExactlyInAnyOrder(prefix + "0.png", prefix + "1.png");
+        assertThat(outputRows.findByJobIdOrderByOutputIndexAsc(saved.getId())).hasSize(2);
+        assertPurged(notSaved);
+        assertThat(keysUnder("images/" + notSaved.getId() + "/")).isEmpty();
+        // And at the run after that: kept for as long as it stays saved.
+        assertThat(DataRetentionJob.run(retention, Instant.now()).jobsPurged()).isZero();
+        assertUntouched(saved);
+        assertThat(keysUnder(prefix)).hasSize(2);
+    }
+
+    @Test
+    void run_givenSavedJobThenUnsaved_purgesItAtTheNextRun() {
+        UUID owner = newUser();
+        GenerationJob job = job(owner, Modality.IMAGE, JobStatus.DONE, daysAgo(200));
+        String prefix = "images/" + job.getId() + "/";
+        putObjects(prefix, "0.png");
+        recordOutputs(job, "images/", "0.png");
+        saves.save(owner, job.getId(), null);
+
+        DataRetentionJob.Summary whileSaved = DataRetentionJob.run(retention, Instant.now());
+
+        assertThat(whileSaved.jobsPurged()).isZero();
+        assertUntouched(job);
+        // Saved: not scheduled for deletion at all.
+        assertThat(DataRetentionService.mediaExpiresAt(jobs.findById(job.getId()).orElseThrow())).isNull();
+
+        saves.unsave(owner, job.getId(), null);
+
+        // Un-saved after its date: due at once, and the date says so until the run comes.
+        assertUntouched(job);
+        assertThat(DataRetentionService.mediaExpiresAt(jobs.findById(job.getId()).orElseThrow()))
+                .isBefore(Instant.now());
+
+        DataRetentionJob.Summary afterUnsave = DataRetentionJob.run(retention, Instant.now());
+
+        assertThat(afterUnsave.jobsPurged()).isEqualTo(1);
+        assertThat(afterUnsave.jobsFailed()).isZero();
+        assertPurged(job);
+        assertThat(keysUnder(prefix)).isEmpty();
+        assertThat(outputRows.findByJobIdOrderByOutputIndexAsc(job.getId())).isEmpty();
+    }
+
+    @Test
+    void run_givenJobSavedAfterTheRunReadIt_keepsItsFiles() {
+        UUID owner = newUser();
+        GenerationJob first = job(owner, Modality.IMAGE, JobStatus.DONE, daysAgo(150));
+        GenerationJob second = job(owner, Modality.IMAGE, JobStatus.DONE, daysAgo(140));
+        String firstPrefix = "images/" + first.getId() + "/";
+        String secondPrefix = "images/" + second.getId() + "/";
+        putObjects(firstPrefix, "0.png");
+        putObjects(secondPrefix, "0.png");
+        // The run reads both jobs in one page. While it deletes the first
+        // one's files, the owner saves the second.
+        doAnswer(call -> {
+            CompletableFuture.runAsync(() -> saves.save(owner, second.getId(), null)).join();
+            return call.callRealMethod();
+        }).when(storage).deletePrefix(firstPrefix);
+
+        DataRetentionJob.Summary summary = DataRetentionJob.run(retention, Instant.now());
+
+        assertThat(summary.jobsPurged()).isEqualTo(1);
+        assertThat(summary.jobsFailed()).isZero();
+        assertPurged(first);
+        assertUntouched(second);
+        assertThat(jobs.findById(second.getId()).orElseThrow().getSavedAt()).isNotNull();
+        assertThat(keysUnder(secondPrefix)).hasSize(1);
+    }
+
+    @Test
+    void run_givenSaveArrivingWhileTheJobIsBeingPurged_refusesTheSave() {
+        UUID owner = newUser();
+        GenerationJob job = job(owner, Modality.IMAGE, JobStatus.DONE, daysAgo(150));
+        String prefix = "images/" + job.getId() + "/";
+        putObjects(prefix, "0.png");
+        // The save starts once the run holds the job and is deleting its
+        // files. It can only finish after the run has: saved with its files
+        // gone is the one outcome that must never happen.
+        CompletableFuture<?>[] save = new CompletableFuture<?>[1];
+        doAnswer(call -> {
+            save[0] = CompletableFuture.runAsync(() -> saves.save(owner, job.getId(), null));
+            Thread.sleep(300);   // long enough for the save to reach the locked row
+            return call.callRealMethod();
+        }).when(storage).deletePrefix(prefix);
+
+        DataRetentionJob.Summary summary = DataRetentionJob.run(retention, Instant.now());
+
+        assertThat(summary.jobsPurged()).isEqualTo(1);
+        assertThatThrownBy(() -> save[0].join())
+                .isInstanceOf(CompletionException.class)
+                .hasCauseInstanceOf(JobSaveRefusedException.class);
+        assertPurged(job);
+        assertThat(jobs.findById(job.getId()).orElseThrow().getSavedAt()).isNull();
         assertThat(keysUnder(prefix)).isEmpty();
     }
 
