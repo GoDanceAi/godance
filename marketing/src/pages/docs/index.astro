@@ -17,6 +17,7 @@ const endpoints = [
   { id: 'images', label: 'POST /v1/images/generations', summary: 'async: returns a job_id to poll, or pass webhook_url' },
   { id: 'videos', label: 'POST /v1/videos/generations', summary: 'async-only, signed webhook' },
   { id: 'jobs', label: 'GET /v1/jobs/{id}', summary: 'async job status, outputs, history and saving a job' },
+  { id: 'recipes', label: 'CRUD /v1/recipes', summary: 'keep a prompt template with variables, run it, and total what its attempts cost' },
   { id: 'estimates', label: 'POST /v1/estimates', summary: 'price an image or video request before sending it' },
   { id: 'models', label: 'GET /v1/models', summary: 'catalog, prices and what each model accepts' },
   { id: 'keys', label: 'CRUD /v1/keys', summary: 'API key management' },
@@ -87,6 +88,50 @@ curl https://api.godance.ai/v1/jobs/saved \\
   -H "Authorization: Bearer $GODANCE_API_KEY"
 
 { "count": 12, "limit": 500 }`;
+
+const recipeSnippet = `curl https://api.godance.ai/v1/recipes \\
+  -H "Authorization: Bearer $GODANCE_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "title": "Mug on a kitchen shelf",
+    "modality": "IMAGE",
+    "template": "A {{color}} mug on a {{surface}}, soft morning light",
+    "variables": [
+      { "name": "color", "default": "red" },
+      { "name": "surface", "default": "kitchen shelf" }
+    ],
+    "model": "gpt-image-2",
+    "params": { "size": "1024x1024", "n": 1 }
+  }'
+
+{ "id": "…", "title": "Mug on a kitchen shelf", "modality": "IMAGE",${recipesOn ? '\n  "source_gallery_recipe": null,' : ''}
+  "created_at": "2026-11-14T09:00:00Z", "updated_at": "2026-11-14T09:00:00Z",
+  "latest_version": {
+    "id": "…", "number": 1,
+    "template": "A {{color}} mug on a {{surface}}, soft morning light",
+    "variables": [
+      { "name": "color", "default": "red" },
+      { "name": "surface", "default": "kitchen shelf" }
+    ],
+    "model": "gpt-image-2", "params": { "size": "1024x1024", "n": 1 },
+    "created_at": "2026-11-14T09:00:00Z" },
+  "attempts": 0, "spent_cents": 0 }`;
+
+const recipeRunSnippet = `curl https://api.godance.ai/v1/images/generations \\
+  -H "Authorization: Bearer $GODANCE_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "model": "gpt-image-2",
+    "size": "1024x1024",
+    "recipe": { "version_id": "…", "variables": { "color": "blue" } }
+  }'
+
+# The job's prompt is the template with the values filled in
+{ "id": "…", "status": "DONE",
+  "prompt": "A blue mug on a kitchen shelf, soft morning light",
+  "recipe": { "id": "…", "version": 1,
+              "variables": { "color": "blue", "surface": "kitchen shelf" } },
+  … }`;
 
 const estimateSnippet = `curl https://api.godance.ai/v1/estimates \\
   -H "Authorization: Bearer $GODANCE_API_KEY" \\
@@ -240,7 +285,8 @@ def verify(payload, header, secret):
       {recipesOn && (
         <li><code class="code-chip">galleryRecipe</code> — the slug of the gallery recipe the job was a run of, or null. To set it, send <code class="code-chip">gallery_recipe</code> in the body of <code class="code-chip">POST /v1/images/generations</code> or <code class="code-chip">POST /v1/videos/generations</code>: a recipe's slug, which is lowercase letters, digits and hyphens, at most 80 characters. Any other value returns <code class="code-chip">400</code> with <code class="code-chip">code: "invalid_gallery_recipe"</code> and nothing is charged. It is optional and changes nothing about the result or its price.</li>
       )}
-      <li><code class="code-chip">purged</code> — true once the files and prompt have been deleted; <code class="code-chip">prompt</code> is then null, <code class="code-chip">params</code> is <code class="code-chip">&#123;&#125;</code> and <code class="code-chip">outputs</code> is empty. The cost fields and <code class="code-chip">channel</code> stay{recipesOn && <>, and so does <code class="code-chip">galleryRecipe</code></>}.</li>
+      <li><code class="code-chip">recipe</code> — set when the job ran one of <a href="#recipes" class="underline" style="color: var(--color-primary)">your recipes</a>: the recipe's <code class="code-chip">id</code>, the <code class="code-chip">version</code> number it ran, and <code class="code-chip">variables</code>, the value each variable had. Null for a job made from a plain prompt, and again once that recipe is deleted.</li>
+      <li><code class="code-chip">purged</code> — true once the files and prompt have been deleted; <code class="code-chip">prompt</code> is then null, <code class="code-chip">params</code> is <code class="code-chip">&#123;&#125;</code> and <code class="code-chip">outputs</code> is empty. A <code class="code-chip">recipe</code>'s <code class="code-chip">variables</code> is null too: the values are deleted with the prompt. The cost fields and <code class="code-chip">channel</code> stay{recipesOn && <>, and so does <code class="code-chip">galleryRecipe</code></>}.</li>
       <li><code class="code-chip">errorMessage</code> — set when <code class="code-chip">FAILED</code>; the reserved credit is refunded.</li>
       <li><code class="code-chip">estimatedCostCents</code>, <code class="code-chip">actualCostCents</code> — integer cents: the amount reserved when the job was accepted, and the amount charged once it is <code class="code-chip">DONE</code>.</li>
       <li><code class="code-chip">id</code>, <code class="code-chip">modality</code>, <code class="code-chip">provider</code>, <code class="code-chip">model</code>, <code class="code-chip">createdAt</code>, <code class="code-chip">startedAt</code>, <code class="code-chip">completedAt</code> — timestamps are ISO 8601.</li>
@@ -257,6 +303,7 @@ def verify(payload, header, secret):
       <li><code class="code-chip">modality</code> — <code class="code-chip">IMAGE</code> or <code class="code-chip">VIDEO</code>.</li>
       <li><code class="code-chip">status</code> — <code class="code-chip">QUEUED</code>, <code class="code-chip">RUNNING</code>, <code class="code-chip">DONE</code> or <code class="code-chip">FAILED</code>.</li>
       <li><code class="code-chip">saved</code> — <code class="code-chip">true</code> for only the jobs you have saved, <code class="code-chip">false</code> for only the others. It combines with the parameters above.</li>
+      <li><code class="code-chip">recipe</code> — a recipe <code class="code-chip">id</code>: only the jobs that ran a version of that recipe.</li>
     </ul>
 
     <h3 id="saving-a-job" class="scroll-mt-24 text-xl font-semibold mt-10 mb-4 text-fg">Saving a job</h3>
@@ -272,6 +319,56 @@ def verify(payload, header, secret):
       <li>Only a <code class="code-chip">DONE</code> job whose files still exist can be saved. Any other job returns <code class="code-chip">409</code> with <code class="code-chip">code: "job_not_saveable"</code>.</li>
       <li>An account can save up to 500 jobs. Saving one more returns <code class="code-chip">409</code> with <code class="code-chip">code: "saved_limit_reached"</code>; un-save a job to make room. <code class="code-chip">GET /v1/jobs/saved</code> returns how many you have saved and your limit.</li>
       <li>While a job is saved, its <code class="code-chip">mediaExpiresAt</code> is null. Un-saving puts the 90 days back, counted from when the job was created. A job already older than that then has a <code class="code-chip">mediaExpiresAt</code> in the past, and its files and prompt are deleted at the next nightly clean-up.</li>
+    </ul>
+
+    <!-- ===== Recipes ===== -->
+    <h2 id="recipes" class="scroll-mt-24 text-2xl font-bold mt-16 mb-4 text-fg">CRUD /v1/recipes</h2>
+    <p class="text-fg-muted">
+      A recipe keeps a setup that works: a prompt template with variables, the model and the
+      request parameters. Every change you save is a new version, numbered 1, 2, 3…, and a
+      version never changes once it is written. Run a version with different values and
+      Godance fills the template in, records which version and values each job used, and adds
+      up what the attempts cost. Recipes are private to your account: an ID that isn't yours
+      returns <code class="code-chip">404</code>. Works with an API key or a signed-in session.
+      Field names are snake_case.
+    </p>
+    <pre class="code-block mt-4"><code>{recipeSnippet}</code></pre>
+    <ul class="mt-4 space-y-2 text-fg-muted">
+      <li><code class="code-chip">POST /v1/recipes</code> — creates a recipe with its version 1 and returns it with <code class="code-chip">201</code>. <code class="code-chip">title</code> (up to 200 characters), <code class="code-chip">modality</code> (<code class="code-chip">IMAGE</code> or <code class="code-chip">VIDEO</code>), <code class="code-chip">template</code> and <code class="code-chip">model</code> are required; <code class="code-chip">variables</code> and <code class="code-chip">params</code> are optional.{recipesOn && <> <code class="code-chip">source_gallery_recipe</code> is optional too: the slug of the gallery recipe yours was made from.</>} A body that breaks a rule on this page returns <code class="code-chip">400</code> with <code class="code-chip">code: "invalid_recipe"</code> and a sentence saying which.</li>
+      <li><code class="code-chip">GET /v1/recipes</code> — your recipes as a JSON array, newest first. <code class="code-chip">limit</code> is 1 to 100 per page, and <code class="code-chip">before</code> is a recipe <code class="code-chip">id</code>: only recipes older than it.</li>
+      <li><code class="code-chip">GET /v1/recipes/&#123;id&#125;</code> — one recipe, with its latest version.</li>
+      <li><code class="code-chip">PATCH /v1/recipes/&#123;id&#125;</code> — renames it: send <code class="code-chip">&#123; "title": "…" &#125;</code>. The title is the only thing about a recipe that changes in place.</li>
+      <li><code class="code-chip">DELETE /v1/recipes/&#123;id&#125;</code> — deletes the recipe and its versions, with <code class="code-chip">204</code>. The jobs made with it are kept, and their <code class="code-chip">recipe</code> becomes null.</li>
+      <li><code class="code-chip">GET /v1/recipes/&#123;id&#125;/versions</code> — every version, newest first.</li>
+      <li><code class="code-chip">POST /v1/recipes/&#123;id&#125;/versions</code> — send <code class="code-chip">template</code>, <code class="code-chip">variables</code>, <code class="code-chip">model</code> and <code class="code-chip">params</code>. When any of them differs from the latest version, a new version is written and returned with <code class="code-chip">201</code>. When nothing differs, the latest version comes back with <code class="code-chip">200</code> and no version is written, so saving twice is safe.</li>
+      <li><code class="code-chip">attempts</code> is how many jobs ran any version of the recipe. <code class="code-chip">spent_cents</code> is what the finished ones were charged, in integer cents.</li>
+      <li>An account can keep up to 500 recipes, and a recipe up to 200 versions. Past either, the request returns <code class="code-chip">409</code> with <code class="code-chip">code: "recipe_limit_reached"</code>.</li>
+    </ul>
+
+    <h3 id="recipe-templates" class="scroll-mt-24 text-xl font-semibold mt-10 mb-4 text-fg">Templates</h3>
+    <ul class="space-y-2 text-fg-muted">
+      <li>A variable is written <code class="code-chip">&#123;&#123;name&#125;&#125;</code>. A name is 1 to 40 ASCII letters, digits, spaces, hyphens or underscores, and starts and ends with a letter or digit.</li>
+      <li>Each variable is declared in <code class="code-chip">variables</code> with its <code class="code-chip">name</code> and a <code class="code-chip">default</code>, which may be an empty string. Every declared variable has to appear in the template at least once.</li>
+      <li>Every <code class="code-chip">&#123;&#123;</code> in the template has to begin a declared variable. A <code class="code-chip">&#125;&#125;</code> on its own is ordinary text, so a prompt written as JSON works.</li>
+      <li>Filling in replaces each <code class="code-chip">&#123;&#123;name&#125;&#125;</code> with the value you send, or with the default when you send none. An empty string is a value. It is one pass: a value that itself contains <code class="code-chip">&#123;&#123;…&#125;&#125;</code> is inserted as it is.</li>
+      <li>A template is at most 32,000 characters and has at most 20 variables. A default or a value is at most 2,000 characters.</li>
+    </ul>
+
+    <h3 id="running-a-recipe" class="scroll-mt-24 text-xl font-semibold mt-10 mb-4 text-fg">Running a recipe</h3>
+    <p class="text-fg-muted">
+      <code class="code-chip">POST /v1/images/generations</code> and
+      <code class="code-chip">POST /v1/videos/generations</code> take
+      <code class="code-chip">recipe</code> in place of <code class="code-chip">prompt</code>: a
+      <code class="code-chip">version_id</code>, and <code class="code-chip">variables</code>
+      with a value for any of the version's variables.
+    </p>
+    <pre class="code-block mt-4"><code>{recipeRunSnippet}</code></pre>
+    <ul class="mt-4 space-y-2 text-fg-muted">
+      <li>Send <code class="code-chip">prompt</code> or <code class="code-chip">recipe</code>, never both: both returns <code class="code-chip">400</code> with <code class="code-chip">code: "prompt_and_recipe"</code>.</li>
+      <li>The filled-in template is the job's prompt. It is what the model receives and what <code class="code-chip">prompt</code> shows on the job, and the request costs what the same prompt sent directly would cost.</li>
+      <li><code class="code-chip">model</code> and the other request fields are sent as usual. The version's <code class="code-chip">model</code> and <code class="code-chip">params</code> record what worked; they do not limit what you send.</li>
+      <li>A <code class="code-chip">version_id</code> that isn't one of your recipes' returns <code class="code-chip">404</code> with <code class="code-chip">code: "recipe_not_found"</code>. An image recipe sent to the video endpoint, or the other way round, returns <code class="code-chip">400</code> with <code class="code-chip">recipe_modality_mismatch</code>; a value for a variable the version doesn't declare returns <code class="code-chip">400</code> with <code class="code-chip">recipe_variable_unknown</code>; a value over 2,000 characters returns <code class="code-chip">400</code> with <code class="code-chip">recipe_variable_too_long</code>. Nothing is charged for a request that is refused.</li>
+      <li>The job's <code class="code-chip">recipe</code> then names the recipe, the version and the values used, and <code class="code-chip">GET /v1/jobs?recipe=&#123;id&#125;</code> lists every job that ran the recipe.</li>
     </ul>
 
     <!-- ===== Estimates ===== -->
