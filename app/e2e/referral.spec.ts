@@ -205,7 +205,7 @@ test.describe('the referral page', () => {
     // Invite comes after Billing, in the header row or, on a phone, the row below it.
     const nav = page.getByRole('navigation', { name: 'Main' });
     await expect(nav.getByRole('link')).toHaveText(
-      ['Dashboard', 'Chat', 'Create', 'History', 'API keys', 'Billing', 'Invite', 'Settings']);
+      ['Dashboard', 'Chat', 'Create', 'History', 'Recipes', 'API keys', 'Billing', 'Invite', 'Settings']);
     // The extra entry doesn't push the page sideways, phone included.
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     await nav.getByRole('link', { name: 'Invite' }).click();

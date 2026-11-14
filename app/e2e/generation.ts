@@ -163,7 +163,8 @@ export function serveJob(api: MockApi, job: JobView): { set: (next: JobView) => 
 
 /**
  * GET /v1/jobs over a fixed list, newest first, as the API pages it: limit,
- * before (a job id; only older jobs), modality and saved.
+ * before (a job id; only older jobs), modality, saved and recipe (a recipe
+ * id; only the jobs that ran one of its versions).
  */
 export function serveJobList(api: MockApi, jobs: JobView[]): MockApi {
   return api.on('GET', '/v1/jobs', (call) => {
@@ -171,6 +172,8 @@ export function serveJobList(api: MockApi, jobs: JobView[]): MockApi {
     const modality = call.query.get('modality');
     if (modality) list = list.filter((j) => j.modality === modality);
     if (call.query.get('saved') === 'true') list = list.filter((j) => j.saved);
+    const recipe = call.query.get('recipe');
+    if (recipe) list = list.filter((j) => j.recipe?.id === recipe);
     const before = call.query.get('before');
     if (before) {
       const at = list.findIndex((j) => j.id === before);

@@ -386,6 +386,14 @@ export interface JobView {
   saved?: boolean;                     // kept past the deletion date; absent from an API without saving
   channel?: JobChannel | null;         // how it was made; null for a job from before this was recorded
   galleryRecipe?: string | null;       // the gallery recipe it was a run of, by slug
+  recipe?: JobRecipe | null;           // the user's recipe it ran; null for a plain prompt, or once that recipe is deleted
+}
+
+/** The user's recipe a job ran: which version, and the value each variable had (null once purged). */
+export interface JobRecipe {
+  id: string;
+  version: number;
+  variables: Record<string, string> | null;
 }
 
 /** STUDIO: made by a signed-in session. API: made with an API key. The API decides which. */
@@ -401,6 +409,38 @@ export interface SavedJobs {
 export interface SavedRecipe {
   slug: string;
   savedAt: string;
+}
+
+// ===== The user's own recipes (/v1/recipes) =====
+
+/** A template variable: its name, and the value it has when none is given. */
+export interface RecipeVariable {
+  name: string;
+  default: string;
+}
+
+/** One version of a recipe. A version never changes once written. */
+export interface UserRecipeVersion {
+  id: string;
+  number: number;
+  template: string;
+  variables: RecipeVariable[];
+  model: string;
+  params: Record<string, unknown>;
+  created_at: string;
+}
+
+/** A recipe the user keeps, with its latest version and what its attempts cost. */
+export interface UserRecipe {
+  id: string;
+  title: string;
+  modality: MediaModality;
+  source_gallery_recipe: string | null;   // the gallery recipe it was made from, by slug
+  created_at: string;
+  updated_at: string;
+  latest_version: UserRecipeVersion;
+  attempts: number;                       // jobs that ran any of its versions
+  spent_cents: number;                    // what the finished ones were charged
 }
 
 // ===== /v1/admin/** (admin console — mirror backend admin DTOs) =====

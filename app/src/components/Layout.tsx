@@ -14,6 +14,7 @@ const NAV: { to: string; label: string }[] = [
   { to: '/chat', label: 'Chat' },
   { to: '/create', label: 'Create' },
   { to: '/history', label: 'History' },
+  { to: '/recipes', label: 'Recipes' },
   { to: '/keys', label: 'API keys' },
   { to: '/billing', label: 'Billing' },
   { to: '/settings', label: 'Settings' },
@@ -67,23 +68,28 @@ export default function Layout({ children }: Props) {
             <LogoLockup size={18} />
           </Link>
 
-          {/* In the header row where it fits; below it, its own scrolling row. */}
+          {/* In the header row where every link fits on one line; below that width, its own scrolling row. */}
           {showNav && (
-            <nav aria-label="Main" className="hidden lg:flex items-center gap-1">
+            <nav aria-label="Main" className="hidden xl:flex shrink-0 items-center gap-1">
               {links}
             </nav>
           )}
 
           {user ? (
-            <div className="flex items-center gap-3">
-              <span className="hidden md:inline text-sm text-fg-muted whitespace-nowrap">
+            // The links keep their room; a long address is the part that gives way.
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="hidden md:flex min-w-0 items-baseline text-sm text-fg-muted whitespace-nowrap">
                 <span className="font-medium text-fg">{formatCents(user.creditBalanceCents)}</span>
-                {user.hasEmail && <span className="hidden xl:inline text-fg-faint"> · {user.email}</span>}
+                {user.hasEmail && (
+                  <span title={user.email ?? undefined} className="hidden xl:block min-w-0 truncate text-fg-faint">
+                    &nbsp;· {user.email}
+                  </span>
+                )}
               </span>
               <ThemeToggle compact />
               <button
                 onClick={() => void handleLogout()}
-                className="text-sm font-medium text-fg-muted hover:text-fg transition-colors"
+                className="shrink-0 whitespace-nowrap text-sm font-medium text-fg-muted hover:text-fg transition-colors"
               >
                 Log out
               </button>
@@ -103,7 +109,7 @@ export default function Layout({ children }: Props) {
         </div>
 
         {showNav && (
-          <nav aria-label="Main" className="lg:hidden border-t border-border">
+          <nav aria-label="Main" className="xl:hidden border-t border-border">
             <div className="mx-auto max-w-6xl px-4 py-1.5 flex items-center gap-1 overflow-x-auto whitespace-nowrap [scrollbar-width:none]">
               {links}
             </div>

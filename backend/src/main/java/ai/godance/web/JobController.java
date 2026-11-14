@@ -35,8 +35,9 @@ import reactor.core.scheduler.Schedulers;
  * <p>{@code GET /v1/jobs} is a bare array, newest first. Optional query
  * parameters: {@code limit} (1–100; without it every job is returned, as
  * before), {@code before} (a job id: only older jobs), {@code modality}
- * ({@code IMAGE} or {@code VIDEO}), {@code status} and {@code saved}
- * ({@code true}: only saved jobs; {@code false}: only the others).
+ * ({@code IMAGE} or {@code VIDEO}), {@code status}, {@code saved}
+ * ({@code true}: only saved jobs; {@code false}: only the others) and
+ * {@code recipe} (a recipe id: only the jobs that ran one of its versions).
  *
  * <p>Saving a job keeps it past the retention period:
  * {@code PUT /v1/jobs/{id}/saved} and {@code DELETE /v1/jobs/{id}/saved},
@@ -61,14 +62,16 @@ public class JobController {
                                     @RequestParam(required = false) String before,
                                     @RequestParam(required = false) String modality,
                                     @RequestParam(required = false) String status,
-                                    @RequestParam(required = false) String saved) {
+                                    @RequestParam(required = false) String saved,
+                                    @RequestParam(required = false) String recipe) {
         UUID userId = JwtService.userIdFromSubject(jwt.getSubject());
         Integer pageSize = parseLimit(limit);
         UUID cursor = parseBefore(before);
         Modality kind = parseModality(modality);
         JobStatus state = parseStatus(status);
         Boolean onlySaved = parseSaved(saved);
-        return Mono.fromCallable(() -> reads.list(userId, pageSize, cursor, kind, state, onlySaved))
+        UUID recipeId = parseRecipe(recipe);
+        return Mono.fromCallable(() -> reads.list(userId, pageSize, cursor, kind, state, onlySaved, recipeId))
                 .subscribeOn(Schedulers.boundedElastic());
     }
 
@@ -133,6 +136,15 @@ public class JobController {
             return UUID.fromString(raw.trim());
         } catch (IllegalArgumentException e) {
             throw badRequest("before must be a job id");
+        }
+    }
+
+    private static UUID parseRecipe(String raw) {
+        if (raw == null) return null;
+        try {
+            return UUID.fromString(raw.trim());
+        } catch (IllegalArgumentException e) {
+            throw badRequest("recipe must be a recipe id");
         }
     }
 

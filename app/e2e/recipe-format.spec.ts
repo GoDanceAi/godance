@@ -47,6 +47,8 @@ test.describe('a recipe', () => {
       title: { en: 'Paper lantern street at dusk', zh: '黄昏的纸灯笼街' },
       modality: 'IMAGE',
       prompt: { en: PROMPT_EN, zh: PROMPT_ZH },
+      // Round 10: a recipe's template and variables, null for one that has none (template.spec.ts).
+      template: null,
       run: { model: 'gpt-image-2', promptLang: 'en', params: { size: '1024x1024', n: 1 } },
       url: `${GALLERY}/gallery/${SLUG}`,
     });

@@ -98,6 +98,9 @@ public class AuditLogService {
     public static final String EVT_REFERRAL_FAILED   = "referral.failed";
     // Saved generations (round 9)
     /** A user saved a generation, which keeps it past the retention period; the job id is in the detail. */
+    /** A user made one of their own recipes, or deleted one (round 10). */
+    public static final String EVT_RECIPE_CREATED = "recipe.created";
+    public static final String EVT_RECIPE_DELETED = "recipe.deleted";
     public static final String EVT_JOB_SAVED   = "job.saved";
     /** A user un-saved a generation, which puts it back under the retention period. */
     public static final String EVT_JOB_UNSAVED = "job.unsaved";

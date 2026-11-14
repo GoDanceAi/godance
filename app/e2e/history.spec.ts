@@ -367,7 +367,7 @@ test.describe('the dashboard and the nav', () => {
     await page.goto('/dashboard');
     const nav = page.getByRole('navigation', { name: 'Main' });
     await expect(nav.getByRole('link')).toHaveText(
-      ['Dashboard', 'Chat', 'Create', 'History', 'API keys', 'Billing', 'Settings']);
+      ['Dashboard', 'Chat', 'Create', 'History', 'Recipes', 'API keys', 'Billing', 'Settings']);
     // Nothing overflows the page sideways, phone included.
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 

@@ -12,7 +12,10 @@ import org.springframework.web.bind.annotation.RestController;
 
 import ai.godance.gateway.VideoDtos.VideoRequest;
 import ai.godance.security.JwtService;
+import ai.godance.domain.Modality;
 import ai.godance.service.JobOrigin;
+import ai.godance.service.RecipeRunService;
+import ai.godance.service.RecipeRunService.RunPrompt;
 import ai.godance.service.VideoGenerationService;
 import ai.godance.web.dto.ImageDtos.AsyncJobAcknowledged;
 import ai.godance.web.dto.VideoDtos.VideoGenerationRequest;
@@ -32,9 +35,11 @@ import reactor.core.scheduler.Schedulers;
 public class VideoController {
 
     private final VideoGenerationService service;
+    private final RecipeRunService recipes;
 
-    public VideoController(VideoGenerationService service) {
+    public VideoController(VideoGenerationService service, RecipeRunService recipes) {
         this.service = service;
+        this.recipes = recipes;
     }
 
     @PostMapping("/videos/generations")
@@ -48,7 +53,13 @@ public class VideoController {
         UUID apiKeyId = apiKeyId(jwt);
         // The channel comes from the credentials; a malformed gallery_recipe is a 400 before any charge.
         JobOrigin origin = JobOrigin.of(apiKeyId, req.galleryRecipe());
-        return Mono.fromCallable(() -> service.submit(userId, apiKeyId, domain, req.webhookUrl(), origin))
+        return Mono.fromCallable(() -> {
+                    // A recipe is rendered here, before anything is priced or charged.
+                    RunPrompt run = recipes.resolve(userId, Modality.VIDEO, req.prompt(), req.recipe());
+                    VideoRequest request = new VideoRequest(domain.model(), run.prompt(), domain.size(),
+                            domain.durationSeconds(), domain.n());
+                    return service.submit(userId, apiKeyId, request, req.webhookUrl(), run.origin(origin));
+                })
                 .subscribeOn(Schedulers.boundedElastic())
                 .map(jobId -> ResponseEntity.accepted().body(AsyncJobAcknowledged.forJob(jobId)));
     }

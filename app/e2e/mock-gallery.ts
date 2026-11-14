@@ -28,6 +28,29 @@ export function imageRecipe(overrides: Json = {}): Json {
   };
 }
 
+// A recipe with variables, as round 10 serves it: each language's template,
+// filled with that language's defaults, is that language's prompt.
+export const TEMPLATE_EN = 'A narrow street of {{lantern color}} paper lanterns at {{time of day}}, wet cobblestones';
+export const TEMPLATE_ZH = '{{time of day}}时分挂满{{lantern color}}纸灯笼的小街，湿润的石板路';
+export const FILLED_EN = 'A narrow street of warm red paper lanterns at dusk, wet cobblestones';
+export const FILLED_ZH = '黄昏时分挂满暖红色纸灯笼的小街，湿润的石板路';
+
+/** The image recipe with a template: two variables, each with an English and a Chinese default. */
+export function templatedRecipe(overrides: Json = {}): Json {
+  return imageRecipe({
+    prompt: {
+      en: FILLED_EN,
+      zh: FILLED_ZH,
+      template: { en: TEMPLATE_EN, zh: TEMPLATE_ZH },
+      variables: [
+        { name: 'lantern color', default: 'warm red', zh_default: '暖红色' },
+        { name: 'time of day', default: 'dusk', zh_default: '黄昏' },
+      ],
+    },
+    ...overrides,
+  });
+}
+
 /** A video recipe: kling-3.0 of the e2e catalog, at a size and duration it allows. */
 export function videoRecipe(overrides: Json = {}): Json {
   return {

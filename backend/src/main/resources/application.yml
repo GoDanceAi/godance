@@ -240,6 +240,12 @@ godance:
     # written once, and only this long after the account was created. 0 = never.
     first-touch-window-hours: ${ATTRIBUTION_FIRST_TOUCH_WINDOW_HOURS:168}
     first-touch-limit-per-account: 20   # calls per account per hour; the app makes one per sign-in
+  recipes:
+    # A user's own recipes (RecipeService). They cost nothing to keep, so the
+    # limits only stop the tables growing without bound. Past either, saving
+    # answers 409 recipe_limit_reached.
+    max-per-account: ${RECIPES_MAX_PER_ACCOUNT:500}   # recipes one account can have
+    max-versions:    ${RECIPES_MAX_VERSIONS:200}      # versions one recipe can have
   retention:
     # The most generations one account can save (JobSaveService). A saved
     # generation is kept past the 90-day deletion, at no charge, for as long

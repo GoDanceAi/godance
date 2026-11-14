@@ -99,7 +99,10 @@ test.describe('the gallery line in the Studio', () => {
 
     await expect(page.getByText('From the gallery:')).toBeVisible();
     await expect(prompt(page)).toHaveValue(PROMPT_EN);
-    await expect(page.getByRole('button', { name: /recipe/i })).toHaveCount(0);
+    // The gallery line has no control. The form's own "Save as recipe" (round 10) keeps the
+    // setup as a recipe of the user's, and does not need this list.
+    const line = page.getByText('From the gallery:').locator('..');
+    await expect(line.getByRole('button', { name: /recipe/i })).toHaveCount(0);
   });
 });
 
