@@ -14,6 +14,7 @@ const NAV: { to: string; label: string }[] = [
   { to: '/chat', label: 'Chat' },
   { to: '/create', label: 'Create' },
   { to: '/history', label: 'History' },
+  { to: '/recipes', label: 'Recipes' },
   { to: '/keys', label: 'API keys' },
   { to: '/billing', label: 'Billing' },
   { to: '/settings', label: 'Settings' },

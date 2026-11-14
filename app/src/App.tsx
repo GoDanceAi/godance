@@ -17,6 +17,9 @@ import ChatPage from './pages/ChatPage';
 import StudioPage from './pages/StudioPage';
 import HistoryPage from './pages/HistoryPage';
 import JobPage from './pages/JobPage';
+import RecipesPage from './pages/RecipesPage';
+import RecipePage from './pages/RecipePage';
+import ComparePage from './pages/ComparePage';
 import ApiKeysPage from './pages/ApiKeysPage';
 import BillingPage from './pages/BillingPage';
 import SettingsPage from './pages/SettingsPage';
@@ -56,6 +59,10 @@ export default function App() {
           <Route path="/create/video" element={<ProtectedRoute><StudioPage key="VIDEO" modality="VIDEO" /></ProtectedRoute>} />
           <Route path="/history"        element={<ProtectedRoute><HistoryPage /></ProtectedRoute>} />
           <Route path="/history/:jobId" element={<ProtectedRoute><JobPage /></ProtectedRoute>} />
+          {/* The user's own recipes, and two to four generations side by side. */}
+          <Route path="/recipes"           element={<ProtectedRoute><RecipesPage /></ProtectedRoute>} />
+          <Route path="/recipes/:recipeId" element={<ProtectedRoute><RecipePage /></ProtectedRoute>} />
+          <Route path="/compare"           element={<ProtectedRoute><ComparePage /></ProtectedRoute>} />
           <Route path="/keys"      element={<ProtectedRoute><ApiKeysPage /></ProtectedRoute>} />
           <Route path="/billing"   element={<ProtectedRoute><BillingPage /></ProtectedRoute>} />
           <Route path="/settings"  element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
