@@ -9,7 +9,7 @@ const description =
 // Endpoint reference — each entry links to its section further down this page.
 const endpoints = [
   { id: 'chat-completions', label: 'POST /v1/chat/completions', summary: 'streaming + non-streaming' },
-  { id: 'images', label: 'POST /v1/images/generations', summary: 'async: returns a job_id to poll, or pass webhook_url' },
+  { id: 'images', label: 'POST /v1/images/generations', summary: 'a job_id to poll, or the images themselves with a sync key' },
   { id: 'videos', label: 'POST /v1/videos/generations', summary: 'async-only, signed webhook' },
   { id: 'jobs', label: 'GET /v1/jobs/{id}', summary: 'async job status, outputs, history and saving a job' },
   { id: 'estimates', label: 'POST /v1/estimates', summary: 'price an image or video request before sending it' },
@@ -45,6 +45,31 @@ const acceptedSnippet = `HTTP/1.1 202 Accepted
   "status": "QUEUED",
   "poll_url": "/v1/jobs/6f1c0b9e-2d4a-4c3b-9a57-0e8d4b2f7c11"
 }`;
+
+const sdkImageSnippet = `from openai import OpenAI
+
+client = OpenAI(base_url="https://api.godance.ai/v1", api_key="gd_live_...")
+
+result = client.images.generate(model="gpt-image-2", prompt="a lighthouse at dusk, watercolor")
+image_url = result.data[0].url`;
+
+const syncImageSnippet = `HTTP/1.1 200 OK
+
+{
+  "created": 1794650000,
+  "data": [
+    { "url": "https://…signed…", "b64_json": "iVBORw0KGgo…", "revised_prompt": null }
+  ],
+  "job_id": "6f1c0b9e-2d4a-4c3b-9a57-0e8d4b2f7c11",
+  "cost_cents": 6
+}`;
+
+const keyResponseSnippet = `# Set an existing key to answer image requests synchronously.
+# Signed-in session only: an API key cannot change itself.
+curl -X PATCH https://api.godance.ai/v1/keys/$KEY_ID \\
+  -H "Authorization: Bearer $SESSION_TOKEN" \\
+  -H "Content-Type: application/json" \\
+  -d '{ "image_response": "sync" }'`;
 
 const jobSnippet = `{
   "id": "6f1c0b9e-2d4a-4c3b-9a57-0e8d4b2f7c11",
@@ -170,13 +195,15 @@ def verify(payload, header, secret):
     <!-- ===== Images ===== -->
     <h2 id="images" class="scroll-mt-24 text-2xl font-bold mt-16 mb-4 text-fg">POST /v1/images/generations</h2>
     <p class="text-fg-muted">
-      The request shape is OpenAI's. Every image model runs as an async job, so this endpoint
-      always answers <code class="code-chip">202 Accepted</code> with a
-      <code class="code-chip">job_id</code> — it never returns image data inline. Poll
+      The request shape is OpenAI's. Every image model runs as an async job, so by default
+      this endpoint answers <code class="code-chip">202 Accepted</code> with a
+      <code class="code-chip">job_id</code>. Poll
       <a href="#jobs" class="underline" style="color: var(--color-primary)"><code class="code-chip">GET /v1/jobs/&#123;id&#125;</code></a>
       for the result, or pass <code class="code-chip">webhook_url</code> and receive a
       <a href="#webhooks" class="underline" style="color: var(--color-primary)">signed POST</a>
-      when the images are ready.
+      when the images are ready. To get the images in the response, as OpenAI's API returns
+      them, set your API key to
+      <a href="#image-responses" class="underline" style="color: var(--color-primary)">synchronous image responses</a>.
     </p>
     <ul class="mt-4 space-y-2 text-fg-muted">
       <li><code class="code-chip">model</code>, <code class="code-chip">prompt</code> (required).</li>
@@ -193,6 +220,27 @@ def verify(payload, header, secret):
     </p>
     <pre class="code-block mt-4"><code>{imageSnippet}</code></pre>
     <pre class="code-block mt-4"><code>{acceptedSnippet}</code></pre>
+
+    <h3 id="image-responses" class="scroll-mt-24 text-xl font-semibold mt-10 mb-4 text-fg">Image responses in OpenAI's shape</h3>
+    <p class="text-fg-muted">
+      Each API key has an <code class="code-chip">image_response</code> setting.
+      <code class="code-chip">async</code> is the behaviour above: a job to poll.
+      With <code class="code-chip">sync</code>, an image request waits for its job and answers
+      with the images, so code written for OpenAI's SDK works with only the base URL and key
+      changed:
+    </p>
+    <pre class="code-block mt-4"><code>{sdkImageSnippet}</code></pre>
+    <pre class="code-block mt-4"><code>{syncImageSnippet}</code></pre>
+    <ul class="mt-4 space-y-2 text-fg-muted">
+      <li><strong class="text-fg">Choosing it.</strong> Pick it for each key on the API keys page of the app, send <code class="code-chip">"image_response": "sync"</code> when you create a key with <code class="code-chip">POST /v1/keys</code>, or change a key with <code class="code-chip">PATCH /v1/keys/&#123;id&#125;</code>. Keys created before this setting existed are <code class="code-chip">async</code> until you change them. <code class="code-chip">GET /v1/keys</code> shows each key's setting.</li>
+      <li><strong class="text-fg">The wait.</strong> The request is held for up to about 90 seconds. It is the same job either way: the same price, reserved when the job is accepted, and the same <code class="code-chip">webhook_url</code> delivery. The response adds <code class="code-chip">job_id</code> and <code class="code-chip">cost_cents</code> to OpenAI's <code class="code-chip">created</code> and <code class="code-chip">data</code>.</li>
+      <li><strong class="text-fg">Still running at the limit.</strong> The request answers <code class="code-chip">202 Accepted</code> with the job body above and a <code class="code-chip">Retry-After: 5</code> header. The job carries on; read it at <code class="code-chip">poll_url</code>. Code that only reads <code class="code-chip">data</code> should check for the 202.</li>
+      <li><strong class="text-fg">Failed.</strong> A job that fails answers <code class="code-chip">502</code> as problem JSON with <code class="code-chip">code: "generation_failed"</code>, the job's error in <code class="code-chip">detail</code> and its <code class="code-chip">job_id</code>. The reserved credit is refunded, as for any failed job.</li>
+      <li><strong class="text-fg"><code class="code-chip">response_format</code>.</strong> <code class="code-chip">"url"</code> returns a link per image and <code class="code-chip">"b64_json"</code> returns each image base64-encoded. Without it, GPT Image models return <code class="code-chip">b64_json</code>, as OpenAI's API does, and a <code class="code-chip">url</code> as well; every other model returns a <code class="code-chip">url</code>. A result larger than 25 MB is returned as links only. Links are signed and expire after a while: read the job again for a fresh one.</li>
+      <li><strong class="text-fg">One request as a job.</strong> With a sync key, send <code class="code-chip">"async": true</code> in the body or a <code class="code-chip">Prefer: respond-async</code> header to get the 202 at once.</li>
+      <li>Video is not affected: <code class="code-chip">POST /v1/videos/generations</code> always answers with a job.</li>
+    </ul>
+    <pre class="code-block mt-4"><code>{keyResponseSnippet}</code></pre>
 
     <!-- ===== Videos ===== -->
     <h2 id="videos" class="scroll-mt-24 text-2xl font-bold mt-16 mb-4 text-fg">POST /v1/videos/generations</h2>

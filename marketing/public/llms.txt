@@ -19,7 +19,8 @@
 - POST /v1/chat/completions — streaming + non-streaming
 - POST /v1/images/generations — async (202 + job_id) when the model is flagged
   requires_async in /v1/models (currently every image model) or the request sets
-  async:true; otherwise sync
+  async:true; otherwise sync. An API key set to image_response "sync" gets the images
+  in the response instead (see "Images with the OpenAI SDK" below)
 - POST /v1/videos/generations — async only, signed webhook callback
 - GET /v1/jobs/{id} — status of an async generation, with its prompt and params,
   every output (outputs[]: index, url, contentType, sizeBytes, revisedPrompt; each url
@@ -41,10 +42,26 @@
   godance.display_name, godance.description and godance.capabilities (sizes,
   default_size, durations, default_seconds, max_n; a missing key means unknown, a
   missing max_n means 1). An n above max_n answers 400 before any charge
-- CRUD /v1/keys — API key management (plaintext returned exactly once)
+- CRUD /v1/keys — API key management (plaintext returned exactly once); each key has
+  image_response, "async" or "sync", set at POST /v1/keys or changed with
+  PATCH /v1/keys/{id} {"image_response": "sync"} (signed-in session only)
 - POST /v1/billing/topup — Stripe Checkout for card / ACH / SEPA
 - GET /v1/webhooks/secret — signing secret (Stripe-style HMAC-SHA256)
 - POST /v1/webhooks/secret/rotate — rotate with 24h dual-signature grace
+
+## Images with the OpenAI SDK
+
+Standard OpenAI SDK image code works unchanged when the API key's image_response is
+"sync": client.images.generate(model="gpt-image-2", prompt="...") waits for the job (up
+to about 90 seconds) and returns 200 with OpenAI's created and data, plus job_id and
+cost_cents. Read result.data[0].url; GPT Image models also return data[0].b64_json by
+default, as OpenAI's API does, and response_format ("url" or "b64_json") selects one.
+If the job is still running at the limit the answer is 202 with {job_id, status,
+poll_url} and Retry-After: 5, so check for it and poll GET /v1/jobs/{id}. A failed job
+answers 502 problem JSON with code "generation_failed" and the charge is refunded. With
+an "async" key (the default for keys made before this setting) the answer is always the
+202; "async": true in the body or a Prefer: respond-async header asks for that on one
+request. Video is always a job.
 
 ## Models
 
