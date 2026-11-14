@@ -87,6 +87,15 @@ public class GenerationJob {
     @Column(name = "purged_at", insertable = false, updatable = false)
     private Instant purgedAt;
 
+    /**
+     * When the owner saved the job, which keeps its files and prompt past the
+     * retention period (V27); null when it is not saved. Read-only here: only
+     * {@code GenerationJobRepository.markSaved}, {@code clearSaved} and
+     * {@code redactPurged} write it.
+     */
+    @Column(name = "saved_at", insertable = false, updatable = false)
+    private Instant savedAt;
+
     @PrePersist
     void onCreate() {
         if (createdAt == null) createdAt = Instant.now();
@@ -144,6 +153,8 @@ public class GenerationJob {
     public void setLeaseExpiresAt(Instant leaseExpiresAt) { this.leaseExpiresAt = leaseExpiresAt; }
 
     public Instant getPurgedAt() { return purgedAt; }
+
+    public Instant getSavedAt() { return savedAt; }
 
     @Override
     public boolean equals(Object o) {

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { apiFetch, ApiError, type JobStatus, type JobView, type MediaModality } from './api';
+import { apiFetch, ApiError, type JobStatus, type JobView, type MediaModality, type SavedJobs } from './api';
 import { formatCents } from './auth';
 
 // Generation jobs: reading them, watching one until it ends, and what to show.
@@ -36,6 +36,7 @@ export interface JobListQuery {
   limit: number;
   before?: string;           // a job id: only jobs older than it
   modality?: MediaModality;
+  saved?: boolean;           // true: only saved jobs
 }
 
 /** GET /v1/jobs: the caller's jobs, newest first. */
@@ -43,7 +44,68 @@ export function listJobs(query: JobListQuery, signal?: AbortSignal): Promise<Job
   const params = new URLSearchParams({ limit: String(query.limit) });
   if (query.before) params.set('before', query.before);
   if (query.modality) params.set('modality', query.modality);
+  if (query.saved) params.set('saved', 'true');
   return apiFetch<JobView[]>(`/v1/jobs?${params}`, { signal });
+}
+
+// ===== Saved generations =====
+// Every job's files and prompt are deleted when its retention period ends.
+// Saving one keeps it until it is un-saved or the account is closed.
+
+/** The saved view: History with only saved generations. */
+export const SAVED_VIEW = '/history?saved=1';
+
+/** How long a job that is not saved is kept: the API's retention period. */
+export const RETENTION_DAYS = 90;
+
+/**
+ * Whether the job gets a save control: a finished one whose files still
+ * exist, read from an API that knows about saving.
+ */
+export function canSave(job: JobView): boolean {
+  return job.status === 'DONE' && !job.purged && typeof job.saved === 'boolean';
+}
+
+/** PUT /v1/jobs/{id}/saved. A 409's `code` is `saved_limit_reached` or `job_not_saveable`. */
+export function saveJob(id: string): Promise<void> {
+  return apiFetch<void>(`/v1/jobs/${encodeURIComponent(id)}/saved`, { method: 'PUT' });
+}
+
+/** DELETE /v1/jobs/{id}/saved. */
+export function unsaveJob(id: string): Promise<void> {
+  return apiFetch<void>(`/v1/jobs/${encodeURIComponent(id)}/saved`, { method: 'DELETE' });
+}
+
+/** GET /v1/jobs/saved: the count against the limit. */
+export function fetchSavedJobs(signal?: AbortSignal): Promise<SavedJobs> {
+  return apiFetch<SavedJobs>('/v1/jobs/saved', { signal });
+}
+
+function retentionEnd(job: JobView): number | null {
+  const made = Date.parse(job.createdAt);
+  return Number.isNaN(made) ? null : made + RETENTION_DAYS * 24 * 60 * 60 * 1000;
+}
+
+/**
+ * True once the job has outlived its retention period, which only a saved
+ * job does: un-saved, its files are deleted at the next nightly run.
+ */
+export function pastRetention(job: JobView, now: number = Date.now()): boolean {
+  const end = retentionEnd(job);
+  return end !== null && end <= now;
+}
+
+/** True when the files are scheduled for deletion and the date has passed: the next nightly run deletes them. */
+export function deletionOverdue(job: JobView, now: number = Date.now()): boolean {
+  if (!job.mediaExpiresAt) return false;
+  const due = Date.parse(job.mediaExpiresAt);
+  return !Number.isNaN(due) && due <= now;
+}
+
+/** The job as the API returns it after a save or an un-save: a saved job has no deletion date. */
+export function withSaved(job: JobView, saved: boolean): JobView {
+  const end = retentionEnd(job);
+  return { ...job, saved, mediaExpiresAt: saved || end === null ? null : new Date(end).toISOString() };
 }
 
 /** How long to wait before the next reading: every 2 s for the first 30 s of watching, then every 5 s. */

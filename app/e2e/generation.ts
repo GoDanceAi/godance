@@ -5,11 +5,12 @@ import type {
   ModelEntry,
   ModelListResponse,
 } from '../src/lib/api';
-import type { MockApi, Reply } from './mock-api';
+import { problem, type MockApi, type Reply } from './mock-api';
 
 // Fixtures for the Studio and History: a catalog that publishes capabilities,
 // jobs as GET /v1/jobs/{id} returns them, and the storage host the files are
-// signed for. Shapes follow the round 7 contract (00-coordination.md).
+// signed for. Shapes follow the round 7 contract (00-coordination.md), and
+// round 9's for saving.
 
 /** Where generated files live: a storage host apart from the API, as in production. */
 export const MEDIA_ORIGIN = 'http://media.godance.localhost';
@@ -126,6 +127,7 @@ export function makeJob(overrides: Partial<JobView> = {}): JobView {
     outputs: [{ index: 0, url: mediaUrl('out-1.png'), contentType: 'image/png', sizeBytes: 812_345, revisedPrompt: null }],
     purged: false,
     mediaExpiresAt: '2027-02-11T12:00:00Z',
+    saved: false,
     ...overrides,
   };
 }
@@ -161,13 +163,14 @@ export function serveJob(api: MockApi, job: JobView): { set: (next: JobView) => 
 
 /**
  * GET /v1/jobs over a fixed list, newest first, as the API pages it: limit,
- * before (a job id; only older jobs) and modality.
+ * before (a job id; only older jobs), modality and saved.
  */
 export function serveJobList(api: MockApi, jobs: JobView[]): MockApi {
   return api.on('GET', '/v1/jobs', (call) => {
     let list = jobs;
     const modality = call.query.get('modality');
     if (modality) list = list.filter((j) => j.modality === modality);
+    if (call.query.get('saved') === 'true') list = list.filter((j) => j.saved);
     const before = call.query.get('before');
     if (before) {
       const at = list.findIndex((j) => j.id === before);
@@ -176,6 +179,46 @@ export function serveJobList(api: MockApi, jobs: JobView[]): MockApi {
     const limit = call.query.get('limit');
     return { json: limit ? list.slice(0, Number(limit)) : list };
   });
+}
+
+const SAVED_ROUTE = /^\/v1\/jobs\/([0-9a-f-]{36})\/saved$/;
+const RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
+
+/**
+ * Saving, as the API does it, over `jobs`: PUT and DELETE /v1/jobs/{id}/saved
+ * and the count at GET /v1/jobs/saved. A job is changed in place, so the
+ * list and job routes serving the same objects answer with its new state.
+ */
+export function serveSaves(api: MockApi, jobs: JobView[], limit = 500): MockApi {
+  const find = (path: string) => jobs.find((j) => j.id === SAVED_ROUTE.exec(path)?.[1]);
+  const count = () => jobs.filter((j) => j.saved).length;
+  return api
+    .on('GET', '/v1/jobs/saved', () => ({ json: { count: count(), limit } }))
+    .on('PUT', SAVED_ROUTE, (call) => {
+      const job = find(call.path);
+      if (!job) return problem(404, 'job not found');
+      if (job.saved) return { status: 204 };
+      if (job.status !== 'DONE' || job.purged) {
+        return problem(409, 'Only a finished generation can be saved.', 'job_not_saveable');
+      }
+      if (count() >= limit) {
+        return problem(409,
+          `You have saved ${limit} generations, the most an account can keep. Un-save one to save another.`,
+          'saved_limit_reached');
+      }
+      job.saved = true;
+      job.mediaExpiresAt = null;
+      return { status: 204 };
+    })
+    .on('DELETE', SAVED_ROUTE, (call) => {
+      const job = find(call.path);
+      if (!job) return problem(404, 'job not found');
+      if (job.saved) {
+        job.saved = false;
+        job.mediaExpiresAt = new Date(Date.parse(job.createdAt) + RETENTION_MS).toISOString();
+      }
+      return { status: 204 };
+    });
 }
 
 /** The 202 a generation request gets. */

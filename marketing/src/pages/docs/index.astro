@@ -11,7 +11,7 @@ const endpoints = [
   { id: 'chat-completions', label: 'POST /v1/chat/completions', summary: 'streaming + non-streaming' },
   { id: 'images', label: 'POST /v1/images/generations', summary: 'async: returns a job_id to poll, or pass webhook_url' },
   { id: 'videos', label: 'POST /v1/videos/generations', summary: 'async-only, signed webhook' },
-  { id: 'jobs', label: 'GET /v1/jobs/{id}', summary: 'async job status, outputs and history' },
+  { id: 'jobs', label: 'GET /v1/jobs/{id}', summary: 'async job status, outputs, history and saving a job' },
   { id: 'estimates', label: 'POST /v1/estimates', summary: 'price an image or video request before sending it' },
   { id: 'models', label: 'GET /v1/models', summary: 'catalog, prices and what each model accepts' },
   { id: 'keys', label: 'CRUD /v1/keys', summary: 'API key management' },
@@ -62,10 +62,25 @@ const jobSnippet = `{
   "outputUrl": "https://…signed…",
   "purged": false,
   "mediaExpiresAt": "2027-02-10T09:00:00Z",
+  "saved": false,
   "estimatedCostCents": 12,
   "actualCostCents": 12,
   …
 }`;
+
+const saveSnippet = `# Save a job: its files and prompt are kept past the 90 days
+curl -X PUT https://api.godance.ai/v1/jobs/$JOB_ID/saved \\
+  -H "Authorization: Bearer $GODANCE_API_KEY"
+
+# Un-save it: the 90 days apply again
+curl -X DELETE https://api.godance.ai/v1/jobs/$JOB_ID/saved \\
+  -H "Authorization: Bearer $GODANCE_API_KEY"
+
+# How many you have saved, and the most you can
+curl https://api.godance.ai/v1/jobs/saved \\
+  -H "Authorization: Bearer $GODANCE_API_KEY"
+
+{ "count": 12, "limit": 500 }`;
 
 const estimateSnippet = `curl https://api.godance.ai/v1/estimates \\
   -H "Authorization: Bearer $GODANCE_API_KEY" \\
@@ -213,7 +228,8 @@ def verify(payload, header, secret):
       <li><code class="code-chip">prompt</code>, <code class="code-chip">params</code> — the request, with its own field names: <code class="code-chip">size</code>, <code class="code-chip">n</code>, <code class="code-chip">style</code>, <code class="code-chip">quality</code> for images; <code class="code-chip">size</code>, <code class="code-chip">seconds</code>, <code class="code-chip">n</code> for video (<code class="code-chip">seconds</code> is the length generated, also when you left it out).</li>
       <li><code class="code-chip">outputs</code> — every file, in order: <code class="code-chip">index</code>, <code class="code-chip">url</code>, <code class="code-chip">contentType</code>, <code class="code-chip">sizeBytes</code>, <code class="code-chip">revisedPrompt</code> (null unless the model rewrote the prompt). Empty until the job is <code class="code-chip">DONE</code>. Each <code class="code-chip">url</code> is signed when you read the job and expires after a while, so read the job again for a fresh link rather than storing one.</li>
       <li><code class="code-chip">outputUrl</code> — the first output's link, signed the same way. Kept for clients written before <code class="code-chip">outputs</code>.</li>
-      <li><code class="code-chip">mediaExpiresAt</code> — when the files and prompt are due to be deleted: 90 days after the job was created. Copy anything you want to keep before then. May be null, meaning nothing is scheduled.</li>
+      <li><code class="code-chip">mediaExpiresAt</code> — when the files and prompt are due to be deleted: 90 days after the job was created. Copy anything you want to keep before then, or <a href="#saving-a-job" class="underline" style="color: var(--color-primary)">save the job</a>. Null means nothing is scheduled, which is the case for a saved job.</li>
+      <li><code class="code-chip">saved</code> — true when you have saved the job, which keeps its files and prompt past the 90 days.</li>
       <li><code class="code-chip">purged</code> — true once the files and prompt have been deleted; <code class="code-chip">prompt</code> is then null, <code class="code-chip">params</code> is <code class="code-chip">&#123;&#125;</code> and <code class="code-chip">outputs</code> is empty. The cost fields stay.</li>
       <li><code class="code-chip">errorMessage</code> — set when <code class="code-chip">FAILED</code>; the reserved credit is refunded.</li>
       <li><code class="code-chip">estimatedCostCents</code>, <code class="code-chip">actualCostCents</code> — integer cents: the amount reserved when the job was accepted, and the amount charged once it is <code class="code-chip">DONE</code>.</li>
@@ -230,6 +246,22 @@ def verify(payload, header, secret):
       <li><code class="code-chip">before</code> — a job <code class="code-chip">id</code>: only jobs older than it. Pass the last <code class="code-chip">id</code> of a page to get the next one; an empty array means there are no more. An <code class="code-chip">id</code> that isn't one of your jobs returns <code class="code-chip">400</code>.</li>
       <li><code class="code-chip">modality</code> — <code class="code-chip">IMAGE</code> or <code class="code-chip">VIDEO</code>.</li>
       <li><code class="code-chip">status</code> — <code class="code-chip">QUEUED</code>, <code class="code-chip">RUNNING</code>, <code class="code-chip">DONE</code> or <code class="code-chip">FAILED</code>.</li>
+      <li><code class="code-chip">saved</code> — <code class="code-chip">true</code> for only the jobs you have saved, <code class="code-chip">false</code> for only the others. It combines with the parameters above.</li>
+    </ul>
+
+    <h3 id="saving-a-job" class="scroll-mt-24 text-xl font-semibold mt-10 mb-4 text-fg">Saving a job</h3>
+    <p class="text-fg-muted">
+      A job's files and prompt are deleted 90 days after it was created. Save a job to keep
+      them: a saved job is kept until you un-save it or close your account. Saving costs
+      nothing and changes nothing about what the job was charged. Works with an API key or a
+      signed-in session.
+    </p>
+    <pre class="code-block mt-4"><code>{saveSnippet}</code></pre>
+    <ul class="mt-4 space-y-2 text-fg-muted">
+      <li><code class="code-chip">PUT</code> and <code class="code-chip">DELETE /v1/jobs/&#123;id&#125;/saved</code> return <code class="code-chip">204</code> with no body. Both are safe to repeat: saving a job that is already saved, or un-saving one that isn't, changes nothing. A job ID that isn't yours returns <code class="code-chip">404</code>.</li>
+      <li>Only a <code class="code-chip">DONE</code> job whose files still exist can be saved. Any other job returns <code class="code-chip">409</code> with <code class="code-chip">code: "job_not_saveable"</code>.</li>
+      <li>An account can save up to 500 jobs. Saving one more returns <code class="code-chip">409</code> with <code class="code-chip">code: "saved_limit_reached"</code>; un-save a job to make room. <code class="code-chip">GET /v1/jobs/saved</code> returns how many you have saved and your limit.</li>
+      <li>While a job is saved, its <code class="code-chip">mediaExpiresAt</code> is null. Un-saving puts the 90 days back, counted from when the job was created. A job already older than that then has a <code class="code-chip">mediaExpiresAt</code> in the past, and its files and prompt are deleted at the next nightly clean-up.</li>
     </ul>
 
     <!-- ===== Estimates ===== -->

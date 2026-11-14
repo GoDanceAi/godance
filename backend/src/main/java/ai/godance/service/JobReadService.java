@@ -27,7 +27,8 @@ import ai.godance.web.dto.ImageDtos.JobView;
 /**
  * Reads a caller's generation jobs for {@code GET /v1/jobs} and
  * {@code GET /v1/jobs/{id}}: owner only, every output with a link signed at
- * read time, and the list paged by {@code (created_at, id)}.
+ * read time, and the list paged by {@code (created_at, id)} and optionally
+ * narrowed to saved jobs.
  *
  * <p>A job finished before V23 has no output rows. The first read of such a
  * job lists its storage prefix and records what it finds; reads after that
@@ -69,9 +70,11 @@ public class JobReadService {
     /**
      * The caller's jobs, newest first. {@code limit} null returns them all, as
      * before paging existed. {@code before} is one of the caller's job ids
-     * (400 otherwise) and returns only jobs older than it. Null filters match any.
+     * (400 otherwise) and returns only jobs older than it. Null filters match
+     * any; {@code saved} true keeps only saved jobs, false only the others.
      */
-    public List<JobView> list(UUID userId, Integer limit, UUID before, Modality modality, JobStatus status) {
+    public List<JobView> list(UUID userId, Integer limit, UUID before, Modality modality, JobStatus status,
+                              Boolean saved) {
         if (limit != null && (limit < 1 || limit > MAX_LIMIT)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "limit must be between 1 and " + MAX_LIMIT);
@@ -86,11 +89,13 @@ public class JobReadService {
             beforeCreatedAt = cursor.getCreatedAt();
             beforeId = cursor.getId();
         }
-        List<GenerationJob> page = jobs.findPageForUser(userId,
-                modality == null ? "" : modality.name(),
-                status == null ? "" : status.name(),
-                beforeCreatedAt, beforeId,
-                limit == null ? Integer.MAX_VALUE : limit);
+        String kind = modality == null ? "" : modality.name();
+        String state = status == null ? "" : status.name();
+        int pageSize = limit == null ? Integer.MAX_VALUE : limit;
+        List<GenerationJob> page = Boolean.TRUE.equals(saved)
+                ? jobs.findSavedPageForUser(userId, kind, state, beforeCreatedAt, beforeId, pageSize)
+                : jobs.findPageForUser(userId, kind, state, Boolean.FALSE.equals(saved),
+                        beforeCreatedAt, beforeId, pageSize);
         if (page.isEmpty()) return List.of();
 
         Map<UUID, List<GenerationJobOutput>> byJob = new HashMap<>();

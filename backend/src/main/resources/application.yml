@@ -234,6 +234,11 @@ godance:
       qualifying-sources:    ${PROMO_REFERRAL_QUALIFYING_SOURCES:STRIPE} # STRIPE (card) and/or NOWPAYMENTS (USDT)
       claim-limit-per-account: 5    # claims tried per account per hour
       claim-limit-per-ip:      20   # claims tried per client IP per hour
+  retention:
+    # The most generations one account can save (JobSaveService). A saved
+    # generation is kept past the 90-day deletion, at no charge, for as long
+    # as the account exists, so the number is limited. 0 = nothing can be saved.
+    saved-limit: ${RETENTION_SAVED_LIMIT:500}
   providers:
     openai:
       api-key:  ${OPENAI_API_KEY:sk_dev_dummy_openai_key_do_not_use_for_real_calls}

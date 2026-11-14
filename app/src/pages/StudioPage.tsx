@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { Link, NavLink, useNavigate, useSearchParams } from 'react-router-dom';
-import type { JobStatus, JobView, MediaModality, ModelEntry } from '../lib/api';
+import { ApiError, type JobStatus, type JobView, type MediaModality, type ModelEntry, type SavedRecipe } from '../lib/api';
 import { formatCents, useAuth } from '../lib/auth';
 import { getCurl, JOB_ID_VAR, postCurl } from '../lib/curl';
 import { isTerminal, outputItems, watchJob } from '../lib/jobs';
 import { controlsFor, groupByProvider, loadCatalog, mediaModels, modelName, priceLabel } from '../lib/media-models';
+import { listSavedRecipes, saveRecipe, unsaveRecipe } from '../lib/saved-recipes';
 import { sendError, type SendError } from '../lib/send-error';
 import {
   generationBody,
@@ -22,6 +23,8 @@ import GalleryExamples from '../components/GalleryExamples';
 import { JobOutputs } from '../components/JobMedia';
 import JobStatusPill from '../components/JobStatusPill';
 import RecipeSource from '../components/RecipeSource';
+import SaveJobButton from '../components/SaveJobButton';
+import SavedRecipes from '../components/SavedRecipes';
 import SendErrorNotice from '../components/SendErrorNotice';
 
 const WORDS = {
@@ -75,6 +78,9 @@ export default function StudioPage({ modality }: { modality: MediaModality }) {
   const [recipe, setRecipe] = useState<{ recipe: GalleryRecipe; lang: RecipeLang } | null>(null);
   // Opened with nothing to load, or with nothing that could be: the Studio offers examples.
   const [startedEmpty, setStartedEmpty] = useState(false);
+  // The gallery recipes this account saved. Null until read, and when the API has no such list.
+  const [savedRecipes, setSavedRecipes] = useState<SavedRecipe[] | null>(null);
+  const [recipeSaveError, setRecipeSaveError] = useState<string | null>(null);
   // The query this page wrote itself after a submit, which needs no loading.
   const ownSearch = useRef<string | null>(null);
   const resultRef = useRef<HTMLElement>(null);
@@ -86,6 +92,15 @@ export default function StudioPage({ modality }: { modality: MediaModality }) {
       .catch(() => { if (!cancelled) setCatalogFailed(true); });
     return () => { cancelled = true; };
   }, [modality]);
+
+  useEffect(() => {
+    let cancelled = false;
+    listSavedRecipes().then(
+      (list) => { if (!cancelled) setSavedRecipes(list); },
+      () => { if (!cancelled) setSavedRecipes(null); },
+    );
+    return () => { cancelled = true; };
+  }, []);
 
   // Whatever the URL asks to load (studio-prefill.ts decides what that is).
   useEffect(() => {
@@ -153,6 +168,23 @@ export default function StudioPage({ modality }: { modality: MediaModality }) {
     setValues((v) => fitValues({ ...v, model: id }, models ?? [], modality).values);
   // An example loads as its link would: through the URL, so Back returns to the empty Studio.
   const pickExample = (slug: string) => setSearchParams({ example: slug });
+  const recipeIsSaved = (slug: string) => savedRecipes?.some((r) => r.slug === slug) ?? false;
+  // Saves a gallery recipe to come back to, or takes it off the list.
+  const setRecipeSaved = async (slug: string, save: boolean) => {
+    setRecipeSaveError(null);
+    try {
+      if (save) await saveRecipe(slug);
+      else await unsaveRecipe(slug);
+      setSavedRecipes((cur) => cur && (save
+        ? [{ slug, savedAt: new Date().toISOString() }, ...cur.filter((r) => r.slug !== slug)]
+        : cur.filter((r) => r.slug !== slug)));
+    } catch (err) {
+      setRecipeSaveError(
+        err instanceof ApiError && err.code === 'saved_recipes_limit_reached' && !err.message.startsWith('HTTP ')
+          ? err.message
+          : `Couldn't ${save ? 'save' : 'remove'} this recipe. Try again.`);
+    }
+  };
   const switchLanguage = (lang: RecipeLang) => {
     const text = recipe?.recipe.prompt[lang];
     if (!recipe || !text) return;
@@ -206,13 +238,32 @@ export default function StudioPage({ modality }: { modality: MediaModality }) {
         What you make is kept in <Link to="/history" className="text-brand-600 hover:underline">History</Link>.
       </p>
 
+      {ready && startedEmpty && current === null && savedRecipes && (
+        <>
+          <SavedRecipes
+            saved={savedRecipes}
+            onPick={pickExample}
+            onRemove={(slug) => void setRecipeSaved(slug, false)}
+          />
+          {recipeSaveError && <p role="alert" className="mt-2 text-xs text-danger">{recipeSaveError}</p>}
+        </>
+      )}
       {ready && startedEmpty && current === null && <GalleryExamples modality={modality} onPick={pickExample} />}
 
       {/* grid-cols-1 is minmax(0, 1fr): long curl lines scroll in their block instead of widening the page. */}
       <div className="mt-6 grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
         <form onSubmit={(e) => void submit(e)} aria-label={`Create ${words.one === 'image' ? 'an image' : 'a video'}`}
               className="card space-y-5">
-          {recipe && <RecipeSource recipe={recipe.recipe} lang={recipe.lang} onLanguage={switchLanguage} />}
+          {recipe && (
+            <RecipeSource
+              recipe={recipe.recipe}
+              lang={recipe.lang}
+              onLanguage={switchLanguage}
+              saved={savedRecipes === null ? null : recipeIsSaved(recipe.recipe.slug)}
+              onToggleSaved={() => void setRecipeSaved(recipe.recipe.slug, !recipeIsSaved(recipe.recipe.slug))}
+              saveError={recipeSaveError}
+            />
+          )}
           <div>
             <label htmlFor="studio-prompt" className="block text-sm font-medium text-fg">Prompt</label>
             <textarea
@@ -342,7 +393,11 @@ export default function StudioPage({ modality }: { modality: MediaModality }) {
         </form>
 
         <section ref={resultRef} aria-label="Result" className="card scroll-mt-4">
-          <Result current={current} modality={modality} />
+          <Result
+            current={current}
+            modality={modality}
+            onJobChange={(job) => setCurrent((cur) => (cur?.id === job.id ? { ...cur, job } : cur))}
+          />
         </section>
       </div>
     </div>
@@ -393,7 +448,11 @@ function statusLine(current: Current, words: (typeof WORDS)[MediaModality]): str
   }
 }
 
-function Result({ current, modality }: { current: Current | null; modality: MediaModality }) {
+function Result({ current, modality, onJobChange }: {
+  current: Current | null;
+  modality: MediaModality;
+  onJobChange: (job: JobView) => void;   // the job was saved or un-saved here
+}) {
   const words = WORDS[modality];
   const job = current?.job ?? null;
   const prompt = job?.prompt ?? current?.prompt ?? '';
@@ -440,6 +499,7 @@ function Result({ current, modality }: { current: Current | null; modality: Medi
       {current && (isTerminal(current.status) || current.gone) && (
         <div className="mt-4 flex flex-wrap gap-2">
           {prompt && <CopyButton text={prompt} label="Copy prompt" />}
+          {job && !current.gone && <SaveJobButton job={job} onChange={onJobChange} />}
           <Link to={`/history/${current.id}`} className="btn btn-ghost btn-sm">Open in History</Link>
         </div>
       )}

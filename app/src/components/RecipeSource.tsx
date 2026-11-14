@@ -1,4 +1,5 @@
 import type { GalleryRecipe, RecipeLang } from '../lib/recipe';
+import { Icon } from './Brand';
 
 /** Only Chinese text is marked: the page itself is in English. */
 function langAttr(lang: RecipeLang): string | undefined {
@@ -7,13 +8,21 @@ function langAttr(lang: RecipeLang): string | undefined {
 
 /**
  * The line saying the form was filled from a gallery recipe, with the
- * recipe's title linking to its page, and a switch between the English and
- * Chinese prompt when the recipe has both.
+ * recipe's title linking to its page, a control that saves the recipe to
+ * come back to, and a switch between the English and Chinese prompt when the
+ * recipe has both.
+ *
+ * `saved` is whether the user has saved this recipe; null leaves the control
+ * out (the list of saved recipes could not be read). `saveError` is what a
+ * refused save said.
  */
-export default function RecipeSource({ recipe, lang, onLanguage }: {
+export default function RecipeSource({ recipe, lang, onLanguage, saved = null, onToggleSaved, saveError = null }: {
   recipe: GalleryRecipe;
   lang: RecipeLang;
   onLanguage: (lang: RecipeLang) => void;
+  saved?: boolean | null;
+  onToggleSaved?: () => void;
+  saveError?: string | null;
 }) {
   const titleLang: RecipeLang = recipe.title[lang] !== null ? lang : recipe.title.en !== null ? 'en' : 'zh';
   const title = recipe.title[titleLang] ?? '';
@@ -33,6 +42,18 @@ export default function RecipeSource({ recipe, lang, onLanguage }: {
           <span lang={langAttr(titleLang)} className="font-medium text-fg">{title}</span>
         )}
       </p>
+      {saved !== null && onToggleSaved && (
+        <button
+          type="button"
+          aria-pressed={saved}
+          title={saved ? 'In your saved recipes. Select to remove it.' : 'Keep this recipe to come back to'}
+          onClick={onToggleSaved}
+          className="btn btn-ghost btn-sm shrink-0 px-2 py-1"
+        >
+          <Icon name={saved ? 'bookmarkFilled' : 'bookmark'} size={14} />
+          {saved ? 'Recipe saved' : 'Save recipe'}
+        </button>
+      )}
       {bilingual && (
         <div role="group" aria-label="Prompt language"
              className="inline-flex shrink-0 rounded-md border border-border bg-surface p-0.5">
@@ -51,6 +72,7 @@ export default function RecipeSource({ recipe, lang, onLanguage }: {
           ))}
         </div>
       )}
+      {saveError && <p role="alert" className="basis-full text-xs text-danger">{saveError}</p>}
     </div>
   );
 }

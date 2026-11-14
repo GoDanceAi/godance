@@ -383,6 +383,19 @@ export interface JobView {
   outputs?: JobOutput[];               // empty until DONE, and again once purged
   purged?: boolean;
   mediaExpiresAt?: string | null;      // null: the files are not scheduled for deletion
+  saved?: boolean;                     // kept past the deletion date; absent from an API without saving
+}
+
+/** GET /v1/jobs/saved: how many generations the account has saved, and the most it can. */
+export interface SavedJobs {
+  count: number;
+  limit: number;
+}
+
+/** One entry of GET /v1/saved-recipes: a gallery recipe the user saved, by its slug. */
+export interface SavedRecipe {
+  slug: string;
+  savedAt: string;
 }
 
 // ===== /v1/admin/** (admin console — mirror backend admin DTOs) =====

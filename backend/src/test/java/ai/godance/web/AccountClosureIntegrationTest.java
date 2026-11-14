@@ -130,6 +130,7 @@ class AccountClosureIntegrationTest {
     @Autowired ConversationRepository conversations;
     @Autowired ConversationMessageRepository messages;
     @Autowired GenerationJobRepository jobs;
+    @Autowired ai.godance.repository.SavedRecipeRepository savedRecipes;
     @Autowired GenerationJobSettlement settlement;
     @Autowired AuditLogEntryRepository audit;
     @Autowired ObjectStorageClient storage;
@@ -356,6 +357,72 @@ class AccountClosureIntegrationTest {
     }
 
     @Test
+    void close_givenSavedJobs_deletesThemAndTheirFilesLikeTheRest() {
+        String email = "saver-" + UUID.randomUUID() + "@godance.test";
+        String bearer = signUpOrLogIn(email);
+        UUID userId = users.findByEmail(email).orElseThrow().getId();
+        // Saved and far past the retention period (the nightly purge has been
+        // skipping it), saved last week, and one that was never saved.
+        GenerationJob savedLongAgo = doneJob(userId, Instant.now().minus(Duration.ofDays(200)));
+        GenerationJob savedLately = doneJob(userId, Instant.now().minus(Duration.ofDays(7)));
+        GenerationJob notSaved = doneJob(userId, Instant.now().minus(Duration.ofDays(7)));
+        List<GenerationJob> all = List.of(savedLongAgo, savedLately, notSaved);
+        for (GenerationJob job : all) {
+            String key = "images/" + job.getId() + "/0.png";
+            storage.upload(key, new byte[] {1, 2, 3}, "image/png");
+            outputRows.save(new ai.godance.domain.GenerationJobOutput(job.getId(), 0, key, "image/png", 3L, null));
+        }
+        for (GenerationJob job : List.of(savedLongAgo, savedLately)) {
+            http.put().uri("/v1/jobs/{id}/saved", job.getId()).header("Authorization", bearer)
+                    .exchange().expectStatus().isNoContent();
+        }
+        assertThat(jobs.countSavedByUserId(userId)).isEqualTo(2);
+
+        closeAs(adminBearer, userId)
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.jobsPurged").isEqualTo(3)
+                .jsonPath("$.jobsNotPurged").isEqualTo(0);
+
+        // Saving keeps a job from the nightly purge, never from a closure.
+        for (GenerationJob job : all) {
+            GenerationJob purged = jobs.findById(job.getId()).orElseThrow();
+            assertThat(purged.getPurgedAt()).isNotNull();
+            assertThat(purged.getSavedAt()).isNull();
+            assertThat(purged.getPrompt()).isEqualTo(Map.of("purged", true));
+            assertThat(purged.getOutputUrl()).isNull();
+            assertThat(keysUnder("images/" + job.getId() + "/")).isEmpty();
+            assertThat(outputRows.findByJobIdOrderByOutputIndexAsc(job.getId())).isEmpty();
+            // Costs stay: they are billing records.
+            assertThat(purged.getActualCostCents()).isEqualTo(480L);
+        }
+        assertThat(jobs.countSavedByUserId(userId)).isZero();
+    }
+
+    @Test
+    void close_givenSavedRecipes_deletesTheList() {
+        String email = "recipes-" + UUID.randomUUID() + "@godance.test";
+        String bearer = signUpOrLogIn(email);
+        UUID userId = users.findByEmail(email).orElseThrow().getId();
+        for (String slug : List.of("paper-lantern-street-at-dusk", "koi-pond-in-the-rain")) {
+            http.put().uri("/v1/saved-recipes/{slug}", slug).header("Authorization", bearer)
+                    .exchange().expectStatus().isNoContent();
+        }
+        // Someone else's list is not touched.
+        String otherEmail = "recipes-other-" + UUID.randomUUID() + "@godance.test";
+        String otherBearer = signUpOrLogIn(otherEmail);
+        UUID otherId = users.findByEmail(otherEmail).orElseThrow().getId();
+        http.put().uri("/v1/saved-recipes/{slug}", "koi-pond-in-the-rain").header("Authorization", otherBearer)
+                .exchange().expectStatus().isNoContent();
+        assertThat(savedRecipes.countByUserId(userId)).isEqualTo(2);
+
+        closeAs(adminBearer, userId).expectStatus().isOk();
+
+        assertThat(savedRecipes.countByUserId(userId)).isZero();
+        assertThat(savedRecipes.countByUserId(otherId)).isEqualTo(1);
+    }
+
+    @Test
     void close_givenStaffAccount_dropsTheRoleAndRecordsIt() {
         String email = "staff-" + UUID.randomUUID() + "@godance.test";
         signUpOrLogIn(email);
@@ -462,6 +529,11 @@ class AccountClosureIntegrationTest {
     }
 
     private GenerationJob doneJob(UUID userId) {
+        return doneJob(userId, null);
+    }
+
+    /** {@code createdAt} null: now. */
+    private GenerationJob doneJob(UUID userId, Instant createdAt) {
         GenerationJob job = new GenerationJob();
         job.setUserId(userId);
         job.setModality(Modality.IMAGE);
@@ -474,6 +546,7 @@ class AccountClosureIntegrationTest {
         job.setEstimatedCostCents(500L);
         job.setActualCostCents(480L);
         job.setRequestId("img_" + UUID.randomUUID());
+        job.setCreatedAt(createdAt);
         return jobs.save(job);
     }
 

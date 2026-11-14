@@ -26,7 +26,9 @@ import ai.godance.storage.ObjectStorageClient;
  * {@link DataRetentionJob}:
  * <ul>
  *   <li>generated media and job prompts: 90 days after the job was created,
- *       once it has ended (DONE, FAILED or CANCELLED);</li>
+ *       once it has ended (DONE, FAILED or CANCELLED), unless its owner has
+ *       saved it ({@link JobSaveService}). A saved job is kept until it is
+ *       un-saved or the account is closed;</li>
  *   <li>archived conversations, with their messages: 30 days after archiving;</li>
  *   <li>audit log rows: 365 days after they were written.</li>
  * </ul>
@@ -83,18 +85,23 @@ public class DataRetentionService {
 
     /**
      * When a job's files and prompt are due to be deleted: {@link #JOB_RETENTION}
-     * after it was created. Null once they have been (the job is purged), so
-     * null means "not scheduled for deletion"; clients must accept it.
+     * after it was created. Null while the job is saved, and once they have
+     * been deleted (the job is purged), so null means "not scheduled for
+     * deletion"; clients must accept it. A job un-saved after its date has
+     * one in the past until the next run deletes it.
      */
     public static Instant mediaExpiresAt(GenerationJob job) {
-        if (job.getPurgedAt() != null || job.getCreatedAt() == null) return null;
+        if (job.getPurgedAt() != null || job.getSavedAt() != null || job.getCreatedAt() == null) return null;
         return job.getCreatedAt().plus(JOB_RETENTION);
     }
 
     /** How many jobs a pass purged, and how many it could not (left for the next run). */
     public record JobPurgeCount(int purged, int failed) { }
 
-    /** Purges every ended job created more than {@link #JOB_RETENTION} before {@code now}. */
+    /**
+     * Purges every ended job created more than {@link #JOB_RETENTION} before
+     * {@code now}, except the ones their owners have saved.
+     */
     public JobPurgeCount purgeExpiredJobs(Instant now) {
         Instant cutoff = now.minus(JOB_RETENTION);
         Instant afterCreatedAt = Instant.EPOCH;
@@ -105,8 +112,11 @@ public class DataRetentionService {
             // Keyset paging, so a job that fails to purge is passed over this run, not re-read.
             List<GenerationJob> page = jobs.findPurgeCandidates(cutoff, afterCreatedAt, afterId, JOB_BATCH);
             for (GenerationJob job : page) {
-                if (purgeJob(job.getId(), now)) purged++;
-                else failed++;
+                switch (purgeUnlessSaved(job.getId(), now)) {
+                    case PURGED -> purged++;
+                    case FAILED -> failed++;
+                    case KEPT -> { }
+                }
             }
             if (page.size() < JOB_BATCH) {
                 return new JobPurgeCount(purged, failed);
@@ -125,12 +135,13 @@ public class DataRetentionService {
      * its output rows (V23) in one transaction. Storage goes first: if it
      * fails the rows are left untouched and the job is tried again on the
      * next run. False when anything failed.
+     *
+     * <p>Purges a saved job like any other, which is what closing an account
+     * needs. The nightly run goes through {@link #purgeUnlessSaved}.
      */
     public boolean purgeJob(UUID jobId, Instant now) {
         try {
-            for (String prefix : MEDIA_PREFIXES) {
-                storage.deletePrefix(prefix + jobId + "/");
-            }
+            deleteMedia(jobId);
             tx.executeWithoutResult(status -> {
                 jobs.redactPurged(jobId, now);
                 outputs.deleteByJobId(jobId);
@@ -139,6 +150,42 @@ public class DataRetentionService {
         } catch (RuntimeException e) {
             log.warn("DataRetention: could not purge generation job {}: {}", jobId, e.getMessage());
             return false;
+        }
+    }
+
+    /** What the nightly run did with one job. */
+    private enum Outcome { PURGED, FAILED, KEPT }
+
+    /**
+     * The nightly purge of one job: {@link #purgeJob}, unless its owner saved
+     * it after this run read it. The job's row is locked first and checked
+     * again, and the lock is held across the storage deletes, so a save made
+     * while they run waits for them and is then refused as purged. Either
+     * the save wins and every file stays, or the purge does and the save
+     * says so.
+     *
+     * <p>A storage failure rolls the transaction back, which leaves the rows
+     * untouched for the next run, as in {@link #purgeJob}.
+     */
+    private Outcome purgeUnlessSaved(UUID jobId, Instant now) {
+        try {
+            Boolean purged = tx.execute(status -> {
+                if (jobs.lockIfStillPurgeable(jobId).isEmpty()) return false;
+                deleteMedia(jobId);
+                jobs.redactPurged(jobId, now);
+                outputs.deleteByJobId(jobId);
+                return true;
+            });
+            return Boolean.TRUE.equals(purged) ? Outcome.PURGED : Outcome.KEPT;
+        } catch (RuntimeException e) {
+            log.warn("DataRetention: could not purge generation job {}: {}", jobId, e.getMessage());
+            return Outcome.FAILED;
+        }
+    }
+
+    private void deleteMedia(UUID jobId) {
+        for (String prefix : MEDIA_PREFIXES) {
+            storage.deletePrefix(prefix + jobId + "/");
         }
     }
 
