@@ -1,7 +1,7 @@
 import type { Page } from '@playwright/test';
 import type { JobView, UserRecipe } from '../src/lib/api';
 import { jobId, makeJob, mediaUrl, MODELS, mockEstimates, outputsOf, serveJob, serveJobList, serveMedia, serveSaves } from './generation';
-import { expect, test, type MockApi } from './mock-api';
+import { expect, makeUser, test, type MockApi } from './mock-api';
 import { makeRecipe, makeVersion, MUG_TEMPLATE, recipeId, serveRecipes, versionId } from './user-recipes';
 
 // Round 10 brief 03, outside the Studio: the user's recipes, one recipe with
@@ -72,6 +72,12 @@ async function openRecipe(page: Page, api: MockApi, recipes: UserRecipe[], jobs:
   await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
 }
 
+/** GET /v1/referrals/me while referrals are on (the shape referral.spec.ts uses). */
+const REFERRALS_ON = {
+  enabled: true, code: 'Q4HN7TWE', referrer_reward_cents: 100, referee_reward_cents: 150, min_topup_cents: 10_00,
+  invited: 3, rewarded: 1, earned_cents: 100, pending_reward_cents: null,
+};
+
 const column = (page: Page, n: number) => page.getByRole('article', { name: `Generation ${n}` });
 const noOverflow = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
 
@@ -139,6 +145,8 @@ test.describe('a recipe page', () => {
     await expect(latest).toContainText(MUG_TEMPLATE);
     await expect(latest.locator('mark')).toHaveText(['{{color}}', '{{surface}}']);
     await expect(latest.getByRole('definition')).toHaveText(['red', 'kitchen shelf', 'gpt-image-1.5', '1536x1024 · Count 2']);
+    // Whatever order the API returns the settings in, they read the same way.
+    await expect(page.getByRole('region', { name: 'Version 3, the latest' })).not.toContainText('Count 2 · 1536x1024');
     await expect(page.getByRole('link', { name: 'Open in Studio' })).toHaveAttribute('href', `/create/image?recipe=${recipeId(1)}`);
   });
 
@@ -443,6 +451,26 @@ test.describe('navigation', () => {
     await expect(page).toHaveURL('/recipes');
     await expect(page.getByRole('heading', { level: 1, name: 'Recipes' })).toBeVisible();
     await expect(nav.getByRole('link', { name: 'Recipes' })).toHaveAttribute('aria-current', 'page');
+    expect(await noOverflow(page)).toBe(true);
+  });
+
+  test('with every link the navigation can have and a long address, no label wraps and the page does not scroll sideways', async ({ page, api }) => {
+    serveRecipes(api, []);
+    await api.signIn(makeUser({ email: 'a.rather.long.address.for.a.header@studio.example.com', role: 'ADMIN' }));
+    api.on('GET', '/v1/admin/me', { json: { email: 'a.rather.long.address.for.a.header@studio.example.com', role: 'ADMIN' } });
+    // Referrals on, as referral.spec.ts serves them: the navigation gains Invite.
+    api.on('GET', '/v1/referrals/me', { json: REFERRALS_ON });
+    await serveMedia(page);
+    await page.goto('/recipes');
+
+    const nav = page.getByRole('navigation', { name: 'Main' });
+    await expect(nav.getByRole('link')).toHaveText(
+      ['Dashboard', 'Chat', 'Create', 'History', 'Recipes', 'API keys', 'Billing', 'Invite', 'Settings', 'Admin']);
+    // One line each: every link is as tall as the shortest label's.
+    const heights = await nav.getByRole('link').evaluateAll((links) => links.map((link) => (link as HTMLElement).offsetHeight));
+    expect(new Set(heights).size).toBe(1);
+    const logOut = page.getByRole('button', { name: 'Log out' });
+    expect(await logOut.evaluate((b) => (b as HTMLElement).offsetHeight)).toBeLessThan(30);
     expect(await noOverflow(page)).toBe(true);
   });
 

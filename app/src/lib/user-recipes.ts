@@ -82,11 +82,15 @@ export function paramsOf(body: GenerationBody): Record<string, unknown> {
 }
 
 const PARAM_NAMES: Record<string, string> = { size: 'Size', n: 'Count', seconds: 'Duration', style: 'Style', quality: 'Quality' };
+// The order they are read in, whatever order the API returns them in.
+const PARAM_ORDER = ['size', 'seconds', 'n', 'style', 'quality'];
 
-/** A version's params as short text: "1024x1024 · 2 images". Empty when it keeps none. */
+/** A version's params as short text: "1536x1024 · Count 2". Empty when it keeps none. */
 export function paramsText(params: Record<string, unknown>): string {
+  const rank = (key: string) => (PARAM_ORDER.includes(key) ? PARAM_ORDER.indexOf(key) : PARAM_ORDER.length);
   return Object.entries(params)
     .filter(([, value]) => typeof value === 'string' || typeof value === 'number')
+    .sort(([a], [b]) => rank(a) - rank(b) || a.localeCompare(b))
     .map(([key, value]) => (key === 'seconds' ? `${value} seconds` : key === 'size' ? String(value) : `${PARAM_NAMES[key] ?? key} ${value}`))
     .join(' · ');
 }
