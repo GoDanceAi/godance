@@ -239,6 +239,19 @@ godance:
     # generation is kept past the 90-day deletion, at no charge, for as long
     # as the account exists, so the number is limited. 0 = nothing can be saved.
     saved-limit: ${RETENTION_SAVED_LIMIT:500}
+  images:
+    # Image responses in OpenAI's shape (ImageSyncService). An API key set to
+    # "sync" has its image requests wait for the job and answer with the images,
+    # as OpenAI's API does; a key on "async" gets a job to poll, as before.
+    # What a new key gets when its creation names nothing. Existing keys never change.
+    new-key-response: ${IMAGES_NEW_KEY_RESPONSE:async}
+    # The longest a request waits before it answers 202 with the job. At most
+    # 300s, which the proxy allows. A proxy that needs the response to start
+    # sooner (Cloudflare: about 100s) needs this below its limit.
+    sync-wait: ${IMAGES_SYNC_WAIT:90s}
+    sync-poll-interval: 1s      # how often a waiting request reads its job
+    # The most image data one response carries as b64_json; larger answers with links.
+    max-inline-bytes: ${IMAGES_MAX_INLINE_BYTES:25MB}
   providers:
     openai:
       api-key:  ${OPENAI_API_KEY:sk_dev_dummy_openai_key_do_not_use_for_real_calls}

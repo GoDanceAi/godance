@@ -11,6 +11,8 @@ import org.hibernate.type.SqlTypes;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
@@ -63,6 +65,14 @@ public class ApiKey {
     @Column(name = "monthly_cap_warned_at")
     private Instant monthlyCapWarnedAt;
 
+    /**
+     * How image requests made with this key answer (V30): a job to poll, or
+     * the images themselves once the job is done. Existing keys are ASYNC.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "image_response", nullable = false)
+    private ImageResponseMode imageResponse = ImageResponseMode.ASYNC;
+
     @Column(name = "is_active", nullable = false)
     private boolean active = true;
 
@@ -112,6 +122,9 @@ public class ApiKey {
 
     public Instant getMonthlyCapWarnedAt() { return monthlyCapWarnedAt; }
     public void setMonthlyCapWarnedAt(Instant monthlyCapWarnedAt) { this.monthlyCapWarnedAt = monthlyCapWarnedAt; }
+
+    public ImageResponseMode getImageResponse() { return imageResponse; }
+    public void setImageResponse(ImageResponseMode imageResponse) { this.imageResponse = imageResponse; }
 
     public boolean isActive() { return active; }
     public void setActive(boolean active) { this.active = active; }

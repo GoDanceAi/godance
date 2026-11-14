@@ -9,6 +9,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -21,6 +22,7 @@ import ai.godance.service.ApiKeyService;
 import ai.godance.web.dto.ApiKeyDtos.ApiKeySummary;
 import ai.godance.web.dto.ApiKeyDtos.CreateApiKeyRequest;
 import ai.godance.web.dto.ApiKeyDtos.CreateApiKeyResponse;
+import ai.godance.web.dto.ApiKeyDtos.UpdateApiKeyRequest;
 import jakarta.validation.Valid;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
@@ -50,6 +52,23 @@ public class ApiKeyController {
     public Mono<List<ApiKeySummary>> list(@AuthenticationPrincipal Jwt jwt) {
         UUID userId = JwtService.userIdFromSubject(jwt.getSubject());
         return Mono.fromCallable(() -> keys.listForUser(userId))
+                .subscribeOn(Schedulers.boundedElastic());
+    }
+
+    /**
+     * Changes how image requests made with this key answer:
+     * {@code {"image_response": "sync"}} or {@code "async"}. Returns the key.
+     * A signed-in session only, like every route here: {@code SecurityConfig}
+     * denies an API key by default, so a key cannot change itself.
+     */
+    @PatchMapping("/{id}")
+    public Mono<ApiKeySummary> update(
+            @PathVariable UUID id,
+            @RequestBody UpdateApiKeyRequest req,
+            @AuthenticationPrincipal Jwt jwt,
+            ServerWebExchange exchange) {
+        UUID userId = JwtService.userIdFromSubject(jwt.getSubject());
+        return Mono.fromCallable(() -> keys.update(userId, id, req, clientIp(exchange)))
                 .subscribeOn(Schedulers.boundedElastic());
     }
 
