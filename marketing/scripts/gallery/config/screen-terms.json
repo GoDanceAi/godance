@@ -1,0 +1,83 @@
+{
+  "about": "Words that set an entry aside before anyone looks at it, by rule of docs/gallery-content-standard.md. A starting list for the operator to extend: it only narrows what reaches review and can never approve anything. Matching ignores case; a term in Latin letters matches whole words only.",
+  "rules": {
+    "1": {
+      "name": "real people",
+      "terms": [
+        "celebrity", "celebrities", "president", "prime minister", "politician", "lookalike", "look-alike",
+        "Elon Musk", "Sam Altman", "Donald Trump", "Trump", "Biden", "Obama", "Putin", "Xi Jinping",
+        "Zuckerberg", "Jeff Bezos", "Steve Jobs", "Bill Gates", "Jensen Huang", "Einstein", "Marilyn Monroe",
+        "Kim Kardashian", "Taylor Swift", "Beyoncé", "Beyonce", "Rihanna", "Kanye", "Drake", "BTS", "Blackpink",
+        "Jackie Chan", "Bruce Lee", "Keanu Reeves", "Tom Cruise", "Leonardo DiCaprio", "Scarlett Johansson",
+        "Emma Watson", "Zendaya", "Timothée Chalamet", "Messi", "Ronaldo", "Mbappé", "Mbappe", "Neymar",
+        "Haaland", "LeBron", "Michael Jordan", "Kobe Bryant", "Stephen Curry", "Shohei Ohtani", "马斯克", "特朗普",
+        "川普", "拜登", "奥巴马", "周杰伦", "刘亦菲", "明星", "名人", "总统"
+      ]
+    },
+    "2": {
+      "name": "third-party characters, franchises and brands",
+      "terms": [
+        "Disney", "Pixar", "Marvel", "DC Comics", "Batman", "Superman", "Spider-Man", "Spiderman", "Iron Man",
+        "Avengers", "Star Wars", "Darth Vader", "Harry Potter", "Hogwarts", "Pokémon", "Pokemon", "Pikachu",
+        "Nintendo", "Super Mario", "Zelda", "Naruto", "One Piece", "Luffy", "Dragon Ball", "Goku",
+        "Demon Slayer", "Jujutsu Kaisen", "Attack on Titan", "Studio Ghibli", "Ghibli", "Totoro", "Hello Kitty",
+        "Sanrio", "Barbie", "LEGO", "Minecraft", "Fortnite", "Genshin", "League of Legends", "Cyberpunk 2077",
+        "Grand Theft Auto", "Simpsons", "South Park", "Rick and Morty", "SpongeBob", "Mickey Mouse", "Minions",
+        "Shrek", "Transformers", "Gundam", "Evangelion", "Sailor Moon", "Doraemon", "Labubu", "Pop Mart",
+        "Nike", "Adidas", "iPhone", "MacBook", "Coca-Cola", "Pepsi", "McDonald's", "Starbucks", "Gucci",
+        "Louis Vuitton", "Chanel", "Dior", "Prada", "Hermès", "Hermes", "Rolex", "Tesla", "Ferrari",
+        "Lamborghini", "Porsche", "BMW", "Mercedes", "Balenciaga", "IKEA", "Red Bull", "NBA", "FIFA",
+        "Premier League", "Champions League", "Real Madrid", "Netflix", "Spotify", "迪士尼", "皮克斯", "漫威", "宝可梦",
+        "皮卡丘", "火影", "海贼王", "龙珠", "鬼灭", "吉卜力", "宫崎骏", "原神", "哆啦A梦", "泡泡玛特", "耐克", "阿迪达斯", "可口可乐", "星巴克", "麦当劳",
+        "特斯拉", "法拉利"
+      ]
+    },
+    "3": {
+      "name": "sexualised or suggestive",
+      "terms": [
+        "sexy", "seductive", "sensual", "erotic", "lingerie", "bikini", "cleavage", "nude", "naked", "topless",
+        "see-through", "bodycon", "stockings", "thigh", "thighs", "busty", "curvy", "slim waist", "long legs",
+        "underwear", "panties", "miniskirt", "micro skirt", "upskirt", "provocative", "alluring", "sultry",
+        "NSFW", "fetish", "bunny girl", "maid outfit", "性感", "丝袜", "黑丝", "白丝", "内衣", "比基尼", "诱惑", "裸体", "全裸",
+        "大长腿", "乳沟", "低胸", "超短裙", "擦边", "纯欲", "色气", "魅惑"
+      ]
+    },
+    "4": {
+      "name": "minors",
+      "terms": [
+        "schoolgirl", "school girl", "schoolboy", "school uniform", "high school", "middle school", "teen",
+        "teens", "teenage", "teenager", "child", "children", "kid", "kids", "toddler", "loli", "underage",
+        "little girl", "little boy", "young girl", "young boy", "小学生", "初中生", "高中生", "校服", "萝莉", "正太", "儿童",
+        "小孩", "小女孩", "小男孩", "少女", "少年", "未成年", "婴儿"
+      ]
+    },
+    "5": {
+      "name": "violence, self-harm, drugs and hate symbols",
+      "terms": [
+        "gore", "gory", "blood", "bloody", "corpse", "dead body", "decapitated", "severed", "mutilated",
+        "torture", "suicide", "self-harm", "massacre", "war crime", "stabbing", "cocaine", "heroin", "meth",
+        "marijuana", "cannabis", "syringe", "drug", "drugs", "swastika", "nazi", "KKK", "terrorist", "血腥", "鲜血",
+        "流血", "尸体", "自杀", "自残", "吸毒", "毒品", "纳粹", "恐怖分子"
+      ]
+    },
+    "6": {
+      "name": "imitated documents, currency, news and real interfaces",
+      "terms": [
+        "passport", "ID card", "identity card", "driver's license", "driving licence", "banknote", "bank note",
+        "currency", "dollar bill", "receipt", "invoice", "certificate", "diploma", "news broadcast",
+        "breaking news", "news report", "newspaper front page", "CNN", "BBC", "Fox News", "New York Times",
+        "Instagram", "TikTok", "Twitter", "tweet", "Facebook", "WhatsApp", "WeChat", "YouTube", "Reddit",
+        "LinkedIn", "Tinder", "Snapchat", "iMessage", "Telegram", "Discord", "Xiaohongshu", "Weibo", "Douyin",
+        "iOS", "Android", "Google", "ChatGPT", "OpenAI", "Microsoft", "身份证", "护照", "驾照", "钞票", "人民币", "收据",
+        "发票", "证书", "新闻联播", "小红书", "微博", "抖音", "微信", "朋友圈", "淘宝", "京东", "推特"
+      ]
+    },
+    "7": {
+      "name": "political, medical or financial claims",
+      "terms": [
+        "guaranteed returns", "investment advice", "get rich", "stock tip", "crypto", "bitcoin", "vote for",
+        "election", "vaccine", "weight loss", "包治", "稳赚", "暴富", "比特币", "投票", "选举", "疫苗", "减肥"
+      ]
+    }
+  }
+}
