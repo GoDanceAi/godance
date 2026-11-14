@@ -136,6 +136,19 @@ public class S3ObjectStorageClient implements ObjectStorageClient {
     }
 
     @Override
+    public byte[] download(String key) {
+        try {
+            return s3.getObjectAsBytes(GetObjectRequest.builder()
+                    .bucket(props.bucket())
+                    .key(key)
+                    .build()).asByteArray();
+        } catch (SdkException e) {
+            throw new IllegalStateException(
+                    "object storage download failed for key=" + key + ": " + e.getMessage(), e);
+        }
+    }
+
+    @Override
     public String presignedUrl(String key) {
         GetObjectRequest get = GetObjectRequest.builder()
                 .bucket(props.bucket())

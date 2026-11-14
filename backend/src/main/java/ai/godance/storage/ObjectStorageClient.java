@@ -13,6 +13,12 @@ public interface ObjectStorageClient {
      */
     String upload(String key, byte[] data, String contentType);
 
+    /**
+     * The bytes stored under {@code key}. A failure throws, a missing object
+     * included. For small objects only: the whole object is read into memory.
+     */
+    byte[] download(String key);
+
     /** Pre-signed GET URL with TTL from {@code godance.object-storage.presign-ttl}. */
     String presignedUrl(String key);
 
