@@ -76,7 +76,8 @@ class AuthServiceTest {
         audit = mock(AuditLogService.class);
         twoFactor = mock(TwoFactorService.class);
         auth = new AuthService(users, apiKeys, passwords, jwt, webhooks, audit, mail,
-                mock(ParentalConsentService.class), twoFactor, mock(SignupCreditService.class));
+                mock(ParentalConsentService.class), twoFactor, mock(SignupCreditService.class),
+                mock(InputService.class));
         when(users.findByEmailVerificationToken(any())).thenReturn(Optional.empty());
         when(users.findByEmail(any())).thenReturn(Optional.empty());
         when(users.findByPasswordResetTokenHash(any())).thenReturn(Optional.empty());

@@ -8,6 +8,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import ai.godance.domain.AgeStatus;
 import ai.godance.domain.User;
 import ai.godance.domain.UserRole;
+import ai.godance.web.dto.InputDtos.InputsStatus;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
@@ -120,9 +121,11 @@ public final class AuthDtos {
             Instant createdAt,
             AgeStatus ageStatus,
             String parentEmailMasked,
-            boolean twoFactorEnabled
+            boolean twoFactorEnabled,
+            // Round 11: whether inputs are switched on, and where this account stands with the terms.
+            InputsStatus inputs
     ) {
-        public static MeResponse from(User u, boolean twoFactorEnabled) {
+        public static MeResponse from(User u, boolean twoFactorEnabled, InputsStatus inputs) {
             return new MeResponse(
                     u.getId(),
                     u.getEmail(),
@@ -138,7 +141,8 @@ public final class AuthDtos {
                     u.getCreatedAt(),
                     u.getAgeStatus(),
                     u.getParentEmail() == null ? null : maskEmail(u.getParentEmail()),
-                    twoFactorEnabled);
+                    twoFactorEnabled,
+                    inputs);
         }
     }
 

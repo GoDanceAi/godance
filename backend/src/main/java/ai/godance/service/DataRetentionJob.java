@@ -12,8 +12,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 /**
  * Nightly run of the Privacy Policy's retention schedule (see
  * {@link DataRetentionService}): purges generation jobs older than 90 days,
- * deletes conversations archived more than 30 days ago and audit rows older
- * than a year. Bound to a cron trigger (03:30 UTC daily) in
+ * deletes conversations archived more than 30 days ago, audit rows older
+ * than a year, and uploaded input files that nothing uses and whose expiry
+ * has passed. Bound to a cron trigger (03:30 UTC daily) in
  * {@link ai.godance.config.QuartzJobsConfig}.
  */
 @DisallowConcurrentExecution
@@ -30,10 +31,10 @@ public class DataRetentionJob implements Job {
 
     /** What one pass did. */
     record Summary(int jobsPurged, int jobsFailed, int conversationsDeleted, int auditRowsDeleted,
-                   int unapprovedChildAccountsDeleted) { }
+                   int unapprovedChildAccountsDeleted, int inputFilesDeleted, int inputFilesFailed) { }
 
     /**
-     * One pass over all four rules. Each rule runs even when an earlier one
+     * One pass over all five rules. Each rule runs even when an earlier one
      * threw; whatever it left undone is picked up by the next run.
      */
     static Summary run(DataRetentionService retention, Instant now) {
@@ -41,6 +42,7 @@ public class DataRetentionJob implements Job {
         int conversations = 0;
         int auditRows = 0;
         int children = 0;
+        InputService.ExpiryCount inputFiles = new InputService.ExpiryCount(0, 0);
         try {
             jobs = retention.purgeExpiredJobs(now);
         } catch (RuntimeException e) {
@@ -61,11 +63,19 @@ public class DataRetentionJob implements Job {
         } catch (RuntimeException e) {
             log.error("DataRetentionJob: unapproved child account delete failed", e);
         }
-        Summary summary = new Summary(jobs.purged(), jobs.failed(), conversations, auditRows, children);
+        try {
+            inputFiles = retention.deleteExpiredInputFiles(now);
+        } catch (RuntimeException e) {
+            log.error("DataRetentionJob: input file delete failed", e);
+        }
+        Summary summary = new Summary(jobs.purged(), jobs.failed(), conversations, auditRows, children,
+                inputFiles.deleted(), inputFiles.failed());
         log.info("DataRetentionJob: purged {} generation job(s) ({} could not be purged, retried next run), "
-                        + "deleted {} archived conversation(s), {} audit row(s) and {} unapproved child account(s)",
+                        + "deleted {} archived conversation(s), {} audit row(s), {} unapproved child account(s) "
+                        + "and {} unused input file(s) ({} could not be deleted, retried next run)",
                 summary.jobsPurged(), summary.jobsFailed(), summary.conversationsDeleted(),
-                summary.auditRowsDeleted(), summary.unapprovedChildAccountsDeleted());
+                summary.auditRowsDeleted(), summary.unapprovedChildAccountsDeleted(),
+                summary.inputFilesDeleted(), summary.inputFilesFailed());
         return summary;
     }
 }

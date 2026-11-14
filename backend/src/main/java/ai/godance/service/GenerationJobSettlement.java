@@ -37,13 +37,16 @@ public class GenerationJobSettlement {
     private final CreditLedgerService ledger;
     private final UsageRecordRepository usage;
     private final GenerationJobOutputRepository outputs;
+    private final InputService inputs;
 
     public GenerationJobSettlement(GenerationJobRepository jobs, CreditLedgerService ledger,
-                                   UsageRecordRepository usage, GenerationJobOutputRepository outputs) {
+                                   UsageRecordRepository usage, GenerationJobOutputRepository outputs,
+                                   InputService inputs) {
         this.jobs = jobs;
         this.ledger = ledger;
         this.usage = usage;
         this.outputs = outputs;
+        this.inputs = inputs;
     }
 
     /** A file the worker stored for a job, recorded when the job ends DONE (V23). */
@@ -57,11 +60,24 @@ public class GenerationJobSettlement {
      */
     @Transactional
     public boolean accept(GenerationJob job, UUID apiKeyId) {
+        return accept(job, apiKeyId, List.of());
+    }
+
+    /**
+     * {@link #accept(GenerationJob, UUID)} for a job that uses inputs (round
+     * 11): the inputs {@link InputService#resolve} checked are recorded in
+     * this same transaction. If one cannot be recorded (a file deleted since
+     * it was checked), the refusal is thrown and nothing is written: no job,
+     * no input row, no ledger row.
+     */
+    @Transactional
+    public boolean accept(GenerationJob job, UUID apiKeyId, List<InputService.ResolvedInput> resolvedInputs) {
         if (!ledger.preDebit(job.getUserId(), apiKeyId, job.getEstimatedCostCents(), job.getRequestId())) {
             return false;
         }
         job.setStatus(JobStatus.QUEUED);
         jobs.save(job);
+        inputs.attach(job, resolvedInputs);
         return true;
     }
 

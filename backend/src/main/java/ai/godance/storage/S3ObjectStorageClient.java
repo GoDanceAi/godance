@@ -150,12 +150,17 @@ public class S3ObjectStorageClient implements ObjectStorageClient {
 
     @Override
     public String presignedUrl(String key) {
+        return presignedUrl(key, props.presignTtl());
+    }
+
+    @Override
+    public String presignedUrl(String key, java.time.Duration ttl) {
         GetObjectRequest get = GetObjectRequest.builder()
                 .bucket(props.bucket())
                 .key(key)
                 .build();
         GetObjectPresignRequest req = GetObjectPresignRequest.builder()
-                .signatureDuration(props.presignTtl())
+                .signatureDuration(ttl)
                 .getObjectRequest(get)
                 .build();
         return presigner.presignGetObject(req).url().toString();

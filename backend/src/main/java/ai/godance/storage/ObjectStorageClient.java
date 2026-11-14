@@ -22,6 +22,12 @@ public interface ObjectStorageClient {
     /** Pre-signed GET URL with TTL from {@code godance.object-storage.presign-ttl}. */
     String presignedUrl(String key);
 
+    /**
+     * Pre-signed GET URL that lasts {@code ttl}. For objects whose links
+     * should be short-lived, such as input files.
+     */
+    String presignedUrl(String key, java.time.Duration ttl);
+
     /** Delete an object. Idempotent — no error if the key doesn't exist. */
     void delete(String key);
 

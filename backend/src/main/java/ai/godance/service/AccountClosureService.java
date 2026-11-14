@@ -53,6 +53,9 @@ import ai.godance.repository.UserTwoFactorRepository;
  *   <li>ends any job still running (FAILED, estimate refunded, as the sweep
  *       would) and purges every job now, saved or not: media objects
  *       deleted, prompt and URLs redacted, costs kept;</li>
+ *   <li>deletes every input file the account uploaded, used or not, with
+ *       every record of its use, and forgets that it accepted the input
+ *       terms;</li>
  *   <li>writes an {@code admin.account.closed} audit row.</li>
  * </ul>
  * Kept: credit ledger, usage records, auto-recharge attempts, the Stripe
@@ -60,7 +63,8 @@ import ai.godance.repository.UserTwoFactorRepository;
  * {@link DataRetentionJob}).
  *
  * <p>Idempotent: closing a closed account changes nothing more, and retries
- * any job whose media could not be deleted the first time.
+ * any job whose media, and any input file whose object, could not be
+ * deleted the first time.
  */
 @Service
 public class AccountClosureService {
@@ -81,6 +85,7 @@ public class AccountClosureService {
     private final GenerationJobRepository jobs;
     private final GenerationJobSettlement settlement;
     private final DataRetentionService retention;
+    private final InputService inputs;
     private final AuditLogService audit;
     private final TransactionTemplate tx;
 
@@ -90,7 +95,7 @@ public class AccountClosureService {
                                  SavedRecipeRepository savedRecipes,
                                  RecipeRepository recipes,
                                  GenerationJobRepository jobs, GenerationJobSettlement settlement,
-                                 DataRetentionService retention, AuditLogService audit,
+                                 DataRetentionService retention, InputService inputs, AuditLogService audit,
                                  PlatformTransactionManager txManager) {
         this.users = users;
         this.twoFactors = twoFactors;
@@ -102,6 +107,7 @@ public class AccountClosureService {
         this.jobs = jobs;
         this.settlement = settlement;
         this.retention = retention;
+        this.inputs = inputs;
         this.audit = audit;
         this.tx = new TransactionTemplate(txManager);
     }
@@ -111,7 +117,11 @@ public class AccountClosureService {
         return "closed-" + userId + "@closed.invalid";
     }
 
-    /** What a closure did. {@code jobsNotPurged > 0} means media deletion failed for some jobs; close again to retry. */
+    /**
+     * What a closure did. {@code jobsNotPurged > 0} or
+     * {@code inputFilesNotDeleted > 0} means storage could not delete some
+     * media; close again to retry.
+     */
     public record Result(
             UUID userId,
             boolean alreadyClosed,
@@ -120,7 +130,9 @@ public class AccountClosureService {
             int conversationsDeleted,
             int openJobsEnded,
             int jobsPurged,
-            int jobsNotPurged
+            int jobsNotPurged,
+            int inputFilesDeleted,
+            int inputFilesNotDeleted
     ) { }
 
     private record AccountStep(boolean alreadyClosed, int apiKeys, int identities, int conversations) { }
@@ -149,10 +161,15 @@ public class AccountClosureService {
             else notPurged++;
         }
 
+        // 4. Delete every input file, used or not. The purges above cleared the
+        //    records of their use; deleting a file's row clears any that are left.
+        InputService.ClosureCount inputFiles = inputs.deleteAllOf(userId);
+
         Result result = new Result(userId, account.alreadyClosed(), account.apiKeys(), account.identities(),
-                account.conversations(), ended, purged, notPurged);
-        if (notPurged > 0) {
-            log.warn("Account {} closed, but {} job(s) could not be purged; close it again to retry", userId, notPurged);
+                account.conversations(), ended, purged, notPurged, inputFiles.deleted(), inputFiles.notDeleted());
+        if (notPurged > 0 || inputFiles.notDeleted() > 0) {
+            log.warn("Account {} closed, but {} job(s) could not be purged and {} input file(s) could not be "
+                    + "deleted; close it again to retry", userId, notPurged, inputFiles.notDeleted());
         } else {
             log.info("Account {} closed by {}: {}", userId, actorId, result);
         }
@@ -185,6 +202,9 @@ public class AccountClosureService {
         // The auto-recharge cron does not look at is_active; this is what stops it charging.
         u.setAutoRechargeEnabled(false);
         u.setStripePaymentMethodId(null);
+        // The input terms were the owner's to accept; nobody holds this account now.
+        u.setInputsTermsVersion(null);
+        u.setInputsTermsAcceptedAt(null);
         u.setActive(false);
         u.setSessionVersion(u.getSessionVersion() + 1);
         users.save(u);

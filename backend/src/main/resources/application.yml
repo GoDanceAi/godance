@@ -8,6 +8,12 @@ spring:
   webflux:
     problemdetails:
       enabled: true     # CLAUDE.md: all HTTP errors as application/problem+json
+    multipart:
+      # The only multipart routes take images as inputs (godance.inputs). A part
+      # larger than this is cut off while it is still being received, so keep it
+      # just above godance.inputs.max-bytes; a larger one answers input_too_large.
+      max-disk-usage-per-part: ${INPUTS_MAX_PART_BYTES:21MB}
+      max-parts: 24
   jackson:
     # Spring Boot 4 moved to Jackson 3, whose defaults differ from Jackson 2's
     # (e.g. FAIL_ON_NULL_FOR_PRIMITIVES, alphabetical property order). Keep the
@@ -251,6 +257,29 @@ godance:
     # generation is kept past the 90-day deletion, at no charge, for as long
     # as the account exists, so the number is limited. 0 = nothing can be saved.
     saved-limit: ${RETENTION_SAVED_LIMIT:500}
+  inputs:
+    # Input files (InputService): images an account uploads to use in a
+    # generation. EVERYTHING HERE SHIPS OFF. While enabled is false no upload,
+    # no terms acceptance and no request that names an input is accepted; each
+    # answers 403 inputs_disabled, and every other route behaves as before.
+    enabled: ${INPUTS_ENABLED:false}
+    # Whether an upload may show a person. While false every upload is checked,
+    # and one that shows a person, or that cannot be checked, is refused.
+    allow-people: ${INPUTS_ALLOW_PEOPLE:false}
+    # The vision chat model that runs the person check. Empty = no check, so
+    # with allow-people false every upload answers 503 input_check_unavailable.
+    check-model: ${INPUTS_CHECK_MODEL:}
+    # The current version of the input terms. Raise it when the text changes:
+    # an account that accepted an older version must accept again.
+    terms-version: ${INPUTS_TERMS_VERSION:1}
+    unused-ttl-hours: ${INPUTS_UNUSED_TTL_HOURS:24}   # how long a file nothing uses is kept
+    max-bytes: ${INPUTS_MAX_BYTES:20MB}               # per file; keep spring.webflux.multipart above it
+    max-megapixels: ${INPUTS_MAX_MEGAPIXELS:40}       # per image
+    max-files-per-account: ${INPUTS_MAX_FILES_PER_ACCOUNT:200}   # stored at once, used or not
+    signed-url-ttl: 5m       # a link the owner reads an input through
+    provider-url-ttl: 1h     # a link handed to a provider that fetches inputs by URL
+    upload-limit-per-account: 60    # uploads tried per account per hour
+    upload-limit-per-ip: 120        # uploads tried per client IP per hour
   images:
     # Image responses in OpenAI's shape (ImageSyncService). An API key set to
     # "sync" has its image requests wait for the job and answer with the images,
