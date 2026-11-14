@@ -44,6 +44,27 @@ prompt. A harmless prompt can still produce an output that fails: a face
 that resembles a real person, a logo the model added by itself, text that
 makes a claim. An output that fails is rejected even when its prompt passes.
 
+## Templates and their variables
+
+Some prompts have blanks. A recipe keeps each one as a variable with a
+default, so that a visitor can fill in a value of their own. The gallery
+shows the template, the names of its variables and their defaults.
+
+- **The defaults are part of the recipe.** Every rule applies to each
+  default, in English and in Chinese, exactly as it applies to the prompt.
+  The published prompt is the template with its defaults filled in, so a
+  default that fails a rule fails the recipe.
+- **A variable must not invite a real person's name or likeness, or someone
+  else's character or brand.** A variable named "celebrity", "actor" or
+  "your face" is rejected under rule 1, and one named "brand logo" or
+  "favourite character" under rule 2, whatever its default is. A variable
+  for an object, a colour, a place, a material or a style is fine.
+- **The reviewer sees them.** The review sheet shows the template with each
+  variable marked, and every default in both languages, beside the prompt.
+
+What a visitor later types into a variable is not gallery content. The
+reviewer checks what the gallery shows.
+
 ## How it is applied
 
 1. **Screening.** The import tool sets aside entries that plainly fail,
