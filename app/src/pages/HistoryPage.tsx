@@ -41,11 +41,13 @@ export default function HistoryPage() {
   // The saved view's count against the limit; null until read, or when it can't be.
   const [savedJobs, setSavedJobs] = useState<SavedJobs | null>(null);
 
-  // An API from before saving ignores the filter and marks nothing saved: show nothing as saved.
-  const shown = useCallback(
-    (page: JobView[]) => (savedOnly ? page.filter((j) => j.saved === true) : page),
-    [savedOnly],
-  );
+  // What a page adds to the list, and whether another may follow. In the
+  // saved view every job the API sends is saved; one that isn't means the
+  // API ignored the filter (it predates saving), so nothing is saved there.
+  const take = useCallback((page: JobView[]) => {
+    if (savedOnly && !page.every((j) => j.saved === true)) return { jobs: [], more: false };
+    return { jobs: page, more: page.length === PAGE_SIZE };
+  }, [savedOnly]);
 
   useEffect(() => {
     const id = ++listId.current;
@@ -55,14 +57,15 @@ export default function HistoryPage() {
     listJobs({ limit: PAGE_SIZE, modality: modality ?? undefined, saved: savedOnly })
       .then((page) => {
         if (id !== listId.current) return;
-        setJobs(shown(page));
-        setHasMore(page.length === PAGE_SIZE);
+        const taken = take(page);
+        setJobs(taken.jobs);
+        setHasMore(taken.more);
       })
       .catch((err: unknown) => {
         if (id !== listId.current) return;
         setError(err instanceof ApiError ? err.detail || err.message : 'Could not load your history.');
       });
-  }, [modality, savedOnly, shown]);
+  }, [modality, savedOnly, take]);
 
   const readSavedJobs = useCallback(() => {
     fetchSavedJobs().then(setSavedJobs, () => setSavedJobs(null));
@@ -73,21 +76,23 @@ export default function HistoryPage() {
   }, [savedOnly, readSavedJobs]);
 
   const loadMore = async () => {
-    const last = jobs?.[jobs.length - 1];
-    if (!last) return;
+    if (jobs === null) return;
+    // No card left to page from (each was un-saved out of the saved view): from the top.
+    const last = jobs.at(-1);
     const id = listId.current;
     setLoadingMore(true);
     setMoreFailed(false);
     try {
       const page = await listJobs({
-        limit: PAGE_SIZE, before: last.id, modality: modality ?? undefined, saved: savedOnly,
+        limit: PAGE_SIZE, before: last?.id, modality: modality ?? undefined, saved: savedOnly,
       });
       if (id !== listId.current) return;
+      const taken = take(page);
       setJobs((cur) => {
         const seen = new Set(cur?.map((j) => j.id));
-        return [...(cur ?? []), ...shown(page).filter((j) => !seen.has(j.id))];
+        return [...(cur ?? []), ...taken.jobs.filter((j) => !seen.has(j.id))];
       });
-      setHasMore(page.length === PAGE_SIZE);
+      setHasMore(taken.more);
     } catch {
       if (id === listId.current) setMoreFailed(true);
     } finally {
@@ -163,9 +168,10 @@ export default function HistoryPage() {
 
       {error && <p role="alert" className="mt-6 text-sm text-danger">{error}</p>}
       {!error && jobs === null && <p className="mt-6 text-sm text-fg-faint">Loading…</p>}
-      {jobs?.length === 0 && (savedOnly ? <NothingSaved modality={modality} /> : <EmptyHistory modality={modality} />)}
+      {jobs?.length === 0 && !hasMore
+        && (savedOnly ? <NothingSaved modality={modality} /> : <EmptyHistory modality={modality} />)}
 
-      {jobs !== null && jobs.length > 0 && (
+      {jobs !== null && (jobs.length > 0 || hasMore) && (
         <>
           <ul className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
             {jobs.map((job) => <JobCard key={job.id} initial={job} onSavedChange={onSavedChange} />)}

@@ -227,6 +227,29 @@ test.describe('the saved view', () => {
     await expect(page.getByRole('button', { name: 'Load more' })).toHaveCount(0);
   });
 
+  test('un-saving a whole page still reaches the saved generations after it', async ({ page, api }) => {
+    await signedIn(page, api);
+    const jobs = manyJobs(26, { saved: true, mediaExpiresAt: null });
+    serveJobList(api, jobs);
+    serveSaves(api, jobs);
+
+    await page.goto('/history?saved=1');
+    await expect(cards(page)).toHaveCount(24);
+    for (let left = 24; left > 0; left--) {
+      await saved(cards(page).first()).click();
+      await expect(cards(page)).toHaveCount(left - 1);
+    }
+    // Two are still saved, on what was the next page: not an empty view.
+    await expect(page.getByText('2 of 500 saved.')).toBeVisible();
+    await expect(page.getByText('No saved generations yet.')).toHaveCount(0);
+
+    await page.getByRole('button', { name: 'Load more' }).click();
+    await expect(cards(page)).toHaveCount(2);
+    await expect(cards(page)).toContainText(['Prompt number 25', 'Prompt number 26']);
+    expect(Object.fromEntries(api.callsTo('GET', '/v1/jobs').at(-1)!.query)).toEqual({ limit: '24', saved: 'true' });
+    await expect(page.getByRole('button', { name: 'Load more' })).toHaveCount(0);
+  });
+
   test('says when nothing is saved, and leads back to everything', async ({ page, api }) => {
     await signedIn(page, api);
     const jobs = manyJobs(2);
@@ -397,6 +420,21 @@ test.describe('a generation that cannot be saved', () => {
     await expect(cards(page)).toHaveCount(5);
     await expect(save(cards(page).nth(0))).toBeVisible();
     await expect(page.getByRole('main').getByRole('button', { name: /^Saved?$/ })).toHaveCount(1);
+  });
+
+  test('from an API without saving, the saved view shows nothing as saved', async ({ page, api }) => {
+    await signedIn(page, api);
+    // That API ignores ?saved=true, sends no `saved` field and has no count route.
+    const jobs = manyJobs(30);
+    for (const job of jobs) delete job.saved;
+    api.on('GET', '/v1/jobs', (call) => ({ json: jobs.slice(0, Number(call.query.get('limit') ?? jobs.length)) }));
+    api.on('GET', '/v1/jobs/saved', problem(400, 'Bad Request'));
+
+    await page.goto('/history?saved=1');
+    await expect(page.getByText('No saved generations yet.')).toBeVisible();
+    await expect(cards(page)).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Load more' })).toHaveCount(0);
+    await expect(page.getByText(/ of \d+ saved/)).toHaveCount(0);
   });
 
   test('has no control on its job page or in the Studio', async ({ page, api }) => {
