@@ -73,7 +73,8 @@ frontend-marketing/
         ├── pricing.astro   # Pricing table — Breadcrumb JSON-LD
         ├── models.astro    # Model catalog — ItemList JSON-LD (good for AI agents)
         ├── docs/index.astro # Documentation hub
-        └── status.astro    # Provider status (data feed lands Session 11)
+        ├── status.astro    # Provider status (data feed lands Session 11)
+        └── 404.astro       # Not-found page — built as /404.html, which CF Pages serves with a 404
 ```
 
 ## SEO / GEO
