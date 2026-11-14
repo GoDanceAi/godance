@@ -1,11 +1,23 @@
 import { useEffect, useState } from 'react';
 import { apiFetch, ApiError, type AdminUsageSummary } from '../../lib/api';
 import { formatCents } from '../../lib/auth';
+import FunnelSection from './FunnelSection';
 
-// Revenue vs provider cost, last 30 days, plus top models/users by spend.
+// Revenue vs provider cost, last 30 days, plus top models/users by spend,
+// then the funnel from sign-up to the API. Each loads on its own, so one
+// failing does not hide the other.
 // Chart is hand-rolled SVG — no chart dependency for four bars and a legend.
 
 export default function OverviewPage() {
+  return (
+    <div>
+      <UsageSummary />
+      <FunnelSection />
+    </div>
+  );
+}
+
+function UsageSummary() {
   const [summary, setSummary] = useState<AdminUsageSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
 
