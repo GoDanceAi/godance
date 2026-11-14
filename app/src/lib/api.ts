@@ -392,6 +392,12 @@ export interface SavedJobs {
   limit: number;
 }
 
+/** One entry of GET /v1/saved-recipes: a gallery recipe the user saved, by its slug. */
+export interface SavedRecipe {
+  slug: string;
+  savedAt: string;
+}
+
 // ===== /v1/admin/** (admin console — mirror backend admin DTOs) =====
 
 export interface AdminMeResponse {

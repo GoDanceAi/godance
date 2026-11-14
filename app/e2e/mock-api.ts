@@ -89,7 +89,9 @@ export class MockApi {
       // The dashboard shows the newest generations; an account has none until a test says so.
       .on('GET', '/v1/jobs', { json: [] })
       // Asked once signed in. Referrals ship off, so by default the API says so.
-      .on('GET', '/v1/referrals/me', { json: { enabled: false } });
+      .on('GET', '/v1/referrals/me', { json: { enabled: false } })
+      // The Studio reads the gallery recipes an account saved; it has none until a test says so.
+      .on('GET', '/v1/saved-recipes', { json: [] });
   }
 
   async install(): Promise<void> {
