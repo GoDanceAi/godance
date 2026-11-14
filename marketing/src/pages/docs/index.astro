@@ -17,6 +17,7 @@ const endpoints = [
   { id: 'images', label: 'POST /v1/images/generations', summary: 'a job_id to poll, or the images themselves with a sync key' },
   { id: 'videos', label: 'POST /v1/videos/generations', summary: 'async-only, signed webhook' },
   { id: 'jobs', label: 'GET /v1/jobs/{id}', summary: 'async job status, outputs, history and saving a job' },
+  { id: 'files', label: 'POST /v1/files', summary: 'upload an image to use as an input, and point a request at it' },
   { id: 'recipes', label: 'CRUD /v1/recipes', summary: 'keep a prompt template with variables, run it, and total what its attempts cost' },
   { id: 'estimates', label: 'POST /v1/estimates', summary: 'price an image or video request before sending it' },
   { id: 'models', label: 'GET /v1/models', summary: 'catalog, prices and what each model accepts' },
@@ -113,6 +114,47 @@ curl https://api.godance.ai/v1/jobs/saved \\
   -H "Authorization: Bearer $GODANCE_API_KEY"
 
 { "count": 12, "limit": 500 }`;
+
+const fileUploadSnippet = `curl https://api.godance.ai/v1/files \\
+  -H "Authorization: Bearer $GODANCE_API_KEY" \\
+  -F purpose=generation_input \\
+  -F file=@product.png
+
+HTTP/1.1 201 Created
+
+{ "id": "0b6f6c1e-8c7d-4c58-9d0a-5f2f4f7f3a10", "object": "file",
+  "purpose": "generation_input", "bytes": 812345, "content_type": "image/png",
+  "width": 1024, "height": 1024, "contains_person": false,
+  "created_at": 1794650000, "expires_at": 1794736400 }`;
+
+const inputRefSnippet = `# One of your uploaded files
+{ "file_id": "0b6f6c1e-8c7d-4c58-9d0a-5f2f4f7f3a10" }
+
+# One of the images a job of yours produced: its job and the output's index
+{ "job_output": { "job_id": "6f1c0b9e-2d4a-4c3b-9a57-0e8d4b2f7c11", "index": 0 } }`;
+
+const fileRoutesSnippet = `# Your files, newest first (limit 1 to 100, default 20; before = a file id)
+curl "https://api.godance.ai/v1/files?limit=20" \\
+  -H "Authorization: Bearer $GODANCE_API_KEY"
+
+# One file
+curl https://api.godance.ai/v1/files/$FILE_ID \\
+  -H "Authorization: Bearer $GODANCE_API_KEY"
+
+# Its bytes: a 302 to a link that works for five minutes
+curl -L -o product.png https://api.godance.ai/v1/files/$FILE_ID/content \\
+  -H "Authorization: Bearer $GODANCE_API_KEY"
+
+# Delete it now
+curl -X DELETE https://api.godance.ai/v1/files/$FILE_ID \\
+  -H "Authorization: Bearer $GODANCE_API_KEY"`;
+
+const jobInputsSnippet = `"inputs": [
+  { "role": "image", "file_id": "0b6f6c1e-8c7d-4c58-9d0a-5f2f4f7f3a10", "url": "https://…signed…" },
+  { "role": "first_frame",
+    "job_output": { "job_id": "6f1c0b9e-2d4a-4c3b-9a57-0e8d4b2f7c11", "index": 0 },
+    "url": "https://…signed…" }
+]`;
 
 const recipeSnippet = `curl https://api.godance.ai/v1/recipes \\
   -H "Authorization: Bearer $GODANCE_API_KEY" \\
@@ -334,6 +376,7 @@ def verify(payload, header, secret):
         <li><code class="code-chip">galleryRecipe</code> — the slug of the gallery recipe the job was a run of, or null. To set it, send <code class="code-chip">gallery_recipe</code> in the body of <code class="code-chip">POST /v1/images/generations</code> or <code class="code-chip">POST /v1/videos/generations</code>: a recipe's slug, which is lowercase letters, digits and hyphens, at most 80 characters. Any other value returns <code class="code-chip">400</code> with <code class="code-chip">code: "invalid_gallery_recipe"</code> and nothing is charged. It is optional and changes nothing about the result or its price.</li>
       )}
       <li><code class="code-chip">recipe</code> — set when the job ran one of <a href="#recipes" class="underline" style="color: var(--color-primary)">your recipes</a>: the recipe's <code class="code-chip">id</code>, the <code class="code-chip">version</code> number it ran, and <code class="code-chip">variables</code>, the value each variable had. Null for a job made from a plain prompt, and again once that recipe is deleted.</li>
+      <li><code class="code-chip">inputs</code> — the images the job was given, in the order the request gave them; empty for a job with none. See <a href="#job-inputs" class="underline" style="color: var(--color-primary)">a job's inputs</a>.</li>
       <li><code class="code-chip">purged</code> — true once the files and prompt have been deleted; <code class="code-chip">prompt</code> is then null, <code class="code-chip">params</code> is <code class="code-chip">&#123;&#125;</code> and <code class="code-chip">outputs</code> is empty. A <code class="code-chip">recipe</code>'s <code class="code-chip">variables</code> is null too: the values are deleted with the prompt. The cost fields and <code class="code-chip">channel</code> stay{recipesOn && <>, and so does <code class="code-chip">galleryRecipe</code></>}.</li>
       <li><code class="code-chip">errorMessage</code> — set when <code class="code-chip">FAILED</code>; the reserved credit is refunded.</li>
       <li><code class="code-chip">estimatedCostCents</code>, <code class="code-chip">actualCostCents</code> — integer cents: the amount reserved when the job was accepted, and the amount charged once it is <code class="code-chip">DONE</code>.</li>
@@ -367,6 +410,82 @@ def verify(payload, header, secret):
       <li>Only a <code class="code-chip">DONE</code> job whose files still exist can be saved. Any other job returns <code class="code-chip">409</code> with <code class="code-chip">code: "job_not_saveable"</code>.</li>
       <li>An account can save up to 500 jobs. Saving one more returns <code class="code-chip">409</code> with <code class="code-chip">code: "saved_limit_reached"</code>; un-save a job to make room. <code class="code-chip">GET /v1/jobs/saved</code> returns how many you have saved and your limit.</li>
       <li>While a job is saved, its <code class="code-chip">mediaExpiresAt</code> is null. Un-saving puts the 90 days back, counted from when the job was created. A job already older than that then has a <code class="code-chip">mediaExpiresAt</code> in the past, and its files and prompt are deleted at the next nightly clean-up.</li>
+    </ul>
+
+    <!-- ===== Files and inputs ===== -->
+    <h2 id="files" class="scroll-mt-24 text-2xl font-bold mt-16 mb-4 text-fg">POST /v1/files</h2>
+    <p class="text-fg-muted">
+      Files and inputs. An input is an image you give a generation to work from: a product
+      photo to place in a scene, or a picture to animate. Upload it once, then point
+      requests at it. Works with an API key or a signed-in session.
+    </p>
+    <p class="mt-4 text-fg-muted">
+      <strong class="text-fg">Not switched on yet.</strong> Inputs are being rolled out. Until
+      they are switched on, uploading answers <code class="code-chip">403</code> with
+      <code class="code-chip">code: "inputs_disabled"</code>, and so does any request that
+      names an input. Nothing else about the API changes.
+    </p>
+    <pre class="code-block mt-4"><code>{fileUploadSnippet}</code></pre>
+    <ul class="mt-4 space-y-2 text-fg-muted">
+      <li>Send <code class="code-chip">multipart/form-data</code> with the image in a part named <code class="code-chip">file</code>. <code class="code-chip">purpose</code> is <code class="code-chip">generation_input</code>, the only purpose there is; it may be left out.</li>
+      <li><strong class="text-fg">What is accepted:</strong> a PNG, JPEG or WebP still image, at most 20&nbsp;MB and at most 40 megapixels. The type is read from the file itself, not from its name or the type the upload declares. An account can keep up to 200 files at once.</li>
+      <li><strong class="text-fg">Metadata is removed</strong> before the file is stored: EXIF, XMP and anything else that describes the picture rather than being it, such as where and when a photo was taken. The image itself is not re-encoded. Its colour profile and its orientation are kept. <code class="code-chip">bytes</code> is the size of what was stored, so it can be smaller than what you sent.</li>
+      <li><strong class="text-fg">Who can upload:</strong> an adult's account that has accepted the input terms. Accept them once in the app, under Settings; an API key cannot accept them for you.</li>
+      <li><code class="code-chip">width</code> and <code class="code-chip">height</code> are in pixels, as the image is shown. <code class="code-chip">created_at</code> and <code class="code-chip">expires_at</code> are seconds since the epoch.</li>
+      <li><code class="code-chip">contains_person</code> — what the automatic check found: <code class="code-chip">false</code>, or null when no check ran. While people are not accepted in inputs, an image that shows a person is refused, so a stored file never says <code class="code-chip">true</code>.</li>
+    </ul>
+
+    <h3 id="input-references" class="scroll-mt-24 text-xl font-semibold mt-10 mb-4 text-fg">Pointing at an input</h3>
+    <p class="text-fg-muted">
+      Wherever a request takes an input, it takes one of two forms:
+    </p>
+    <pre class="code-block mt-4"><code>{inputRefSnippet}</code></pre>
+    <ul class="mt-4 space-y-2 text-fg-muted">
+      <li>A <code class="code-chip">file_id</code> must be one of your own files. Someone else's answers <code class="code-chip">404</code> with <code class="code-chip">code: "file_not_found"</code>, exactly as a file that does not exist.</li>
+      <li>A <code class="code-chip">job_output</code> must be an image from one of your own jobs that is <code class="code-chip">DONE</code> and whose files have not been deleted. Anything else answers <code class="code-chip">404</code> with <code class="code-chip">code: "job_output_not_found"</code>. It needs no upload.</li>
+      <li>A reference that is not exactly one of the two answers <code class="code-chip">400</code> with <code class="code-chip">code: "invalid_input_reference"</code>.</li>
+      <li>A request that is refused for its input charges nothing and creates no job.</li>
+    </ul>
+
+    <h3 id="file-retention" class="scroll-mt-24 text-xl font-semibold mt-10 mb-4 text-fg">How long a file is kept</h3>
+    <ul class="space-y-2 text-fg-muted">
+      <li>A file no job has used is deleted 24 hours after it was uploaded. <code class="code-chip">expires_at</code> says when.</li>
+      <li>Once a job uses a file, it is kept for as long as that job is: 90 days, or until you un-save a <a href="#saving-a-job" class="underline" style="color: var(--color-primary)">saved job</a>. While a job uses it, <code class="code-chip">expires_at</code> is null.</li>
+      <li>When the last job that used it is deleted, the file is unused again and gets another 24 hours.</li>
+      <li><code class="code-chip">DELETE /v1/files/&#123;id&#125;</code> deletes it at once, whether or not a job used it. Closing your account deletes every file.</li>
+      <li>A file is private. Only you can read it, through links that expire, and it is never shown publicly.</li>
+    </ul>
+    <pre class="code-block mt-4"><code>{fileRoutesSnippet}</code></pre>
+
+    <h3 id="input-refusals" class="scroll-mt-24 text-xl font-semibold mt-10 mb-4 text-fg">What is refused, and why</h3>
+    <p class="text-fg-muted">
+      Each refusal is a problem response with its own <code class="code-chip">code</code>. An
+      upload is checked in the order below, and the first check that fails answers. The size
+      in bytes is checked before the type, and the size in pixels after it.
+    </p>
+    <ul class="mt-4 space-y-2 text-fg-muted">
+      <li><code class="code-chip">403 inputs_disabled</code> — inputs are not switched on.</li>
+      <li><code class="code-chip">403 inputs_not_allowed_for_account</code> — the account is not an adult's.</li>
+      <li><code class="code-chip">403 inputs_terms_required</code> — the account has not accepted the current input terms. <code class="code-chip">terms_version</code> in the response is the version to accept.</li>
+      <li><code class="code-chip">413 input_too_large</code> — more than 20&nbsp;MB, or more than 40 megapixels.</li>
+      <li><code class="code-chip">415 input_type_unsupported</code> — not a PNG, JPEG or WebP still image: another format, an animation, or a file that is cut short.</li>
+      <li><code class="code-chip">409 input_limit_reached</code> — the account already keeps 200 files. Delete one to upload another.</li>
+      <li><code class="code-chip">422 input_person_not_allowed</code> — the image shows a person, and images of people are not accepted yet.</li>
+      <li><code class="code-chip">503 input_check_unavailable</code> — the image could not be checked, so it was not accepted. Try again later.</li>
+      <li><code class="code-chip">429</code> — too many uploads in an hour. <code class="code-chip">Retry-After</code> says how long to wait.</li>
+    </ul>
+
+    <h3 id="job-inputs" class="scroll-mt-24 text-xl font-semibold mt-10 mb-4 text-fg">A job's inputs</h3>
+    <p class="text-fg-muted">
+      A <a href="#jobs" class="underline" style="color: var(--color-primary)">job</a> says what
+      it was given in <code class="code-chip">inputs</code>, in the order the request gave them:
+    </p>
+    <pre class="code-block mt-4"><code>{jobInputsSnippet}</code></pre>
+    <ul class="mt-4 space-y-2 text-fg-muted">
+      <li><code class="code-chip">role</code> — what the input was to the job: <code class="code-chip">image</code>, <code class="code-chip">mask</code>, <code class="code-chip">first_frame</code>, <code class="code-chip">last_frame</code> or <code class="code-chip">reference_image</code>.</li>
+      <li><code class="code-chip">file_id</code> or <code class="code-chip">job_output</code> — the reference the request used.</li>
+      <li><code class="code-chip">url</code> — a link to the input, signed when you read the job, which works for five minutes. Null once the file is gone: you deleted it, or the job whose output it was has had its files deleted.</li>
+      <li>Once the job itself is <code class="code-chip">purged</code>, <code class="code-chip">inputs</code> is empty.</li>
     </ul>
 
     <!-- ===== Recipes ===== -->
