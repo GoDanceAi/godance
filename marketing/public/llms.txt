@@ -20,6 +20,8 @@
 - Complete reference, one file: every route with a runnable curl example and a Python
   example, using the real field names — https://godance.ai/llms-full.txt
 - OpenAPI 3.1 description of every route, for tools — https://api.godance.ai/v1/openapi.yaml
+- Without code: two n8n templates that run a Google Sheet's rows as Godance image or video
+  jobs — https://github.com/GoDanceAi/godance/tree/main/integrations/n8n
 
 ## API surface (OpenAI-compatible)
 
@@ -76,7 +78,11 @@
   missing max_n means 1). An n above max_n answers 400 before any charge
 - CRUD /v1/keys — API key management (plaintext returned exactly once); each key has
   image_response, "async" or "sync", set at POST /v1/keys or changed with
-  PATCH /v1/keys/{id} {"image_response": "sync"} (signed-in session only)
+  PATCH /v1/keys/{id} {"image_response": "sync"} (signed-in session only). A key can
+  also have daily_cap_cents and monthly_cap_cents (the most it may spend in a UTC day
+  and month; past one a request answers 402) and expires_at (after it, 401); null means
+  none, and a PATCH changes only the fields it sends. GET /v1/keys shows each key's
+  spent_today_cents and spent_month_cents
 - POST /v1/billing/topup — Stripe Checkout for card / ACH / SEPA
 - GET /v1/webhooks/secret — signing secret (Stripe-style HMAC-SHA256)
 - POST /v1/webhooks/secret/rotate — rotate with 24h dual-signature grace
