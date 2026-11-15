@@ -12,6 +12,7 @@ import org.springframework.context.annotation.Configuration;
 import ai.godance.service.AutoRechargeCronJob;
 import ai.godance.service.DataRetentionJob;
 import ai.godance.service.GenerationJobSweepJob;
+import ai.godance.service.RecipeBatchTickJob;
 import ai.godance.service.ReferralSweepJob;
 import ai.godance.service.pricing.PricingRefreshCronJob;
 
@@ -124,6 +125,33 @@ public class QuartzJobsConfig {
         return TriggerBuilder.newTrigger()
                 .forJob(dataRetentionJobDetail)
                 .withIdentity("dataRetentionTrigger")
+                .withSchedule(CronScheduleBuilder.cronSchedule(cron)
+                        .inTimeZone(java.util.TimeZone.getTimeZone("UTC"))
+                        .withMisfireHandlingInstructionDoNothing())
+                .build();
+    }
+
+    @Bean
+    JobDetail recipeBatchTickJobDetail() {
+        return JobBuilder.newJob(RecipeBatchTickJob.class)
+                .withIdentity("recipeBatchTickJob")
+                .storeDurably()
+                .build();
+    }
+
+    /**
+     * Every three seconds by default: a recipe batch's next row starts
+     * within a few seconds of a place coming free. A pass with no batch to
+     * advance is one indexed read. A missed firing is dropped, not made up:
+     * the next pass does the same work.
+     */
+    @Bean
+    Trigger recipeBatchTickTrigger(
+            JobDetail recipeBatchTickJobDetail,
+            @Value("${godance.batches.tick-cron:0/3 * * * * ?}") String cron) {
+        return TriggerBuilder.newTrigger()
+                .forJob(recipeBatchTickJobDetail)
+                .withIdentity("recipeBatchTickTrigger")
                 .withSchedule(CronScheduleBuilder.cronSchedule(cron)
                         .inTimeZone(java.util.TimeZone.getTimeZone("UTC"))
                         .withMisfireHandlingInstructionDoNothing())

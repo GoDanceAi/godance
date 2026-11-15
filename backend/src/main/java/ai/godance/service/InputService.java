@@ -470,25 +470,76 @@ public class InputService {
         requireMayUse(userId);
         List<ResolvedInput> resolved = new ArrayList<>(uses.size());
         for (InputUse use : uses) {
-            InputRef ref = use.ref();
-            boolean isFile = ref != null && ref.fileId() != null;
-            boolean isOutput = ref != null && ref.jobOutput() != null;
-            if (isFile == isOutput) {
-                throw InputRefusedException.invalidReference(
-                        "an input is either {\"file_id\": …} or {\"job_output\": {\"job_id\": …, \"index\": …}}");
-            }
-            resolved.add(isFile ? resolveFile(userId, use.role(), ref.fileId())
+            InputRef ref = requireOneReference(use.ref());
+            resolved.add(ref.fileId() != null ? resolveFile(userId, use.role(), ref.fileId())
                     : resolveJobOutput(userId, use.role(), ref.jobOutput()));
         }
         return List.copyOf(resolved);
     }
 
     private ResolvedInput resolveFile(UUID userId, InputRole role, UUID fileId) {
-        InputFile file = get(userId, fileId);
-        requirePeopleRule(file);
+        InputFile file = usableFile(userId, fileId);
         byte[] bytes = storage.download(file.getStorageKey());
         return new ResolvedInput(role, file.getId(), null, null, file.getStorageKey(), file.getContentType(),
                 file.getWidth(), file.getHeight(), bytes);
+    }
+
+    /** One of the caller's files that still exists and passes the people rule as it stands now. */
+    private InputFile usableFile(UUID userId, UUID fileId) {
+        InputFile file = get(userId, fileId);
+        requirePeopleRule(file);
+        return file;
+    }
+
+    /**
+     * What {@link #inspect} knows about an input without loading it. For an
+     * uploaded file that is its type, its shape and its size in bytes. For a
+     * job output only the type is on record: the shape and size are null.
+     */
+    public record InputFacts(InputRole role, InputRef ref, String contentType,
+                             Integer width, Integer height, Long sizeBytes) { }
+
+    /**
+     * {@link #resolve} without loading any image: every check that method
+     * makes of who may use an input and whether it is the caller's, for a
+     * request that will run later (a row of a recipe batch). Writes nothing
+     * and reads nothing from storage. The row's job runs {@link #resolve}
+     * itself when it starts, so anything that changes in between is still
+     * caught there.
+     *
+     * @return what is on record about each input, in the order given
+     */
+    public List<InputFacts> inspect(UUID userId, List<InputUse> uses) {
+        if (uses == null || uses.isEmpty()) return List.of();
+        requireMayUse(userId);
+        List<InputFacts> facts = new ArrayList<>(uses.size());
+        for (InputUse use : uses) {
+            InputRef ref = requireOneReference(use.ref());
+            if (ref.fileId() != null) {
+                InputFile file = usableFile(userId, ref.fileId());
+                facts.add(new InputFacts(use.role(), ref, file.getContentType(), file.getWidth(), file.getHeight(),
+                        file.getBytes()));
+            } else {
+                GenerationJobOutput output = ownOutput(userId, ref.jobOutput());
+                // A video output is not an input; resolve() finds that out by reading the file.
+                if (output.getContentType() == null || !output.getContentType().startsWith("image/")) {
+                    throw InputRefusedException.jobOutputNotFound();
+                }
+                facts.add(new InputFacts(use.role(), ref, output.getContentType(), null, null, null));
+            }
+        }
+        return List.copyOf(facts);
+    }
+
+    /** The reference, when it names exactly one thing: a file or a job output. */
+    private static InputRef requireOneReference(InputRef ref) {
+        boolean isFile = ref != null && ref.fileId() != null;
+        boolean isOutput = ref != null && ref.jobOutput() != null;
+        if (isFile == isOutput) {
+            throw InputRefusedException.invalidReference(
+                    "an input is either {\"file_id\": …} or {\"job_output\": {\"job_id\": …, \"index\": …}}");
+        }
+        return ref;
     }
 
     /**
@@ -502,7 +553,8 @@ public class InputService {
         }
     }
 
-    private ResolvedInput resolveJobOutput(UUID userId, InputRole role, JobOutputRef ref) {
+    /** The stored output a reference names: one of the caller's own jobs, DONE and not purged. */
+    private GenerationJobOutput ownOutput(UUID userId, JobOutputRef ref) {
         if (ref.jobId() == null || ref.index() == null || ref.index() < 0) {
             throw InputRefusedException.invalidReference("job_output needs a job_id and an index of 0 or more");
         }
@@ -510,10 +562,14 @@ public class InputService {
                 .filter(j -> j.getUserId().equals(userId))
                 .filter(j -> j.getStatus() == JobStatus.DONE && j.getPurgedAt() == null)
                 .orElseThrow(InputRefusedException::jobOutputNotFound);
-        GenerationJobOutput output = outputs.findByJobIdOrderByOutputIndexAsc(job.getId()).stream()
+        return outputs.findByJobIdOrderByOutputIndexAsc(job.getId()).stream()
                 .filter(o -> o.getOutputIndex() == ref.index())
                 .findFirst()
                 .orElseThrow(InputRefusedException::jobOutputNotFound);
+    }
+
+    private ResolvedInput resolveJobOutput(UUID userId, InputRole role, JobOutputRef ref) {
+        GenerationJobOutput output = ownOutput(userId, ref);
         byte[] bytes;
         Info info;
         try {
@@ -523,7 +579,7 @@ public class InputService {
             // A video, or a file that is no longer there.
             throw InputRefusedException.jobOutputNotFound();
         }
-        return new ResolvedInput(role, null, job.getId(), ref.index(), output.getStorageKey(),
+        return new ResolvedInput(role, null, output.getJobId(), ref.index(), output.getStorageKey(),
                 info.format().contentType(), info.width(), info.height(), bytes);
     }
 
@@ -554,6 +610,39 @@ public class InputService {
                         input.sourceJobId(), input.sourceIndex());
             }
         }
+    }
+
+    // ===== Files a recipe batch holds =================================
+
+    /**
+     * Holds the files a recipe batch's rows name, so the nightly run does
+     * not delete one while the batch waits (round 12). Runs in the
+     * transaction that creates the batch: if a file was deleted since
+     * {@link #inspect} read it, the batch is refused with
+     * {@code file_not_found} and nothing is written.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void holdForBatch(UUID batchId, UUID userId, Set<UUID> fileIds) {
+        if (fileIds == null || fileIds.isEmpty()) return;
+        requireMayUse(userId);
+        if (files.markInUse(fileIds, userId) != fileIds.size()) {
+            throw InputRefusedException.fileNotFound();
+        }
+        for (UUID fileId : fileIds) files.holdForBatch(batchId, fileId);
+    }
+
+    /**
+     * Lets go of the files a batch held: the batch has ended. A file one of
+     * its jobs used is still in use, by that job, until the job is purged.
+     * A file nothing uses any more is unused from now: it gets a fresh
+     * expiry, or, when its owner had already deleted it, its row goes.
+     */
+    @Transactional
+    public void releaseBatch(UUID batchId, Instant now) {
+        List<UUID> held = files.findHeldByBatch(batchId);
+        if (files.releaseBatch(batchId) == 0 || held.isEmpty()) return;
+        files.deleteGoneAndUnused(held);
+        files.expireUnused(held, now.plus(props.unusedTtl()));
     }
 
     /** A signed link to a resolved input for a provider that fetches inputs by URL. Short-lived, never public. */

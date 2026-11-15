@@ -1,6 +1,5 @@
 package ai.godance.web;
 
-import java.util.List;
 import java.util.UUID;
 
 import org.springframework.http.ResponseEntity;
@@ -15,13 +14,10 @@ import org.springframework.web.bind.annotation.RestController;
 import ai.godance.gateway.ImageDtos.ImageRequest;
 import ai.godance.service.ImageResponseFormat;
 import ai.godance.security.JwtService;
-import ai.godance.service.ImageEdits;
 import ai.godance.service.ImageGenerationService;
-import ai.godance.service.InputService.ResolvedInput;
-import ai.godance.domain.Modality;
 import ai.godance.service.JobOrigin;
-import ai.godance.service.RecipeRunService;
-import ai.godance.service.RecipeRunService.RunPrompt;
+import ai.godance.service.RecipeRuns;
+import ai.godance.service.RecipeRuns.ImageRun;
 import ai.godance.web.dto.ImageDtos.ImageGenerationRequest;
 import jakarta.validation.Valid;
 import reactor.core.publisher.Mono;
@@ -45,34 +41,13 @@ import reactor.core.scheduler.Schedulers;
 public class ImageController {
 
     private final ImageGenerationService service;
-    private final RecipeRunService recipes;
+    private final RecipeRuns runs;
     private final ImageJobAnswers answers;
-    private final ImageEdits edits;
 
-    public ImageController(ImageGenerationService service, RecipeRunService recipes, ImageJobAnswers answers,
-                           ImageEdits edits) {
+    public ImageController(ImageGenerationService service, RecipeRuns runs, ImageJobAnswers answers) {
         this.service = service;
-        this.recipes = recipes;
+        this.runs = runs;
         this.answers = answers;
-        this.edits = edits;
-    }
-
-    /**
-     * What a request runs with, once its recipe is rendered: the request, and
-     * the inputs its recipe names. A recipe with input slots runs as an edit
-     * and one without as a generation: the server decides, from the slots.
-     */
-    private record Run(ImageRequest request, List<ResolvedInput> inputs, JobOrigin origin) { }
-
-    private Run runOf(UUID userId, ImageRequest domain, ImageGenerationRequest req, JobOrigin origin) {
-        // A recipe is rendered here, before anything is priced or charged.
-        RunPrompt run = recipes.resolve(userId, Modality.IMAGE, req.prompt(), req.recipe());
-        ImageRequest request = domain.withPrompt(run.prompt());
-        if (!run.hasInputs()) return new Run(request, List.of(), run.origin(origin));
-        // Each slot's image is checked and loaded as an edit's is: inputs on, the model takes them, the caller owns them.
-        List<ResolvedInput> inputs = edits.resolve(userId, domain.model(),
-                new ImageEdits.Refs(run.inputsWithRole("image"), null));
-        return new Run(edits.attach(request, inputs), inputs, run.origin(origin));
     }
 
     @PostMapping("/images/generations")
@@ -95,7 +70,8 @@ public class ImageController {
         boolean mayWait = answers.mayWait(apiKeyId, forceAsync, req.async(), prefer);
         if (Boolean.TRUE.equals(req.async()) || forceAsync) {
             return Mono.fromCallable(() -> {
-                        Run run = runOf(userId, domain, req, origin);
+                        // The recipe is rendered and its slots' images loaded, before anything is priced or charged.
+                        ImageRun run = runs.image(userId, domain, req.prompt(), req.recipe(), origin);
                         return service.executeAsync(userId, apiKeyId, run.request(),
                                 req.webhookUrl(), run.origin(), run.inputs());
                     })
@@ -104,7 +80,7 @@ public class ImageController {
         }
 
         return Mono.fromCallable(() -> {
-                    Run run = runOf(userId, domain, req, origin);
+                    ImageRun run = runs.image(userId, domain, req.prompt(), req.recipe(), origin);
                     return service.execute(userId, apiKeyId, run.request(), run.origin(), run.inputs());
                 })
                 .subscribeOn(Schedulers.boundedElastic())

@@ -19,6 +19,13 @@ public interface ObjectStorageClient {
      */
     byte[] download(String key);
 
+    /**
+     * The object stored under {@code key}, as a stream the caller reads and
+     * closes. For objects of any size: nothing is held in memory beyond
+     * what the caller reads. A failure throws, a missing object included.
+     */
+    java.io.InputStream open(String key);
+
     /** Pre-signed GET URL with TTL from {@code godance.object-storage.presign-ttl}. */
     String presignedUrl(String key);
 

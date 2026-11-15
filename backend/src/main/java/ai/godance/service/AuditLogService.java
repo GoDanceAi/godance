@@ -103,6 +103,11 @@ public class AuditLogService {
     /** A user made one of their own recipes, or deleted one (round 10). */
     public static final String EVT_RECIPE_CREATED = "recipe.created";
     public static final String EVT_RECIPE_DELETED = "recipe.deleted";
+    /** A recipe batch (round 12): made, paused with the reason, cancelled with the reason, and ended DONE. */
+    public static final String EVT_BATCH_CREATED   = "batch.created";
+    public static final String EVT_BATCH_PAUSED    = "batch.paused";
+    public static final String EVT_BATCH_CANCELLED = "batch.cancelled";
+    public static final String EVT_BATCH_COMPLETED = "batch.completed";
     public static final String EVT_JOB_SAVED   = "job.saved";
     /** A user un-saved a generation, which puts it back under the retention period. */
     public static final String EVT_JOB_UNSAVED = "job.unsaved";

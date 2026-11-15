@@ -23,6 +23,7 @@ import ai.godance.repository.ApiKeyRepository;
 import ai.godance.repository.ConversationRepository;
 import ai.godance.repository.GenerationJobRepository;
 import ai.godance.repository.OAuthIdentityRepository;
+import ai.godance.repository.RecipeBatchRepository;
 import ai.godance.repository.RecipeRepository;
 import ai.godance.repository.SavedRecipeRepository;
 import ai.godance.repository.UserRepository;
@@ -48,8 +49,8 @@ import ai.godance.repository.UserTwoFactorRepository;
  *   <li>turns auto-recharge off and forgets the saved payment method, so the
  *       card is never charged again;</li>
  *   <li>deletes every conversation and its messages, the list of
- *       gallery recipes the owner saved, and the owner's own recipes with
- *       all their versions;</li>
+ *       gallery recipes the owner saved, the owner's own recipes with all
+ *       their versions, and every recipe batch with its rows;</li>
  *   <li>ends any job still running (FAILED, estimate refunded, as the sweep
  *       would) and purges every job now, saved or not: media objects
  *       deleted, prompt and URLs redacted, costs kept;</li>
@@ -82,6 +83,7 @@ public class AccountClosureService {
     private final ConversationRepository conversations;
     private final SavedRecipeRepository savedRecipes;
     private final RecipeRepository recipes;
+    private final RecipeBatchRepository batches;
     private final GenerationJobRepository jobs;
     private final GenerationJobSettlement settlement;
     private final DataRetentionService retention;
@@ -93,7 +95,7 @@ public class AccountClosureService {
                                  ApiKeyRepository apiKeys,
                                  OAuthIdentityRepository identities, ConversationRepository conversations,
                                  SavedRecipeRepository savedRecipes,
-                                 RecipeRepository recipes,
+                                 RecipeRepository recipes, RecipeBatchRepository batches,
                                  GenerationJobRepository jobs, GenerationJobSettlement settlement,
                                  DataRetentionService retention, InputService inputs, AuditLogService audit,
                                  PlatformTransactionManager txManager) {
@@ -104,6 +106,7 @@ public class AccountClosureService {
         this.conversations = conversations;
         this.savedRecipes = savedRecipes;
         this.recipes = recipes;
+        this.batches = batches;
         this.jobs = jobs;
         this.settlement = settlement;
         this.retention = retention;
@@ -216,6 +219,10 @@ public class AccountClosureService {
         int links = identities.deleteByUserId(userId);
         int convs = conversations.deleteByUserId(userId);
         savedRecipes.deleteByUserId(userId);
+        // Recipe batches go first, with their rows and the files they hold, so the
+        // runner has nothing of this account left to start. A row's job that is
+        // already running is ended below with every other open job.
+        int batchesDeleted = batches.deleteByUserId(userId);
         // The owner's own recipes go, with their versions. Their jobs are purged below.
         recipes.deleteByUserId(userId);
 
@@ -226,6 +233,7 @@ public class AccountClosureService {
         detail.put("apiKeysDeleted", keys);
         detail.put("oauthIdentitiesDeleted", links);
         detail.put("conversationsDeleted", convs);
+        detail.put("batchesDeleted", batchesDeleted);
         audit.record(AuditLogService.EVT_ADMIN_ACCOUNT_CLOSED, AuditOutcome.SUCCESS, userId, ip, detail);
         return new AccountStep(alreadyClosed, keys, links, convs);
     }

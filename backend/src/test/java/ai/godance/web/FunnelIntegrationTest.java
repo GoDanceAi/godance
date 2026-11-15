@@ -300,6 +300,53 @@ class FunnelIntegrationTest {
                 .jsonPath("$.by_source[0].signed_up").isEqualTo(5);
     }
 
+    // ===== Recipe batches (round 12) ==================================
+
+    @Test
+    void funnel_givenBatches_expectsFirstBatchCountedAndABatchMadeWithAKeyCountedAsApiUse() {
+        Instant signedUp = Instant.parse("2025-12-02T12:00:00Z");   // Tuesday of 2025-W49
+        signUps(2, signedUp, null);                                  // signed up, nothing more
+        // A batch made in the Studio: a first batch, and not API use, whatever its jobs' channel says.
+        UUID inTheStudio = signUp(signedUp, null);
+        batch(inTheStudio, JobChannel.STUDIO, signedUp.plus(DAY));
+        batchJob(inTheStudio, JobChannel.STUDIO, signedUp.plus(DAY).plusSeconds(5));
+        // A batch made with an API key is API use from the moment it is made: 2 days in, before any API job.
+        UUID withAKey = signUp(signedUp, null);
+        batch(withAKey, JobChannel.API, signedUp.plus(DAY.multipliedBy(2)));
+        job(withAKey, JobChannel.API, signedUp.plus(DAY.multipliedBy(5)), null);
+        // Batches that have since been deleted: their jobs remain, and still say how the batch was made.
+        UUID studioBatchGone = signUp(signedUp, null);
+        batchJob(studioBatchGone, JobChannel.STUDIO, signedUp.plus(DAY));
+        UUID keyBatchGone = signUp(signedUp, null);
+        batchJob(keyBatchGone, JobChannel.API, signedUp.plus(DAY.multipliedBy(4)));
+
+        funnel("2025-12-01", "2025-12-07")
+                .jsonPath("$.cohorts.length()").isEqualTo(1)
+                .jsonPath("$.cohorts[0].week").isEqualTo("2025-W49")
+                .jsonPath("$.cohorts[0].signed_up").isEqualTo(6)
+                .jsonPath("$.cohorts[0].first_batch").isEqualTo(4)
+                // A batch's jobs are not Studio jobs, and only the two made with a key are API use.
+                .jsonPath("$.cohorts[0].first_studio_job").isEqualTo(0)
+                .jsonPath("$.cohorts[0].first_api_job").isEqualTo(2)
+                .jsonPath("$.cohorts[0].median_days_to_api_job").isEqualTo(3.0)   // between 2 and 4 days
+                .jsonPath("$.by_source[0].source").isEqualTo("none")
+                .jsonPath("$.by_source[0].signed_up").isEqualTo(6)
+                .jsonPath("$.by_source[0].first_batch").isEqualTo(4)
+                .jsonPath("$.by_source[0].first_api_job").isEqualTo(2);
+    }
+
+    @Test
+    void funnel_givenNoBatches_expectsFirstBatchZero() {
+        Instant signedUp = Instant.parse("2025-12-09T12:00:00Z");   // 2025-W50
+        signUps(4, signedUp, null);
+        job(signUp(signedUp, null), JobChannel.STUDIO, signedUp.plus(DAY), null);
+
+        funnel("2025-12-08", "2025-12-14")
+                .jsonPath("$.cohorts[0].signed_up").isEqualTo(5)
+                .jsonPath("$.cohorts[0].first_batch").isEqualTo(0)
+                .jsonPath("$.by_source[0].first_batch").isEqualTo(0);
+    }
+
     // ===== Gallery recipes ============================================
 
     @Test
@@ -459,6 +506,33 @@ class FunnelIntegrationTest {
         job.setCreatedAt(createdAt);
         job.setChannel(channel);
         job.setGalleryRecipe(galleryRecipe);
+        jobs.save(job);
+    }
+
+    /** A recipe batch of the user's, made in the Studio or with an API key at {@code createdAt}. */
+    private void batch(UUID userId, JobChannel madeBy, Instant createdAt) {
+        jdbc.update("""
+                INSERT INTO recipe_batches (id, user_id, created_by_channel, modality, model, max_concurrency,
+                                            status, rows_total, estimated_total_cents, created_at)
+                VALUES (gen_random_uuid(), ?, ?, 'IMAGE', 'gpt-image-2', 2, 'QUEUED', 1, 6, ?)
+                """, userId, madeBy.name(), Timestamp.from(createdAt));
+    }
+
+    /** A job a batch made: channel BATCH, and how its batch was made. It names no row: the batch may be gone. */
+    private void batchJob(UUID userId, JobChannel batchMadeBy, Instant createdAt) {
+        GenerationJob job = new GenerationJob();
+        job.setUserId(userId);
+        job.setModality(Modality.IMAGE);
+        job.setProvider(Provider.OPENAI);
+        job.setModel("gpt-image-2");
+        job.setPrompt(Map.of("prompt", "a fixture"));
+        job.setStatus(JobStatus.DONE);
+        job.setEstimatedCostCents(6L);
+        job.setActualCostCents(6L);
+        job.setRequestId("img_" + UUID.randomUUID());
+        job.setCreatedAt(createdAt);
+        job.setChannel(JobChannel.BATCH);
+        job.setBatchChannel(batchMadeBy);
         jobs.save(job);
     }
 

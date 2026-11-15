@@ -18,6 +18,8 @@ import ai.godance.repository.AuditLogRetentionRepository;
 import ai.godance.repository.ConversationRepository;
 import ai.godance.repository.GenerationJobOutputRepository;
 import ai.godance.repository.GenerationJobRepository;
+import ai.godance.repository.RecipeBatchRepository;
+import ai.godance.repository.RecipeBatchRowRepository;
 import ai.godance.repository.UnapprovedChildRepository;
 import ai.godance.storage.ObjectStorageClient;
 
@@ -34,7 +36,11 @@ import ai.godance.storage.ObjectStorageClient;
  *   <li>input files (round 11): an uploaded image nothing uses, once its
  *       expiry has passed. One a job uses is kept as long as that job is,
  *       so a saved job keeps its inputs; purging the job releases them
- *       ({@link InputService}).</li>
+ *       ({@link InputService});</li>
+ *   <li>recipe batches (round 12): the values a batch row held are deleted
+ *       with its job's prompt, when that job is purged; a batch that has
+ *       ended is deleted once it is 90 days old and none of its rows has an
+ *       unpurged job.</li>
  * </ul>
  * Billing records (credit ledger, usage records, auto-recharge attempts)
  * are never deleted. A purged job keeps its cost columns.
@@ -73,13 +79,18 @@ public class DataRetentionService {
     private final UnapprovedChildRepository unapprovedChildren;
     private final GenerationJobOutputRepository outputs;
     private final InputService inputs;
+    private final RecipeBatchRepository batches;
+    private final RecipeBatchRowRepository batchRows;
     private final TransactionTemplate tx;
 
     public DataRetentionService(GenerationJobRepository jobs, ConversationRepository conversations,
                                 AuditLogRetentionRepository auditRows, ObjectStorageClient storage,
                                 UnapprovedChildRepository unapprovedChildren,
                                 GenerationJobOutputRepository outputs, InputService inputs,
+                                RecipeBatchRepository batches, RecipeBatchRowRepository batchRows,
                                 PlatformTransactionManager txManager) {
+        this.batches = batches;
+        this.batchRows = batchRows;
         this.jobs = jobs;
         this.conversations = conversations;
         this.auditRows = auditRows;
@@ -154,6 +165,8 @@ public class DataRetentionService {
                 jobs.redactPurged(jobId, now);
                 outputs.deleteByJobId(jobId);
                 inputs.releaseJob(jobId, now);
+                // A batch row's values are its job's prompt in another shape: they go with it.
+                batchRows.redactForJob(jobId);
             });
             return true;
         } catch (RuntimeException e) {
@@ -184,6 +197,7 @@ public class DataRetentionService {
                 jobs.redactPurged(jobId, now);
                 outputs.deleteByJobId(jobId);
                 inputs.releaseJob(jobId, now);
+                batchRows.redactForJob(jobId);
                 return true;
             });
             return Boolean.TRUE.equals(purged) ? Outcome.PURGED : Outcome.KEPT;
@@ -197,6 +211,31 @@ public class DataRetentionService {
         for (String prefix : MEDIA_PREFIXES) {
             storage.deletePrefix(prefix + jobId + "/");
         }
+    }
+
+    /**
+     * Deletes recipe batches there is nothing left to show for: ended,
+     * created more than {@link #JOB_RETENTION} before {@code now}, and with
+     * no row whose job is still unpurged. Run after {@link #purgeExpiredJobs},
+     * so a batch goes on the night its last job is purged. Its rows go with
+     * it; its jobs stay, purged, with their costs. A batch one of whose
+     * jobs is saved is kept as long as that job is. A paused batch has not
+     * ended and is left alone.
+     */
+    public int deleteFinishedBatches(Instant now) {
+        Instant cutoff = now.minus(JOB_RETENTION);
+        int total = 0;
+        for (int batch = 0; batch < MAX_ROW_BATCHES; batch++) {
+            Integer deleted = tx.execute(status -> {
+                List<UUID> ids = batches.findDeletable(cutoff, ROW_BATCH);
+                return ids.isEmpty() ? 0 : batches.deleteByIds(ids);
+            });
+            int count = deleted == null ? 0 : deleted;
+            total += count;
+            if (count < ROW_BATCH) return total;
+        }
+        log.warn("DataRetention: stopped after {} recipe batches this run; the rest are deleted next run", total);
+        return total;
     }
 
     /**

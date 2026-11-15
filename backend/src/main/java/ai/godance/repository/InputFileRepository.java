@@ -14,13 +14,14 @@ import org.springframework.data.repository.query.Param;
 import ai.godance.domain.InputFile;
 
 /**
- * Input files (V31). "In use" is read off {@code generation_job_inputs}
- * alone: a file is in use exactly while a row there names it, and those
- * rows are deleted when their job is purged.
+ * Input files (V31). "In use" is read off two tables. A file is in use
+ * while a row of {@code generation_job_inputs} names it, and those rows are
+ * deleted when their job is purged.
  *
- * <p>Round 11 brief 05 gives recipes input slots that hold no file. If a
- * recipe ever keeps one, its table joins the three {@code NOT EXISTS}
- * checks below, and nothing else changes.
+ * <p>A recipe's input slots hold no file. A recipe batch does, until it
+ * ends (round 12): its rows name files their jobs will use, and
+ * {@code recipe_batch_inputs} joins the {@code NOT EXISTS} checks below, so
+ * a file a waiting batch names is in use too.
  */
 public interface InputFileRepository extends JpaRepository<InputFile, UUID> {
 
@@ -101,12 +102,16 @@ public interface InputFileRepository extends JpaRepository<InputFile, UUID> {
                AND f.expires_at IS NOT NULL
                AND f.expires_at < :now
                AND NOT EXISTS (SELECT 1 FROM generation_job_inputs i WHERE i.file_id = f.id)
+               AND NOT EXISTS (SELECT 1 FROM recipe_batch_inputs h WHERE h.file_id = f.id)
                FOR UPDATE
             """, nativeQuery = true)
     Optional<UUID> lockIfExpiredAndUnused(@Param("id") UUID id, @Param("now") Instant now);
 
-    /** Whether any job still records the file. */
-    @Query(value = "SELECT EXISTS (SELECT 1 FROM generation_job_inputs WHERE file_id = :id)", nativeQuery = true)
+    /** Whether any job still records the file, or any batch that has not ended holds it. */
+    @Query(value = """
+            SELECT EXISTS (SELECT 1 FROM generation_job_inputs WHERE file_id = :id)
+                OR EXISTS (SELECT 1 FROM recipe_batch_inputs WHERE file_id = :id)
+            """, nativeQuery = true)
     boolean isInUse(@Param("id") UUID id);
 
     /** The object is gone: no link can be signed for the file any more. */
@@ -133,6 +138,7 @@ public interface InputFileRepository extends JpaRepository<InputFile, UUID> {
              WHERE f.id IN (:ids)
                AND f.deleted_at IS NOT NULL
                AND NOT EXISTS (SELECT 1 FROM generation_job_inputs i WHERE i.file_id = f.id)
+               AND NOT EXISTS (SELECT 1 FROM recipe_batch_inputs h WHERE h.file_id = f.id)
             """, nativeQuery = true)
     int deleteGoneAndUnused(@Param("ids") Collection<UUID> ids);
 
@@ -148,6 +154,29 @@ public interface InputFileRepository extends JpaRepository<InputFile, UUID> {
                AND f.deleted_at IS NULL
                AND f.expires_at IS NULL
                AND NOT EXISTS (SELECT 1 FROM generation_job_inputs i WHERE i.file_id = f.id)
+               AND NOT EXISTS (SELECT 1 FROM recipe_batch_inputs h WHERE h.file_id = f.id)
             """, nativeQuery = true)
     int expireUnused(@Param("ids") Collection<UUID> ids, @Param("expiresAt") Instant expiresAt);
+
+    // ===== Files a recipe batch holds (V36) ==============================
+    // A batch's rows name files that their jobs will use later. Until the
+    // batch ends, recipe_batch_inputs holds each one: the checks above count
+    // a held file as in use, so the nightly run leaves it alone.
+
+    /** Records that the batch holds the file. A file it already holds is left as it is. */
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query(value = """
+            INSERT INTO recipe_batch_inputs (batch_id, file_id) VALUES (:batchId, :fileId)
+            ON CONFLICT DO NOTHING
+            """, nativeQuery = true)
+    int holdForBatch(@Param("batchId") UUID batchId, @Param("fileId") UUID fileId);
+
+    /** The files the batch holds. */
+    @Query(value = "SELECT file_id FROM recipe_batch_inputs WHERE batch_id = :batchId", nativeQuery = true)
+    List<UUID> findHeldByBatch(@Param("batchId") UUID batchId);
+
+    /** Lets go of every file the batch holds; how many there were. */
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query(value = "DELETE FROM recipe_batch_inputs WHERE batch_id = :batchId", nativeQuery = true)
+    int releaseBatch(@Param("batchId") UUID batchId);
 }

@@ -1,6 +1,5 @@
 package ai.godance.web;
 
-import java.util.List;
 import java.util.UUID;
 
 import org.springframework.http.ResponseEntity;
@@ -13,15 +12,12 @@ import org.springframework.web.bind.annotation.RestController;
 
 import ai.godance.gateway.VideoDtos.VideoRequest;
 import ai.godance.security.JwtService;
-import ai.godance.domain.Modality;
 import ai.godance.service.JobOrigin;
-import ai.godance.service.RecipeRefusedException;
-import ai.godance.service.RecipeRunService;
-import ai.godance.service.RecipeRunService.RunPrompt;
+import ai.godance.service.RecipeRuns;
+import ai.godance.service.RecipeRuns.VideoRun;
 import ai.godance.service.VideoGenerationService;
 import ai.godance.service.VideoInputs;
 import ai.godance.web.dto.ImageDtos.AsyncJobAcknowledged;
-import ai.godance.web.dto.InputDtos.InputRef;
 import ai.godance.web.dto.VideoDtos.VideoGenerationRequest;
 import jakarta.validation.Valid;
 import reactor.core.publisher.Mono;
@@ -39,11 +35,11 @@ import reactor.core.scheduler.Schedulers;
 public class VideoController {
 
     private final VideoGenerationService service;
-    private final RecipeRunService recipes;
+    private final RecipeRuns runs;
 
-    public VideoController(VideoGenerationService service, RecipeRunService recipes) {
+    public VideoController(VideoGenerationService service, RecipeRuns runs) {
         this.service = service;
-        this.recipes = recipes;
+        this.runs = runs;
     }
 
     @PostMapping("/videos/generations")
@@ -60,20 +56,10 @@ public class VideoController {
         // The images the clip starts from, ends on or follows. None for a request from text alone.
         VideoInputs.Refs inputs = new VideoInputs.Refs(req.firstFrame(), req.lastFrame(), req.referenceImages());
         return Mono.fromCallable(() -> {
-                    // A recipe is rendered here, before anything is priced or charged.
-                    RunPrompt run = recipes.resolve(userId, Modality.VIDEO, req.prompt(), req.recipe());
-                    // A recipe that names its own inputs runs with those, each placed by its slot's role, and with no others.
-                    VideoInputs.Refs named = inputs;
-                    if (run.hasInputs()) {
-                        if (!inputs.isEmpty()) throw RecipeRefusedException.inputsOutsideRecipe();
-                        List<InputRef> first = run.inputsWithRole("first_frame");
-                        List<InputRef> last = run.inputsWithRole("last_frame");
-                        named = new VideoInputs.Refs(first.isEmpty() ? null : first.get(0),
-                                last.isEmpty() ? null : last.get(0), run.inputsWithRole("reference_image"));
-                    }
-                    VideoRequest request = new VideoRequest(domain.model(), run.prompt(), domain.size(),
-                            domain.durationSeconds(), domain.n());
-                    return service.submit(userId, apiKeyId, request, req.webhookUrl(), run.origin(origin), named);
+                    // A recipe is rendered here, before anything is priced or charged. One that names
+                    // its own inputs runs with those, each placed by its slot's role, and with no others.
+                    VideoRun run = runs.video(userId, domain, req.prompt(), req.recipe(), inputs, origin);
+                    return service.submit(userId, apiKeyId, run.request(), req.webhookUrl(), run.origin(), run.inputs());
                 })
                 .subscribeOn(Schedulers.boundedElastic())
                 .map(jobId -> ResponseEntity.accepted().body(AsyncJobAcknowledged.forJob(jobId)));
