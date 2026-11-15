@@ -217,10 +217,19 @@ class OpenApiDriftTest {
 
     @Test
     void paths_givenTheLineLayoutOtherChecksReadItBy_expectsTheSameRoutesAsTheParser() {
-        // marketing's llms-full.txt check reads this file without a YAML parser: a path is a
-        // key indented two spaces under "paths:", a method a key indented four. If the file
-        // is ever laid out differently, this fails here rather than that check going blind.
-        assertThat(routesByLine()).isEqualTo(routesInDocument());
+        // marketing's llms-full.txt check (marketing/scripts/llms) reads this file without a
+        // YAML parser: a path is a key indented two spaces under "paths:", a method a key
+        // indented four, and an operation's summary and security are each one line indented
+        // six. If the file is ever laid out differently, this fails here rather than that
+        // check going blind.
+        Map<String, String> parsed = new java.util.TreeMap<>();
+        forEachOperation((route, operation) -> {
+            boolean apiKey = list(operation.get("security")).stream()
+                    .anyMatch(requirement -> map(requirement).containsKey("apiKey"));
+            parsed.put(route, operation.get("summary") + " | apiKey=" + apiKey);
+        });
+
+        assertThat(routesByLine()).isEqualTo(parsed);
     }
 
     // ===== Operations =================================================
@@ -369,13 +378,22 @@ class OpenApiDriftTest {
                 }));
     }
 
-    /** The routes as a reader without a YAML parser finds them; see the layout note at the top of the file. */
-    private static Set<String> routesByLine() {
+    /**
+     * Each route with its summary and whether an API key may call it, as a
+     * reader without a YAML parser finds them (the same reading as
+     * marketing/scripts/llms/routes.js); see the layout note at the top of
+     * the file.
+     */
+    private static Map<String, String> routesByLine() {
         Pattern pathLine = Pattern.compile("^  (/[^\\s:]*):\\s*$");
         Pattern methodLine = Pattern.compile("^    (get|put|post|delete|patch|head|options):\\s*$");
-        Set<String> routes = new TreeSet<>();
+        Pattern summaryLine = Pattern.compile("^      summary:\\s*(.*)$");
+        Pattern apiKeyLine = Pattern.compile("^      security:.*\\bapiKey\\b.*$");
+        Map<String, String> summaries = new java.util.TreeMap<>();
+        Set<String> forApiKeys = new TreeSet<>();
         boolean inPaths = false;
         String path = null;
+        String route = null;
         for (String line : text.split("\n")) {
             if (line.equals("paths:")) {
                 inPaths = true;
@@ -386,11 +404,22 @@ class OpenApiDriftTest {
             Matcher asPath = pathLine.matcher(line);
             if (asPath.matches()) {
                 path = asPath.group(1);
+                route = null;
                 continue;
             }
             Matcher asMethod = methodLine.matcher(line);
-            if (asMethod.matches() && path != null) routes.add(asMethod.group(1).toUpperCase() + " " + path);
+            if (asMethod.matches() && path != null) {
+                route = asMethod.group(1).toUpperCase() + " " + path;
+                summaries.put(route, "");
+                continue;
+            }
+            if (route == null) continue;
+            Matcher asSummary = summaryLine.matcher(line);
+            if (asSummary.matches()) summaries.put(route, asSummary.group(1).replaceAll("^\"(.*)\"$", "$1"));
+            if (apiKeyLine.matcher(line).matches()) forApiKeys.add(route);
         }
+        Map<String, String> routes = new java.util.TreeMap<>();
+        summaries.forEach((r, summary) -> routes.put(r, summary + " | apiKey=" + forApiKeys.contains(r)));
         return routes;
     }
 
