@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ApiError, type JobView, type ModelListResponse } from '../lib/api';
 import { formatCents, useAuth } from '../lib/auth';
+import { rowNumber } from '../lib/batch-table';
 import {
   costText,
   deletionOverdue,
@@ -198,6 +199,17 @@ function JobDetail({ initial }: { initial: JobView }) {
               <dd className="text-fg">
                 <Link to={`/recipes/${job.recipe.id}`} className="text-brand-600 hover:underline">
                   Your recipe, version {job.recipe.version}
+                </Link>
+              </dd>
+            </>
+          )}
+          {job.batch && (
+            <>
+              <dt className="text-fg-subtle">Batch</dt>
+              <dd className="text-fg">
+                {/* The API counts rows from 0; people from 1. The link carries the API's number. */}
+                <Link to={`/batches/${job.batch.id}?row=${job.batch.row}`} className="text-brand-600 hover:underline">
+                  Row {rowNumber(job.batch.row)} of a batch
                 </Link>
               </dd>
             </>

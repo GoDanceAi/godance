@@ -8,8 +8,9 @@ import {
 } from '../../lib/api';
 
 // The funnel: of the people who signed up in a period, how many went on to
-// run something in the Studio, to pay for a top-up, and to generate with an
-// API key. Counts only; the API leaves out any group under five people.
+// run something in the Studio, to pay for a top-up, to start a recipe batch,
+// and to generate with an API key. Counts only; the API leaves out any group
+// under five people.
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -176,7 +177,7 @@ function FunnelTable({ title, first, rows, extraHeading, empty }: {
   extraHeading?: string;
   empty: string;
 }) {
-  const columns = extraHeading ? 6 : 5;
+  const columns = extraHeading ? 7 : 6;
   return (
     <div className="card p-0 overflow-x-auto">
       <h3 className="px-4 pt-4 text-sm font-semibold text-fg">{title}</h3>
@@ -187,6 +188,7 @@ function FunnelTable({ title, first, rows, extraHeading, empty }: {
             <th scope="col" className="px-4 py-2 font-semibold text-right">Signed up</th>
             <th scope="col" className="px-4 py-2 font-semibold text-right">Studio job</th>
             <th scope="col" className="px-4 py-2 font-semibold text-right">Paid top-up</th>
+            <th scope="col" className="px-4 py-2 font-semibold text-right">Batch</th>
             <th scope="col" className="px-4 py-2 font-semibold text-right">API job</th>
             {extraHeading && <th scope="col" className="px-4 py-2 font-semibold text-right">{extraHeading}</th>}
           </tr>
@@ -206,6 +208,12 @@ function FunnelTable({ title, first, rows, extraHeading, empty }: {
               </td>
               <td className="px-4 py-2.5 text-right tabular-nums text-fg-muted">
                 <Share count={row.stages.first_paid_top_up} of={row.stages.signed_up} />
+              </td>
+              {/* Started a recipe batch. An API from before batches does not send the count. */}
+              <td className="px-4 py-2.5 text-right tabular-nums text-fg-muted">
+                {typeof row.stages.first_batch === 'number'
+                  ? <Share count={row.stages.first_batch} of={row.stages.signed_up} />
+                  : '—'}
               </td>
               <td className="px-4 py-2.5 text-right tabular-nums text-fg-muted">
                 <Share count={row.stages.first_api_job} of={row.stages.signed_up} />

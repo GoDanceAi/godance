@@ -19,6 +19,9 @@ import HistoryPage from './pages/HistoryPage';
 import JobPage from './pages/JobPage';
 import RecipesPage from './pages/RecipesPage';
 import RecipePage from './pages/RecipePage';
+import NewBatchPage from './pages/NewBatchPage';
+import BatchesPage from './pages/BatchesPage';
+import BatchPage from './pages/BatchPage';
 import ComparePage from './pages/ComparePage';
 import ApiKeysPage from './pages/ApiKeysPage';
 import BillingPage from './pages/BillingPage';
@@ -62,7 +65,11 @@ export default function App() {
           {/* The user's own recipes, and two to four generations side by side. */}
           <Route path="/recipes"           element={<ProtectedRoute><RecipesPage /></ProtectedRoute>} />
           <Route path="/recipes/:recipeId" element={<ProtectedRoute><RecipePage /></ProtectedRoute>} />
-          <Route path="/compare"           element={<ProtectedRoute><ComparePage /></ProtectedRoute>} />
+          {/* A recipe run over a table: the new batch, the batches, and one batch. */}
+          <Route path="/recipes/:recipeId/batch" element={<ProtectedRoute><NewBatchPage /></ProtectedRoute>} />
+          <Route path="/batches"           element={<ProtectedRoute><BatchesPage /></ProtectedRoute>} />
+          <Route path="/batches/:batchId"  element={<ProtectedRoute><BatchPage /></ProtectedRoute>} />
+          <Route path="/compare"          element={<ProtectedRoute><ComparePage /></ProtectedRoute>} />
           <Route path="/keys"      element={<ProtectedRoute><ApiKeysPage /></ProtectedRoute>} />
           <Route path="/billing"   element={<ProtectedRoute><BillingPage /></ProtectedRoute>} />
           <Route path="/settings"  element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />

@@ -20,7 +20,7 @@ export interface ApiCall {
 export interface Reply {
   status?: number;
   json?: unknown;
-  body?: string;
+  body?: string | Buffer;   // a Buffer for a binary answer (a batch's results.zip)
   contentType?: string;
   setCookie?: string;
 }
@@ -28,12 +28,15 @@ export interface Reply {
 /** A reply, or a function of the call; a function may also answer the route itself and return nothing. */
 type Responder = Reply | ((call: ApiCall, route: Route) => Reply | void | Promise<Reply | void>);
 
-/** RFC 7807 error, the shape the backend sends for every HTTP error; `code` is its extension member. */
-export function problem(status: number, detail: string, code?: string): Reply {
+/**
+ * RFC 7807 error, the shape the backend sends for every HTTP error; `code` is
+ * its extension member, and `extra` any others (a batch's bad `row`).
+ */
+export function problem(status: number, detail: string, code?: string, extra: Record<string, unknown> = {}): Reply {
   return {
     status,
     contentType: 'application/problem+json',
-    json: { type: 'about:blank', title: 'Error', status, detail, ...(code ? { code } : {}) },
+    json: { type: 'about:blank', title: 'Error', status, detail, ...(code ? { code } : {}), ...extra },
   };
 }
 
@@ -94,6 +97,8 @@ export class MockApi {
       .on('GET', '/v1/referrals/me', { json: { enabled: false } })
       // The Studio reads the gallery recipes an account saved; it has none until a test says so.
       .on('GET', '/v1/saved-recipes', { json: [] })
+      // A recipe page lists the recipe's batches; an account has none until a test says so.
+      .on('GET', '/v1/recipe-batches', { json: [] })
       // Handed in once after a sign-in that follows a signed-out page load (lib/first-touch).
       .on('POST', '/v1/attribution/first-touch', { status: 204 });
   }

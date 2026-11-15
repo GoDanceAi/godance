@@ -6,17 +6,18 @@ import { expect, makeUser, problem, test, type MockApi } from './mock-api';
 
 const SUMMARY: AdminUsageSummary = { from: '2026-10-16', to: '2026-11-14', days: [], topModels: [], topUsers: [] };
 
+// first_batch (round 12 brief 01): how many of the group went on to start a recipe batch.
 const FUNNEL: AdminFunnel = {
   cohorts: [
-    { week: '2026-W45', signed_up: 80, first_studio_job: 40, first_paid_top_up: 12, first_api_job: 0, median_days_to_api_job: null },
-    { week: '2026-W46', signed_up: 120, first_studio_job: 64, first_paid_top_up: 18, first_api_job: 7, median_days_to_api_job: 3.5 },
+    { week: '2026-W45', signed_up: 80, first_studio_job: 40, first_paid_top_up: 12, first_batch: 0, first_api_job: 0, median_days_to_api_job: null },
+    { week: '2026-W46', signed_up: 120, first_studio_job: 64, first_paid_top_up: 18, first_batch: 9, first_api_job: 7, median_days_to_api_job: 3.5 },
   ],
   by_source: [
-    { source: 'gallery', signed_up: 40, first_studio_job: 31, first_paid_top_up: 9, first_api_job: 4 },
-    { source: 'utm:newsletter', signed_up: 25, first_studio_job: 10, first_paid_top_up: 2, first_api_job: 1 },
-    { source: 'utm:other', signed_up: 10, first_studio_job: 3, first_paid_top_up: 0, first_api_job: 0 },
-    { source: 'referral', signed_up: 8, first_studio_job: 6, first_paid_top_up: 4, first_api_job: 2 },
-    { source: 'none', signed_up: 117, first_studio_job: 54, first_paid_top_up: 15, first_api_job: 0 },
+    { source: 'gallery', signed_up: 40, first_studio_job: 31, first_paid_top_up: 9, first_batch: 6, first_api_job: 4 },
+    { source: 'utm:newsletter', signed_up: 25, first_studio_job: 10, first_paid_top_up: 2, first_batch: 1, first_api_job: 1 },
+    { source: 'utm:other', signed_up: 10, first_studio_job: 3, first_paid_top_up: 0, first_batch: 0, first_api_job: 0 },
+    { source: 'referral', signed_up: 8, first_studio_job: 6, first_paid_top_up: 4, first_batch: 2, first_api_job: 2 },
+    { source: 'none', signed_up: 117, first_studio_job: 54, first_paid_top_up: 15, first_batch: 0, first_api_job: 0 },
   ],
   gallery_recipes: [
     { slug: 'paper-lantern-street-at-dusk', users: 31, jobs: 88, users_with_api_job: 4 },
@@ -45,19 +46,22 @@ test.describe('the funnel on the admin Overview page', () => {
     await expect(section.getByText('Groups of fewer than 5 people are left out.')).toBeVisible();
 
     const weeks = section.getByRole('table').nth(0);
+    // Batch (round 12) sits between the top-up and the API job.
     await expect(weeks.getByRole('columnheader')).toHaveText(
-      ['Week', 'Signed up', 'Studio job', 'Paid top-up', 'API job', 'Median days to API job']);
+      ['Week', 'Signed up', 'Studio job', 'Paid top-up', 'Batch', 'API job', 'Median days to API job']);
     await expect(weeks.getByRole('row', { name: /2026-W46/ }).getByRole('cell'))
-      .toHaveText(['120', '64 (53%)', '18 (15%)', '7 (6%)', '3.5']);
+      .toHaveText(['120', '64 (53%)', '18 (15%)', '9 (8%)', '7 (6%)', '3.5']);
     // Nobody in the week has an API job yet: no median to show.
     await expect(weeks.getByRole('row', { name: /2026-W45/ }).getByRole('cell'))
-      .toHaveText(['80', '40 (50%)', '12 (15%)', '0 (0%)', '—']);
+      .toHaveText(['80', '40 (50%)', '12 (15%)', '0 (0%)', '0 (0%)', '—']);
 
     const sources = section.getByRole('table').nth(1);
+    await expect(sources.getByRole('columnheader')).toHaveText(
+      ['Source', 'Signed up', 'Studio job', 'Paid top-up', 'Batch', 'API job']);
     await expect(sources.getByRole('rowheader')).toHaveText(
       ['Gallery recipe', 'Campaign: newsletter', 'Other campaigns', 'Invited by a user', 'No source recorded']);
     await expect(sources.getByRole('row', { name: /Gallery recipe/ }).getByRole('cell'))
-      .toHaveText(['40', '31 (78%)', '9 (23%)', '4 (10%)']);
+      .toHaveText(['40', '31 (78%)', '9 (23%)', '6 (15%)', '4 (10%)']);
 
     const recipes = section.getByRole('table').nth(2);
     await expect(recipes.getByRole('row', { name: /paper-lantern-street-at-dusk/ }).getByRole('cell'))
@@ -67,6 +71,24 @@ test.describe('the funnel on the admin Overview page', () => {
 
     // The tables scroll inside their cards; the page does not move sideways, phone included.
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  });
+
+  test('an API from before batches sends no batch count: the column shows a dash, and the rest stands', async ({ page, api }) => {
+    await signInAsStaff(api);
+    const older: AdminFunnel = {
+      cohorts: FUNNEL.cohorts.map(({ first_batch: _, ...cohort }) => cohort),
+      by_source: FUNNEL.by_source.map(({ first_batch: _, ...source }) => source),
+      gallery_recipes: FUNNEL.gallery_recipes,
+    };
+    api.on('GET', '/v1/admin/funnel', { json: older });
+
+    await page.goto('/admin/overview');
+
+    const section = page.getByRole('region', { name: 'From sign-up to the API' });
+    await expect(section.getByRole('table').nth(0).getByRole('row', { name: /2026-W46/ }).getByRole('cell'))
+      .toHaveText(['120', '64 (53%)', '18 (15%)', '—', '7 (6%)', '3.5']);
+    await expect(section.getByRole('table').nth(1).getByRole('row', { name: /Gallery recipe/ }).getByRole('cell'))
+      .toHaveText(['40', '31 (78%)', '9 (23%)', '—', '4 (10%)']);
   });
 
   test('asks for the last 30 days, then for the range that is picked', async ({ page, api }) => {
