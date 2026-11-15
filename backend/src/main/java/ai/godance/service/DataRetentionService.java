@@ -30,7 +30,11 @@ import ai.godance.storage.ObjectStorageClient;
  *       saved it ({@link JobSaveService}). A saved job is kept until it is
  *       un-saved or the account is closed;</li>
  *   <li>archived conversations, with their messages: 30 days after archiving;</li>
- *   <li>audit log rows: 365 days after they were written.</li>
+ *   <li>audit log rows: 365 days after they were written;</li>
+ *   <li>input files (round 11): an uploaded image nothing uses, once its
+ *       expiry has passed. One a job uses is kept as long as that job is,
+ *       so a saved job keeps its inputs; purging the job releases them
+ *       ({@link InputService}).</li>
  * </ul>
  * Billing records (credit ledger, usage records, auto-recharge attempts)
  * are never deleted. A purged job keeps its cost columns.
@@ -68,18 +72,21 @@ public class DataRetentionService {
     private final ObjectStorageClient storage;
     private final UnapprovedChildRepository unapprovedChildren;
     private final GenerationJobOutputRepository outputs;
+    private final InputService inputs;
     private final TransactionTemplate tx;
 
     public DataRetentionService(GenerationJobRepository jobs, ConversationRepository conversations,
                                 AuditLogRetentionRepository auditRows, ObjectStorageClient storage,
                                 UnapprovedChildRepository unapprovedChildren,
-                                GenerationJobOutputRepository outputs, PlatformTransactionManager txManager) {
+                                GenerationJobOutputRepository outputs, InputService inputs,
+                                PlatformTransactionManager txManager) {
         this.jobs = jobs;
         this.conversations = conversations;
         this.auditRows = auditRows;
         this.storage = storage;
         this.unapprovedChildren = unapprovedChildren;
         this.outputs = outputs;
+        this.inputs = inputs;
         this.tx = new TransactionTemplate(txManager);
     }
 
@@ -132,7 +139,8 @@ public class DataRetentionService {
 
     /**
      * Deletes one ended job's media objects, then redacts its row and deletes
-     * its output rows (V23) in one transaction. Storage goes first: if it
+     * its output rows (V23) and its input rows (V31) in one transaction; the
+     * files it used are looked at again there. Storage goes first: if it
      * fails the rows are left untouched and the job is tried again on the
      * next run. False when anything failed.
      *
@@ -145,6 +153,7 @@ public class DataRetentionService {
             tx.executeWithoutResult(status -> {
                 jobs.redactPurged(jobId, now);
                 outputs.deleteByJobId(jobId);
+                inputs.releaseJob(jobId, now);
             });
             return true;
         } catch (RuntimeException e) {
@@ -174,6 +183,7 @@ public class DataRetentionService {
                 deleteMedia(jobId);
                 jobs.redactPurged(jobId, now);
                 outputs.deleteByJobId(jobId);
+                inputs.releaseJob(jobId, now);
                 return true;
             });
             return Boolean.TRUE.equals(purged) ? Outcome.PURGED : Outcome.KEPT;
@@ -187,6 +197,15 @@ public class DataRetentionService {
         for (String prefix : MEDIA_PREFIXES) {
             storage.deletePrefix(prefix + jobId + "/");
         }
+    }
+
+    /**
+     * Deletes input files whose expiry is before {@code now} and that
+     * nothing uses. Run after {@link #purgeExpiredJobs}, though a file that
+     * pass releases has a fresh expiry and goes on a later night.
+     */
+    public InputService.ExpiryCount deleteExpiredInputFiles(Instant now) {
+        return inputs.deleteExpired(now);
     }
 
     /** Deletes conversations archived more than {@link #ARCHIVED_CONVERSATION_RETENTION} before {@code now}. */

@@ -25,6 +25,7 @@ import ai.godance.repository.RecipeVersionRepository;
 import ai.godance.storage.ObjectStorageClient;
 import ai.godance.storage.ObjectStorageClient.StoredObject;
 import ai.godance.web.dto.ImageDtos.JobOutputView;
+import ai.godance.web.dto.InputDtos.JobInputView;
 import ai.godance.web.dto.ImageDtos.JobView;
 
 /**
@@ -53,13 +54,16 @@ public class JobReadService {
     private final GenerationJobOutputRepository outputs;
     private final ObjectStorageClient storage;
     private final RecipeVersionRepository recipeVersions;
+    private final InputService inputs;
 
     public JobReadService(GenerationJobRepository jobs, GenerationJobOutputRepository outputs,
-                          ObjectStorageClient storage, RecipeVersionRepository recipeVersions) {
+                          ObjectStorageClient storage, RecipeVersionRepository recipeVersions,
+                          InputService inputs) {
         this.jobs = jobs;
         this.outputs = outputs;
         this.storage = storage;
         this.recipeVersions = recipeVersions;
+        this.inputs = inputs;
     }
 
     /** One of the caller's jobs; 404 for an unknown id or another user's job. */
@@ -71,7 +75,8 @@ public class JobReadService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "job not found"));
         RecipeVersion version = job.getRecipeVersionId() == null ? null
                 : recipeVersions.findById(job.getRecipeVersionId()).orElse(null);
-        return view(job, outputs.findByJobIdOrderByOutputIndexAsc(job.getId()), version);
+        return view(job, outputs.findByJobIdOrderByOutputIndexAsc(job.getId()), version,
+                inputs.viewsFor(job.getId()));
     }
 
     /**
@@ -122,12 +127,16 @@ public class JobReadService {
                 page.stream().map(GenerationJob::getId).toList())) {
             byJob.computeIfAbsent(o.getJobId(), k -> new ArrayList<>()).add(o);
         }
+        // The inputs these jobs were given, in one pass.
+        Map<UUID, List<JobInputView>> inputsByJob = inputs.viewsFor(page.stream().map(GenerationJob::getId).toList());
         return page.stream()
-                .map(j -> view(j, byJob.getOrDefault(j.getId(), List.of()), versions.get(j.getRecipeVersionId())))
+                .map(j -> view(j, byJob.getOrDefault(j.getId(), List.of()), versions.get(j.getRecipeVersionId()),
+                        inputsByJob.getOrDefault(j.getId(), List.of())))
                 .toList();
     }
 
-    private JobView view(GenerationJob job, List<GenerationJobOutput> recorded, RecipeVersion recipeVersion) {
+    private JobView view(GenerationJob job, List<GenerationJobOutput> recorded, RecipeVersion recipeVersion,
+                         List<JobInputView> jobInputs) {
         List<GenerationJobOutput> rows = recorded;
         if (rows.isEmpty() && needsBackfill(job)) {
             rows = backfill(job);
@@ -136,7 +145,7 @@ public class JobReadService {
                 .map(o -> new JobOutputView(o.getOutputIndex(), storage.presignedUrl(o.getStorageKey()),
                         o.getContentType(), o.getSizeBytes(), o.getRevisedPrompt()))
                 .toList();
-        return JobView.from(job, shown, DataRetentionService.mediaExpiresAt(job), recipeVersion);
+        return JobView.from(job, shown, DataRetentionService.mediaExpiresAt(job), recipeVersion, jobInputs);
     }
 
     /** A DONE, unpurged job with no rows finished before V23: every DONE job stored at least one file. */

@@ -68,6 +68,8 @@ export function makeUser(overrides: Partial<MeResponse> = {}): MeResponse {
     ageStatus: 'ADULT',
     parentEmailMasked: null,
     twoFactorEnabled: false,
+    // As the API ships: inputs switched off.
+    inputs: { enabled: false, terms_version: 1, accepted: false, accepted_at: null, allow_people: false },
     ...overrides,
   };
 }

@@ -170,6 +170,16 @@ public class User {
     @Column(name = "auto_recharge_last_failure_reason", columnDefinition = "text")
     private String autoRechargeLastFailureReason;
 
+    /**
+     * The version of the input terms the account accepted (V31), or null. An
+     * older version than {@code godance.inputs.terms-version} does not count.
+     */
+    @Column(name = "inputs_terms_version")
+    private Integer inputsTermsVersion;
+
+    @Column(name = "inputs_terms_accepted_at")
+    private Instant inputsTermsAcceptedAt;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -300,6 +310,12 @@ public class User {
 
     public String getAutoRechargeLastFailureReason() { return autoRechargeLastFailureReason; }
     public void setAutoRechargeLastFailureReason(String r) { this.autoRechargeLastFailureReason = r; }
+
+    public Integer getInputsTermsVersion() { return inputsTermsVersion; }
+    public void setInputsTermsVersion(Integer v) { this.inputsTermsVersion = v; }
+
+    public Instant getInputsTermsAcceptedAt() { return inputsTermsAcceptedAt; }
+    public void setInputsTermsAcceptedAt(Instant t) { this.inputsTermsAcceptedAt = t; }
 
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }

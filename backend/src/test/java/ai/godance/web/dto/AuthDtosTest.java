@@ -18,10 +18,13 @@ import ai.godance.web.dto.AuthDtos.MeResponse;
  */
 class AuthDtosTest {
 
+    /** {@code inputs} as it is while inputs are switched off, which is how they ship. */
+    private static final InputDtos.InputsStatus INPUTS_OFF = new InputDtos.InputsStatus(false, 1, false, null, false);
+
     @Test
     void from_givenTwoFactorFlag_expectsItOnTheResponse() {
-        assertThat(MeResponse.from(user("someone@godance.test"), true).twoFactorEnabled()).isTrue();
-        assertThat(MeResponse.from(user("someone@godance.test"), false).twoFactorEnabled()).isFalse();
+        assertThat(MeResponse.from(user("someone@godance.test"), true, INPUTS_OFF).twoFactorEnabled()).isTrue();
+        assertThat(MeResponse.from(user("someone@godance.test"), false, INPUTS_OFF).twoFactorEnabled()).isFalse();
     }
 
     @Test
@@ -45,7 +48,7 @@ class AuthDtosTest {
 
     @Test
     void meResponseFrom_givenRealEmail_expectsHasEmailTrue() {
-        MeResponse me = MeResponse.from(user("someone@godance.test"), false);
+        MeResponse me = MeResponse.from(user("someone@godance.test"), false, INPUTS_OFF);
 
         assertThat(me.hasEmail()).isTrue();
         assertThat(me.email()).isEqualTo("someone@godance.test");
@@ -57,12 +60,12 @@ class AuthDtosTest {
         User u = user("someone@godance.test");
         u.setPasswordHash("$2a$12$placeholderplaceholderplaceholderplaceholderplaceh");
 
-        assertThat(MeResponse.from(u, false).hasPassword()).isTrue();
+        assertThat(MeResponse.from(u, false, INPUTS_OFF).hasPassword()).isTrue();
     }
 
     @Test
     void meResponseFrom_givenSyntheticXAddress_expectsHasEmailFalse() {
-        MeResponse me = MeResponse.from(user("x-42" + User.SYNTHETIC_EMAIL_SUFFIX), false);
+        MeResponse me = MeResponse.from(user("x-42" + User.SYNTHETIC_EMAIL_SUFFIX), false, INPUTS_OFF);
 
         assertThat(me.hasEmail()).isFalse();
         assertThat(me.pendingEmail()).isNull();
@@ -73,7 +76,7 @@ class AuthDtosTest {
         User u = user("x-42" + User.SYNTHETIC_EMAIL_SUFFIX);
         u.setPendingEmail("added@godance.test");
 
-        MeResponse me = MeResponse.from(u, false);
+        MeResponse me = MeResponse.from(u, false, INPUTS_OFF);
 
         assertThat(me.hasEmail()).isFalse();
         assertThat(me.pendingEmail()).isEqualTo("added@godance.test");
@@ -85,7 +88,7 @@ class AuthDtosTest {
         u.setAgeStatus(AgeStatus.CONSENT_PENDING);
         u.setParentEmail("parent@family.test");
 
-        MeResponse me = MeResponse.from(u, false);
+        MeResponse me = MeResponse.from(u, false, INPUTS_OFF);
 
         assertThat(me.ageStatus()).isEqualTo(AgeStatus.CONSENT_PENDING);
         assertThat(me.parentEmailMasked()).isEqualTo("p***@family.test");
@@ -93,7 +96,7 @@ class AuthDtosTest {
 
     @Test
     void meResponseFrom_givenAdult_expectsAdultAndNoParentEmail() {
-        MeResponse me = MeResponse.from(user("someone@godance.test"), false);
+        MeResponse me = MeResponse.from(user("someone@godance.test"), false, INPUTS_OFF);
 
         assertThat(me.ageStatus()).isEqualTo(AgeStatus.ADULT);
         assertThat(me.parentEmailMasked()).isNull();

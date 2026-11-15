@@ -233,6 +233,12 @@ public class SecurityConfig {
                         // so a script can read and run the recipes the Studio saved.
                         .pathMatchers("/v1/recipes", "/v1/recipes/*", "/v1/recipes/*/versions")
                                 .hasAnyAuthority(sessionOr(ApiKeyAuthFilter.API_KEY_AUTHORITY))
+                        // Input files (round 11): the owner, with a session or an API key, so a
+                        // script can upload what it then names in a request. Accepting the input
+                        // terms (/v1/inputs/terms) is not here: it falls to the session-only rule
+                        // below, because a person must read them.
+                        .pathMatchers("/v1/files", "/v1/files/*", "/v1/files/*/content")
+                                .hasAnyAuthority(sessionOr(ApiKeyAuthFilter.API_KEY_AUTHORITY))
                         // Price of an image or video request before it is sent; charges nothing.
                         .pathMatchers(HttpMethod.POST, "/v1/estimates")
                                 .hasAnyAuthority(sessionOr(ApiKeyAuthFilter.API_KEY_AUTHORITY))

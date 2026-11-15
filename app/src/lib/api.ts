@@ -168,6 +168,21 @@ export interface MeResponse {
   ageStatus: AgeStatus;
   parentEmailMasked: string | null; // where the consent request went, masked; null for adults
   twoFactorEnabled: boolean; // true: signing in needs an authenticator code
+  // Image inputs (round 11). Absent from an API older than that: treat as switched off.
+  inputs?: InputsStatus;
+}
+
+/**
+ * Where image inputs stand for this account. Everything about inputs is
+ * shown only while `enabled` is true. `accepted` is true only for the
+ * current `terms_version`.
+ */
+export interface InputsStatus {
+  enabled: boolean;
+  terms_version: number;
+  accepted: boolean;
+  accepted_at: string | null;
+  allow_people: boolean;   // false: an image that shows a person is refused
 }
 
 export type AgeStatus = 'ADULT' | 'CONSENT_PENDING' | 'CONSENT_GRANTED';

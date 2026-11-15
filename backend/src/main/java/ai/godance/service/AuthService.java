@@ -84,11 +84,13 @@ public class AuthService {
     private final ParentalConsentService parentalConsent;
     private final TwoFactorService twoFactor;
     private final SignupCreditService signupCredit;
+    private final InputService inputs;
 
     public AuthService(UserRepository users, ApiKeyRepository apiKeys, PasswordEncoder passwords,
                        JwtService jwt, WebhookSigner webhooks, AuditLogService audit,
                        MailService mail, ParentalConsentService parentalConsent,
-                       TwoFactorService twoFactor, SignupCreditService signupCredit) {
+                       TwoFactorService twoFactor, SignupCreditService signupCredit,
+                       InputService inputs) {
         this.users = users;
         this.apiKeys = apiKeys;
         this.passwords = passwords;
@@ -99,6 +101,7 @@ public class AuthService {
         this.parentalConsent = parentalConsent;
         this.twoFactor = twoFactor;
         this.signupCredit = signupCredit;
+        this.inputs = inputs;
     }
 
     /**
@@ -637,7 +640,8 @@ public class AuthService {
 
     @Transactional(readOnly = true)
     public MeResponse me(UUID id) {
-        return MeResponse.from(loadById(id), twoFactor.isEnabled(id));
+        User user = loadById(id);
+        return MeResponse.from(user, twoFactor.isEnabled(id), inputs.statusFor(user));
     }
 
     @Transactional(readOnly = true)

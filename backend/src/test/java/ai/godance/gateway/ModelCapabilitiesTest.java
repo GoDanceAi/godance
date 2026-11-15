@@ -69,4 +69,71 @@ class ModelCapabilitiesTest {
         assertThat(m.description()).isNull();
         assertThat(m.capabilities()).isEqualTo(ModelCapabilities.UNKNOWN);
     }
+
+    // ===== inputs (round 11) ============================================
+
+    @Test
+    void fromJson_givenNoInputs_expectsNoneAndNothingPublished() {
+        ModelCapabilities c = ModelCapabilities.fromJson(Map.of("max_n", 4));
+
+        assertThat(c.inputs()).isEqualTo(ModelCapabilities.Inputs.NONE);
+        assertThat(c.inputs().images()).isFalse();
+        assertThat(c.inputs().mask()).isFalse();
+        assertThat(c.inputs().firstFrame()).isFalse();
+        assertThat(c.inputs().lastFrame()).isFalse();
+        assertThat(c.inputs().referenceImages()).isFalse();
+        assertThat(c.toJson()).doesNotContainKey("inputs");
+        assertThat(ModelCapabilities.UNKNOWN.inputs()).isEqualTo(ModelCapabilities.Inputs.NONE);
+    }
+
+    @Test
+    void fromJson_givenImageInputs_expectsTheMostAndTheMaskAndTheSameJsonBack() {
+        Map<String, Object> raw = Map.of("inputs", Map.of("images", Map.of("max", 4, "mask", true)));
+
+        ModelCapabilities c = ModelCapabilities.fromJson(raw);
+
+        assertThat(c.inputs().images()).isTrue();
+        assertThat(c.inputs().maxImages()).isEqualTo(4);
+        assertThat(c.inputs().mask()).isTrue();
+        assertThat(c.isEmpty()).isFalse();
+        assertThat(c.toJson()).isEqualTo(raw);
+        // Without a mask, as a chat model states it.
+        Map<String, Object> chat = Map.of("inputs", Map.of("images", Map.of("max", 10)));
+        assertThat(ModelCapabilities.fromJson(chat).inputs().mask()).isFalse();
+        assertThat(ModelCapabilities.fromJson(chat).toJson()).isEqualTo(chat);
+    }
+
+    @Test
+    void fromJson_givenVideoInputs_expectsEachOneAndTheSameJsonBack() {
+        Map<String, Object> raw = Map.of("default_seconds", 5, "inputs",
+                Map.of("first_frame", true, "last_frame", false, "reference_images", Map.of("max", 4)));
+
+        ModelCapabilities c = ModelCapabilities.fromJson(raw);
+
+        assertThat(c.inputs().firstFrame()).isTrue();
+        assertThat(c.inputs().lastFrame()).isFalse();
+        assertThat(c.inputs().maxReferenceImages()).isEqualTo(4);
+        assertThat(c.inputs().images()).isFalse();
+        assertThat(c.toJson()).isEqualTo(raw);
+    }
+
+    @Test
+    void fromJson_givenMalformedInputs_expectsNoneNeverLooser() {
+        for (Object malformed : new Object[] {
+                "images",                                              // not an object
+                List.of("images"),
+                Map.of("images", true),                                // images is not an object
+                Map.of("images", Map.of("max", "4")),                  // a string, not a number
+                Map.of("images", Map.of("max", 0)),
+                Map.of("images", Map.of("mask", true)),                // a mask with no images
+                Map.of("first_frame", "true"),                         // a string, not a boolean
+                Map.of("first_frame", 1),
+                Map.of("reference_images", 4),                         // not an object
+                Map.of("reference_images", Map.of("max", -1))}) {
+            ModelCapabilities c = ModelCapabilities.fromJson(Map.of("inputs", malformed));
+
+            assertThat(c.inputs()).as(String.valueOf(malformed)).isEqualTo(ModelCapabilities.Inputs.NONE);
+            assertThat(c.toJson()).doesNotContainKey("inputs");
+        }
+    }
 }

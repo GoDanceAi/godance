@@ -16,6 +16,7 @@ import ai.godance.domain.Modality;
 import ai.godance.domain.Provider;
 import ai.godance.domain.RecipeVersion;
 import ai.godance.service.JobOrigin;
+import ai.godance.web.dto.InputDtos.JobInputView;
 import ai.godance.web.dto.RecipeDtos.RecipeRef;
 import ai.godance.service.ImageGenerationService.ImageResult;
 import ai.godance.service.ImageGenerationService.UploadedImage;
@@ -129,6 +130,11 @@ public final class ImageDtos {
      *       the value each variable had, or null for a plain prompt. After
      *       the purge the values are null; once the recipe is deleted, the
      *       whole field is.</li>
+     *   <li>{@code inputs}: the images the job was given (round 11), in the
+     *       order the request gave them: each one's role, what it was (an
+     *       uploaded file or one of the owner's job outputs) and a link
+     *       signed when the job is read, null once that file is gone. Empty
+     *       for a job with none, and once the job is purged.</li>
      * </ul>
      */
     public record JobView(
@@ -152,14 +158,15 @@ public final class ImageDtos {
             boolean saved,
             JobChannel channel,
             String galleryRecipe,
-            RecipeRunView recipe
+            RecipeRunView recipe,
+            List<JobInputView> inputs
     ) {
         /**
          * {@code outputs} carry links already signed; {@code outputUrl} is the
          * first of them, or the stored link for a job that has none recorded.
          */
         public static JobView from(GenerationJob j, List<JobOutputView> outputs, Instant mediaExpiresAt,
-                                   RecipeVersion recipeVersion) {
+                                   RecipeVersion recipeVersion, List<JobInputView> inputs) {
             boolean purged = j.getPurgedAt() != null;
             List<JobOutputView> shown = purged ? List.of() : outputs;
             String outputUrl = shown.isEmpty() ? j.getOutputUrl() : shown.get(0).url();
@@ -174,7 +181,8 @@ public final class ImageDtos {
                     !purged && j.getSavedAt() != null,
                     j.getChannel(), j.getGalleryRecipe(),
                     recipeVersion == null ? null : new RecipeRunView(recipeVersion.getRecipeId(),
-                            recipeVersion.getNumber(), purged ? null : recipeVariablesOf(j)));
+                            recipeVersion.getNumber(), purged ? null : recipeVariablesOf(j)),
+                    purged || inputs == null ? List.of() : inputs);
         }
 
         /** The value each variable had in this run, as the job's request stored them. */

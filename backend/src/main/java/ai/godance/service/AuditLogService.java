@@ -106,6 +106,15 @@ public class AuditLogService {
     public static final String EVT_JOB_SAVED   = "job.saved";
     /** A user un-saved a generation, which puts it back under the retention period. */
     public static final String EVT_JOB_UNSAVED = "job.unsaved";
+    // Input files (round 11). None of these carries an image: sizes, types and reasons only.
+    /** An image was stored as an input file; its size, type and dimensions are in the detail. */
+    public static final String EVT_INPUT_UPLOADED = "input.uploaded";
+    /** An upload was refused; the reason (the problem's {@code code}) is in the detail. */
+    public static final String EVT_INPUT_REFUSED  = "input.refused";
+    /** A user deleted one of their input files. */
+    public static final String EVT_INPUT_DELETED  = "input.deleted";
+    /** A user accepted the input terms; the version is in the detail. */
+    public static final String EVT_INPUTS_TERMS_ACCEPTED = "inputs.terms_accepted";
 
     private final AuditLogEntryRepository repo;
 

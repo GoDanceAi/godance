@@ -14,22 +14,105 @@ import java.util.Map;
  * {@code sizes} and {@code durations} are published for clients and are not
  * checked. {@code defaultSeconds} restates the adapter's
  * {@code defaultDurationSeconds()}, which is what is priced and sent.
+ *
+ * <p>{@code inputs} (round 11) says which images a model can be given. It
+ * is enforced: an input the model does not state is refused before any
+ * charge. Absent means none, so a model takes no input until its row says
+ * it does.
  */
 public record ModelCapabilities(
         List<String> sizes,
         String defaultSize,
         List<Integer> durations,
         Integer defaultSeconds,
-        Integer maxN
+        Integer maxN,
+        Inputs inputs
 ) {
     /** The output count allowed when a model states none. */
     public static final int DEFAULT_MAX_N = 1;
 
-    public static final ModelCapabilities UNKNOWN = new ModelCapabilities(null, null, null, null, null);
+    public static final ModelCapabilities UNKNOWN = new ModelCapabilities(null, null, null, null, null, Inputs.NONE);
 
     public ModelCapabilities {
         sizes = sizes == null ? null : List.copyOf(sizes);
         durations = durations == null ? null : List.copyOf(durations);
+        inputs = inputs == null ? Inputs.NONE : inputs;
+    }
+
+    /** A model that takes no inputs. */
+    public ModelCapabilities(List<String> sizes, String defaultSize, List<Integer> durations,
+                             Integer defaultSeconds, Integer maxN) {
+        this(sizes, defaultSize, durations, defaultSeconds, maxN, Inputs.NONE);
+    }
+
+    /**
+     * The images a model can be given, from {@code capabilities.inputs}:
+     * <pre>
+     * "inputs": { "images": { "max": 4, "mask": true } }            image models, chat models
+     * "inputs": { "first_frame": true, "last_frame": false,
+     *             "reference_images": { "max": 4 } }                video models
+     * </pre>
+     * Everything defaults to "no": {@code maxImages} and
+     * {@code maxReferenceImages} are 0 and the flags false unless the stored
+     * JSON says otherwise in exactly the right shape. {@code lastFrameStated}
+     * only remembers that the row said {@code "last_frame": false}, so it
+     * is published back as it was written.
+     */
+    public record Inputs(int maxImages, boolean mask, boolean firstFrame, boolean lastFrame,
+                         boolean lastFrameStated, int maxReferenceImages) {
+
+        public static final Inputs NONE = new Inputs(0, false, false, false, false, 0);
+
+        /** Whether the model takes input images at all (an edit, or images in chat). */
+        public boolean images() {
+            return maxImages > 0;
+        }
+
+        /** Whether the model follows reference images. */
+        public boolean referenceImages() {
+            return maxReferenceImages > 0;
+        }
+
+        public boolean isEmpty() {
+            return maxImages == 0 && !firstFrame && !lastFrame && !lastFrameStated && maxReferenceImages == 0;
+        }
+
+        static Inputs fromJson(Object raw) {
+            if (!(raw instanceof Map<?, ?> map)) return NONE;
+            int maxImages = 0;
+            boolean mask = false;
+            if (map.get("images") instanceof Map<?, ?> images) {
+                Integer max = positiveInt(images.get("max"));
+                if (max != null) {
+                    maxImages = max;
+                    mask = Boolean.TRUE.equals(images.get("mask"));
+                }
+            }
+            boolean firstFrame = Boolean.TRUE.equals(map.get("first_frame"));
+            boolean lastFrame = Boolean.TRUE.equals(map.get("last_frame"));
+            boolean lastFrameStated = map.get("last_frame") instanceof Boolean;
+            int maxReferenceImages = 0;
+            if (map.get("reference_images") instanceof Map<?, ?> references) {
+                Integer max = positiveInt(references.get("max"));
+                if (max != null) maxReferenceImages = max;
+            }
+            Inputs inputs = new Inputs(maxImages, mask, firstFrame, lastFrame, lastFrameStated, maxReferenceImages);
+            return inputs.isEmpty() ? NONE : inputs;
+        }
+
+        Map<String, Object> toJson() {
+            Map<String, Object> out = new LinkedHashMap<>();
+            if (maxImages > 0) {
+                Map<String, Object> images = new LinkedHashMap<>();
+                images.put("max", maxImages);
+                if (mask) images.put("mask", true);
+                out.put("images", images);
+            }
+            if (firstFrame) out.put("first_frame", true);
+            if (lastFrame || lastFrameStated) out.put("last_frame", lastFrame);
+            if (maxReferenceImages > 0) out.put("reference_images", Map.of("max", maxReferenceImages));
+            return out;
+        }
     }
 
     /** The most outputs one request may ask for. */
@@ -39,7 +122,7 @@ public record ModelCapabilities(
 
     public boolean isEmpty() {
         return sizes == null && defaultSize == null && durations == null
-                && defaultSeconds == null && maxN == null;
+                && defaultSeconds == null && maxN == null && inputs.isEmpty();
     }
 
     /**
@@ -54,7 +137,8 @@ public record ModelCapabilities(
                 raw.get("default_size") instanceof String s ? s : null,
                 positiveIntList(raw.get("durations")),
                 positiveInt(raw.get("default_seconds")),
-                positiveInt(raw.get("max_n")));
+                positiveInt(raw.get("max_n")),
+                Inputs.fromJson(raw.get("inputs")));
     }
 
     /** The published form: snake_case keys, absent fields left out. */
@@ -65,6 +149,7 @@ public record ModelCapabilities(
         if (durations != null) out.put("durations", durations);
         if (defaultSeconds != null) out.put("default_seconds", defaultSeconds);
         if (maxN != null) out.put("max_n", maxN);
+        if (!inputs.isEmpty()) out.put("inputs", inputs.toJson());
         return out;
     }
 
