@@ -1,36 +1,48 @@
 import { useEffect, useState } from 'react';
-import type { FormEvent } from 'react';
-import { apiFetch, ApiError, type ApiKeySummary, type ImageResponse } from '../lib/api';
-import { Icon } from '../components/Brand';
+import { useSearchParams } from 'react-router-dom';
+import { ApiError, type ApiKeySummary, type ImageResponse } from '../lib/api';
+import { formatCents } from '../lib/auth';
+import {
+  capState,
+  DEFAULT_DAILY_CAP,
+  expiryOfKey,
+  hasCaps,
+  isExpired,
+  KEY_NAME_MAX_LENGTH,
+  listKeys,
+  revokeKey,
+  updateKey,
+} from '../lib/keys';
+import { formatDate } from '../lib/time';
+import CreateKey from '../components/keys/CreateKey';
+import KeyLimits from '../components/keys/KeyLimits';
 
 const IMAGE_RESPONSE_LABEL: Record<ImageResponse, string> = {
   async: 'Asynchronous',
   sync: 'Synchronous',
 };
 
-interface CreateResponse {
-  id: string;
-  name: string;
-  prefix: string;
-  plaintext: string;     // ONLY returned at creation; never refetchable
-  createdAt: string;
-}
+const COLUMNS = 6;
 
+/**
+ * /keys — the account's API keys: make one, see what each may spend and has
+ * spent, change its limits and how its image requests answer, revoke it.
+ * `?for=<name>` opens it ready to make a key for a recipe ("Run at scale"):
+ * named after it, with the 5.00 USD daily cap such a key starts with.
+ */
 export default function ApiKeysPage() {
+  const [searchParams] = useSearchParams();
+  const forName = (searchParams.get('for') ?? '').trim().slice(0, KEY_NAME_MAX_LENGTH);
   const [keys, setKeys] = useState<ApiKeySummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [newName, setNewName] = useState('');
-  // '' leaves the choice to the server: the new key then shows what it was given.
-  const [newImageResponse, setNewImageResponse] = useState<ImageResponse | ''>('');
-  const [busy, setBusy] = useState(false);
   // The key whose image response setting is being saved.
   const [savingId, setSavingId] = useState<string | null>(null);
-  const [justCreated, setJustCreated] = useState<CreateResponse | null>(null);
+  // The key whose limits are open in the dialog.
+  const [editing, setEditing] = useState<ApiKeySummary | null>(null);
 
   const load = async () => {
     try {
-      const data = await apiFetch<ApiKeySummary[]>('/v1/keys');
-      setKeys(data);
+      setKeys(await listKeys());
     } catch (err) {
       setError(err instanceof ApiError ? err.detail || err.message : 'Failed to load keys');
     }
@@ -38,33 +50,10 @@ export default function ApiKeysPage() {
 
   useEffect(() => { void load(); }, []);
 
-  const createKey = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!newName.trim()) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const created = await apiFetch<CreateResponse>('/v1/keys', {
-        method: 'POST',
-        json: newImageResponse
-          ? { name: newName.trim(), image_response: newImageResponse }
-          : { name: newName.trim() },
-      });
-      setJustCreated(created);
-      setNewName('');
-      setNewImageResponse('');
-      await load();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.detail || err.message : 'Failed to create key');
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const revoke = async (id: string) => {
     if (!confirm('Revoke this key? Apps using it will start receiving 401.')) return;
     try {
-      await apiFetch(`/v1/keys/${id}`, { method: 'DELETE' });
+      await revokeKey(id);
       await load();
     } catch (err) {
       setError(err instanceof ApiError ? err.detail || err.message : 'Failed to revoke key');
@@ -75,10 +64,7 @@ export default function ApiKeysPage() {
     setSavingId(id);
     setError(null);
     try {
-      const updated = await apiFetch<ApiKeySummary>(`/v1/keys/${id}`, {
-        method: 'PATCH',
-        json: { image_response: imageResponse },
-      });
+      const updated = await updateKey(id, { image_response: imageResponse });
       setKeys((cur) => cur && cur.map((k) => (k.id === id ? { ...k, ...updated } : k)));
     } catch (err) {
       // The list is unchanged, so the control goes back to what the key still is.
@@ -91,61 +77,34 @@ export default function ApiKeysPage() {
   };
 
   return (
-    <div className="mx-auto max-w-3xl px-6 py-8">
+    <div className="mx-auto max-w-5xl px-6 py-8">
       <h1 className="text-2xl font-bold tracking-tight text-fg">API keys</h1>
       <p className="mt-2 text-sm text-fg-muted">
         Use these with the OpenAI SDK by setting <code className="code-chip">api_key</code>.
         Plaintext is shown once at creation — there's no way to recover it later.
       </p>
+      <p className="mt-2 text-sm text-fg-muted">
+        A key can carry a daily and a monthly cap. Once it has spent that much, its requests are refused until the
+        day or the month is over, so a script that runs away stops there.
+      </p>
 
-      {justCreated && (
-        <div className="mt-6 rounded-md border border-emerald-300 bg-emerald-50 p-4">
-          <p className="text-sm font-semibold text-emerald-900">
-            Key created: {justCreated.name}
+      <div className="mt-8">
+        {forName && (
+          <p className="mb-3 text-sm text-fg">
+            A key for <span className="font-semibold">“{forName}”</span>: named after it, with a daily cap you can change.
           </p>
-          <p className="mt-2 text-xs text-emerald-900">Copy it now — it won't be shown again.</p>
-          <code className="mt-3 block break-all text-xs font-mono bg-surface border border-border rounded p-3 text-fg">
-            {justCreated.plaintext}
-          </code>
-          <button
-            onClick={() => setJustCreated(null)}
-            className="mt-3 text-xs text-emerald-700 hover:underline"
-          >
-            I've saved it — dismiss
-          </button>
-        </div>
-      )}
-
-      <form onSubmit={createKey} className="mt-8 flex flex-wrap gap-2">
-        <input
-          type="text"
-          value={newName}
-          onChange={(e) => setNewName(e.target.value)}
-          placeholder="Key name (e.g. 'production backend')"
-          aria-label="Key name"
-          className="input min-w-0 flex-1 basis-56"
-          disabled={busy}
+        )}
+        {/* Remounted when the link changes, so its fields start from the new name. */}
+        <CreateKey
+          key={forName}
+          defaultName={forName}
+          defaultDailyCap={forName ? DEFAULT_DAILY_CAP : ''}
+          submitLabel={forName ? 'Create a key for this' : 'Create key'}
+          namePlaceholder="Key name (e.g. 'production backend')"
+          chooseImageResponse
+          onCreated={() => void load()}
         />
-        <select
-          value={newImageResponse}
-          onChange={(e) => setNewImageResponse(e.target.value as ImageResponse | '')}
-          aria-label="Image responses for the new key"
-          className="input w-auto"
-          disabled={busy}
-        >
-          <option value="">Image responses: default</option>
-          <option value="sync">Image responses: synchronous</option>
-          <option value="async">Image responses: asynchronous</option>
-        </select>
-        <button
-          type="submit"
-          disabled={busy || !newName.trim()}
-          className="btn btn-primary"
-        >
-          <Icon name="plus" size={14} />
-          {busy ? 'Creating…' : 'Create key'}
-        </button>
-      </form>
+      </div>
 
       <p id="image-responses-help" className="mt-3 text-xs text-fg-muted">
         Synchronous: image requests wait for the result, as OpenAI's API does.
@@ -159,25 +118,29 @@ export default function ApiKeysPage() {
         <table className="w-full text-sm">
           <thead className="bg-surface-alt border-b border-border">
             <tr className="text-left text-fg-subtle">
-              <th className="px-4 py-2.5 font-semibold">Name</th>
-              <th className="px-4 py-2.5 font-semibold">Prefix</th>
-              <th className="px-4 py-2.5 font-semibold">Image responses</th>
-              <th className="px-4 py-2.5 font-semibold">Created</th>
-              <th className="px-4 py-2.5 font-semibold">Last used</th>
-              <th className="px-4 py-2.5"></th>
+              <th scope="col" className="px-4 py-2.5 font-semibold">Key</th>
+              <th scope="col" className="px-4 py-2.5 font-semibold">Image responses</th>
+              <th scope="col" className="px-4 py-2.5 font-semibold">Spent, and its cap</th>
+              <th scope="col" className="px-4 py-2.5 font-semibold">Expires</th>
+              <th scope="col" className="px-4 py-2.5 font-semibold">Created</th>
+              {/* Named for a screen reader without a hidden element: one positioned out of the
+                  flow would not scroll with the table, and would widen the page on a phone. */}
+              <th scope="col" aria-label="Actions" className="px-4 py-2.5" />
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
             {keys === null && (
-              <tr><td colSpan={6} className="px-4 py-6 text-center text-fg-faint">Loading…</td></tr>
+              <tr><td colSpan={COLUMNS} className="px-4 py-6 text-center text-fg-faint">Loading…</td></tr>
             )}
             {keys?.length === 0 && (
-              <tr><td colSpan={6} className="px-4 py-6 text-center text-fg-faint">No keys yet.</td></tr>
+              <tr><td colSpan={COLUMNS} className="px-4 py-6 text-center text-fg-faint">No keys yet.</td></tr>
             )}
             {keys?.map((k) => (
               <tr key={k.id}>
-                <td className="px-4 py-3 font-medium text-fg">{k.name}</td>
-                <td className="px-4 py-3 font-mono text-xs text-fg-muted">gd_live_{k.prefix}…</td>
+                <td className="px-4 py-3">
+                  <p className="min-w-[9rem] break-words font-medium text-fg">{k.name}</p>
+                  <p className="mt-0.5 whitespace-nowrap font-mono text-xs text-fg-muted">gd_live_{k.prefix}…</p>
+                </td>
                 <td className="px-4 py-3 text-fg-muted">
                   {k.image_response ? (
                     <select
@@ -194,11 +157,32 @@ export default function ApiKeysPage() {
                     </select>
                   ) : '—'}
                 </td>
-                <td className="px-4 py-3 text-fg-muted">{new Date(k.createdAt).toLocaleDateString()}</td>
                 <td className="px-4 py-3 text-fg-muted">
-                  {k.lastUsedAt ? new Date(k.lastUsedAt).toLocaleDateString() : '—'}
+                  {hasCaps(k) ? (
+                    <>
+                      <Spend label="Today" spent={k.spent_today_cents ?? 0} cap={k.daily_cap_cents} />
+                      <Spend label="This month" spent={k.spent_month_cents ?? 0} cap={k.monthly_cap_cents} />
+                    </>
+                  ) : '—'}
                 </td>
-                <td className="px-4 py-3 text-right">
+                <td className="px-4 py-3 text-fg-muted"><Expiry apiKey={k} /></td>
+                <td className="whitespace-nowrap px-4 py-3 text-xs text-fg-muted">
+                  <p>{new Date(k.createdAt).toLocaleDateString()}</p>
+                  <p className="mt-0.5 text-fg-subtle">
+                    {k.lastUsedAt ? `Last used ${new Date(k.lastUsedAt).toLocaleDateString()}` : 'Not used yet'}
+                  </p>
+                </td>
+                <td className="whitespace-nowrap px-4 py-3 text-right">
+                  {hasCaps(k) && (
+                    <button
+                      type="button"
+                      onClick={() => setEditing(k)}
+                      aria-label={`Edit limits for ${k.name}`}
+                      className="mr-4 text-xs font-medium text-brand-600 hover:underline"
+                    >
+                      Edit limits
+                    </button>
+                  )}
                   <button
                     onClick={() => void revoke(k.id)}
                     className="text-xs text-danger hover:underline font-medium"
@@ -211,6 +195,42 @@ export default function ApiKeysPage() {
           </tbody>
         </table>
       </div>
+
+      {editing && (
+        <KeyLimits
+          apiKey={editing}
+          onClose={() => setEditing(null)}
+          onSaved={(updated) => setKeys((cur) => cur && cur.map((k) => (k.id === updated.id ? { ...k, ...updated } : k)))}
+        />
+      )}
     </div>
+  );
+}
+
+const SPEND_TONE = { ok: 'text-fg', near: 'text-warning', over: 'text-danger' } as const;
+
+/** What a key has spent in a day or a month, against its cap for it. */
+function Spend({ label, spent, cap }: { label: string; spent: number; cap: number | null | undefined }) {
+  const state = capState(spent, cap);
+  return (
+    <p className="whitespace-nowrap text-xs">
+      <span className="text-fg-subtle">{label}</span>{' '}
+      <span className={`font-semibold tabular-nums ${SPEND_TONE[state]}`}>{formatCents(spent)}</span>{' '}
+      {cap === null || cap === undefined
+        ? <span className="text-fg-subtle">· no cap</span>
+        : <span>of <span className="tabular-nums">{formatCents(cap)}</span>{state === 'over' && ' · cap reached'}</span>}
+    </p>
+  );
+}
+
+/** When a key stops working, and whether it already has. */
+function Expiry({ apiKey }: { apiKey: ApiKeySummary }) {
+  const expiry = expiryOfKey(apiKey);
+  if (expiry === null) return <span className="text-xs text-fg-subtle">Never</span>;
+  return (
+    <span className="whitespace-nowrap text-xs">
+      {isExpired(apiKey) && <span className="pill pill-rose mr-1.5">Expired</span>}
+      <time dateTime={expiry}>{formatDate(expiry)}</time>
+    </span>
   );
 }

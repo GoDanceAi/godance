@@ -1,5 +1,5 @@
 import { test as base, expect, type Page, type Route } from '@playwright/test';
-import type { MeResponse } from '../src/lib/api';
+import type { ApiKeySummary, MeResponse } from '../src/lib/api';
 import { API_ORIGIN, APP_HOST } from './api-origin';
 
 // Production's cookie (backend SessionCookies), set and read by the real browser.
@@ -75,6 +75,120 @@ export function makeUser(overrides: Partial<MeResponse> = {}): MeResponse {
     inputs: { enabled: false, terms_version: 1, accepted: false, accepted_at: null, allow_people: false },
     ...overrides,
   };
+}
+
+/** Not a real key: the format only has to look like what the API returns. */
+export const FAKE_KEY = 'gd_live_e2e0fake0plaintext0shown0once';
+
+/**
+ * One key as GET /v1/keys lists it since round 12: no caps, nothing spent,
+ * no expiry. The expiry is under both names, as the API sends it.
+ */
+export function makeKey(overrides: Partial<ApiKeySummary> = {}): ApiKeySummary {
+  const key: ApiKeySummary = {
+    id: 'key-1', name: 'production backend', prefix: 'e2e0fake', scopes: null, active: true,
+    createdAt: '2026-10-28T12:00:00Z', lastUsedAt: null, expiresAt: null, image_response: 'async',
+    daily_cap_cents: null, monthly_cap_cents: null, expires_at: null,
+    spent_today_cents: 0, spent_month_cents: 0,
+    ...overrides,
+  };
+  const expiry = overrides.expires_at ?? overrides.expiresAt ?? null;
+  return { ...key, expires_at: expiry, expiresAt: expiry };
+}
+
+/** A cap as the API takes it: a whole number of cents, at least 1, or null for none. */
+function badCap(value: unknown): boolean {
+  return value !== null && !(Number.isInteger(value) && (value as number) >= 1);
+}
+
+/** An expiry as the API keeps and returns it: in UTC, to the second. Null for none. */
+function utcToTheSecond(expiry: unknown): string | null {
+  return typeof expiry === 'string' ? new Date(expiry).toISOString().replace(/\.\d{3}Z$/, 'Z') : null;
+}
+
+const KEY_SETTINGS = ['image_response', 'daily_cap_cents', 'monthly_cap_cents', 'expires_at'] as const;
+
+/** What is wrong with the settings a create or an update sent, in the API's own words; null when nothing is. */
+function settingsProblem(body: Record<string, unknown>): Reply | null {
+  if ('image_response' in body && body.image_response !== 'async' && body.image_response !== 'sync') {
+    return problem(400, 'image_response must be "async" or "sync"');
+  }
+  for (const cap of ['daily_cap_cents', 'monthly_cap_cents'] as const) {
+    if (cap in body && badCap(body[cap])) {
+      return problem(400, `${cap} must be a whole number of cents, at least 1, or null for no cap`);
+    }
+  }
+  // An expiry is an ISO-8601 time with a zone, in the future, or null for none.
+  const expiry = body.expires_at;
+  if ('expires_at' in body && expiry !== null) {
+    if (typeof expiry !== 'string' || Number.isNaN(Date.parse(expiry))) {
+      return problem(400, 'expires_at must be an ISO-8601 date and time, or null for no expiry');
+    }
+    if (Date.parse(expiry) <= Date.now()) return problem(400, 'expires_at must be in the future');
+  }
+  return null;
+}
+
+/**
+ * /v1/keys as the API serves it (the round 12 contract), over `keys`, which
+ * is changed in place so a test reads what the app did from it. POST and
+ * PATCH take `daily_cap_cents`, `monthly_cap_cents` and `expires_at`: a cap
+ * is at least 1 cent or null, the expiry is in the future or null. On PATCH
+ * a field left out is left as it is, null clears it, and an empty body is a
+ * 400. POST answers the new key with its caps and expiry, and its plaintext
+ * ({@link FAKE_KEY}) this once; PATCH answers the key as the list has it.
+ * The expiry comes back in UTC, to the second, as the API keeps it.
+ */
+export function serveKeys(api: MockApi, keys: ApiKeySummary[]): MockApi {
+  const ONE = /^\/v1\/keys\/([\w-]+)$/;
+  const find = (path: string) => keys.find((key) => key.id === ONE.exec(path)?.[1]);
+  return api
+    .on('GET', '/v1/keys', () => ({ json: keys }))
+    .on('POST', '/v1/keys', (call) => {
+      const body = call.body as Record<string, unknown>;
+      const wrong = settingsProblem(body);
+      if (wrong) return wrong;
+      const created = makeKey({
+        id: `key-${keys.length + 1}`,
+        name: String(body.name),
+        prefix: `e2e0k${String(keys.length + 1).padStart(3, '0')}`,
+        createdAt: '2026-11-15T09:00:00Z',
+        image_response: (body.image_response as ApiKeySummary['image_response']) ?? 'async',
+        daily_cap_cents: (body.daily_cap_cents as number | null | undefined) ?? null,
+        monthly_cap_cents: (body.monthly_cap_cents as number | null | undefined) ?? null,
+        expires_at: utcToTheSecond(body.expires_at),
+      });
+      keys.push(created);
+      return {
+        status: 201,
+        json: {
+          id: created.id, name: created.name, prefix: created.prefix, plaintext: FAKE_KEY, createdAt: created.createdAt,
+          image_response: created.image_response, daily_cap_cents: created.daily_cap_cents,
+          monthly_cap_cents: created.monthly_cap_cents, expires_at: created.expires_at,
+        },
+      };
+    })
+    .on('PATCH', ONE, (call) => {
+      const at = keys.findIndex((key) => key.id === ONE.exec(call.path)?.[1]);
+      if (at === -1) return problem(404, 'api key not found');
+      const body = call.body as Record<string, unknown>;
+      if (!KEY_SETTINGS.some((name) => name in body)) return problem(400, 'send at least one setting to change');
+      const wrong = settingsProblem(body);
+      if (wrong) return wrong;
+      const changed: Record<string, unknown> = { ...keys[at] };
+      for (const name of KEY_SETTINGS) if (name in body) changed[name] = body[name];
+      // The expiry is sent under both names.
+      changed.expires_at = utcToTheSecond(changed.expires_at);
+      changed.expiresAt = changed.expires_at;
+      keys[at] = changed as unknown as ApiKeySummary;
+      return { json: keys[at] };
+    })
+    .on('DELETE', ONE, (call) => {
+      const key = find(call.path);
+      if (!key) return problem(404, 'api key not found');
+      keys.splice(keys.indexOf(key), 1);
+      return { status: 204 };
+    });
 }
 
 /**

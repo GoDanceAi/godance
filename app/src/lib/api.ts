@@ -263,6 +263,37 @@ export interface ApiKeySummary {
   lastUsedAt: string | null;
   expiresAt: string | null;
   image_response?: ImageResponse;   // absent from an API without the setting
+  // Caps set by the key's owner (round 12), in whole cents. Absent from an API without them.
+  daily_cap_cents?: number | null;    // the most the key may spend in a UTC day; null: no cap
+  monthly_cap_cents?: number | null;  // the same for a UTC month
+  expires_at?: string | null;         // when the key stops working; the same value as expiresAt
+  spent_today_cents?: number;         // what it has spent this UTC day, as the caps count it
+  spent_month_cents?: number;
+}
+
+/** POST /v1/keys: the new key. `plaintext` is in this answer only, and can never be read again. */
+export interface CreatedApiKey {
+  id: string;
+  name: string;
+  prefix: string;
+  plaintext: string;
+  createdAt: string;
+  image_response?: ImageResponse;
+  daily_cap_cents?: number | null;
+  monthly_cap_cents?: number | null;
+  expires_at?: string | null;
+}
+
+/**
+ * What POST /v1/keys takes besides the name, and PATCH /v1/keys/{id} can
+ * change. A field left out is left as it is; a cap or the expiry sent as
+ * null is cleared. A cap is at least 1 cent; the expiry is in the future.
+ */
+export interface ApiKeySettings {
+  image_response?: ImageResponse;
+  daily_cap_cents?: number | null;
+  monthly_cap_cents?: number | null;
+  expires_at?: string | null;
 }
 
 /**
