@@ -91,6 +91,41 @@ public interface GenerationJobRepository extends JpaRepository<GenerationJob, UU
                                           @Param("beforeId") UUID beforeId,
                                           @Param("limit") int limit);
 
+    // ===== OpenAI's video list (GET /v1/videos) ===========================
+    // A user's video jobs whose files have not been deleted, paged by
+    // (created_at, id) strictly past a cursor. Callers pass a cursor before
+    // or after every job for the first page; nothing is ever bound as null.
+
+    /** Newest first: the video jobs strictly older than the cursor. */
+    @Query(value = """
+            SELECT * FROM generation_jobs j
+             WHERE j.user_id = :userId
+               AND j.modality = 'VIDEO'
+               AND j.purged_at IS NULL
+               AND (j.created_at, j.id) < (:cursorCreatedAt, :cursorId)
+             ORDER BY j.created_at DESC, j.id DESC
+             LIMIT :limit
+            """, nativeQuery = true)
+    List<GenerationJob> findVideosNewestFirst(@Param("userId") UUID userId,
+                                              @Param("cursorCreatedAt") Instant cursorCreatedAt,
+                                              @Param("cursorId") UUID cursorId,
+                                              @Param("limit") int limit);
+
+    /** Oldest first: the video jobs strictly newer than the cursor. */
+    @Query(value = """
+            SELECT * FROM generation_jobs j
+             WHERE j.user_id = :userId
+               AND j.modality = 'VIDEO'
+               AND j.purged_at IS NULL
+               AND (j.created_at, j.id) > (:cursorCreatedAt, :cursorId)
+             ORDER BY j.created_at ASC, j.id ASC
+             LIMIT :limit
+            """, nativeQuery = true)
+    List<GenerationJob> findVideosOldestFirst(@Param("userId") UUID userId,
+                                              @Param("cursorCreatedAt") Instant cursorCreatedAt,
+                                              @Param("cursorId") UUID cursorId,
+                                              @Param("limit") int limit);
+
     List<GenerationJob> findByStatus(JobStatus status);
 
     /** The job made for a batch row (V36), if one was: the database allows at most one. */

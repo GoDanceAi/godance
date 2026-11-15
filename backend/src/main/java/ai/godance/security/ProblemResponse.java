@@ -34,9 +34,18 @@ final class ProblemResponse {
                 + "\",\"status\":" + status.value()
                 + ",\"detail\":\"" + escape(detail) + "\""
                 + (code == null ? "" : ",\"code\":\"" + escape(code) + "\"")
+                + (OpenAiError.appliesTo(exchange) ? openAiError(status, detail, code) : "")
                 + "}";
         DataBuffer buffer = response.bufferFactory().wrap(body.getBytes(StandardCharsets.UTF_8));
         return response.writeWith(Mono.just(buffer));
+    }
+
+    /** OpenAI's {@code error} member, on the routes that follow its Videos API ({@link OpenAiError}). */
+    private static String openAiError(HttpStatus status, String detail, String code) {
+        return ",\"" + OpenAiError.MEMBER + "\":{\"message\":\"" + escape(detail)
+                + "\",\"type\":\"" + OpenAiError.type(status.value())
+                + "\",\"param\":null,\"code\":" + (code == null ? "null" : "\"" + escape(code) + "\"")
+                + "}";
     }
 
     private static String escape(String s) {
