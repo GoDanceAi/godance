@@ -5,10 +5,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.io.IOException;
 import java.io.InputStream;
 import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 import java.lang.reflect.RecordComponent;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -357,12 +359,26 @@ class OpenApiDriftTest {
         return routes;
     }
 
-    /** The JSON field of each component of a record: its {@code @JsonProperty} name, else its own. */
+    /**
+     * The JSON fields of a record: each component's {@code @JsonProperty} name, else its own,
+     * and each method the record declares with a {@code @JsonProperty}, which Jackson writes
+     * beside the components.
+     */
     private static Set<String> jsonFields(Class<? extends Record> record) {
         Set<String> fields = new TreeSet<>();
+        Set<Method> accessors = new HashSet<>();
         for (RecordComponent component : record.getRecordComponents()) {
+            accessors.add(component.getAccessor());
             JsonProperty named = component.getAccessor().getAnnotation(JsonProperty.class);
             fields.add(named != null && !named.value().isEmpty() ? named.value() : component.getName());
+        }
+        for (Method method : record.getDeclaredMethods()) {
+            JsonProperty named = method.getAnnotation(JsonProperty.class);
+            if (named == null || accessors.contains(method) || Modifier.isStatic(method.getModifiers())
+                    || method.getParameterCount() != 0) {
+                continue;
+            }
+            fields.add(named.value().isEmpty() ? method.getName() : named.value());
         }
         return fields;
     }
