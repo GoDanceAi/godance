@@ -1,0 +1,2837 @@
+openapi: 3.1.0
+# Written by hand and kept true by tests: OpenApiDriftTest fails when a route in
+# web/ is missing here or a path here has no route, and when a schema below no
+# longer has the fields of the record it describes. Admin routes (/v1/admin/**)
+# are not part of this document.
+#
+# Layout the tests rely on: each path is a key indented two spaces under
+# `paths:`, and each method a key indented four spaces under its path.
+info:
+  title: Godance API
+  version: "1"
+  summary: One OpenAI-compatible API for text, image and video models.
+  description: |
+    Godance routes one API to many model providers. Chat follows OpenAI's Chat
+    Completions; images and video follow OpenAI's request shapes and run as
+    jobs. Fields marked "Godance extension" are additions an OpenAI client
+    can ignore.
+
+    **Base URL.** `https://api.godance.ai`. OpenAI SDKs take
+    `base_url="https://api.godance.ai/v1"`.
+
+    **Authentication.** Send `Authorization: Bearer <credential>`. An API key
+    (`gd_live_…`) calls the model API: chat, images, video, jobs, files,
+    recipes, estimates and usage. Every other route (keys, billing, the
+    account) needs a signed-in session, and answers an API key with 403.
+
+    **Errors.** Every error is an RFC 7807 problem document
+    (`application/problem+json`) with `title`, `status` and `detail`. Many
+    carry `code`, a stable string to branch on. On the routes that follow
+    OpenAI's Videos API (`/v1/videos`, not `/v1/videos/generations`) the same
+    document also carries OpenAI's `error` object, which is where OpenAI's
+    SDKs read a message from.
+
+    **Money.** Every amount is integer cents of US dollars, never a decimal.
+    A generation reserves its price when it is accepted and returns the
+    reservation if it fails.
+
+    **Retention.** A job's files and prompt are deleted 90 days after the job
+    was created, unless the job is saved.
+servers:
+  - url: https://api.godance.ai
+tags:
+  - name: Models
+    description: The catalog, with prices and what each model accepts.
+  - name: Chat
+  - name: Images
+  - name: Video
+    description: Godance's own video route. Always a job.
+  - name: Video (OpenAI shape)
+    description: |
+      OpenAI's Videos API as a second view of the same video jobs, so that
+      code written for OpenAI's SDK (`client.videos.create_and_poll`,
+      `client.videos.download_content`) works unchanged. `model` is a Godance
+      video model: OpenAI's own `sora-2` models and its Videos API were shut
+      down on 2026-09-24.
+  - name: Jobs
+  - name: Files and inputs
+    description: |
+      Images a request can work from. Switched off by default: until inputs
+      are switched on, uploading and every request that names an input answer
+      403 `inputs_disabled`.
+  - name: Recipes
+  - name: Batches
+    description: |
+      One version of a recipe run over many rows. Each row becomes an ordinary
+      job, so a batch charges nothing itself: every cent is a job's. The
+      server starts the rows, a few at a time; when credit or a spending cap
+      refuses one, the batch is PAUSED (it does not fail) until it is resumed.
+      A row is never submitted twice.
+  - name: Estimates
+  - name: Usage
+  - name: API keys
+  - name: Account
+  - name: Two-factor sign-in
+  - name: Billing
+  - name: Webhooks
+  - name: Conversations
+  - name: Referrals
+  - name: Saved gallery recipes
+  - name: Service
+paths:
+  /healthz:
+    get:
+      operationId: getHealth
+      tags: [Service]
+      summary: Liveness and build information.
+      security: []
+      responses:
+        "200":
+          description: The service is up.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+  /v1/openapi.yaml:
+    get:
+      operationId: getOpenApiDocument
+      tags: [Service]
+      summary: This document.
+      security: []
+      responses:
+        "200":
+          description: The OpenAPI description of this API.
+          content:
+            application/yaml:
+              schema: { type: string }
+  /v1/status:
+    get:
+      operationId: getProviderStatus
+      tags: [Service]
+      summary: Availability and latency of each provider's models over the past hour.
+      security: []
+      responses:
+        "200":
+          description: One row per provider and model, from its latest five-minute window.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Status" }
+  /v1/models:
+    get:
+      operationId: listModels
+      tags: [Models]
+      summary: Every model, with its price and what it accepts.
+      description: |
+        OpenAI's model list. Each entry carries a `godance` object: its
+        modality, list price, platform fee and, for image and video models,
+        its capabilities. Public: no credential is needed.
+      security: []
+      responses:
+        "200":
+          description: The catalog.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ModelList" }
+  /v1/chat/completions:
+    post:
+      operationId: createChatCompletion
+      tags: [Chat]
+      summary: A chat completion, streamed or whole.
+      description: |
+        OpenAI's Chat Completions contract. With `stream: true` the answer is
+        `text/event-stream`: one `chat.completion.chunk` per event, then
+        `data: [DONE]`. A message's `content` is a string, or OpenAI's array
+        of text and image parts; image parts are part of inputs and answer
+        403 `inputs_disabled` until inputs are switched on. Other OpenAI
+        parameters (`tools`, `top_p`, `response_format`, …) are ignored.
+
+        Problem codes: `insufficient_credit` (402), `inputs_disabled` (403),
+        `unsupported_content_part`, `invalid_image_url`, `image_fetch_failed`,
+        `image_type_unsupported`, `too_many_images`,
+        `model_does_not_accept_images` (400), `image_too_large` (413),
+        `file_not_found` (404).
+      security: [{ apiKey: [] }, { session: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ChatCompletionRequest" }
+            example:
+              model: gpt-4o-mini
+              messages: [{ role: user, content: Hello }]
+      responses:
+        "200":
+          description: The completion, or the event stream when `stream` is true.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ChatCompletion" }
+            text/event-stream:
+              schema: { $ref: "#/components/schemas/ChatCompletionChunk" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "402": { $ref: "#/components/responses/PaymentRequired" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+  /v1/images/generations:
+    post:
+      operationId: createImage
+      tags: [Images]
+      summary: Generate images from a prompt.
+      description: |
+        OpenAI's request shape. Every image model runs as a job, so the answer
+        is 202 with the job, unless the request is made with an API key whose
+        `image_response` is `sync`: such a request waits for its job (about 90
+        seconds at most) and answers 200 in OpenAI's shape. `"async": true` or
+        a `Prefer: respond-async` header asks for the 202 on one request. A
+        job still running when the wait ends answers 202 with `Retry-After: 5`.
+
+        Send `prompt` or `recipe`, never both.
+
+        Problem codes: `insufficient_credit` (402), `prompt_and_recipe`,
+        `invalid_gallery_recipe`, `recipe_modality_mismatch`,
+        `recipe_variable_unknown`, `recipe_variable_too_long` (400),
+        `recipe_not_found` (404), `generation_failed` (502, a waiting request
+        whose job failed; the reservation is returned).
+      security: [{ apiKey: [] }, { session: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/Prefer" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ImageGenerationRequest" }
+            example: { model: gpt-image-2, prompt: "a lighthouse at dusk, watercolor", n: 1 }
+      responses:
+        "200":
+          description: The images, for a request that waited (an API key set to `sync`).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ImageResponse" }
+        "202":
+          description: The job. Poll `poll_url`, or pass `webhook_url` and wait for the signed POST.
+          headers:
+            Retry-After:
+              description: Sent when a waiting request gave up waiting; the job carries on.
+              schema: { type: integer }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JobAccepted" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "402": { $ref: "#/components/responses/PaymentRequired" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/GenerationFailed" }
+  /v1/images/edits:
+    post:
+      operationId: createImageEdit
+      tags: [Images]
+      summary: Make an image from images.
+      description: |
+        Two forms. Multipart is OpenAI's own (`client.images.edit`): `model`,
+        `prompt`, one or more `image` parts (also `image[]`), and optionally
+        `mask`, `n`, `size`, `quality`, `response_format`; each image is
+        checked as an upload to `POST /v1/files` is and becomes one of the
+        caller's files. JSON names images that are already stored. The answer
+        follows the key, as for a generation.
+
+        Part of inputs: answers 403 `inputs_disabled` until they are switched
+        on. Further problem codes: `input_not_supported` (400), everything an
+        upload can answer, and everything a generation can.
+      security: [{ apiKey: [] }, { session: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/Prefer" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ImageEditRequest" }
+          multipart/form-data:
+            schema:
+              type: object
+              required: [model]
+              properties:
+                model: { type: string }
+                prompt: { type: string }
+                image: { type: string, format: binary, description: "Repeat the part, or use `image[]`, to send several." }
+                mask: { type: string, format: binary }
+                n: { type: integer, minimum: 1 }
+                size: { type: string }
+                quality: { type: string }
+                response_format: { type: string, enum: [url, b64_json] }
+                async: { type: boolean }
+                webhook_url: { type: string }
+                gallery_recipe: { type: string }
+                recipe: { type: string, description: "The `recipe` object of the JSON form, as JSON text." }
+      responses:
+        "200":
+          description: The images, for a request that waited.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ImageResponse" }
+        "202":
+          description: The job.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JobAccepted" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "402": { $ref: "#/components/responses/PaymentRequired" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedType" }
+        "502": { $ref: "#/components/responses/GenerationFailed" }
+  /v1/videos/generations:
+    post:
+      operationId: createVideoGeneration
+      tags: [Video]
+      summary: Generate a video. Always answers with a job.
+      description: |
+        The price is the model's per-second rate × `seconds` × `n`, reserved
+        when the job is accepted. Left out, `seconds` is the model's
+        `default_seconds`. `first_frame`, `last_frame` and `reference_images`
+        are part of inputs (403 `inputs_disabled` until switched on); a model
+        says which it takes under `godance.capabilities.inputs`.
+
+        Problem codes: `insufficient_credit` (402), `prompt_and_recipe`,
+        `invalid_gallery_recipe`, `input_not_supported`,
+        `input_aspect_mismatch`, `invalid_input_reference` (400),
+        `file_not_found`, `job_output_not_found`, `recipe_not_found` (404).
+      security: [{ apiKey: [] }, { session: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/VideoGenerationRequest" }
+            example: { model: seedance-2.0, prompt: "A paper boat drifts down a gutter after rain.", seconds: 8 }
+      responses:
+        "202":
+          description: The job. Poll `poll_url`, or pass `webhook_url`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JobAccepted" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "402": { $ref: "#/components/responses/PaymentRequired" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/videos:
+    post:
+      operationId: createVideo
+      tags: [Video (OpenAI shape)]
+      summary: Create a video, in OpenAI's shape.
+      description: |
+        Creates the same job as `POST /v1/videos/generations` and answers with
+        OpenAI's video object, `queued`. Takes JSON, or the multipart form
+        OpenAI's SDK always sends.
+
+        - `model` is required and is a Godance video model, such as
+          `seedance-2.0`. There is no default.
+        - `seconds` is a string in OpenAI's API (`"8"`); a number is taken too.
+        - `input_reference` is the image the video starts from (the job's
+          first frame). In a form it is a file part, stored as an upload to
+          `POST /v1/files` is, or `input_reference[file_id]`. In JSON it is
+          `{"file_id"}` or, as a Godance extension, `{"job_output"}`.
+          `image_url` answers 400 `image_url_not_supported`. Inputs are
+          switched off by default: 403 `inputs_disabled`.
+        - `webhook_url`, `gallery_recipe` and `recipe` are Godance
+          extensions, as on `POST /v1/videos/generations`.
+
+        Problem codes: `invalid_parameter` (400, `param` names the field),
+        `image_url_not_supported` (400), and everything
+        `POST /v1/videos/generations` and an upload can answer.
+      security: [{ apiKey: [] }, { session: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/VideoCreateRequest" }
+            example: { model: seedance-2.0, prompt: "A paper boat drifts down a gutter after rain.", seconds: "8" }
+          multipart/form-data:
+            schema:
+              type: object
+              required: [model]
+              properties:
+                model: { type: string }
+                prompt: { type: string }
+                seconds: { type: string }
+                size: { type: string }
+                input_reference: { type: string, format: binary, description: The image the video starts from. }
+                "input_reference[file_id]": { type: string, format: uuid }
+                "input_reference[job_output][job_id]": { type: string, format: uuid }
+                "input_reference[job_output][index]": { type: integer }
+                webhook_url: { type: string }
+                gallery_recipe: { type: string }
+                recipe: { type: string, description: "The `recipe` object of the JSON form, as JSON text." }
+      responses:
+        "200":
+          description: The video, `queued`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Video" }
+        "400": { $ref: "#/components/responses/VideoError" }
+        "401": { $ref: "#/components/responses/VideoError" }
+        "402": { $ref: "#/components/responses/VideoError" }
+        "403": { $ref: "#/components/responses/VideoError" }
+        "404": { $ref: "#/components/responses/VideoError" }
+        "413": { $ref: "#/components/responses/VideoError" }
+        "415": { $ref: "#/components/responses/VideoError" }
+    get:
+      operationId: listVideos
+      tags: [Video (OpenAI shape)]
+      summary: The caller's videos, a page at a time.
+      description: |
+        Every video job of the caller whose files have not been deleted,
+        whichever route made it. Pass a page's `last_id` as `after` for the
+        next page; `has_more` says whether there is one.
+      security: [{ apiKey: [] }, { session: [] }]
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+        - { name: after, in: query, description: A video id. Only videos past it in the order asked for., schema: { type: string, format: uuid } }
+        - { name: order, in: query, schema: { type: string, enum: [desc, asc], default: desc } }
+      responses:
+        "200":
+          description: A page of videos.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VideoList" }
+        "400": { $ref: "#/components/responses/VideoError" }
+        "401": { $ref: "#/components/responses/VideoError" }
+  /v1/videos/{id}:
+    get:
+      operationId: getVideo
+      tags: [Video (OpenAI shape)]
+      summary: One video.
+      description: |
+        While the video is `queued` or `in_progress` the response carries
+        `openai-poll-after-ms: 5000`, which OpenAI's SDK waits before it
+        polls again. Another user's video answers 404 `video_not_found`,
+        exactly as one that does not exist.
+      security: [{ apiKey: [] }, { session: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/VideoId" }
+      responses:
+        "200":
+          description: The video.
+          headers:
+            openai-poll-after-ms:
+              description: Present while the video is not finished.
+              schema: { type: integer }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Video" }
+        "401": { $ref: "#/components/responses/VideoError" }
+        "404": { $ref: "#/components/responses/VideoError" }
+    delete:
+      operationId: deleteVideo
+      tags: [Video (OpenAI shape)]
+      summary: Delete a video's files now.
+      description: |
+        Deletes the files and the prompt as the 90-day clean-up would, saved
+        or not. Nothing is refunded: the job stays at `/v1/jobs/{id}`, purged,
+        with what it cost. A video that is `queued` or `in_progress` answers
+        409 `video_not_deletable`.
+      security: [{ apiKey: [] }, { session: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/VideoId" }
+      responses:
+        "200":
+          description: Deleted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VideoDeleted" }
+        "401": { $ref: "#/components/responses/VideoError" }
+        "404": { $ref: "#/components/responses/VideoError" }
+        "409": { $ref: "#/components/responses/VideoError" }
+        "503": { $ref: "#/components/responses/VideoError" }
+  /v1/videos/{id}/content:
+    get:
+      operationId: downloadVideoContent
+      tags: [Video (OpenAI shape)]
+      summary: The video's bytes.
+      description: |
+        Streams the file with the content type it was stored with; it does not
+        redirect. `variant=video` (the default) is the clip. `thumbnail` is a
+        poster image where the job has one; no model stores one today, so it
+        answers 404 `video_content_not_found`. `spritesheet` answers 400
+        `variant_not_supported`. A video that is not finished answers 409
+        `video_not_ready`; a failed one 404 `video_content_not_found`; a file
+        storage cannot hand over just now 503 `video_content_unavailable`.
+      security: [{ apiKey: [] }, { session: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/VideoId" }
+        - { name: variant, in: query, schema: { type: string, enum: [video, thumbnail], default: video } }
+      responses:
+        "200":
+          description: The file.
+          content:
+            video/mp4:
+              schema: { type: string, format: binary }
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        "400": { $ref: "#/components/responses/VideoError" }
+        "401": { $ref: "#/components/responses/VideoError" }
+        "404": { $ref: "#/components/responses/VideoError" }
+        "409": { $ref: "#/components/responses/VideoError" }
+        "503": { $ref: "#/components/responses/VideoError" }
+  /v1/videos/{id}/remix:
+    post:
+      operationId: remixVideo
+      tags: [Video (OpenAI shape)]
+      summary: "Not supported: remixing a video."
+      description: Part of OpenAI's Videos API that Godance does not offer. Always 404 `video_remix_not_supported`.
+      security: [{ apiKey: [] }, { session: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/VideoId" }
+      responses:
+        "404": { $ref: "#/components/responses/VideoError" }
+  /v1/videos/edits:
+    post:
+      operationId: editVideo
+      tags: [Video (OpenAI shape)]
+      summary: "Not supported: editing a video."
+      description: Part of OpenAI's Videos API that Godance does not offer. Always 404 `video_edits_not_supported`.
+      security: [{ apiKey: [] }, { session: [] }]
+      responses:
+        "404": { $ref: "#/components/responses/VideoError" }
+  /v1/videos/extensions:
+    post:
+      operationId: extendVideo
+      tags: [Video (OpenAI shape)]
+      summary: "Not supported: extending a video."
+      description: Part of OpenAI's Videos API that Godance does not offer. Always 404 `video_extensions_not_supported`.
+      security: [{ apiKey: [] }, { session: [] }]
+      responses:
+        "404": { $ref: "#/components/responses/VideoError" }
+  /v1/videos/characters:
+    post:
+      operationId: createVideoCharacter
+      tags: [Video (OpenAI shape)]
+      summary: "Not supported: characters."
+      description: Part of OpenAI's Videos API that Godance does not offer. Always 404 `video_characters_not_supported`.
+      security: [{ apiKey: [] }, { session: [] }]
+      responses:
+        "404": { $ref: "#/components/responses/VideoError" }
+  /v1/videos/characters/{id}:
+    get:
+      operationId: getVideoCharacter
+      tags: [Video (OpenAI shape)]
+      summary: "Not supported: characters."
+      description: Part of OpenAI's Videos API that Godance does not offer. Always 404 `video_characters_not_supported`.
+      security: [{ apiKey: [] }, { session: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "404": { $ref: "#/components/responses/VideoError" }
+  /v1/jobs:
+    get:
+      operationId: listJobs
+      tags: [Jobs]
+      summary: The caller's jobs, newest first.
+      description: A bare JSON array. Without `limit` every job is returned.
+      security: [{ apiKey: [] }, { session: [] }]
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100 } }
+        - { name: before, in: query, description: A job id. Only jobs older than it., schema: { type: string, format: uuid } }
+        - { name: modality, in: query, schema: { type: string, enum: [IMAGE, VIDEO] } }
+        - { name: status, in: query, schema: { $ref: "#/components/schemas/JobStatus" } }
+        - { name: saved, in: query, description: "`true`: only saved jobs. `false`: only the others.", schema: { type: boolean } }
+        - { name: recipe, in: query, description: A recipe id. Only the jobs that ran a version of it., schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Jobs.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Job" } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /v1/jobs/saved:
+    get:
+      operationId: countSavedJobs
+      tags: [Jobs]
+      summary: How many jobs the caller has saved, and the most the account can.
+      security: [{ apiKey: [] }, { session: [] }]
+      responses:
+        "200":
+          description: The count and the limit.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SavedJobs" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /v1/jobs/{id}:
+    get:
+      operationId: getJob
+      tags: [Jobs]
+      summary: One job, with its outputs.
+      description: Each output link is signed when the job is read and expires; read the job again for a fresh one.
+      security: [{ apiKey: [] }, { session: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/JobId" }
+      responses:
+        "200":
+          description: The job.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/jobs/{id}/saved:
+    put:
+      operationId: saveJob
+      tags: [Jobs]
+      summary: Save a job, which keeps its files and prompt past the 90 days.
+      description: Safe to repeat. 409 `job_not_saveable` (not DONE, or files already deleted) or `saved_limit_reached`.
+      security: [{ apiKey: [] }, { session: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/JobId" }
+      responses:
+        "204": { description: Saved. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    delete:
+      operationId: unsaveJob
+      tags: [Jobs]
+      summary: Un-save a job. The 90 days apply again.
+      security: [{ apiKey: [] }, { session: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/JobId" }
+      responses:
+        "204": { description: Not saved any more. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/files:
+    post:
+      operationId: uploadFile
+      tags: [Files and inputs]
+      summary: Upload an image to use as an input.
+      description: |
+        A PNG, JPEG or WebP still image, at most 20 MB and 40 megapixels.
+        Metadata is removed before it is stored. The account must be an
+        adult's and have accepted the input terms.
+
+        Problem codes, in the order they are checked: `inputs_disabled`,
+        `inputs_not_allowed_for_account`, `inputs_terms_required` (403),
+        `input_too_large` (413), `input_type_unsupported` (415),
+        `input_limit_reached` (409), `input_person_not_allowed` (422),
+        `input_check_unavailable` (503); and 429 for too many uploads in an hour.
+      security: [{ apiKey: [] }, { session: [] }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+                purpose: { type: string, enum: [generation_input] }
+      responses:
+        "201":
+          description: The stored file.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/File" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedType" }
+        "422": { $ref: "#/components/responses/Unprocessable" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+    get:
+      operationId: listFiles
+      tags: [Files and inputs]
+      summary: The caller's files, newest first.
+      security: [{ apiKey: [] }, { session: [] }]
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+        - { name: before, in: query, description: A file id. Only files older than it., schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Files.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/File" } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /v1/files/{id}:
+    get:
+      operationId: getFile
+      tags: [Files and inputs]
+      summary: One file.
+      security: [{ apiKey: [] }, { session: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/FileId" }
+      responses:
+        "200":
+          description: The file.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/File" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      operationId: deleteFile
+      tags: [Files and inputs]
+      summary: Delete a file now.
+      security: [{ apiKey: [] }, { session: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/FileId" }
+      responses:
+        "204": { description: Deleted. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/files/{id}/content:
+    get:
+      operationId: getFileContent
+      tags: [Files and inputs]
+      summary: The file's bytes, by redirect.
+      description: Answers 302 to a signed link that works for five minutes. Follow the redirect (`curl -L`).
+      security: [{ apiKey: [] }, { session: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/FileId" }
+      responses:
+        "302":
+          description: A short-lived link to the file.
+          headers:
+            Location: { schema: { type: string, format: uri } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/inputs/terms:
+    post:
+      operationId: acceptInputTerms
+      tags: [Files and inputs]
+      summary: Accept the input terms.
+      description: A signed-in session only, since a person must read them. `inputs_terms_version_mismatch` (400) for a version that is not the current one.
+      security: [{ session: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AcceptInputTermsRequest" }
+      responses:
+        "204": { description: Accepted. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/recipes:
+    post:
+      operationId: createRecipe
+      tags: [Recipes]
+      summary: Create a recipe, with its version 1.
+      description: |
+        A recipe keeps a prompt template with variables (`{{name}}`), a model
+        and request parameters. `invalid_recipe` (400) for a body that breaks
+        a rule; `recipe_limit_reached` (409) past 500 recipes.
+      security: [{ apiKey: [] }, { session: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateRecipeRequest" }
+      responses:
+        "201":
+          description: The recipe.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Recipe" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    get:
+      operationId: listRecipes
+      tags: [Recipes]
+      summary: The caller's recipes, newest first.
+      security: [{ apiKey: [] }, { session: [] }]
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100 } }
+        - { name: before, in: query, description: A recipe id. Only recipes older than it., schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Recipes.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Recipe" } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /v1/recipes/{id}:
+    get:
+      operationId: getRecipe
+      tags: [Recipes]
+      summary: One recipe, with its latest version.
+      security: [{ apiKey: [] }, { session: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/RecipeId" }
+      responses:
+        "200":
+          description: The recipe.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Recipe" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      operationId: renameRecipe
+      tags: [Recipes]
+      summary: Rename a recipe.
+      security: [{ apiKey: [] }, { session: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/RecipeId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RenameRecipeRequest" }
+      responses:
+        "200":
+          description: The recipe.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Recipe" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      operationId: deleteRecipe
+      tags: [Recipes]
+      summary: Delete a recipe and its versions. Its jobs are kept.
+      security: [{ apiKey: [] }, { session: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/RecipeId" }
+      responses:
+        "204": { description: Deleted. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/recipes/{id}/versions:
+    get:
+      operationId: listRecipeVersions
+      tags: [Recipes]
+      summary: Every version of a recipe, newest first.
+      security: [{ apiKey: [] }, { session: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/RecipeId" }
+      responses:
+        "200":
+          description: Versions.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/RecipeVersion" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      operationId: createRecipeVersion
+      tags: [Recipes]
+      summary: Save a new version, when something changed.
+      description: 201 with the new version when it differs from the latest; 200 with the latest when nothing differs. `recipe_limit_reached` (409) past 200 versions.
+      security: [{ apiKey: [] }, { session: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/RecipeId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/NewRecipeVersionRequest" }
+      responses:
+        "200":
+          description: Nothing differed; the latest version.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecipeVersion" }
+        "201":
+          description: The new version.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecipeVersion" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/recipe-batches/estimate:
+    post:
+      operationId: estimateRecipeBatch
+      tags: [Batches]
+      summary: What a batch would cost, before it is created.
+      description: |
+        Takes the body of `POST /v1/recipe-batches` and runs the same checks.
+        Nothing is written and nothing is charged. `total_cents` is the sum of
+        what each row's job would reserve; `enough` compares it with the
+        balance now. A batch can be created either way.
+      security: [{ apiKey: [] }, { session: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BatchRequest" }
+      responses:
+        "200":
+          description: The estimate.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BatchEstimate" }
+        "400": { $ref: "#/components/responses/BatchRefused" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/recipe-batches:
+    post:
+      operationId: createRecipeBatch
+      tags: [Batches]
+      summary: Run one recipe version over many rows.
+      description: |
+        Answers 201 with the batch, `QUEUED`. Creating a batch charges nothing
+        and starts nothing: the server starts its rows a few seconds later,
+        `max_concurrency` at a time, and each row's job reserves its own price
+        when it starts.
+
+        Every row is checked first, by the rules of a single run. If one
+        would be refused the whole request answers 400 with that refusal's
+        `code` (`recipe_variable_unknown`, for instance, or
+        `invalid_batch_row` when it has none), the row's 0-based index in
+        `row`, and nothing written.
+
+        Problem codes: `batch_too_large` (400, more than 500 rows),
+        `invalid_batch` (400), `recipe_not_found` (404, the version is not
+        one of the caller's), `batch_limit_reached` (409, two batches that
+        are not finished already).
+      security: [{ apiKey: [] }, { session: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BatchRequest" }
+            example:
+              version_id: 0d6b2f3a-8c7d-4c58-9d0a-5f2f4f7f3a10
+              rows:
+                - { variables: { color: blue } }
+                - { variables: { color: green, surface: oak table } }
+              max_concurrency: 2
+      responses:
+        "201":
+          description: The batch, `QUEUED`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Batch" }
+        "400": { $ref: "#/components/responses/BatchRefused" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    get:
+      operationId: listRecipeBatches
+      tags: [Batches]
+      summary: The caller's batches, newest first.
+      description: A bare JSON array.
+      security: [{ apiKey: [] }, { session: [] }]
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+        - { name: before, in: query, description: A batch id. Only batches older than it., schema: { type: string, format: uuid } }
+        - { name: recipe_id, in: query, description: A recipe id. Only that recipe's batches., schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Batches.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Batch" } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /v1/recipe-batches/{id}:
+    get:
+      operationId: getRecipeBatch
+      tags: [Batches]
+      summary: One batch, with its counts.
+      description: Another account's batch answers 404 `batch_not_found`, exactly as one that does not exist.
+      security: [{ apiKey: [] }, { session: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/BatchId" }
+      responses:
+        "200":
+          description: The batch.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Batch" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/recipe-batches/{id}/rows:
+    get:
+      operationId: listRecipeBatchRows
+      tags: [Batches]
+      summary: A batch's rows, in row order.
+      description: A bare JSON array. Each output link is signed when the row is read and expires.
+      security: [{ apiKey: [] }, { session: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/BatchId" }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+        - { name: after, in: query, description: The index of the last row already read., schema: { type: integer, minimum: 0 } }
+      responses:
+        "200":
+          description: Rows.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/BatchRow" } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/recipe-batches/{id}/cancel:
+    post:
+      operationId: cancelRecipeBatch
+      tags: [Batches]
+      summary: Cancel a batch. Rows that have not started are skipped.
+      description: Rows that are running finish and are charged as usual. Cancelling a batch that has ended changes nothing.
+      security: [{ apiKey: [] }, { session: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/BatchId" }
+      responses:
+        "200":
+          description: The batch.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Batch" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/recipe-batches/{id}/resume:
+    post:
+      operationId: resumeRecipeBatch
+      tags: [Batches]
+      summary: Continue a paused batch from the row where it stopped.
+      description: Top up, or wait for the cap's period to turn over, then resume. A batch that is not paused answers 409 `batch_not_resumable`.
+      security: [{ apiKey: [] }, { session: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/BatchId" }
+      responses:
+        "200":
+          description: The batch.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Batch" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/recipe-batches/{id}/results.csv:
+    get:
+      operationId: downloadRecipeBatchCsv
+      tags: [Batches]
+      summary: The results as a CSV file, one line per row.
+      description: |
+        Columns: `index`, `status`, one for each of the recipe's variables,
+        `job_id`, `cost_cents`, `error`, then a signed link to each output as
+        `output_1` to `output_n`. The links expire; download the file again
+        for fresh ones.
+      security: [{ apiKey: [] }, { session: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/BatchId" }
+      responses:
+        "200":
+          description: The file.
+          content:
+            text/csv:
+              schema: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/recipe-batches/{id}/results.zip:
+    get:
+      operationId: downloadRecipeBatchZip
+      tags: [Batches]
+      summary: Every output file of a batch, as a zip.
+      description: When the outputs total more than 500 MB it answers 413 `results_too_large`; use the CSV's links instead.
+      security: [{ apiKey: [] }, { session: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/BatchId" }
+      responses:
+        "200":
+          description: The file.
+          content:
+            application/zip:
+              schema: { type: string, format: binary }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+  /v1/estimates:
+    post:
+      operationId: createEstimate
+      tags: [Estimates]
+      summary: The price of an image or video request, before it is sent.
+      description: Charges nothing and creates no job. `estimated_cost_cents` is exactly what the same request would reserve.
+      security: [{ apiKey: [] }, { session: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EstimateRequest" }
+            example: { model: seedance-2.0, seconds: 8 }
+      responses:
+        "200":
+          description: The estimate.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Estimate" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/usage:
+    get:
+      operationId: listUsage
+      tags: [Usage]
+      summary: Recent usage records, newest first.
+      security: [{ apiKey: [] }, { session: [] }]
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        "200":
+          description: Usage records.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/UsageRecord" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /v1/keys:
+    post:
+      operationId: createApiKey
+      tags: [API keys]
+      summary: Create an API key. The key itself is returned once.
+      security: [{ session: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ApiKeyCreateRequest" }
+      responses:
+        "201":
+          description: The key, with its plaintext.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiKeyCreated" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    get:
+      operationId: listApiKeys
+      tags: [API keys]
+      summary: The caller's API keys. Never the keys themselves.
+      security: [{ session: [] }]
+      responses:
+        "200":
+          description: Keys.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/ApiKey" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/keys/{id}:
+    patch:
+      operationId: updateApiKey
+      tags: [API keys]
+      summary: Change how image requests made with a key answer.
+      security: [{ session: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ApiKeyUpdateRequest" }
+      responses:
+        "200":
+          description: The key.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiKey" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      operationId: deleteApiKey
+      tags: [API keys]
+      summary: Revoke a key. It stops working at once.
+      security: [{ session: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: Revoked. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/auth/signup:
+    post:
+      operationId: signUp
+      tags: [Account]
+      summary: Create an account.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SignupRequest" }
+      responses:
+        "201":
+          description: The new session.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthSession" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+  /v1/auth/login:
+    post:
+      operationId: logIn
+      tags: [Account]
+      summary: Sign in with email and password.
+      description: With two-factor sign-in on, the answer carries `twoFactorToken` in place of `accessToken`; send it to `POST /v1/auth/2fa/verify` with a code.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LoginRequest" }
+      responses:
+        "200":
+          description: The session, or the two-factor challenge.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthSession" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+  /v1/auth/logout:
+    post:
+      operationId: logOut
+      tags: [Account]
+      summary: Sign out everywhere.
+      security: [{ session: [] }]
+      responses:
+        "204": { description: Signed out. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /v1/auth/session:
+    post:
+      operationId: adoptSession
+      tags: [Account]
+      summary: Move a bearer session into the web app's cookie.
+      security: [{ session: [] }]
+      responses:
+        "204": { description: The cookie is set. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /v1/auth/verify:
+    get:
+      operationId: verifyEmail
+      tags: [Account]
+      summary: Confirm an email address with the emailed token.
+      security: [{ session: [] }]
+      parameters:
+        - { name: token, in: query, required: true, schema: { type: string } }
+      responses:
+        "204": { description: Verified. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/auth/verify/resend:
+    post:
+      operationId: resendVerification
+      tags: [Account]
+      summary: Send the verification email again.
+      security: [{ session: [] }]
+      responses:
+        "204": { description: Sent. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+  /v1/auth/email:
+    post:
+      operationId: changeEmail
+      tags: [Account]
+      summary: Change the account's email address.
+      security: [{ session: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ChangeEmailRequest" }
+      responses:
+        "204": { description: A verification email was sent to the new address. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/auth/email/release:
+    post:
+      operationId: releaseEmail
+      tags: [Account]
+      summary: Release an address from an account that never verified it.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReleaseEmailRequest" }
+      responses:
+        "204": { description: Released. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+  /v1/auth/email/release-link:
+    post:
+      operationId: sendReleaseLink
+      tags: [Account]
+      summary: Email a link that releases an address held by an unverified account.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReleaseLinkRequest" }
+      responses:
+        "202": { description: "Always, whether or not an email was sent." }
+        "400": { $ref: "#/components/responses/BadRequest" }
+  /v1/auth/password/forgot:
+    post:
+      operationId: forgotPassword
+      tags: [Account]
+      summary: Email a password-reset link.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ForgotPasswordRequest" }
+      responses:
+        "202": { description: "Always, whether or not the address is registered." }
+        "400": { $ref: "#/components/responses/BadRequest" }
+  /v1/auth/password/reset:
+    post:
+      operationId: resetPassword
+      tags: [Account]
+      summary: Set a new password with the emailed token.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ResetPasswordRequest" }
+      responses:
+        "200":
+          description: The new session, or the two-factor challenge.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthSession" }
+        "204": { description: Reset; a client that uses the cookie signs in again. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+  /v1/auth/me:
+    get:
+      operationId: getMe
+      tags: [Account]
+      summary: The signed-in account, with its balance.
+      security: [{ session: [] }]
+      responses:
+        "200":
+          description: The account.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Me" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/auth/2fa:
+    get:
+      operationId: getTwoFactorStatus
+      tags: [Two-factor sign-in]
+      summary: Whether two-factor sign-in is on.
+      security: [{ session: [] }]
+      responses:
+        "200":
+          description: The status.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TwoFactorStatus" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/auth/2fa/enrol:
+    post:
+      operationId: enrolTwoFactor
+      tags: [Two-factor sign-in]
+      summary: Start enrolling an authenticator app.
+      security: [{ session: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TwoFactorEnrolRequest" }
+      responses:
+        "200":
+          description: The secret to add to the app.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TwoFactorEnrolment" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/auth/2fa/enable:
+    post:
+      operationId: enableTwoFactor
+      tags: [Two-factor sign-in]
+      summary: Turn two-factor sign-in on with a code from the app.
+      security: [{ session: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TwoFactorCodeRequest" }
+      responses:
+        "200":
+          description: The recovery codes, shown once, and the new session.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TwoFactorEnabled" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/auth/2fa/disable:
+    post:
+      operationId: disableTwoFactor
+      tags: [Two-factor sign-in]
+      summary: Turn two-factor sign-in off.
+      security: [{ session: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TwoFactorDisableRequest" }
+      responses:
+        "204": { description: Off. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/auth/2fa/verify:
+    post:
+      operationId: verifyTwoFactor
+      tags: [Two-factor sign-in]
+      summary: Finish a sign-in that owes its second factor.
+      description: The bearer credential is the `twoFactorToken` a sign-in answered with, not a session.
+      security: [{ session: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TwoFactorCodeRequest" }
+      responses:
+        "200":
+          description: The session.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthSession" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+  /v1/auth/parental-consent:
+    get:
+      operationId: getParentalConsent
+      tags: [Account]
+      summary: What a parent is asked to approve, by the emailed token.
+      security: []
+      parameters:
+        - { name: token, in: query, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: The request for consent.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ParentalConsent" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+  /v1/auth/parental-consent/checkout:
+    post:
+      operationId: startParentalConsentCheckout
+      tags: [Account]
+      summary: A parent approves by paying a top-up on the child's account.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ParentalConsentCheckoutRequest" }
+      responses:
+        "201":
+          description: A hosted checkout to send the parent to.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TopUp" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+  /v1/auth/parental-consent/resend:
+    post:
+      operationId: resendParentalConsent
+      tags: [Account]
+      summary: Email the parent again, from an account that is waiting for consent.
+      security: [{ session: [] }]
+      responses:
+        "204": { description: Sent. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+  /v1/billing/topup:
+    post:
+      operationId: createTopUp
+      tags: [Billing]
+      summary: Start a card, ACH or SEPA top-up (Stripe Checkout).
+      security: [{ session: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TopUpRequest" }
+      responses:
+        "201":
+          description: A hosted checkout to send the user to.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TopUp" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/billing/nowpayments/topup:
+    post:
+      operationId: createUsdtTopUp
+      tags: [Billing]
+      summary: Start a USDT top-up (NOWPayments).
+      security: [{ session: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TopUpRequest" }
+      responses:
+        "201":
+          description: A hosted payment page to send the user to.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TopUp" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/billing/auto-recharge:
+    get:
+      operationId: getAutoRecharge
+      tags: [Billing]
+      summary: The account's auto-recharge settings.
+      security: [{ session: [] }]
+      responses:
+        "200":
+          description: The settings.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AutoRecharge" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    put:
+      operationId: putAutoRecharge
+      tags: [Billing]
+      summary: Turn auto-recharge on or off, or change its amounts.
+      description: Needs a card saved with `save_card`; 409 without one.
+      security: [{ session: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AutoRechargeRequest" }
+      responses:
+        "200":
+          description: The settings.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AutoRecharge" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/billing/webhooks/stripe:
+    post:
+      operationId: receiveStripeWebhook
+      tags: [Billing]
+      summary: Stripe's webhook receiver. Not for API clients.
+      description: Authenticated by the `Stripe-Signature` header; 400 for a signature that does not verify.
+      security: []
+      parameters:
+        - { name: Stripe-Signature, in: header, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200": { description: "Accepted, a repeat included." }
+        "400": { $ref: "#/components/responses/BadRequest" }
+  /v1/billing/webhooks/nowpayments:
+    post:
+      operationId: receiveNowPaymentsWebhook
+      tags: [Billing]
+      summary: NOWPayments' webhook receiver. Not for API clients.
+      description: Authenticated by the `x-nowpayments-sig` header; 400 for a signature that does not verify.
+      security: []
+      parameters:
+        - { name: x-nowpayments-sig, in: header, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200": { description: "Accepted, a repeat included." }
+        "400": { $ref: "#/components/responses/BadRequest" }
+  /v1/webhooks/secret:
+    get:
+      operationId: getWebhookSecret
+      tags: [Webhooks]
+      summary: The secret that signs the account's webhook deliveries.
+      description: |
+        A delivery carries `X-Godance-Signature: t=<unix>,v1=<hex>[,v1=<hex>]`.
+        Each `v1` is HMAC-SHA256 of `<t>.<raw body>` with the secret.
+      security: [{ session: [] }]
+      responses:
+        "200":
+          description: The secret, created on first read.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WebhookSecret" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/webhooks/secret/rotate:
+    post:
+      operationId: rotateWebhookSecret
+      tags: [Webhooks]
+      summary: A new signing secret. For 24 hours deliveries are signed with both.
+      security: [{ session: [] }]
+      responses:
+        "200":
+          description: The new secret.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WebhookSecret" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/conversations:
+    post:
+      operationId: createConversation
+      tags: [Conversations]
+      summary: Start a stored conversation.
+      description: Chat history for apps that want it kept. `POST /v1/chat/completions` itself stores nothing.
+      security: [{ session: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateConversationRequest" }
+      responses:
+        "201":
+          description: The conversation.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Conversation" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    get:
+      operationId: listConversations
+      tags: [Conversations]
+      summary: The caller's conversations.
+      security: [{ session: [] }]
+      responses:
+        "200":
+          description: Conversations.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Conversation" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/conversations/{id}:
+    get:
+      operationId: getConversation
+      tags: [Conversations]
+      summary: One conversation.
+      security: [{ session: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ConversationId" }
+      responses:
+        "200":
+          description: The conversation.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Conversation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      operationId: archiveConversation
+      tags: [Conversations]
+      summary: Archive a conversation. It is deleted for good 30 days later.
+      security: [{ session: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ConversationId" }
+      responses:
+        "204": { description: Archived. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/conversations/{id}/messages:
+    get:
+      operationId: listConversationMessages
+      tags: [Conversations]
+      summary: A conversation's messages, in order.
+      security: [{ session: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ConversationId" }
+      responses:
+        "200":
+          description: Messages.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/ConversationMessage" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      operationId: appendConversationMessage
+      tags: [Conversations]
+      summary: Add a message to a conversation.
+      security: [{ session: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/ConversationId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AppendMessageRequest" }
+      responses:
+        "201":
+          description: The stored message.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConversationMessage" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/referrals/me:
+    get:
+      operationId: getReferrals
+      tags: [Referrals]
+      summary: The caller's referral code and what it has earned.
+      security: [{ session: [] }]
+      responses:
+        "200":
+          description: "`{\"enabled\": false}` while referrals are switched off; otherwise the code and its counts."
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - { $ref: "#/components/schemas/Referrals" }
+                  - { $ref: "#/components/schemas/ReferralsDisabled" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/referrals/claim:
+    post:
+      operationId: claimReferral
+      tags: [Referrals]
+      summary: Claim someone's referral code.
+      description: "`referral_code_unknown` (404) or `referral_not_eligible` (409)."
+      security: [{ session: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReferralClaimRequest" }
+      responses:
+        "200":
+          description: What the claim is worth once the account tops up.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReferralClaim" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+  /v1/saved-recipes:
+    get:
+      operationId: listSavedGalleryRecipes
+      tags: [Saved gallery recipes]
+      summary: The gallery recipes the caller saved.
+      security: [{ session: [] }]
+      responses:
+        "200":
+          description: Saved recipes.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/SavedGalleryRecipe" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/saved-recipes/{slug}:
+    put:
+      operationId: saveGalleryRecipe
+      tags: [Saved gallery recipes]
+      summary: Save a gallery recipe. Safe to repeat.
+      description: "`saved_recipes_limit_reached` (409) at the limit."
+      security: [{ session: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/GallerySlug" }
+      responses:
+        "204": { description: Saved. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    delete:
+      operationId: unsaveGalleryRecipe
+      tags: [Saved gallery recipes]
+      summary: Un-save a gallery recipe.
+      security: [{ session: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/GallerySlug" }
+      responses:
+        "204": { description: Not saved any more. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/attribution/first-touch:
+    post:
+      operationId: recordFirstTouch
+      tags: [Account]
+      summary: What brought a new account here, recorded once by the web app.
+      security: [{ session: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FirstTouchRequest" }
+      responses:
+        "204": { description: "Always, for a well-formed body." }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+components:
+  securitySchemes:
+    apiKey:
+      type: http
+      scheme: bearer
+      description: |
+        A Godance API key, `Authorization: Bearer gd_live_…`. Create one in the
+        app, or with `POST /v1/keys` from a signed-in session. A key calls the
+        model API only.
+    session:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        A signed-in session: the `accessToken` that sign-in answers with, sent
+        as `Authorization: Bearer …`. The web app carries the same session in
+        a cookie instead.
+  parameters:
+    Prefer:
+      name: Prefer
+      in: header
+      description: "`respond-async` asks for the 202 with the job, also from a key set to `sync`."
+      schema: { type: string }
+    VideoId:
+      name: id
+      in: path
+      required: true
+      description: The video's id, which is its job's id.
+      schema: { type: string, format: uuid }
+    JobId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    FileId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    RecipeId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    BatchId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    ConversationId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    GallerySlug:
+      name: slug
+      in: path
+      required: true
+      description: A gallery recipe's slug - lowercase letters, digits and hyphens, at most 80 characters.
+      schema: { type: string }
+  responses:
+    BadRequest:
+      description: The request is not valid. `detail` says why; `code` where there is one.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    Unauthorized:
+      description: No credential, or one that is unknown, inactive or expired.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    PaymentRequired:
+      description: "`insufficient_credit` (top up to go on), or a spending cap was reached (no `code`; topping up does not lift a cap)."
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    Forbidden:
+      description: The credential may not do this - an API key on a route that needs a signed-in session, or a refusal named by `code`.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    NotFound:
+      description: No such thing for this caller. Another user's answers the same as one that does not exist.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    Conflict:
+      description: The request cannot be carried out as things stand; `code` says which rule.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    TooLarge:
+      description: A body or an image larger than allowed.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    UnsupportedType:
+      description: Not a type this route takes.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    Unprocessable:
+      description: The image was understood and is not accepted; `code` says why.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    TooManyRequests:
+      description: Too many requests. `Retry-After` says how long to wait.
+      headers:
+        Retry-After: { schema: { type: integer } }
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    Unavailable:
+      description: Not available right now; try again later.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    GenerationFailed:
+      description: "The job a request waited for failed: `code` `generation_failed`, with `job_id`. The reservation is returned."
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    BatchRefused:
+      description: |
+        The batch request is refused and nothing is written: `batch_too_large`,
+        `invalid_batch`, or one row's refusal. A row's refusal carries the code
+        a single run would get (`invalid_batch_row` when it has none), the
+        row's 0-based index in `row`, and a `detail` that starts `row N:`.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/BatchProblem" }
+    VideoError:
+      description: A problem document that also carries OpenAI's `error` object. `code` says which refusal.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/VideoProblem" }
+  schemas:
+    Problem:
+      type: object
+      description: An RFC 7807 problem document. Further members appear with some codes, such as `limit` or `terms_version`.
+      required: [title, status]
+      properties:
+        type: { type: string, description: "Usually absent, which RFC 7807 reads as `about:blank`." }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string, description: A sentence for a person. }
+        instance: { type: string, description: The path of the request. }
+        code: { type: string, description: "A stable string to branch on, where the refusal has one." }
+      additionalProperties: true
+    VideoProblem:
+      description: A problem document on OpenAI's video routes.
+      allOf:
+        - { $ref: "#/components/schemas/Problem" }
+        - type: object
+          required: [error]
+          properties:
+            param: { type: string, description: "The request field the refusal is about, where there is one." }
+            error: { $ref: "#/components/schemas/OpenAiError" }
+    OpenAiError:
+      type: object
+      description: OpenAI's error object. `message` repeats the problem's `detail`, and `code` its `code`.
+      required: [message, type]
+      properties:
+        message: { type: string }
+        type:
+          type: string
+          enum: [invalid_request_error, authentication_error, permission_error, not_found_error, rate_limit_error, server_error]
+        param: { type: [string, "null"] }
+        code: { type: [string, "null"] }
+    Health:
+      type: object
+      properties:
+        status: { type: string }
+        region: { type: string }
+        version: { type: string }
+        git_sha: { type: string }
+        timestamp: { type: string, format: date-time }
+    Status:
+      type: object
+      properties:
+        generatedAt: { type: string, format: date-time }
+        providers: { type: array, items: { $ref: "#/components/schemas/ProviderStatus" } }
+    ProviderStatus:
+      type: object
+      properties:
+        provider: { type: string }
+        model: { type: string }
+        windowStart: { type: string, format: date-time }
+        windowEnd: { type: string, format: date-time }
+        requestCount: { type: integer }
+        errorCount: { type: integer }
+        rateLimitCount: { type: integer }
+        errorRate: { type: number }
+        p50Ms: { type: [integer, "null"] }
+        p95Ms: { type: [integer, "null"] }
+        p99Ms: { type: [integer, "null"] }
+        state: { type: string, enum: [ok, degraded, down] }
+    ModelList:
+      type: object
+      properties:
+        object: { type: string, const: list }
+        data: { type: array, items: { $ref: "#/components/schemas/Model" } }
+    Model:
+      type: object
+      properties:
+        id: { type: string, description: The value to send as `model`. }
+        object: { type: string, const: model }
+        owned_by: { type: string }
+        godance:
+          type: object
+          description: Godance extension. A routing id (`godance-fast`, `godance-auto`, `godance-quality`) has only `virtual` and `modality`.
+          properties:
+            modality: { type: string, enum: [TEXT, IMAGE, VIDEO, AUDIO_TTS, AUDIO_STT, EMBEDDING] }
+            requires_async: { type: boolean, description: The model always runs as a job. }
+            pricing:
+              type: object
+              description: The provider's list price, in microcents (1/10,000 of a cent).
+              properties:
+                input_microcents_per_1k: { type: integer }
+                output_microcents_per_1k: { type: integer }
+                per_image_microcents: { type: integer }
+                per_input_image_microcents: { type: integer }
+                per_second_microcents: { type: integer }
+            markup_percent: { type: number, description: The platform fee charged on top of the list price. }
+            display_name: { type: string }
+            description: { type: string }
+            capabilities: { $ref: "#/components/schemas/ModelCapabilities" }
+            virtual: { type: boolean }
+    ModelCapabilities:
+      type: object
+      description: What an image or video model accepts. A missing key means not known, never unlimited; a missing `max_n` means 1.
+      properties:
+        sizes: { type: array, items: { type: string } }
+        default_size: { type: string }
+        durations: { type: array, items: { type: integer } }
+        default_seconds: { type: integer }
+        max_n: { type: integer }
+        inputs:
+          type: object
+          description: The images the model can be given. A field that is not listed is not taken.
+          properties:
+            images:
+              type: object
+              properties:
+                max: { type: integer }
+                mask: { type: boolean }
+            first_frame: { type: boolean }
+            last_frame: { type: boolean }
+            reference_images:
+              type: object
+              properties:
+                max: { type: integer }
+    ChatCompletionRequest:
+      type: object
+      required: [model, messages]
+      properties:
+        model: { type: string }
+        messages: { type: array, minItems: 1, items: { $ref: "#/components/schemas/ChatMessage" } }
+        max_tokens: { type: integer }
+        temperature: { type: number }
+        stream: { type: boolean, default: false }
+    ChatMessage:
+      type: object
+      required: [role, content]
+      properties:
+        role: { type: string, enum: [system, user, assistant] }
+        content:
+          description: A string, or OpenAI's array of parts.
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                oneOf:
+                  - type: object
+                    required: [type, text]
+                    properties:
+                      type: { type: string, const: text }
+                      text: { type: string }
+                  - type: object
+                    required: [type, image_url]
+                    properties:
+                      type: { type: string, const: image_url }
+                      image_url:
+                        type: object
+                        required: [url]
+                        properties:
+                          url: { type: string, description: "A base64 data URL, an https URL, or `https://api.godance.ai/v1/files/{id}/content` for one of the caller's files." }
+                          detail: { type: string, enum: [auto, low, high, original] }
+    ChatCompletion:
+      type: object
+      properties:
+        id: { type: string }
+        object: { type: string, const: chat.completion }
+        created: { type: integer }
+        model: { type: string }
+        choices: { type: array, items: { $ref: "#/components/schemas/ChatChoice" } }
+        usage: { $ref: "#/components/schemas/TokenUsage" }
+    ChatChoice:
+      type: object
+      properties:
+        index: { type: integer }
+        message: { $ref: "#/components/schemas/ChatResponseMessage" }
+        finish_reason: { type: [string, "null"] }
+    ChatResponseMessage:
+      type: object
+      properties:
+        role: { type: string }
+        content: { type: string }
+    TokenUsage:
+      type: object
+      properties:
+        prompt_tokens: { type: integer }
+        completion_tokens: { type: integer }
+        total_tokens: { type: integer }
+    ChatCompletionChunk:
+      type: object
+      description: One event of a streamed completion.
+      properties:
+        id: { type: string }
+        object: { type: string, const: chat.completion.chunk }
+        created: { type: integer }
+        model: { type: string }
+        choices: { type: array, items: { $ref: "#/components/schemas/ChatChunkChoice" } }
+        usage:
+          description: Null until the last chunk.
+          oneOf:
+            - { $ref: "#/components/schemas/TokenUsage" }
+            - { type: "null" }
+    ChatChunkChoice:
+      type: object
+      properties:
+        index: { type: integer }
+        delta: { $ref: "#/components/schemas/ChatChunkDelta" }
+        finish_reason: { type: [string, "null"] }
+    ChatChunkDelta:
+      type: object
+      properties:
+        role: { type: [string, "null"] }
+        content: { type: [string, "null"] }
+    ImageGenerationRequest:
+      type: object
+      required: [model]
+      properties:
+        model: { type: string }
+        prompt: { type: string, description: Required unless `recipe` is sent. }
+        size: { type: string }
+        n: { type: integer, minimum: 1, description: At most the model's `max_n`. }
+        style: { type: string }
+        quality: { type: string }
+        response_format: { type: string, enum: [url, b64_json], description: Shapes a response that carries the images. }
+        async: { type: boolean, description: Godance extension. Ask for the job. }
+        webhook_url: { type: string, format: uri, description: Godance extension. Where to POST the signed completion event. }
+        gallery_recipe: { type: string, description: Godance extension. The slug of the gallery recipe this request is a run of. }
+        recipe: { $ref: "#/components/schemas/RecipeRef" }
+    ImageResponse:
+      type: object
+      description: OpenAI's image response, with `job_id` and `cost_cents` as Godance extensions.
+      properties:
+        created: { type: integer }
+        data: { type: array, items: { $ref: "#/components/schemas/ImageData" } }
+        job_id: { type: string, format: uuid }
+        cost_cents: { type: integer }
+    ImageData:
+      type: object
+      properties:
+        url: { type: string, format: uri, description: A signed link; it expires. }
+        b64_json: { type: string }
+        revised_prompt: { type: [string, "null"] }
+    JobAccepted:
+      type: object
+      properties:
+        job_id: { type: string, format: uuid }
+        status: { $ref: "#/components/schemas/JobStatus" }
+        poll_url: { type: string, description: "`/v1/jobs/{job_id}`" }
+    ImageEditRequest:
+      type: object
+      description: The JSON form of an edit.
+      required: [model]
+      properties:
+        model: { type: string }
+        prompt: { type: string }
+        images: { type: array, items: { $ref: "#/components/schemas/InputRef" } }
+        mask: { $ref: "#/components/schemas/InputRef" }
+        n: { type: integer, minimum: 1 }
+        size: { type: string }
+        quality: { type: string }
+        response_format: { type: string, enum: [url, b64_json] }
+        async: { type: boolean }
+        webhook_url: { type: string, format: uri }
+        gallery_recipe: { type: string }
+        recipe: { $ref: "#/components/schemas/RecipeRef" }
+    InputRef:
+      type: object
+      description: How a request points at an input. Exactly one of the two.
+      properties:
+        file_id: { type: string, format: uuid, description: One of the caller's uploaded files. }
+        job_output: { $ref: "#/components/schemas/JobOutputRef" }
+    JobOutputRef:
+      type: object
+      description: An image output of one of the caller's own finished jobs.
+      properties:
+        job_id: { type: string, format: uuid }
+        index: { type: integer }
+    VideoGenerationRequest:
+      type: object
+      required: [model]
+      properties:
+        model: { type: string }
+        prompt: { type: string, description: Required unless `recipe` is sent. }
+        size: { type: string }
+        seconds: { type: integer, minimum: 1 }
+        n: { type: integer, minimum: 1 }
+        webhook_url: { type: string, format: uri }
+        gallery_recipe: { type: string }
+        recipe: { $ref: "#/components/schemas/RecipeRef" }
+        first_frame: { $ref: "#/components/schemas/InputRef" }
+        last_frame: { $ref: "#/components/schemas/InputRef" }
+        reference_images: { type: array, items: { $ref: "#/components/schemas/InputRef" } }
+    VideoCreateRequest:
+      type: object
+      description: The JSON form of `POST /v1/videos`.
+      required: [model]
+      properties:
+        model: { type: string, description: A Godance video model. Required; there is no default. }
+        prompt: { type: string, description: Required unless `recipe` is sent. }
+        seconds:
+          description: The clip's length. OpenAI's string, or a number.
+          oneOf:
+            - { type: string, examples: ["8"] }
+            - { type: integer, minimum: 1 }
+        size: { type: string, examples: ["1280x720"] }
+        input_reference: { $ref: "#/components/schemas/VideoInputReference" }
+        webhook_url: { type: string, format: uri, description: Godance extension. }
+        gallery_recipe: { type: string, description: Godance extension. }
+        recipe: { $ref: "#/components/schemas/RecipeRef" }
+    VideoInputReference:
+      type: object
+      description: The image a video starts from. One of `file_id` and `job_output`.
+      properties:
+        file_id: { type: string, format: uuid, description: One of the caller's uploaded files. }
+        image_url: { type: string, description: Not supported. Answers 400 `image_url_not_supported`. }
+        job_output: { $ref: "#/components/schemas/JobOutputRef" }
+    Video:
+      type: object
+      description: OpenAI's video object, mapped from a job. Times are seconds since the epoch.
+      properties:
+        id: { type: string, format: uuid, description: The job's id. }
+        object: { type: string, const: video }
+        model: { type: string }
+        status: { type: string, enum: [queued, in_progress, completed, failed] }
+        progress: { type: integer, description: "0 until the video is completed, then 100." }
+        created_at: { type: integer }
+        completed_at: { type: [integer, "null"] }
+        expires_at: { type: [integer, "null"], description: When the files are due to be deleted; null while the job is saved. }
+        prompt: { type: [string, "null"] }
+        seconds: { type: [string, "null"], description: "The clip's length, as a string." }
+        size: { type: [string, "null"], description: "The size asked for, else the model's default size where known." }
+        error:
+          oneOf:
+            - { $ref: "#/components/schemas/VideoGenerationError" }
+            - { type: "null" }
+        remixed_from_video_id: { type: "null", description: Always null. Remix is not supported. }
+        cost_cents: { type: integer, description: "Godance extension. Reserved while queued or in progress, charged once completed, 0 when failed." }
+        job_url: { type: string, description: "Godance extension. The same job: `/v1/jobs/{id}`." }
+    VideoGenerationError:
+      type: object
+      description: Why a video failed.
+      properties:
+        code: { type: string, enum: [generation_failed, generation_cancelled] }
+        message: { type: string }
+    VideoList:
+      type: object
+      properties:
+        object: { type: string, const: list }
+        data: { type: array, items: { $ref: "#/components/schemas/Video" } }
+        first_id: { type: [string, "null"], format: uuid }
+        last_id: { type: [string, "null"], format: uuid, description: Pass as `after` for the next page. }
+        has_more: { type: boolean }
+    VideoDeleted:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        object: { type: string, const: video.deleted }
+        deleted: { type: boolean, const: true }
+    JobStatus:
+      type: string
+      enum: [QUEUED, RUNNING, DONE, FAILED, CANCELLED]
+    Job:
+      type: object
+      description: A generation job. Field names are camelCase.
+      properties:
+        id: { type: string, format: uuid }
+        status: { $ref: "#/components/schemas/JobStatus" }
+        modality: { type: string, enum: [IMAGE, VIDEO] }
+        provider: { type: string }
+        model: { type: string }
+        estimatedCostCents: { type: [integer, "null"], description: Reserved when the job was accepted. }
+        actualCostCents: { type: [integer, "null"], description: Charged once the job is DONE. }
+        outputUrl: { type: [string, "null"], description: "The first output's link, signed when the job is read." }
+        errorMessage: { type: [string, "null"] }
+        createdAt: { type: string, format: date-time }
+        startedAt: { type: [string, "null"], format: date-time }
+        completedAt: { type: [string, "null"], format: date-time }
+        prompt: { type: [string, "null"] }
+        params: { type: object, description: "The request, with its own field names: `size`, `n`, `style`, `quality` for images; `size`, `seconds`, `n` for video." }
+        outputs: { type: array, items: { $ref: "#/components/schemas/JobOutput" } }
+        purged: { type: boolean, description: The files and prompt have been deleted. }
+        mediaExpiresAt: { type: [string, "null"], format: date-time, description: When the files and prompt are due to be deleted; null while saved. }
+        saved: { type: boolean }
+        channel: { type: [string, "null"], enum: [STUDIO, API, BATCH, null], description: "How the job was made. `BATCH` for a job a recipe batch made." }
+        galleryRecipe: { type: [string, "null"] }
+        recipe:
+          oneOf:
+            - { $ref: "#/components/schemas/JobRecipe" }
+            - { type: "null" }
+        inputs: { type: array, items: { $ref: "#/components/schemas/JobInput" } }
+        batch:
+          description: The recipe batch and the row the job was made for. Null for a job outside a batch.
+          oneOf:
+            - { $ref: "#/components/schemas/JobBatch" }
+            - { type: "null" }
+    JobOutput:
+      type: object
+      properties:
+        index: { type: integer }
+        url: { type: string, format: uri }
+        contentType: { type: string }
+        sizeBytes: { type: integer }
+        revisedPrompt: { type: [string, "null"] }
+    JobInput:
+      type: object
+      properties:
+        role: { type: string, enum: [image, mask, first_frame, last_frame, reference_image] }
+        file_id: { type: string, format: uuid }
+        job_output: { $ref: "#/components/schemas/JobOutputRef" }
+        url: { type: [string, "null"], description: A link that works for five minutes; null once the file is gone. }
+    JobRecipe:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        version: { type: integer }
+        variables: { type: [object, "null"], additionalProperties: { type: string } }
+    JobBatch:
+      type: object
+      properties:
+        id: { type: string, format: uuid, description: The batch. }
+        row: { type: integer, description: "The index of the job's row in `GET /v1/recipe-batches/{id}/rows`." }
+    SavedJobs:
+      type: object
+      properties:
+        count: { type: integer }
+        limit: { type: integer }
+    File:
+      type: object
+      description: An uploaded input file. Times are seconds since the epoch.
+      properties:
+        id: { type: string, format: uuid }
+        object: { type: string, const: file }
+        purpose: { type: string, const: generation_input }
+        bytes: { type: integer }
+        content_type: { type: string }
+        width: { type: integer }
+        height: { type: integer }
+        contains_person: { type: [boolean, "null"] }
+        created_at: { type: integer }
+        expires_at: { type: [integer, "null"], description: When an unused file is deleted; null while a job uses it. }
+    AcceptInputTermsRequest:
+      type: object
+      required: [version]
+      properties:
+        version: { type: integer }
+    RecipeRef:
+      type: object
+      description: Godance extension. Run a version of one of the caller's recipes in place of `prompt`.
+      required: [version_id]
+      properties:
+        version_id: { type: string, format: uuid }
+        variables: { type: object, additionalProperties: { type: string } }
+        inputs:
+          type: object
+          description: An input for each of the version's input slots, by slot name.
+          additionalProperties: { $ref: "#/components/schemas/InputRef" }
+    RecipeVariable:
+      type: object
+      properties:
+        name: { type: string }
+        default: { type: string }
+    RecipeInputSlot:
+      type: object
+      properties:
+        slot: { type: string }
+        role: { type: string }
+        hint: { type: [string, "null"] }
+    CreateRecipeRequest:
+      type: object
+      required: [title, modality, template, model]
+      properties:
+        title: { type: string, maxLength: 200 }
+        modality: { type: string, enum: [IMAGE, VIDEO] }
+        template: { type: string }
+        variables: { type: array, items: { $ref: "#/components/schemas/RecipeVariable" } }
+        model: { type: string }
+        params: { type: object }
+        source_gallery_recipe: { type: string }
+        inputs: { type: array, items: { $ref: "#/components/schemas/RecipeInputSlot" } }
+    NewRecipeVersionRequest:
+      type: object
+      required: [template, model]
+      properties:
+        template: { type: string }
+        variables: { type: array, items: { $ref: "#/components/schemas/RecipeVariable" } }
+        model: { type: string }
+        params: { type: object }
+        inputs: { type: array, items: { $ref: "#/components/schemas/RecipeInputSlot" } }
+    RenameRecipeRequest:
+      type: object
+      required: [title]
+      properties:
+        title: { type: string, maxLength: 200 }
+    RecipeVersion:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        number: { type: integer }
+        template: { type: string }
+        variables: { type: array, items: { $ref: "#/components/schemas/RecipeVariable" } }
+        model: { type: string }
+        params: { type: object }
+        created_at: { type: string, format: date-time }
+        inputs: { type: array, items: { $ref: "#/components/schemas/RecipeInputSlot" } }
+    Recipe:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        modality: { type: string, enum: [IMAGE, VIDEO] }
+        source_gallery_recipe: { type: [string, "null"] }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        latest_version: { $ref: "#/components/schemas/RecipeVersion" }
+        attempts: { type: integer, description: How many jobs ran any version. }
+        spent_cents: { type: integer, description: What the finished ones were charged. }
+    BatchProblem:
+      description: A problem document for a refused batch request.
+      allOf:
+        - { $ref: "#/components/schemas/Problem" }
+        - type: object
+          properties:
+            row: { type: integer, description: The 0-based index of the row that was refused. Present only for a row's refusal. }
+    BatchRequest:
+      type: object
+      description: The body of `POST /v1/recipe-batches` and of its estimate.
+      required: [version_id, rows]
+      properties:
+        version_id: { type: string, format: uuid, description: The recipe version every row runs. }
+        model: { type: string, description: "Left out, the version's model." }
+        params: { type: object, description: "Left out, the version's params. One that is sent replaces them as a whole; it takes `size`, `n`, `seconds`, `style` and `quality`." }
+        rows: { type: array, minItems: 1, maxItems: 500, items: { $ref: "#/components/schemas/BatchRowRequest" } }
+        max_concurrency: { type: integer, minimum: 1, maximum: 4, default: 2, description: How many rows run at a time. }
+        webhook_url: { type: string, format: uri, description: "Where to POST once, when the batch ends: one signed `recipe_batch.completed` event." }
+    BatchRowRequest:
+      type: object
+      description: One row of a batch request.
+      properties:
+        variables: { type: object, additionalProperties: { type: string }, description: A value for any of the version's variables. One left out keeps its default. }
+        inputs:
+          type: object
+          description: For a recipe with input slots, an input for every slot, by slot name.
+          additionalProperties: { $ref: "#/components/schemas/InputRef" }
+    BatchLimits:
+      type: object
+      description: What the server allows a batch.
+      properties:
+        max_rows: { type: integer }
+        max_concurrency: { type: integer }
+    BatchEstimate:
+      type: object
+      properties:
+        rows: { type: integer }
+        total_cents: { type: integer, description: The sum of what each row's job would reserve. }
+        balance_cents: { type: integer }
+        enough: { type: boolean, description: Whether the balance now covers the total. A batch can be created either way. }
+        limits: { $ref: "#/components/schemas/BatchLimits" }
+    Batch:
+      type: object
+      description: A recipe batch. Field names are snake_case.
+      properties:
+        id: { type: string, format: uuid }
+        recipe_id: { type: [string, "null"], format: uuid, description: Null once the recipe has been deleted. }
+        recipe_title: { type: [string, "null"] }
+        version_id: { type: [string, "null"], format: uuid }
+        modality: { type: string, enum: [IMAGE, VIDEO] }
+        model: { type: string }
+        params: { type: object }
+        status: { type: string, enum: [QUEUED, RUNNING, PAUSED, DONE, CANCELLED] }
+        pause_reason: { type: [string, "null"], enum: [insufficient_credit, spending_cap, null], description: Why the batch is PAUSED. }
+        pause_detail: { type: [string, "null"], description: "For `spending_cap`, which cap." }
+        max_concurrency: { type: integer }
+        rows_total: { type: integer }
+        rows_done: { type: integer }
+        rows_failed: { type: integer }
+        rows_running: { type: integer }
+        rows_skipped: { type: integer }
+        estimated_total_cents: { type: integer }
+        spent_cents: { type: integer, description: What the finished rows' jobs were charged. A batch charges nothing itself. }
+        created_at: { type: string, format: date-time }
+        started_at: { type: [string, "null"], format: date-time }
+        completed_at: { type: [string, "null"], format: date-time, description: When the last row ended. }
+    BatchRow:
+      type: object
+      properties:
+        index: { type: integer }
+        status: { type: string, enum: [PENDING, RUNNING, DONE, FAILED, SKIPPED] }
+        variables: { type: [object, "null"], additionalProperties: { type: string }, description: The value each variable had. Null once the row's job has been purged. }
+        job_id: { type: [string, "null"], format: uuid, description: The row's job. Null until the row has started. }
+        cost_cents: { type: [integer, "null"], description: "What the row's job was charged: null until the row has ended, 0 for a row that failed." }
+        error: { type: [string, "null"] }
+        outputs: { type: array, items: { $ref: "#/components/schemas/BatchRowOutput" } }
+    BatchRowOutput:
+      type: object
+      properties:
+        index: { type: integer }
+        url: { type: string, format: uri, description: A signed link; it expires. }
+        content_type: { type: string }
+    EstimateRequest:
+      type: object
+      required: [model]
+      properties:
+        model: { type: string }
+        n: { type: integer, minimum: 1 }
+        size: { type: string }
+        seconds: { type: integer, minimum: 1 }
+        input_images: { type: integer, minimum: 0 }
+    Estimate:
+      type: object
+      properties:
+        model: { type: string }
+        modality: { type: string }
+        n: { type: integer }
+        seconds: { type: [integer, "null"] }
+        estimated_cost_cents: { type: integer }
+        currency: { type: string }
+        input_images: { type: integer }
+    UsageRecord:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        modality: { type: string }
+        provider: { type: string }
+        model: { type: string }
+        inputTokens: { type: integer }
+        outputTokens: { type: integer }
+        costCents: { type: integer }
+        providerCostCents: { type: [integer, "null"] }
+        region: { type: string }
+        cacheHit: { type: boolean }
+        fallbackUsed: { type: boolean }
+        requestId: { type: string }
+        recordedAt: { type: string, format: date-time }
+    ApiKeyCreateRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, maxLength: 255 }
+        scopes: { type: array, items: { type: string } }
+        image_response: { type: string, enum: [async, sync] }
+    ApiKeyUpdateRequest:
+      type: object
+      properties:
+        image_response: { type: string, enum: [async, sync] }
+    ApiKeyCreated:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        prefix: { type: string }
+        plaintext: { type: string, description: The key itself. Returned only this once. }
+        createdAt: { type: string, format: date-time }
+        image_response: { type: string, enum: [async, sync] }
+    ApiKey:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        prefix: { type: string }
+        scopes: { type: array, items: { type: string } }
+        active: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        lastUsedAt: { type: [string, "null"], format: date-time }
+        expiresAt: { type: [string, "null"], format: date-time }
+        image_response: { type: string, enum: [async, sync] }
+    SignupRequest:
+      type: object
+      required: [email, password, fullName]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, minLength: 12, maxLength: 128 }
+        fullName: { type: string, maxLength: 255 }
+        birthMonth: { type: string, description: YYYY-MM. }
+        parentEmail: { type: string, format: email }
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string }
+    ForgotPasswordRequest:
+      type: object
+      required: [email]
+      properties:
+        email: { type: string, format: email }
+    ResetPasswordRequest:
+      type: object
+      required: [token, newPassword]
+      properties:
+        token: { type: string }
+        newPassword: { type: string, minLength: 12, maxLength: 128 }
+    ReleaseEmailRequest:
+      type: object
+      required: [token]
+      properties:
+        token: { type: string }
+    ReleaseLinkRequest:
+      type: object
+      required: [email]
+      properties:
+        email: { type: string, format: email }
+    ChangeEmailRequest:
+      type: object
+      required: [email]
+      properties:
+        email: { type: string, format: email }
+        currentPassword: { type: string }
+    AuthSession:
+      type: object
+      description: A session. Members that do not apply are left out.
+      properties:
+        accessToken: { type: string, description: The bearer token of the session. }
+        tokenType: { type: string, enum: [Bearer, Cookie] }
+        expiresAt: { type: string, format: date-time }
+        twoFactorToken: { type: string, description: In place of `accessToken` when the sign-in owes a second factor. }
+    Me:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string }
+        hasEmail: { type: boolean }
+        pendingEmail: { type: [string, "null"] }
+        hasPassword: { type: boolean }
+        fullName: { type: [string, "null"] }
+        role: { type: string, enum: [USER, SUPPORT, FINANCE, ADMIN] }
+        emailVerified: { type: boolean }
+        creditBalanceCents: { type: integer }
+        dailyCreditCapCents: { type: [integer, "null"] }
+        monthlyCreditCapCents: { type: [integer, "null"] }
+        createdAt: { type: string, format: date-time }
+        ageStatus: { type: string, enum: [ADULT, CONSENT_PENDING, CONSENT_GRANTED] }
+        parentEmailMasked: { type: [string, "null"] }
+        twoFactorEnabled: { type: boolean }
+        inputs: { $ref: "#/components/schemas/InputsStatus" }
+    InputsStatus:
+      type: object
+      description: Whether inputs are switched on, and whether this account has accepted the current input terms.
+      properties:
+        enabled: { type: boolean }
+        terms_version: { type: integer }
+        accepted: { type: boolean }
+        accepted_at: { type: [string, "null"], format: date-time }
+        allow_people: { type: boolean }
+    TwoFactorStatus:
+      type: object
+      properties:
+        enabled: { type: boolean }
+        recoveryCodesRemaining: { type: integer }
+    TwoFactorEnrolRequest:
+      type: object
+      properties:
+        currentPassword: { type: string }
+    TwoFactorEnrolment:
+      type: object
+      properties:
+        secret: { type: string }
+        otpauthUri: { type: string }
+    TwoFactorCodeRequest:
+      type: object
+      required: [code]
+      properties:
+        code: { type: string }
+    TwoFactorEnabled:
+      type: object
+      properties:
+        recoveryCodes: { type: array, items: { type: string } }
+        session: { $ref: "#/components/schemas/AuthSession" }
+    TwoFactorDisableRequest:
+      type: object
+      required: [code]
+      properties:
+        currentPassword: { type: string }
+        code: { type: string }
+    ParentalConsent:
+      type: object
+      properties:
+        childFirstName: { type: string }
+        childEmailMasked: { type: string }
+        minTopupCents: { type: integer }
+        maxTopupCents: { type: integer }
+        currency: { type: string }
+        expiresAt: { type: string, format: date-time }
+        notice: { $ref: "#/components/schemas/ParentalNotice" }
+    ParentalNotice:
+      type: object
+      description: What a parent is told before approving.
+      properties:
+        collected: { type: array, items: { type: string } }
+        notStored: { type: string }
+        sharing: { type: string }
+        noSale: { type: string }
+        parentRights: { type: string }
+        contactEmail: { type: string }
+        privacyPolicyUrl: { type: string }
+    ParentalConsentCheckoutRequest:
+      type: object
+      required: [token, amountCents]
+      properties:
+        token: { type: string }
+        amountCents: { type: integer, minimum: 1 }
+    TopUpRequest:
+      type: object
+      required: [amountCents]
+      properties:
+        amountCents: { type: integer, minimum: 1 }
+        save_card: { type: boolean, description: Keep the card on file for auto-recharge. }
+    TopUp:
+      type: object
+      properties:
+        sessionId: { type: string }
+        checkoutUrl: { type: string, format: uri }
+        amountCents: { type: integer }
+    AutoRechargeRequest:
+      type: object
+      required: [enabled]
+      properties:
+        enabled: { type: boolean }
+        threshold_cents: { type: integer, minimum: 0 }
+        topup_cents: { type: integer, minimum: 0 }
+    AutoRecharge:
+      type: object
+      properties:
+        enabled: { type: boolean }
+        threshold_cents: { type: [integer, "null"] }
+        topup_cents: { type: [integer, "null"] }
+        payment_method_on_file: { type: boolean }
+        last_failure_at: { type: [string, "null"], format: date-time }
+        last_failure_reason: { type: [string, "null"] }
+    WebhookSecret:
+      type: object
+      properties:
+        secret: { type: string, description: "`whsec_…`" }
+        header: { type: string, description: "The header deliveries are signed in: `X-Godance-Signature`." }
+    CreateConversationRequest:
+      type: object
+      properties:
+        title: { type: string, maxLength: 255 }
+    Conversation:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: [string, "null"] }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        archivedAt: { type: [string, "null"], format: date-time }
+    AppendMessageRequest:
+      type: object
+      required: [role, content]
+      properties:
+        role: { type: string, enum: [system, user, assistant] }
+        content: { type: string }
+        model: { type: string }
+        input_tokens: { type: integer }
+        output_tokens: { type: integer }
+        cost_cents: { type: integer }
+    ConversationMessage:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        role: { type: string }
+        content: { type: string }
+        model: { type: [string, "null"] }
+        input_tokens: { type: [integer, "null"] }
+        output_tokens: { type: [integer, "null"] }
+        cost_cents: { type: [integer, "null"] }
+        createdAt: { type: string, format: date-time }
+    Referrals:
+      type: object
+      properties:
+        enabled: { type: boolean, const: true }
+        code: { type: string }
+        referrer_reward_cents: { type: integer }
+        referee_reward_cents: { type: integer }
+        min_topup_cents: { type: integer }
+        invited: { type: integer }
+        rewarded: { type: integer }
+        earned_cents: { type: integer }
+        pending_reward_cents: { type: [integer, "null"] }
+    ReferralsDisabled:
+      type: object
+      properties:
+        enabled: { type: boolean, const: false }
+    ReferralClaimRequest:
+      type: object
+      required: [code]
+      properties:
+        code: { type: string }
+    ReferralClaim:
+      type: object
+      properties:
+        referee_reward_cents: { type: integer }
+        min_topup_cents: { type: integer }
+    SavedGalleryRecipe:
+      type: object
+      properties:
+        slug: { type: string }
+        savedAt: { type: string, format: date-time }
+    FirstTouchRequest:
+      type: object
+      properties:
+        utm_source: { type: string }
+        utm_medium: { type: string }
+        utm_campaign: { type: string }
+        gallery_recipe: { type: string }
+        landing_path: { type: string }
+        referrer_host: { type: string }

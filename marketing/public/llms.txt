@@ -11,8 +11,15 @@
 - vs. OpenRouter: Godance covers image and video too, not just text.
 - vs. Eden AI: no account tiers — one published fee per model (Eden's fee is tier-dependent).
 - vs. Fireworks / Together: pure aggregator — no GPUs, no model weights, no lock-in.
-- vs. B.AI / WorldClaw: an OpenAI-compatible developer API, not an end-user product — targets
-  engineering teams integrating models into their own apps.
+- vs. B.AI / WorldClaw: built for people building with AI, whether or not they are engineers
+  yet — work out a prompt in the Studio, keep it as a recipe, then run it at scale through
+  the same OpenAI-compatible API.
+
+## For AI assistants writing code
+
+- Complete reference, one file: every route with a runnable curl example and a Python
+  example, using the real field names — https://godance.ai/llms-full.txt
+- OpenAPI 3.1 description of every route, for tools — https://api.godance.ai/v1/openapi.yaml
 
 ## API surface (OpenAI-compatible)
 
@@ -22,6 +29,9 @@
   async:true; otherwise sync. An API key set to image_response "sync" gets the images
   in the response instead (see "Images with the OpenAI SDK" below)
 - POST /v1/videos/generations — async only, signed webhook callback
+- POST /v1/videos, GET /v1/videos, GET /v1/videos/{id}, GET /v1/videos/{id}/content,
+  DELETE /v1/videos/{id} — the same video jobs in the shape of OpenAI's Videos API, so
+  OpenAI SDK video code works (see "Video with the OpenAI SDK" below)
 - GET /v1/jobs/{id} — status of an async generation, with its prompt and params,
   every output (outputs[]: index, url, contentType, sizeBytes, revisedPrompt; each url
   signed at read time), purged, saved, and mediaExpiresAt (files and prompt deleted 90
@@ -46,6 +56,17 @@
   recipe: {version_id, variables: {name: value}} in place of prompt (both → 400
   prompt_and_recipe). The filled-in template is the job's prompt and price. The job
   then has recipe: {id, version, variables}; GET /v1/jobs?recipe={id} lists its jobs
+- POST /v1/recipe-batches — run one recipe version over up to 500 rows ({version_id,
+  rows: [{variables, inputs}], model, params, max_concurrency 1-4, webhook_url}). Each row
+  is an ordinary job (channel "BATCH", batch: {id, row}); the batch charges nothing
+  itself, and it pauses (it does not fail) when credit or a spending cap runs out:
+  POST /v1/recipe-batches/{id}/resume continues it, POST /v1/recipe-batches/{id}/cancel
+  skips the rows not started. POST /v1/recipe-batches/estimate prices it first. Two
+  unfinished batches per account (409 batch_limit_reached)
+- GET /v1/recipe-batches, GET /v1/recipe-batches/{id}, GET /v1/recipe-batches/{id}/rows,
+  GET /v1/recipe-batches/{id}/results.csv and GET /v1/recipe-batches/{id}/results.zip —
+  your batches, their progress, each row's status with its job and signed output links,
+  and the results as files. One signed recipe_batch.completed webhook when a batch ends
 - POST /v1/estimates — price of an image or video request before sending it
   ({model, n, size, seconds} → estimated_cost_cents, the exact amount the request would
   reserve); no charge, no job
@@ -73,6 +94,24 @@ answers 502 problem JSON with code "generation_failed" and the charge is refunde
 an "async" key (the default for keys made before this setting) the answer is always the
 202; "async": true in the body or a Prefer: respond-async header asks for that on one
 request. Video is always a job.
+
+## Video with the OpenAI SDK
+
+OpenAI SDK video code works with the base URL, the key and the model changed:
+video = client.videos.create_and_poll(model="seedance-2.0", prompt="...", seconds="8"),
+then client.videos.download_content(video.id, variant="video").write_to_file("out.mp4").
+model is a Godance video model and is required: OpenAI shut down its own Videos API and
+sora-2 models on 2026-09-24, so do not send "sora-2". A video is a Godance job with the
+same id (GET /v1/jobs/{id}); the video object adds cost_cents and job_url. status is
+queued, in_progress, completed or failed (error.code "generation_failed", reservation
+returned). GET /v1/videos/{id}/content streams the file (variant=video; thumbnail answers
+404 because no model stores one). GET /v1/videos lists {data, first_id, last_id, has_more}
+(limit, after, order). DELETE /v1/videos/{id} deletes the files now and refunds nothing.
+input_reference (an image to start from) is a file part or {"file_id": "..."}; it is part
+of image inputs, which answer 403 inputs_disabled until they are switched on. Remix,
+edits, extensions and characters are not supported and answer 404 with a code of their
+own. Errors on these routes are problem JSON that also carries OpenAI's error object, so
+the SDK's exceptions carry the message.
 
 ## Models
 

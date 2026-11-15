@@ -9,9 +9,11 @@ spring:
     problemdetails:
       enabled: true     # CLAUDE.md: all HTTP errors as application/problem+json
     multipart:
-      # The only multipart routes take images as inputs (godance.inputs). A part
-      # larger than this is cut off while it is still being received, so keep it
-      # just above godance.inputs.max-bytes; a larger one answers input_too_large.
+      # The only files the multipart routes take are images used as inputs
+      # (godance.inputs); POST /v1/videos also takes a form of text fields alone,
+      # which is how OpenAI's SDK sends it. A part larger than this is cut off
+      # while it is still being received, so keep it just above
+      # godance.inputs.max-bytes; a larger one answers input_too_large.
       max-disk-usage-per-part: ${INPUTS_MAX_PART_BYTES:21MB}
       max-parts: 24
   jackson:
