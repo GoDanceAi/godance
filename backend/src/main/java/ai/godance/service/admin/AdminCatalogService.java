@@ -64,6 +64,9 @@ public class AdminCatalogService {
             long outputMicrocentsPer1k,
             long perImageMicrocents,
             long perSecondMicrocents,
+            // Read-only here (V33): what the provider charges per input image of an edit; null when nothing.
+            // A pricing proposal sets it; no admin route edits it directly.
+            Long perInputImageMicrocents,
             Double markupOverride,
             double effectiveMarkupPercent,
             boolean requiresAsync,
@@ -173,6 +176,7 @@ public class AdminCatalogService {
                 e.getStatus() == CatalogStatus.ACTIVE,
                 e.getInputMicrocentsPer1k(), e.getOutputMicrocentsPer1k(),
                 e.getPerImageMicrocents(), e.getPerSecondMicrocents(),
+                e.getPerInputImageMicrocents(),
                 e.getMarkupOverride(),
                 effectiveMarkup(e),
                 e.isRequiresAsync(), e.getCostSource(), e.getLastVerifiedAt(), e.getUpdatedAt(),

@@ -197,6 +197,7 @@ public class PricingRefreshService {
             case OUTPUT     -> e.getOutputMicrocentsPer1k();
             case PER_IMAGE  -> e.getPerImageMicrocents();
             case PER_SECOND -> e.getPerSecondMicrocents();
+            case PER_INPUT_IMAGE -> e.getPerInputImageMicrocents();
         };
     }
 

@@ -14,6 +14,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import ai.godance.config.VolcengineProperties;
 import ai.godance.domain.Provider;
 import ai.godance.gateway.ImageDtos.GeneratedImage;
+import ai.godance.gateway.ImageDtos.ImageInput;
 import ai.godance.gateway.ImageDtos.ImageRequest;
 import ai.godance.gateway.ImageProviderAdapter;
 import reactor.core.publisher.Mono;
@@ -53,13 +54,26 @@ public class VolcengineArkSeedreamProvider implements ImageProviderAdapter {
     }
 
     @Override
+    public boolean editsImages() {
+        return true;
+    }
+
+    /**
+     * An edit is the same request with {@code image}: one input image as a
+     * base64 data URL, or a list of them, in the order given. Seedream takes
+     * no mask. A request without input images is sent exactly as before.
+     * Source: Ark's image generation reference
+     * (volcengine.com/docs/82379/1541523), read 2026-11-14.
+     */
+    @Override
     public Mono<List<GeneratedImage>> generate(ImageRequest request) {
         ArkImageRequest body = new ArkImageRequest(
                 request.model(),
                 request.prompt(),
                 request.size() == null ? "1024x1024" : request.size(),
                 request.n() == null ? 1 : request.n(),
-                "b64_json");
+                "b64_json",
+                imageOf(request));
 
         return client.post()
                 .uri("/api/v3/images/generations")
@@ -80,13 +94,25 @@ public class VolcengineArkSeedreamProvider implements ImageProviderAdapter {
                 .toList();
     }
 
+    /** Null for no input image, a string for one, a list for several: the three forms Ark's {@code image} takes. */
+    private static Object imageOf(ImageRequest request) {
+        if (!request.isEdit()) return null;
+        List<String> urls = request.images().stream().map(VolcengineArkSeedreamProvider::dataUrl).toList();
+        return urls.size() == 1 ? urls.get(0) : urls;
+    }
+
+    private static String dataUrl(ImageInput image) {
+        return "data:" + image.contentType() + ";base64," + Base64.getEncoder().encodeToString(image.bytes());
+    }
+
     @JsonInclude(JsonInclude.Include.NON_NULL)
     record ArkImageRequest(
             String model,
             String prompt,
             String size,
             int n,
-            @JsonProperty("response_format") String responseFormat
+            @JsonProperty("response_format") String responseFormat,
+            Object image
     ) { }
 
     record ArkImageResponse(Long created, List<ArkImageData> data) { }

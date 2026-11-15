@@ -50,8 +50,18 @@ public class ModelCatalog {
             Double markupOverride,         // null = use tier default
             long perImageMicrocents,       // 0 for non-image models
             long perSecondMicrocents,      // 0 for non-video models (Session 9)
-            boolean requiresAsync          // true → endpoint must use async path; ignored for sync-only modalities (Session 9)
+            boolean requiresAsync,         // true → endpoint must use async path; ignored for sync-only modalities (Session 9)
+            long perInputImageMicrocents   // what the provider charges for each input image of an edit; 0 when it charges nothing (V33)
     ) {
+        /** A model that charges nothing for input images, which is every model built in code. */
+        public ModelInfo(String modelName, Provider provider, Modality modality,
+                         long inputMicrocentsPer1k, long outputMicrocentsPer1k,
+                         Integer defaultMaxOutputTokens, Double markupOverride,
+                         long perImageMicrocents, long perSecondMicrocents, boolean requiresAsync) {
+            this(modelName, provider, modality, inputMicrocentsPer1k, outputMicrocentsPer1k,
+                    defaultMaxOutputTokens, markupOverride, perImageMicrocents, perSecondMicrocents, requiresAsync, 0L);
+        }
+
         /** Compact constructor for text/audio/embedding models. */
         public static ModelInfo text(String modelName, Provider provider, Modality modality,
                                      long inputMicrocentsPer1k, long outputMicrocentsPer1k,
@@ -165,6 +175,7 @@ public class ModelCatalog {
                 e.getMarkupOverride(),
                 e.getPerImageMicrocents(),
                 e.getPerSecondMicrocents(),
-                e.isRequiresAsync());
+                e.isRequiresAsync(),
+                e.getPerInputImageMicrocents() == null ? 0L : Math.max(0L, e.getPerInputImageMicrocents()));
     }
 }
