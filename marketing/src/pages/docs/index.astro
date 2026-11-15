@@ -35,6 +35,21 @@ const chatSnippet = `curl https://api.godance.ai/v1/chat/completions \\
     "stream": true
   }'`;
 
+const chatImageSnippet = `curl https://api.godance.ai/v1/chat/completions \\
+  -H "Authorization: Bearer $GODANCE_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "model": "gpt-5.4",
+    "messages": [{
+      "role": "user",
+      "content": [
+        { "type": "text", "text": "What is in this photo?" },
+        { "type": "image_url",
+          "image_url": { "url": "https://example.com/photos/mug.jpg", "detail": "auto" } }
+      ]
+    }]
+  }'`;
+
 const imageSnippet = `curl https://api.godance.ai/v1/images/generations \\
   -H "Authorization: Bearer $GODANCE_API_KEY" \\
   -H "Content-Type: application/json" \\
@@ -70,6 +85,55 @@ const syncImageSnippet = `HTTP/1.1 200 OK
   "job_id": "6f1c0b9e-2d4a-4c3b-9a57-0e8d4b2f7c11",
   "cost_cents": 6
 }`;
+
+const editSdkSnippet = `from openai import OpenAI
+
+client = OpenAI(base_url="https://api.godance.ai/v1", api_key="gd_live_...")
+
+result = client.images.edit(
+    model="gpt-image-2",
+    image=open("mug.png", "rb"),
+    prompt="Put the mug on a marble counter, soft window light.",
+)
+image_b64 = result.data[0].b64_json`;
+
+const editCurlSnippet = `# The same request with curl. Repeat -F "image[]=@..." to send several images.
+curl https://api.godance.ai/v1/images/edits \\
+  -H "Authorization: Bearer $GODANCE_API_KEY" \\
+  -F model=gpt-image-2 \\
+  -F "prompt=Put the mug on a marble counter, soft window light." \\
+  -F "image=@mug.png" \\
+  -F "mask=@where-to-change.png"`;
+
+const editJsonSnippet = `curl https://api.godance.ai/v1/images/edits \\
+  -H "Authorization: Bearer $GODANCE_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "model": "gpt-image-2",
+    "prompt": "The same mug, on a marble counter, soft window light.",
+    "images": [
+      { "file_id": "0d6b2f3a-…" },
+      { "job_output": { "job_id": "5b0e7c1e-…", "index": 0 } }
+    ],
+    "mask": { "file_id": "9a1f44c2-…" },
+    "n": 1,
+    "size": "1024x1024"
+  }'`;
+
+const editCapabilitiesSnippet = `"godance": {
+  "modality": "IMAGE",
+  "pricing": { "per_image_microcents": 30000, "per_input_image_microcents": 60000 },
+  "capabilities": { "inputs": { "images": { "max": 8 } }, … },
+  …
+}`;
+
+const editEstimateSnippet = `curl https://api.godance.ai/v1/estimates \\
+  -H "Authorization: Bearer $GODANCE_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{ "model": "flux-2-pro", "input_images": 2 }'
+
+{ "model": "flux-2-pro", "modality": "IMAGE", "n": 1, "seconds": null,
+  "estimated_cost_cents": 17, "currency": "USD", "input_images": 2 }`;
 
 const keyResponseSnippet = `# Set an existing key to answer image requests synchronously.
 # Signed-in session only: an API key cannot change itself.
@@ -293,7 +357,7 @@ def verify(payload, header, secret):
     </p>
     <ul class="mt-4 space-y-2 text-fg-muted">
       <li><code class="code-chip">model</code> (required) — any text model from the <a href="/models" class="underline" style="color: var(--color-primary)">model catalog</a>.</li>
-      <li><code class="code-chip">messages</code> (required) — array of objects with <code class="code-chip">role</code> and <code class="code-chip">content</code>; <code class="code-chip">content</code> is a plain string.</li>
+      <li><code class="code-chip">messages</code> (required) — array of objects with <code class="code-chip">role</code> and <code class="code-chip">content</code>; <code class="code-chip">content</code> is a string, or OpenAI's array of text and image parts (see <a href="#chat-images" class="underline" style="color: var(--color-primary)">images in chat</a>).</li>
       <li><code class="code-chip">max_tokens</code>, <code class="code-chip">temperature</code> — optional.</li>
       <li><code class="code-chip">stream</code> — optional, defaults to <code class="code-chip">false</code>.</li>
     </ul>
@@ -309,6 +373,35 @@ def verify(payload, header, secret):
       <code class="code-chip">response_format</code>, …) aren't supported and are ignored.
     </p>
     <pre class="code-block mt-4"><code>{chatSnippet}</code></pre>
+
+    <h3 id="chat-images" class="scroll-mt-24 text-xl font-semibold mt-10 mb-4 text-fg">Images in chat</h3>
+    <p class="text-fg-muted">
+      A message's <code class="code-chip">content</code> can be OpenAI's array of parts, so a
+      model that can see is sent images the same way OpenAI's SDK sends them. The response is
+      unchanged: the answer's <code class="code-chip">content</code> is a string. Streaming
+      works the same way.
+    </p>
+    <p class="mt-4 text-fg-muted">
+      <strong class="text-fg">Not switched on yet.</strong> Image parts are part of
+      <a href="#files" class="underline" style="color: var(--color-primary)">inputs</a>, which are
+      being rolled out. Until they are switched on, a request with an image part answers
+      <code class="code-chip">403</code> with <code class="code-chip">code: "inputs_disabled"</code>.
+      Text parts work now, and a request whose content is a string is unaffected.
+    </p>
+    <pre class="code-block mt-4"><code>{chatImageSnippet}</code></pre>
+    <ul class="mt-4 space-y-2 text-fg-muted">
+      <li><strong class="text-fg">Parts.</strong> <code class="code-chip">&#123;"type": "text", "text": "…"&#125;</code> and <code class="code-chip">&#123;"type": "image_url", "image_url": &#123;"url": "…", "detail": "auto"&#125;&#125;</code>. <code class="code-chip">detail</code> is optional: <code class="code-chip">auto</code>, <code class="code-chip">low</code>, <code class="code-chip">high</code> or <code class="code-chip">original</code>, passed on to providers that take it. Images belong in <code class="code-chip">user</code> messages. Any other part type answers <code class="code-chip">400</code> with <code class="code-chip">code: "unsupported_content_part"</code>.</li>
+      <li><strong class="text-fg">Three ways to name an image.</strong> <code class="code-chip">url</code> may be:
+        a base64 data URL (<code class="code-chip">data:image/png;base64,…</code>);
+        an <code class="code-chip">https</code> URL, which Godance fetches once, without following redirects, from public addresses only;
+        or <code class="code-chip">https://api.godance.ai/v1/files/&#123;id&#125;/content</code> for one of <a href="#files" class="underline" style="color: var(--color-primary)">your own files</a>, which is read from storage rather than fetched.
+        Anything else answers <code class="code-chip">400</code> with <code class="code-chip">code: "invalid_image_url"</code>.</li>
+      <li><strong class="text-fg">Limits.</strong> At most 10 images in a request, each at most 20&nbsp;MB, PNG, JPEG or WebP, still images only. A data URL counts towards the request body, which is limited to 256&nbsp;KB (a larger body answers <code class="code-chip">413</code>); for a larger image use an <code class="code-chip">https</code> URL or upload it as a file. An <code class="code-chip">https</code> image must answer within 10 seconds with an image content type.</li>
+      <li><strong class="text-fg">Which models.</strong> A model accepts images when <code class="code-chip">godance.capabilities.inputs.images</code> is present on <a href="#models" class="underline" style="color: var(--color-primary)">GET /v1/models</a>; its <code class="code-chip">max</code> is the most images one request to it may carry. The <a href="/models" class="underline" style="color: var(--color-primary)">model catalog</a> lists them. Any other model answers <code class="code-chip">400</code> with <code class="code-chip">code: "model_does_not_accept_images"</code>, and a fallback model that cannot see is never used for a request with images.</li>
+      <li><strong class="text-fg">What the provider receives.</strong> The image itself, inline, never your URL. Details stored inside the file, such as where a photo was taken, are removed first. Godance does not keep the image.</li>
+      <li><strong class="text-fg">Price.</strong> A provider counts an image as input tokens and reports them in <code class="code-chip">usage.prompt_tokens</code>, which is what you are charged for. The amount reserved up front allows for each image at the most its model can count it as, and the difference is returned when the request settles.</li>
+      <li><strong class="text-fg">Refusals,</strong> each before anything is charged: <code class="code-chip">400 image_fetch_failed</code> (unreachable, not a public address, a redirect, not an image, too slow), <code class="code-chip">413 image_too_large</code>, <code class="code-chip">400 image_type_unsupported</code>, <code class="code-chip">400 too_many_images</code>, and <code class="code-chip">404 file_not_found</code> for a file that is not yours.</li>
+    </ul>
 
     <!-- ===== Images ===== -->
     <h2 id="images" class="scroll-mt-24 text-2xl font-bold mt-16 mb-4 text-fg">POST /v1/images/generations</h2>
@@ -359,6 +452,49 @@ def verify(payload, header, secret):
       <li>Video is not affected: <code class="code-chip">POST /v1/videos/generations</code> always answers with a job.</li>
     </ul>
     <pre class="code-block mt-4"><code>{keyResponseSnippet}</code></pre>
+
+    <h3 id="image-edits" class="scroll-mt-24 text-xl font-semibold mt-10 mb-4 text-fg">Edit an image</h3>
+    <p class="text-fg-muted">
+      <code class="code-chip">POST /v1/images/edits</code> makes an image from images: your product
+      in a new setting, a photo in another style, one part of a picture changed. It takes OpenAI's
+      own form, so <code class="code-chip">client.images.edit(…)</code> works with only the base
+      URL and key changed, and a JSON form that points at images already stored.
+    </p>
+    <p class="mt-4 text-fg-muted">
+      <strong class="text-fg">Not switched on yet.</strong> Edits are part of
+      <a href="#files" class="underline" style="color: var(--color-primary)">inputs</a>, which are
+      being rolled out. Until they are switched on, this route answers
+      <code class="code-chip">403</code> with <code class="code-chip">code: "inputs_disabled"</code>.
+    </p>
+    <pre class="code-block mt-4"><code>{editSdkSnippet}</code></pre>
+    <pre class="code-block mt-4"><code>{editCurlSnippet}</code></pre>
+    <ul class="mt-4 space-y-2 text-fg-muted">
+      <li><strong class="text-fg">The multipart form.</strong> <code class="code-chip">model</code> and <code class="code-chip">prompt</code>, one or more <code class="code-chip">image</code> parts (also accepted as <code class="code-chip">image[]</code>), and optionally <code class="code-chip">mask</code>, <code class="code-chip">n</code>, <code class="code-chip">size</code>, <code class="code-chip">quality</code> and <code class="code-chip">response_format</code>.</li>
+      <li><strong class="text-fg">What happens to the images you send.</strong> Each one is checked exactly as an upload to <a href="#files" class="underline" style="color: var(--color-primary)"><code class="code-chip">POST /v1/files</code></a> is, with the same limits and the same refusals, and becomes one of your files. It is kept for as long as the job is.</li>
+      <li><strong class="text-fg">The answer</strong> follows the key, as for a generation: a job to poll, or with a key set to <a href="#image-responses" class="underline" style="color: var(--color-primary)"><code class="code-chip">sync</code></a> the images in OpenAI's shape. The SDK example above needs a sync key.</li>
+      <li><strong class="text-fg">The same job as a generation.</strong> The price is reserved when the job is accepted and returned in full if it fails; <code class="code-chip">webhook_url</code>, <code class="code-chip">async</code>{recipesOn && <Fragment>, <code class="code-chip">gallery_recipe</code></Fragment>} and <code class="code-chip">recipe</code> work as they do there. The job lists what it worked from under <a href="#job-inputs" class="underline" style="color: var(--color-primary)"><code class="code-chip">inputs</code></a>.</li>
+    </ul>
+    <p class="mt-6 text-fg-muted">
+      <strong class="text-fg">The JSON form</strong> names images that are already stored, in either
+      <a href="#input-references" class="underline" style="color: var(--color-primary)">form of input</a>:
+      a <code class="code-chip">file_id</code> for an upload, or a <code class="code-chip">job_output</code>
+      for an image one of your own jobs made. Editing a job's output needs no upload at all.
+    </p>
+    <pre class="code-block mt-4"><code>{editJsonSnippet}</code></pre>
+    <ul class="mt-4 space-y-2 text-fg-muted">
+      <li><strong class="text-fg">Masks.</strong> A <code class="code-chip">mask</code> says where the first image may change. Send a PNG the same size as that image whose transparent areas are the parts to change. Only a model that lists <code class="code-chip">"mask": true</code> takes one.</li>
+      <li><strong class="text-fg">Which models.</strong> A model takes input images when <code class="code-chip">godance.capabilities.inputs.images</code> is present on <a href="#models" class="underline" style="color: var(--color-primary)">GET /v1/models</a>: <code class="code-chip">max</code> is the most images one request may carry, and <code class="code-chip">mask</code> whether it takes a mask. Today: <code class="code-chip">gpt-image-2</code> and <code class="code-chip">gpt-image-1.5</code> (up to 16, with a mask), <code class="code-chip">seedream-5.0</code> (up to 14) and <code class="code-chip">flux-2-pro</code> (up to 8). The <a href="/models" class="underline" style="color: var(--color-primary)">models page</a> lists them all.</li>
+      <li><strong class="text-fg">The input price.</strong> Some providers charge for each input image. Where one does, the model's <code class="code-chip">pricing</code> carries <code class="code-chip">per_input_image_microcents</code>, and an edit costs the price of the images made plus that price for each input image, with the platform fee on the sum. A mask is not charged for. To see the figure first, send <code class="code-chip">input_images</code> to <a href="#estimates" class="underline" style="color: var(--color-primary)"><code class="code-chip">POST /v1/estimates</code></a>: it is exactly what the request will reserve.</li>
+    </ul>
+    <pre class="code-block mt-4"><code>{editCapabilitiesSnippet}</code></pre>
+    <pre class="code-block mt-4"><code>{editEstimateSnippet}</code></pre>
+    <p class="mt-4 text-fg-muted">
+      <strong class="text-fg">Refusals,</strong> each before anything is stored or charged:
+      <code class="code-chip">400</code> with <code class="code-chip">code: "input_not_supported"</code>
+      when the model takes no input images, takes fewer than were sent, or takes no mask;
+      <code class="code-chip">400</code> when there is no image at all; and everything under
+      <a href="#input-refusals" class="underline" style="color: var(--color-primary)">what is refused, and why</a>.
+    </p>
 
     <!-- ===== Videos ===== -->
     <h2 id="videos" class="scroll-mt-24 text-2xl font-bold mt-16 mb-4 text-fg">POST /v1/videos/generations</h2>

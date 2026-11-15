@@ -1,0 +1,70 @@
+{
+  "slug": "sample-without-generated-from",
+  "title": {
+    "en": "A sample that does not say how it was made"
+  },
+  "modality": "IMAGE",
+  "tags": [
+    "product",
+    "still-life"
+  ],
+  "prompt": {
+    "en": "Place the product from the uploaded photo on a white marble counter beside a folded linen cloth, soft morning window light, square frame.",
+    "zh": "将上传照片中的产品放在白色大理石台面上，旁边是一块叠好的亚麻布，柔和的晨间窗光，方形构图。",
+    "zh_origin": "list"
+  },
+  "inputs": [
+    {
+      "slot": "product photo",
+      "role": "image",
+      "hint": {
+        "en": "One product on a plain background",
+        "zh": "纯色背景上的一件产品"
+      },
+      "sample": {
+        "file": "sample-without-generated-from/input-0.webp",
+        "content_type": "image/webp",
+        "width": 1024,
+        "height": 1024
+      }
+    }
+  ],
+  "runs": [
+    {
+      "model": "gpt-image-2",
+      "prompt_lang": "en",
+      "params": {
+        "size": "1024x1024",
+        "n": 1
+      },
+      "inputs": {
+        "product photo": "sample-without-generated-from/input-0.webp"
+      },
+      "cost_cents": 7,
+      "generated_on": "2026-11-12",
+      "outputs": [
+        {
+          "file": "sample-without-generated-from/gpt-image-2-0.webp",
+          "thumb": "sample-without-generated-from/gpt-image-2-0-480.webp",
+          "content_type": "image/webp",
+          "width": 1024,
+          "height": 1024
+        }
+      ]
+    }
+  ],
+  "source": {
+    "list": "example-org/invented-image-prompts",
+    "list_commit": "0000000000000000000000000000000000000000",
+    "licence": "CC0-1.0",
+    "author": "fixture_inge",
+    "author_url": "https://example.com/@fixture_inge",
+    "original_url": "https://example.com/@fixture_inge/posts/11021",
+    "changes": []
+  },
+  "review": {
+    "approved_on": "2026-11-13",
+    "standard_version": 2
+  },
+  "published_on": "2026-11-13"
+}

@@ -213,6 +213,32 @@ describe('npm run validate', () => {
   });
 });
 
+describe('the fixtures', () => {
+  const fixtures = path.join(MARKETING_ROOT, 'fixtures/gallery');
+
+  test('every fixture recipe is valid, the two with inputs among them', async () => {
+    const { recipes, problems } = await readRecipeFolder(path.join(fixtures, 'recipes'));
+    assert.deepEqual(problems, []);
+    const withInputs = recipes.filter(({ data }) => data.inputs).map(({ data }) => [data.slug, data.modality, data.inputs.map((slot) => slot.role)]);
+    assert.deepEqual(withInputs.sort(), [
+      ['enamel-teapot-on-marble', 'IMAGE', ['image']],
+      ['paper-boat-sets-off', 'VIDEO', ['first_frame', 'reference_image']],
+    ]);
+  });
+
+  test('the invalid fixture is refused for one reason: its sample does not say how it was generated', async () => {
+    const { recipes, problems } = await readRecipeFolder(path.join(fixtures, 'invalid'));
+    assert.deepEqual(recipes, []);
+    assert.deepEqual(problems.map(({ file, rule, path: where }) => [file, rule, where]), [
+      ['sample-without-generated-from.json', 'input-sample', 'inputs[0].sample.generated_from'],
+    ]);
+
+    const { status, stderr, stdout } = validate([path.join(fixtures, 'invalid')]);
+    assert.equal(status, 1);
+    assert.match(`${stdout}${stderr}`, /\[input-sample\] inputs\[0\]\.sample\.generated_from: a sample says how it was generated on Godance/);
+  });
+});
+
 describe('GALLERY_CONTENT_DIR', () => {
   test('the command checks the folder it names', async (t) => {
     const dir = await galleryFolder(t, { 'kite-over-a-salt-flat.json': videoRecipe() });

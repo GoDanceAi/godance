@@ -39,6 +39,53 @@ async function workspace(t, { world = fakeWorld({ lists, onChat: translator }), 
   return { dirs, world, cli, lines, paidRequests };
 }
 
+describe('--inputs', () => {
+  const people = { rules: {}, input_people: { terms: ['portrait', 'face'] } };
+
+  test('none is the default: an entry that needs an input image is set aside', async (t) => {
+    const { cli } = await workspace(t, { config: { terms: people } });
+    const { code, text } = await cli('plan');
+    assert.equal(code, 0, text);
+    assert.match(text, /1  needs an input image, video or audio/);
+    assert.doesNotMatch(text, /needs an input image:/);
+  });
+
+  test('objects keeps a person entry set aside, with its reason', async (t) => {
+    const { cli } = await workspace(t, { config: { terms: people } });
+    const { code, text } = await cli('plan', '--inputs', 'objects');
+    assert.equal(code, 0, text);
+    // The invented list's one input entry is "Turn the uploaded photo into a watercolour portrait."
+    assert.match(text, /1  needs an input image of a person/);
+    assert.doesNotMatch(text, /needs an input image, video or audio/);
+  });
+
+  test('people is refused under the current standard, before anything is read or spent', async (t) => {
+    const { cli, dirs, world } = await workspace(t, { config: { terms: people } });
+    for (const command of [['plan'], ['screen', '--apply'], ['fetch', '--apply'], ['generate', '--apply', '--max-spend-cents', '500']]) {
+      const { code, text } = await cli(...command, '--inputs', 'people');
+      assert.equal(code, 1, text);
+      assert.match(text, /--inputs people is refused: the content standard \(version 2\) does not allow person samples\./);
+    }
+    assert.deepEqual(world.requests, [], 'nothing was requested from anywhere');
+    assert.equal(existsSync(dirs.work), false, 'nothing was written');
+  });
+
+  test('a mode that does not exist is a misuse', async (t) => {
+    const { cli } = await workspace(t, { config: { terms: people } });
+    const { code, text } = await cli('plan', '--inputs', 'everything');
+    assert.equal(code, 2);
+    assert.match(text, /--inputs must be one of none, objects, people/);
+  });
+
+  test('objects needs the list of words that mark a person', async (t) => {
+    const { cli, world } = await workspace(t);          // a config whose list is empty
+    const { code, text } = await cli('plan', '--inputs', 'objects');
+    assert.equal(code, 1);
+    assert.match(text, /needs the list of words that mark a person/);
+    assert.deepEqual(world.requests, []);
+  });
+});
+
 describe('a dry run', () => {
   test('plan prints the count at each stage and the projected spend', async (t) => {
     const { cli } = await workspace(t);
@@ -263,7 +310,7 @@ describe('the whole pipeline', () => {
     assert.match(await ok('generate', '--apply', '--max-spend-cents', '500'), /0 new runs would start/);
     assert.equal(world.submissions.length, submissions);
 
-    assert.match(await ok('review', '--apply'), /5 candidates with a finished run; content standard version 1/);
+    assert.match(await ok('review', '--apply'), /5 candidates with a finished run; content standard version 2/);
     assert.equal(existsSync(path.join(dirs.work, 'review', 'index.html')), true);
     assert.equal(existsSync(path.join(dirs.work, 'review', 'decisions.json')), false, 'the tool never writes the decisions');
 

@@ -118,6 +118,74 @@ export const videoRecipe = () => ({
 });
 
 /**
+ * An image recipe with one input slot, as round 11 has them: the slot, a
+ * sample input generated on Godance, and a run that says it used that sample.
+ */
+export const inputRecipe = () => {
+  const recipe = imageRecipe();
+  recipe.slug = 'product-on-a-marble-counter';
+  recipe.title = { en: 'Product on a marble counter', zh: '大理石台面上的产品' };
+  recipe.prompt = {
+    en: 'Place the product from the uploaded photo on a marble counter, soft window light.',
+    zh: '将上传照片中的产品放在大理石台面上，柔和的窗光。',
+    zh_origin: 'machine',
+  };
+  recipe.inputs = [
+    {
+      slot: 'product photo',
+      role: 'image',
+      hint: { en: 'One product on a plain background', zh: '纯色背景上的一件产品' },
+      sample: {
+        file: 'product-on-a-marble-counter/input-0.webp',
+        content_type: 'image/webp',
+        width: 1024,
+        height: 1024,
+        generated_from: {
+          model: 'gpt-image-2',
+          prompt: 'A plain ceramic bottle on a white background, product photo.',
+          params: { size: '1024x1024', n: 1 },
+          cost_cents: 6,
+          generated_on: '2026-11-19',
+        },
+      },
+    },
+  ];
+  recipe.runs[0].inputs = { 'product photo': 'product-on-a-marble-counter/input-0.webp' };
+  recipe.runs[0].outputs[0].file = 'product-on-a-marble-counter/gpt-image-2-0.webp';
+  recipe.runs[0].outputs[0].thumb = 'product-on-a-marble-counter/gpt-image-2-0-480.webp';
+  return recipe;
+};
+
+/** A video recipe that starts from a first frame. */
+export const videoInputRecipe = () => {
+  const recipe = videoRecipe();
+  recipe.slug = 'paper-boat-sets-off';
+  recipe.title = { en: 'Paper boat sets off' };
+  recipe.inputs = [
+    {
+      slot: 'first frame',
+      role: 'first_frame',
+      hint: { en: 'The still the clip starts from' },
+      sample: {
+        file: 'paper-boat-sets-off/input-0.webp',
+        content_type: 'image/webp',
+        width: 1280,
+        height: 720,
+        generated_from: {
+          model: 'gpt-image-2',
+          prompt: 'A paper boat on a still pond, early morning.',
+          params: { size: '1536x1024', n: 1 },
+          cost_cents: 6,
+          generated_on: '2026-11-19',
+        },
+      },
+    },
+  ];
+  recipe.runs[0].inputs = { 'first frame': 'paper-boat-sets-off/input-0.webp' };
+  return recipe;
+};
+
+/**
  * Make a temporary gallery folder holding `files`: a map of path (relative
  * to the folder) to contents, where an object is written as JSON and a
  * string as it is. Removed again when the test ends.

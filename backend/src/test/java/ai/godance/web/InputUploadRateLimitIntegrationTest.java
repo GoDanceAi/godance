@@ -11,6 +11,7 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.boot.webtestclient.autoconfigure.AutoConfigureWebTestClient;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Primary;
 import org.springframework.http.HttpHeaders;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -62,6 +63,7 @@ class InputUploadRateLimitIntegrationTest {
     @TestConfiguration
     static class StandInCheck {
         @Bean
+        @Primary   // in place of the built-in check, which asks a model
         InputPersonCheck inputPersonCheck() {
             return (userId, image, contentType) -> InputPersonCheck.Verdict.NO_PERSON;
         }

@@ -35,9 +35,9 @@ public class EstimateController {
     @PostMapping("/estimates")
     public Mono<EstimateResponse> estimate(@Valid @RequestBody EstimateRequest req) {
         return Mono.fromCallable(() -> {
-            Quote q = quotes.any(req.model(), req.n(), req.seconds());
+            Quote q = quotes.any(req.model(), req.n(), req.seconds(), req.inputImages());
             return new EstimateResponse(q.model().modelName(), q.model().modality().name(),
-                    q.n(), q.seconds(), q.costCents(), CURRENCY);
+                    q.n(), q.seconds(), q.costCents(), CURRENCY, req.inputImages());
         });
     }
 }

@@ -62,8 +62,22 @@ public class CostCalculator {
 
     /** Image generation cost — per-image flat price × count + markup. */
     public long imageCostCents(ModelInfo model, int imageCount) {
+        return imageCostCents(model, imageCount, 0);
+    }
+
+    /**
+     * The cost of an image request that works from input images: the
+     * per-image price × the images made, plus the model's price per input
+     * image × the images given, with the model's markup on the sum. A mask is
+     * not an input image here: no provider charges for one. With no input
+     * images, or on a model whose provider charges nothing for them, this is
+     * {@link #imageCostCents(ModelInfo, int)} exactly.
+     */
+    public long imageCostCents(ModelInfo model, int imageCount, int inputImages) {
         if (imageCount <= 0) return 0L;
-        long microcents = withMarkup(model, model.perImageMicrocents() * imageCount);
+        long inputs = Math.max(0, inputImages);
+        long microcents = withMarkup(model,
+                model.perImageMicrocents() * imageCount + model.perInputImageMicrocents() * inputs);
         return halfUpDiv(microcents, MICROCENTS_PER_CENT);
     }
 

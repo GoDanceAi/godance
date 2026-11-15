@@ -100,6 +100,48 @@ A flat poster of a small harbour at dawn, {argument name="boat colour" default="
   'images/poster_case1/output.jpg': 'not text: must never be requested',
 };
 
+/**
+ * An image list whose entries need an input image: two about an object, one
+ * about a person, and one that needs nothing. Invented, like the others.
+ */
+export const INPUT_LIST = {
+  LICENSE: CC0_TEXT,
+  'cases/product.md': `# Product Cases
+
+### Case 1: [Product On Marble](https://x.com/inventedeleven/status/3001) (by [@inventedeleven](https://x.com/inventedeleven))
+
+**Prompt:**
+
+\`\`\`
+Place the product from the uploaded photo on a marble counter, soft window light, square frame.
+\`\`\`
+### Case 2: [Watercolour From Photo](https://x.com/inventedtwelve/status/3002) (by [@inventedtwelve](https://x.com/inventedtwelve))
+
+**Prompt:**
+
+\`\`\`
+Turn the uploaded photo into a watercolour portrait.
+\`\`\`
+### Case 3: [Object Poster](https://x.com/inventedthirteen/status/3003) (by [@inventedthirteen](https://x.com/inventedthirteen))
+
+**Prompt:**
+
+\`\`\`
+Use the uploaded image of the object as the centre of a bold two-colour poster, 3:4 ratio.
+\`\`\`
+### Case 4: [Lighthouse Print](https://x.com/inventedfourteen/status/3004) (by [@inventedfourteen](https://x.com/inventedfourteen))
+
+**Prompt:**
+
+\`\`\`
+A linocut print of a lighthouse on a cliff, two colours, wide 16:9 frame.
+\`\`\`
+`,
+};
+
+/** The words that mark a person, for a test's screen-terms.json. */
+export const PEOPLE_TERMS = { rules: {}, input_people: { terms: ['portrait', 'face', 'person', 'hand', 'her', 'him', '人像', '脸'] } };
+
 const videoEntry = ({ title, badge, prompt, id, author, handle, status, date, featured = false }) =>
   featured
     ? `### No. ${id}: ${title}
@@ -296,12 +338,14 @@ const json = (status, body, headers = {}) => new Response(body === null ? null :
  * @param {(call: object) => Response | 'network-error' | undefined} [options.onSubmit] Intercept a submission.
  * @param {(messages: object[]) => string} [options.onChat] The reply to a chat completion.
  * @param {number} [options.pollsUntilDone] How many polls a job takes to finish.
+ * @param {string | null} [options.inputsRefusal] The code POST /v1/files refuses with (inputs_disabled, ...), or null to accept.
  */
-export function fakeWorld({ lists = {}, models = CATALOGUE, onPoll, onSubmit, onChat, pollsUntilDone = 2, imageCost = 6, videoCostPerSecond = 17 } = {}) {
+export function fakeWorld({ lists = {}, models = CATALOGUE, onPoll, onSubmit, onChat, pollsUntilDone = 2, imageCost = 6, videoCostPerSecond = 17, inputsRefusal = null } = {}) {
   const world = {
     requests: [], // every request: { method, url, authorization, body }
     submissions: [], // accepted image and video jobs
     chats: [],
+    uploads: [], // input files accepted by POST /v1/files: { id, filename, type, bytes }
     jobs: new Map(),
     inFlight: 0,
     mostInFlight: 0,
@@ -312,7 +356,9 @@ export function fakeWorld({ lists = {}, models = CATALOGUE, onPoll, onSubmit, on
     const url = new URL(String(input));
     const method = init.method ?? 'GET';
     const authorization = init.headers?.Authorization ?? init.headers?.authorization ?? null;
-    const body = init.body ? JSON.parse(init.body) : null;
+    // A multipart upload is a FormData; everything else the tool sends is JSON.
+    const form = init.body instanceof FormData ? init.body : null;
+    const body = form ? { form: [...form.keys()] } : init.body ? JSON.parse(init.body) : null;
     world.requests.push({ method, url: url.href, authorization, body });
 
     // The host the lists are read from
@@ -348,9 +394,23 @@ export function fakeWorld({ lists = {}, models = CATALOGUE, onPoll, onSubmit, on
       return json(200, { choices: [{ message: { role: 'assistant', content: text } }], usage: { prompt_tokens: 100, completion_tokens: 50 } });
     }
 
-    const submit = /^\/v1\/(images|videos)\/generations$/.exec(url.pathname);
-    if (method === 'POST' && submit) {
-      const call = { kind: submit[1], body, attempt: world.requests.filter((r) => r.method === 'POST' && r.url === url.href).length };
+    if (method === 'POST' && url.pathname === '/v1/files') {
+      const refusals = {
+        inputs_disabled: 'Image inputs are not available.',
+        inputs_terms_required: 'Accept the input terms before using your own images.',
+        inputs_not_allowed_for_account: 'Image inputs are not available for this account.',
+      };
+      if (inputsRefusal) return json(403, { title: 'Forbidden', status: 403, detail: refusals[inputsRefusal] ?? 'refused', code: inputsRefusal });
+      const file = form?.get('file');
+      if (!file || form.get('purpose') !== 'generation_input') return json(400, { title: 'Bad Request', status: 400, detail: 'the form needs a part named file' });
+      const id = `file-${world.uploads.length + 1}`;
+      world.uploads.push({ id, filename: file.name, type: file.type, bytes: Buffer.from(await file.arrayBuffer()) });
+      return json(201, { id, object: 'file', purpose: 'generation_input', bytes: file.size, content_type: file.type, width: 96, height: 64, contains_person: false, created_at: 1794650000, expires_at: 1794736400 });
+    }
+
+    const submit = /^\/v1\/(images|videos)\/(generations|edits)$/.exec(url.pathname);
+    if (method === 'POST' && submit && !(submit[1] === 'videos' && submit[2] === 'edits')) {
+      const call = { kind: submit[1], route: submit[2], body, attempt: world.requests.filter((r) => r.method === 'POST' && r.url === url.href).length };
       const intercepted = onSubmit?.(call, world);
       if (intercepted === 'network-error') throw new TypeError('fetch failed');
       if (intercepted instanceof Response) return intercepted;

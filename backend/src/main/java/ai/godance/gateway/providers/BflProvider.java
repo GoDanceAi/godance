@@ -16,6 +16,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import ai.godance.config.BflProperties;
 import ai.godance.domain.Provider;
 import ai.godance.gateway.ImageDtos.GeneratedImage;
+import ai.godance.gateway.ImageDtos.ImageInput;
 import ai.godance.gateway.ImageDtos.ImageRequest;
 import ai.godance.gateway.ImageProviderAdapter;
 import reactor.core.publisher.Mono;
@@ -63,10 +64,31 @@ public class BflProvider implements ImageProviderAdapter {
     }
 
     @Override
+    public boolean editsImages() {
+        return true;
+    }
+
+    /**
+     * An edit is the same request with reference images: {@code input_image},
+     * then {@code input_image_2} to {@code input_image_8}, in the order
+     * given. BFL documents these as addresses, so each is the short-lived
+     * signed address of the stored input, never a public one. FLUX.2 takes
+     * no mask. A request without input images is sent exactly as before.
+     * Source: BFL's FLUX.2 [pro] reference and its image editing guide
+     * (docs.bfl.ai/flux_2/flux2_image_editing), read 2026-11-14.
+     */
+    @Override
     public Mono<List<GeneratedImage>> generate(ImageRequest request) {
         String endpoint = "/v1/" + modelToEndpoint(request.model());
         var dimensions = parseSize(request.size());
-        BflSubmit body = new BflSubmit(request.prompt(), dimensions.width(), dimensions.height());
+        List<ImageInput> inputs = request.images();
+        if (inputs.size() > MAX_INPUT_IMAGES) {
+            return Mono.error(new IllegalArgumentException(
+                    "BFL takes at most " + MAX_INPUT_IMAGES + " input images; got " + inputs.size()));
+        }
+        BflSubmit body = new BflSubmit(request.prompt(), dimensions.width(), dimensions.height(),
+                url(inputs, 0), url(inputs, 1), url(inputs, 2), url(inputs, 3),
+                url(inputs, 4), url(inputs, 5), url(inputs, 6), url(inputs, 7));
 
         return apiClient.post()
                 .uri(endpoint)
@@ -132,8 +154,25 @@ public class BflProvider implements ImageProviderAdapter {
         }
     }
 
+    /** The most reference images the request has fields for. */
+    static final int MAX_INPUT_IMAGES = 8;
+
+    private static String url(List<ImageInput> inputs, int index) {
+        return index < inputs.size() ? inputs.get(index).url() : null;
+    }
+
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    record BflSubmit(String prompt, int width, int height) { }
+    record BflSubmit(
+            String prompt, int width, int height,
+            @JsonProperty("input_image") String inputImage,
+            @JsonProperty("input_image_2") String inputImage2,
+            @JsonProperty("input_image_3") String inputImage3,
+            @JsonProperty("input_image_4") String inputImage4,
+            @JsonProperty("input_image_5") String inputImage5,
+            @JsonProperty("input_image_6") String inputImage6,
+            @JsonProperty("input_image_7") String inputImage7,
+            @JsonProperty("input_image_8") String inputImage8
+    ) { }
 
     record BflSubmitResponse(
             String id,

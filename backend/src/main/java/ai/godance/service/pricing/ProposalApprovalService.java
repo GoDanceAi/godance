@@ -190,6 +190,7 @@ public class ProposalApprovalService {
             case OUTPUT     -> entry.setOutputMicrocentsPer1k(value);
             case PER_IMAGE  -> entry.setPerImageMicrocents(value);
             case PER_SECOND -> entry.setPerSecondMicrocents(value);
+            case PER_INPUT_IMAGE -> entry.setPerInputImageMicrocents(value);
         }
     }
 

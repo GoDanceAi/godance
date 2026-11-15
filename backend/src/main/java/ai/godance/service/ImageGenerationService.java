@@ -99,7 +99,18 @@ public class ImageGenerationService {
      * fully-resolved URLs. Use for OpenAI-compat clients.
      */
     public ImageResult execute(UUID userId, UUID apiKeyId, ImageRequest request, JobOrigin origin) {
-        return executeInternal(userId, apiKeyId, request, null, origin);
+        return execute(userId, apiKeyId, request, origin, List.of());
+    }
+
+    /**
+     * {@link #execute(UUID, UUID, ImageRequest, JobOrigin)} for an edit.
+     * {@code inputs} are the request's input images and mask, already checked
+     * and loaded; they are recorded with the job in the transaction that
+     * takes its pre-debit.
+     */
+    public ImageResult execute(UUID userId, UUID apiKeyId, ImageRequest request, JobOrigin origin,
+                               List<InputService.ResolvedInput> inputs) {
+        return executeInternal(userId, apiKeyId, request, null, origin, inputs);
     }
 
     /**
@@ -123,10 +134,21 @@ public class ImageGenerationService {
      */
     public UUID executeAsync(UUID userId, UUID apiKeyId, ImageRequest request, String webhookUrl,
                              JobOrigin origin) {
+        return executeAsync(userId, apiKeyId, request, webhookUrl, origin, List.of());
+    }
+
+    /**
+     * {@link #executeAsync(UUID, UUID, ImageRequest, String, JobOrigin)} for
+     * an edit: {@code inputs} are recorded with the job, and the pre-debit
+     * includes the model's price for each input image.
+     */
+    public UUID executeAsync(UUID userId, UUID apiKeyId, ImageRequest request, String webhookUrl,
+                             JobOrigin origin, List<InputService.ResolvedInput> inputs) {
         webhookDestinations.requireAllowed(webhookUrl);   // before any charge (spec risk R-02)
-        Quote quote = quotes.image(request.model(), request.n());   // 404 / 400 before any charge
+        // 404 / 400 before any charge. An edit's input images are part of the price.
+        Quote quote = quotes.image(request.model(), request.n(), request.images().size());
         ModelInfo model = quote.model();
-        GenerationJob job = acceptJob(userId, apiKeyId, quote, request, webhookUrl, origin);
+        GenerationJob job = acceptJob(userId, apiKeyId, quote, request, webhookUrl, origin, inputs);
 
         // Kick off async processing. The pre-debit and the job row are already
         // committed together; if this worker dies, GenerationJobSweepJob fails
@@ -139,9 +161,9 @@ public class ImageGenerationService {
     }
 
     private ImageResult executeInternal(UUID userId, UUID apiKeyId, ImageRequest request, String webhookUrl,
-                                        JobOrigin origin) {
-        Quote quote = quotes.image(request.model(), request.n());   // 404 / 400 before any charge
-        GenerationJob job = acceptJob(userId, apiKeyId, quote, request, webhookUrl, origin);
+                                        JobOrigin origin, List<InputService.ResolvedInput> inputs) {
+        Quote quote = quotes.image(request.model(), request.n(), request.images().size());   // 404 / 400 before any charge
+        GenerationJob job = acceptJob(userId, apiKeyId, quote, request, webhookUrl, origin, inputs);
         return runJob(job, userId, apiKeyId, quote.model(), request, webhookUrl);
     }
 
@@ -151,10 +173,10 @@ public class ImageGenerationService {
      * {@code POST /v1/estimates} returns.
      */
     private GenerationJob acceptJob(UUID userId, UUID apiKeyId, Quote quote, ImageRequest request,
-                                    String webhookUrl, JobOrigin origin) {
+                                    String webhookUrl, JobOrigin origin, List<InputService.ResolvedInput> inputs) {
         GenerationJob job = newJob(userId, quote.model(), request, quote.costCents(), newRequestId(), webhookUrl);
         origin.applyTo(job);
-        if (!settlement.accept(job, apiKeyId)) {
+        if (!settlement.accept(job, apiKeyId, inputs)) {
             throw new InsufficientCreditException();
         }
         return job;
@@ -198,7 +220,7 @@ public class ImageGenerationService {
         // for: a provider that returns one image for n = 2 is paid for one,
         // and settlement returns the rest of the hold.
         int requested = request.n() == null ? 1 : request.n();
-        long cost = chargeFor(job, model, Math.min(upstream.size(), requested));
+        long cost = chargeFor(job, model, Math.min(upstream.size(), requested), request.images().size());
         List<UploadedImage> uploaded;
         boolean completed;
         try {
@@ -226,9 +248,13 @@ public class ImageGenerationService {
         return result;
     }
 
-    /** The price of {@code images} images, capped at what the job held up front. */
-    private long chargeFor(GenerationJob job, ModelInfo model, int images) {
-        return Math.min(job.getEstimatedCostCents(), quotes.imagePriceCents(model, images));
+    /**
+     * The price of {@code images} images made from {@code inputImages} input
+     * images, capped at what the job held up front. The input images are
+     * charged for once, however many images came back.
+     */
+    private long chargeFor(GenerationJob job, ModelInfo model, int images, int inputImages) {
+        return Math.min(job.getEstimatedCostCents(), quotes.imagePriceCents(model, images, inputImages));
     }
 
     /** What was stored: the images as the response and webhook show them, and the rows the job records. */
@@ -309,7 +335,9 @@ public class ImageGenerationService {
 
     private UsageRecord buildUsageRecord(UUID userId, UUID apiKeyId, ModelInfo model, ImageRequest request,
                                          long actualCents, String requestId, int imageCount) {
-        long providerCostMicrocents = model.perImageMicrocents() * imageCount;
+        // What the provider bills: each image it returned, and each input image it was given.
+        long providerCostMicrocents = model.perImageMicrocents() * imageCount
+                + model.perInputImageMicrocents() * request.images().size();
         long providerCostCents = (providerCostMicrocents + 5_000) / 10_000;
 
         UsageRecord r = new UsageRecord();

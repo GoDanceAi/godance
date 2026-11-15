@@ -14,6 +14,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.webtestclient.autoconfigure.AutoConfigureWebTestClient;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Primary;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -42,9 +43,9 @@ import ai.godance.web.dto.InputDtos.InputRef;
  * The two ends of the people rule that {@code InputFileIntegrationTest}
  * cannot reach with its stand-in check:
  * <ul>
- *   <li>people not allowed and <b>no check present at all</b>, which is what
- *       switching inputs on gives until brief 02's check model is set:
- *       every upload fails closed;</li>
+ *   <li>people not allowed and <b>no check model set</b>, which is what
+ *       switching inputs on gives until the operator names one
+ *       ({@code godance.inputs.check-model}): every upload fails closed;</li>
  *   <li>people allowed: the check is not asked, and the file records that
  *       nothing checked it.</li>
  * </ul>
@@ -77,7 +78,7 @@ class InputFilePeoplePolicyIntegrationTest {
             "godance.inputs.enabled=true",
             "godance.inputs.allow-people=false"})
     @AutoConfigureWebTestClient
-    class PeopleNotAllowedAndNoCheckPresent {
+    class PeopleNotAllowedAndNoCheckModel {
 
         @DynamicPropertySource
         static void props(DynamicPropertyRegistry r) {
@@ -92,9 +93,11 @@ class InputFilePeoplePolicyIntegrationTest {
         @Autowired org.springframework.context.ApplicationContext context;
 
         @Test
-        void upload_givenNoPersonCheckPresent_expects503CheckUnavailableAndNothingStored() {
-            // Nothing implements the check here: this is brief 01 on its own.
-            assertThat(context.getBeansOfType(InputPersonCheck.class)).isEmpty();
+        void upload_givenNoCheckModel_expects503CheckUnavailableAndNothingStored() {
+            // The only check is the built-in one, and no model is configured for it.
+            assertThat(context.getBeansOfType(InputPersonCheck.class).values()).singleElement()
+                    .isInstanceOf(ai.godance.service.VisionPersonCheck.class);
+            assertThat(context.getBean(ai.godance.config.InputsProperties.class).hasCheckModel()).isFalse();
             String email = "no-check-" + UUID.randomUUID() + "@godance.test";
             String bearer = InputFixtures.signup(http, email);
             UUID userId = users.findByEmail(email).orElseThrow().getId();
@@ -128,6 +131,7 @@ class InputFilePeoplePolicyIntegrationTest {
         @TestConfiguration
         static class CountingCheck {
             @Bean
+            @Primary   // in place of the built-in check, which asks a model
             InputPersonCheck inputPersonCheck() {
                 return (userId, image, contentType) -> {
                     CHECKS.incrementAndGet();
