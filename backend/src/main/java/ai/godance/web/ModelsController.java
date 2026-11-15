@@ -81,7 +81,11 @@ public class ModelsController {
             case TEXT, EMBEDDING, AUDIO_STT, AUDIO_TTS -> Map.of(
                     "input_microcents_per_1k",  m.inputMicrocentsPer1k(),
                     "output_microcents_per_1k", m.outputMicrocentsPer1k());
-            case IMAGE -> Map.of("per_image_microcents", m.perImageMicrocents());
+            // The price of each input image of an edit, only where the provider charges one (V33).
+            case IMAGE -> m.perInputImageMicrocents() > 0
+                    ? Map.of("per_image_microcents", m.perImageMicrocents(),
+                            "per_input_image_microcents", m.perInputImageMicrocents())
+                    : Map.of("per_image_microcents", m.perImageMicrocents());
             case VIDEO -> Map.of("per_second_microcents", m.perSecondMicrocents());
         };
         Map<String, Object> godance = new LinkedHashMap<>();

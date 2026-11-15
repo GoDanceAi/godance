@@ -1,5 +1,6 @@
 package ai.godance.web.dto;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 import jakarta.validation.constraints.Min;
@@ -18,7 +19,9 @@ public final class EstimateDtos {
             @NotBlank String model,
             @Min(1) Integer n,
             String size,
-            @Min(1) Integer seconds
+            @Min(1) Integer seconds,
+            // How many input images the request would carry (an image edit). Left out, none.
+            @Min(0) @JsonProperty("input_images") Integer inputImages
     ) { }
 
     /**
@@ -32,6 +35,14 @@ public final class EstimateDtos {
             int n,
             Integer seconds,
             @JsonProperty("estimated_cost_cents") long estimatedCostCents,
-            String currency
-    ) { }
+            String currency,
+            // Echoed only when the request named it, so an estimate without it reads as it always has.
+            @JsonInclude(JsonInclude.Include.NON_NULL) @JsonProperty("input_images") Integer inputImages
+    ) {
+        /** An estimate for a request that named no input images. */
+        public EstimateResponse(String model, String modality, int n, Integer seconds,
+                                long estimatedCostCents, String currency) {
+            this(model, modality, n, seconds, estimatedCostCents, currency, null);
+        }
+    }
 }

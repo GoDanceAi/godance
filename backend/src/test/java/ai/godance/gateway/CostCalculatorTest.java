@@ -159,4 +159,32 @@ class CostCalculatorTest {
         assertThat(calc.markupPercent(
                 ModelInfo.video("sora-2", Provider.OPENAI, 150_000L, null))).isEqualTo(12.0);
     }
+
+    // ===== Input images of an edit (V33) ==============================
+
+    /** An image model whose provider charges 6 cents for each input image, on top of 3 cents an image. */
+    private static final ModelInfo CHARGES_FOR_INPUTS = new ModelInfo(
+            "flux-2-pro", Provider.BFL, Modality.IMAGE, 0L, 0L, null, 12.0, 30_000L, 0L, true, 60_000L);
+
+    @Test
+    void imageCostCents_givenInputImages_expectsTheirPriceAddedBeforeTheMarkup() {
+        // (30 000 + 2 × 60 000) µ¢ × 1.12 = 168 000 µ¢ → 17¢, not 3¢ + 2 × 7¢ rounded apart.
+        assertThat(calc.imageCostCents(CHARGES_FOR_INPUTS, 1, 2)).isEqualTo(17L);
+        // (2 × 30 000 + 1 × 60 000) µ¢ × 1.12 = 134 400 µ¢ → 13¢: the inputs are charged once, not per image made.
+        assertThat(calc.imageCostCents(CHARGES_FOR_INPUTS, 2, 1)).isEqualTo(13L);
+    }
+
+    @Test
+    void imageCostCents_givenNoInputImages_expectsThePriceOfAGeneration() {
+        assertThat(calc.imageCostCents(CHARGES_FOR_INPUTS, 1, 0)).isEqualTo(calc.imageCostCents(CHARGES_FOR_INPUTS, 1)).isEqualTo(3L);
+        assertThat(calc.imageCostCents(CHARGES_FOR_INPUTS, 1, -4)).isEqualTo(3L);
+        assertThat(calc.imageCostCents(CHARGES_FOR_INPUTS, 0, 5)).isZero();
+    }
+
+    @Test
+    void imageCostCents_givenAModelThatChargesNothingForInputs_expectsInputsToCostNothing() {
+        ModelInfo free = ModelInfo.imageAsync("seedream-5.0", Provider.VOLCENGINE_ARK, 35_000L, 12.0);
+        assertThat(free.perInputImageMicrocents()).isZero();
+        assertThat(calc.imageCostCents(free, 1, 14)).isEqualTo(calc.imageCostCents(free, 1)).isEqualTo(4L);
+    }
 }
