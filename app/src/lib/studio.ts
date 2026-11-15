@@ -7,6 +7,8 @@ import {
   type MediaModality,
   type UserRecipeVersion,
 } from './api';
+import type { InputRef } from './api';
+import type { InputFields } from './inputs';
 import { mediaModality } from './jobs';
 import type { Controls } from './media-models';
 import type { GalleryRecipe } from './recipe';
@@ -26,10 +28,14 @@ export interface StudioValues {
   seconds: number | null;
 }
 
-/** `recipe` on a generation request: a version of one of the caller's recipes, and values for its variables. */
+/**
+ * `recipe` on a generation request: a version of one of the caller's
+ * recipes, values for its variables, and an input for each of its slots.
+ */
 export interface RecipeRef {
   version_id: string;
   variables: Record<string, string>;
+  inputs?: Record<string, InputRef>;
 }
 
 /** A body for POST /v1/images/generations or /v1/videos/generations: `prompt`, or `recipe` in its place. */
@@ -44,10 +50,27 @@ export interface GenerationBody {
   quality?: string;
   gallery_recipe?: string;   // the gallery recipe this is a run of (galleryRecipeOf)
   async?: true;
+  // The images the request works from (lib/inputs.ts). An image request with `images` is an edit.
+  images?: InputRef[];
+  mask?: InputRef;
+  first_frame?: InputRef;
+  last_frame?: InputRef;
+  reference_images?: InputRef[];
 }
 
-export function generationPath(modality: MediaModality): string {
-  return modality === 'VIDEO' ? '/v1/videos/generations' : '/v1/images/generations';
+/**
+ * Where a request goes. An image request that carries input images is an
+ * edit; everything else is a generation. A recipe that names its own inputs
+ * goes to the generations route: the API decides, from the recipe's slots.
+ */
+export function generationPath(modality: MediaModality, body?: GenerationBody | null): string {
+  if (modality === 'VIDEO') return '/v1/videos/generations';
+  return body?.images?.length ? '/v1/images/edits' : '/v1/images/generations';
+}
+
+/** The request with these input fields. */
+export function withInputs(body: GenerationBody, fields: InputFields): GenerationBody {
+  return { ...body, ...fields };
 }
 
 // Images answer at once unless asked not to; video is always a job.
@@ -165,7 +188,7 @@ export function rerunBody(job: JobView, controls: Controls | null): GenerationBo
 
 /** Submits a generation as a job. */
 export async function startGeneration(modality: MediaModality, body: GenerationBody): Promise<AsyncJobAcknowledged> {
-  const ack = await apiFetch<AsyncJobAcknowledged>(generationPath(modality), { method: 'POST', json: body });
+  const ack = await apiFetch<AsyncJobAcknowledged>(generationPath(modality, body), { method: 'POST', json: body });
   if (typeof ack?.job_id !== 'string') throw new Error('The generation could not be started.');
   return ack;
 }
@@ -176,6 +199,9 @@ function estimateRequest(body: GenerationBody): Record<string, unknown> {
   if (body.n !== undefined) req.n = body.n;
   if (body.size !== undefined) req.size = body.size;
   if (body.seconds !== undefined) req.seconds = body.seconds;
+  // An edit's input images are part of its price; a recipe's slot images count the same way.
+  const inputImages = body.images?.length ?? 0;
+  if (inputImages > 0) req.input_images = inputImages;
   return req;
 }
 
