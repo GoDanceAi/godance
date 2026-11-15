@@ -317,6 +317,25 @@ test.describe('a job\'s inputs', () => {
     await expect(list.getByText('Mask')).toBeVisible();
   });
 
+  test('go with it when it is run again, to the edits route, priced with them', async ({ page, api }) => {
+    const job = withInputs();
+    await openInputsStudio(page, api);
+    serveJob(api, job);
+    api.on('POST', '/v1/images/edits', accepted(jobId(8)));
+    serveJob(api, makeJob({ id: jobId(8) }));
+    await page.goto(`/history/${job.id}`);
+
+    // flux-2-pro charges for its one input image; the mask is not counted.
+    await expect(page.getByRole('button', { name: /^Run again/ })).toContainText('$0.10');
+    await page.getByRole('button', { name: /^Run again/ }).click();
+    await expect.poll(() => api.callsTo('POST', '/v1/images/edits').length).toBe(1);
+    expect(api.callsTo('POST', '/v1/images/edits')[0].body).toEqual({
+      model: 'flux-2-pro', prompt: 'The mug on a marble counter', size: '1024x1024', async: true,
+      images: [{ file_id: fileId(1) }], mask: { file_id: fileId(2) },
+    });
+    expect(api.callsTo('POST', '/v1/images/generations')).toHaveLength(0);
+  });
+
   test('are shown in History, in compare and in the Studio\'s result', async ({ page, api }) => {
     const job = withInputs();
     const other = makeJob({ id: jobId(6), prompt: 'A lighthouse' });

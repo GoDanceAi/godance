@@ -183,7 +183,27 @@ export function rerunBody(job: JobView, controls: Controls | null): GenerationBo
   if (modality === 'VIDEO' && positiveInt(p.seconds)) body.seconds = p.seconds;
   if (modality === 'IMAGE' && text(p.style)) body.style = p.style;
   if (modality === 'IMAGE' && text(p.quality)) body.quality = p.quality;
-  return withAsync(modality, body);
+  return withAsync(modality, { ...body, ...inputsOfJob(job) });
+}
+
+/**
+ * The inputs a job was given, as the fields that name them again: the same
+ * files and job outputs, in the same roles and order. A run made from an
+ * image is run again from that image; if one of them is gone by then, the
+ * API says which. Nothing for a job without inputs.
+ */
+function inputsOfJob(job: JobView): InputFields {
+  const refs = (role: string): InputRef[] => (job.inputs ?? [])
+    .filter((input) => input.role === role)
+    .flatMap((input): InputRef[] => (input.file_id ? [{ file_id: input.file_id }]
+      : input.job_output ? [{ job_output: input.job_output }] : []));
+  const fields: InputFields = {};
+  if (refs('image').length) fields.images = refs('image');
+  if (refs('mask').length) fields.mask = refs('mask')[0];
+  if (refs('first_frame').length) fields.first_frame = refs('first_frame')[0];
+  if (refs('last_frame').length) fields.last_frame = refs('last_frame')[0];
+  if (refs('reference_image').length) fields.reference_images = refs('reference_image');
+  return fields;
 }
 
 /** Submits a generation as a job. */
