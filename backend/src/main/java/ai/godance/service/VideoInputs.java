@@ -115,6 +115,18 @@ public class VideoInputs {
         }
     }
 
+    /**
+     * Refuses inputs the model cannot take, knowing only which fields the
+     * request has and how many reference images: what each one points to is
+     * not looked at. For a caller that knows the shape of a request before
+     * it knows the inputs themselves (a recipe's slots).
+     */
+    public void requireSupported(ModelInfo model, Refs refs) {
+        if (refs.isEmpty()) return;
+        inputs.requireEnabled();
+        named(model, refs);
+    }
+
     /** A request's inputs, each with the field it came in, once the model is known to take them. */
     private record Named(List<InputUse> uses, List<String> fields, InputRules rules) { }
 

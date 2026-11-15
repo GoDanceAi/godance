@@ -160,4 +160,15 @@ public interface RecipeBatchRowRepository extends JpaRepository<RecipeBatchRow, 
              WHERE r.batch_id = :batchId
             """, nativeQuery = true)
     long sumOutputBytes(@Param("batchId") UUID batchId);
+
+    /** The most stored outputs any one row of the batch has; 0 when none has any. */
+    @Query(value = """
+            SELECT COALESCE(MAX(per_row.outputs), 0)
+              FROM (SELECT COUNT(*) AS outputs
+                      FROM recipe_batch_rows r
+                      JOIN generation_job_outputs o ON o.job_id = r.job_id
+                     WHERE r.batch_id = :batchId
+                     GROUP BY r.id) per_row
+            """, nativeQuery = true)
+    int maxOutputsOfARow(@Param("batchId") UUID batchId);
 }

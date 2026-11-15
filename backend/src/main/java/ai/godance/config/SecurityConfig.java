@@ -233,6 +233,10 @@ public class SecurityConfig {
                         // so a script can read and run the recipes the Studio saved.
                         .pathMatchers("/v1/recipes", "/v1/recipes/*", "/v1/recipes/*/versions")
                                 .hasAnyAuthority(sessionOr(ApiKeyAuthFilter.API_KEY_AUTHORITY))
+                        // Recipe batches (round 12): a recipe run over many rows, from the
+                        // Studio or from a script, so a session or an API key as recipes are.
+                        .pathMatchers("/v1/recipe-batches", "/v1/recipe-batches/**")
+                                .hasAnyAuthority(sessionOr(ApiKeyAuthFilter.API_KEY_AUTHORITY))
                         // Input files (round 11): the owner, with a session or an API key, so a
                         // script can upload what it then names in a request. Accepting the input
                         // terms (/v1/inputs/terms) is not here: it falls to the session-only rule

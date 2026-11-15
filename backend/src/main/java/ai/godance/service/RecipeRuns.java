@@ -67,14 +67,12 @@ public class RecipeRuns {
      * {@link #image} for a recipe run that starts later: the recipe renders
      * and every slot's image may be used, and nothing is loaded.
      *
-     * @return how many input images the run has, which is part of its price
+     * @return the rendered run: its prompt, and the value every variable has
      */
-    public int checkImage(UUID userId, String model, RecipeRef recipe) {
+    public RunPrompt checkImage(UUID userId, String model, RecipeRef recipe) {
         RunPrompt run = recipes.resolve(userId, Modality.IMAGE, null, recipe);
-        if (!run.hasInputs()) return 0;
-        ImageEdits.Refs refs = imageRefs(run);
-        edits.check(userId, model, refs);
-        return refs.images().size();
+        if (run.hasInputs()) edits.check(userId, model, imageRefs(run));
+        return run;
     }
 
     private static ImageEdits.Refs imageRefs(RunPrompt run) {
@@ -117,9 +115,10 @@ public class RecipeRuns {
      * and every slot's image may be used with this model, and nothing is
      * loaded.
      */
-    public void checkVideo(UUID userId, ModelInfo model, RecipeRef recipe) {
+    public RunPrompt checkVideo(UUID userId, ModelInfo model, RecipeRef recipe) {
         RunPrompt run = recipes.resolve(userId, Modality.VIDEO, null, recipe);
         if (run.hasInputs()) videoInputs.check(userId, model, videoRefs(run));
+        return run;
     }
 
     private static VideoInputs.Refs videoRefs(RunPrompt run) {
@@ -127,5 +126,30 @@ public class RecipeRuns {
         List<InputRef> last = run.inputsWithRole("last_frame");
         return new VideoInputs.Refs(first.isEmpty() ? null : first.get(0),
                 last.isEmpty() ? null : last.get(0), run.inputsWithRole("reference_image"));
+    }
+
+    /**
+     * Whether the model takes the inputs a recipe version's slots ask for,
+     * told from the slots alone: no input is named yet. The same refusals a
+     * run would get, before any row is looked at, so a model that cannot
+     * take the recipe's inputs is not reported as a fault of one row.
+     *
+     * @param slotRoles the role of each of the version's slots, in order;
+     *                  empty for a recipe with none, and then nothing is checked
+     */
+    public void requireModelTakesSlots(Modality modality, ModelInfo model, List<String> slotRoles) {
+        if (slotRoles.isEmpty()) return;
+        // The checks look at which inputs a request has, never at what they point to.
+        InputRef any = InputRef.file(new UUID(0L, 0L));
+        if (modality == Modality.IMAGE) {
+            long images = slotRoles.stream().filter("image"::equals).count();
+            edits.requireSupported(model.modelName(), (int) images, false);
+            return;
+        }
+        long references = slotRoles.stream().filter("reference_image"::equals).count();
+        videoInputs.requireSupported(model, new VideoInputs.Refs(
+                slotRoles.contains("first_frame") ? any : null,
+                slotRoles.contains("last_frame") ? any : null,
+                java.util.Collections.nCopies((int) references, any)));
     }
 }
