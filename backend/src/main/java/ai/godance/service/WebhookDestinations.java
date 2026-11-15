@@ -61,6 +61,16 @@ public class WebhookDestinations {
     }
 
     /**
+     * Whether private destinations are allowed, which they are only in tests
+     * that deliver to a local receiver. A caller that fetches a user's URL
+     * through {@link #client()} uses this to decide whether plain http is
+     * acceptable at all.
+     */
+    public boolean allowsPrivate() {
+        return allowPrivate;
+    }
+
+    /**
      * Refuses a webhook URL the backend must not call, with a 400. A null or
      * blank URL means "no webhook" and passes.
      */

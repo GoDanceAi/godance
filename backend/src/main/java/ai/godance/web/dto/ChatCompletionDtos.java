@@ -3,6 +3,7 @@ package ai.godance.web.dto;
 import java.util.List;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import tools.jackson.databind.JsonNode;
 
 import ai.godance.gateway.ChatDtos.ChatChoice;
 import ai.godance.gateway.ChatDtos.ChatMessage;
@@ -28,7 +29,20 @@ public final class ChatCompletionDtos {
             Boolean stream
     ) { }
 
-    public record Message(@NotBlank String role, @NotBlank String content) { }
+    /**
+     * A message of a request. {@code content} is a string, as it always was,
+     * or OpenAI's array of parts (round 11):
+     * <pre>
+     * [ {"type": "text", "text": "…"},
+     *   {"type": "image_url", "image_url": {"url": "…", "detail": "auto"}} ]
+     * </pre>
+     * It is read as JSON here and checked by the controller, so a part of
+     * the wrong shape answers a 400 that says which.
+     */
+    public record Message(@NotBlank String role, JsonNode content) { }
+
+    /** A message of a response: its content is always a string. */
+    public record ResponseMessage(String role, String content) { }
 
     public record ChatCompletionResponse(
             String id,
@@ -54,14 +68,14 @@ public final class ChatCompletionDtos {
         private static Choice toChoice(ChatChoice c) {
             ChatMessage m = c.message();
             return new Choice(c.index(),
-                    new Message(m.role(), m.content()),
+                    new ResponseMessage(m.role(), m.content()),
                     c.finishReason());
         }
     }
 
     public record Choice(
             int index,
-            Message message,
+            ResponseMessage message,
             @JsonProperty("finish_reason") String finishReason
     ) { }
 
