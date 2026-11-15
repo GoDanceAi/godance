@@ -126,7 +126,7 @@ export default function InputSlots({ modality, takes, slots, onChange, disabled 
             )}
 
             {mine.length > 0 && (
-              <ul aria-labelledby={groupId} className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-3">
+              <ul aria-labelledby={groupId} className="mt-2 grid grid-cols-2 gap-3">
                 {mine.map((slot, i) => {
                   const which = slot.name ?? (room > 1 ? `${ROLE_LABEL[role]} ${i + 1}` : ROLE_LABEL[role]);
                   return (
@@ -144,7 +144,7 @@ export default function InputSlots({ modality, takes, slots, onChange, disabled 
                           </div>
                           <p className="mt-1.5 truncate text-xs text-fg" title={slot.input.label}>{which}</p>
                           {slot.hint && <p className="text-xs text-fg-subtle">{slot.hint}</p>}
-                          <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1">
+                          <div className="mt-1.5 flex flex-col items-start gap-0.5">
                             <button type="button" className="btn btn-ghost btn-sm px-0" onClick={() => remove(slot)}
                                     aria-label={`Remove ${which}`}>
                               {slot.input.sample ? 'Replace' : 'Remove'}
