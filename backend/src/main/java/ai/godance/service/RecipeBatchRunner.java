@@ -3,6 +3,7 @@ package ai.godance.service;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -233,20 +234,31 @@ public class RecipeBatchRunner {
     // ===== 2. Rows are started ========================================
 
     private void startRows(RecipeBatch batch) {
-        UUID batchId = batch.getId();
-        int free = batch.getMaxConcurrency() - rows.countRunning(batchId);
-        if (free <= 0) return;
-        for (RecipeBatchRow row : rows.findNextPending(batchId, free)) {
-            Instant now = Instant.now();
-            // Claimed only while the batch still starts rows: a cancel or a pause that got there first wins.
-            Integer claimed = tx.execute(s -> {
-                if (rows.claim(row.getId(), now) == 0) return 0;
-                batches.markRunning(batchId, now);
-                return 1;
-            });
-            if (claimed == null || claimed == 0) return;
+        // At most a batch's whole size, however the loop goes: a row is claimed once.
+        for (int started = 0; started < batch.getRowsTotal(); started++) {
+            RecipeBatchRow row = tx.execute(s -> claimNext(batch));
+            if (row == null) return;
             if (!startRow(batch, row)) return;
         }
+    }
+
+    /**
+     * Claims the batch's next pending row, or returns null when there is no
+     * place free, no row left, or the batch no longer starts rows. One
+     * transaction with the batch's row locked, so the count of running rows
+     * and the claim are one step: {@code max_concurrency} holds even if two
+     * passes overlap, and a cancel or a pause that got there first wins.
+     */
+    private RecipeBatchRow claimNext(RecipeBatch batch) {
+        UUID batchId = batch.getId();
+        if (batches.lockIfStartsRows(batchId).isEmpty()) return null;
+        if (rows.countRunning(batchId) >= batch.getMaxConcurrency()) return null;
+        List<RecipeBatchRow> next = rows.findNextPending(batchId, 1);
+        if (next.isEmpty()) return null;
+        Instant now = Instant.now();
+        if (rows.claim(next.get(0).getId(), now) == 0) return null;
+        batches.markRunning(batchId, now);
+        return next.get(0);
     }
 
     /**

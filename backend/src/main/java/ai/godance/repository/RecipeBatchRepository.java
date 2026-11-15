@@ -71,6 +71,21 @@ public interface RecipeBatchRepository extends JpaRepository<RecipeBatch, UUID> 
             """, nativeQuery = true)
     List<UUID> findOpenIds(@Param("limit") int limit);
 
+    /**
+     * Locks the batch's row until the caller's transaction ends, and returns
+     * its id only while the batch may still start rows. Whoever claims a row
+     * holds this first, so the rows running are counted and the next one
+     * claimed by one caller at a time: two passes that overlap cannot
+     * between them start more rows than {@code max_concurrency}. A cancel
+     * or a pause in flight is waited for, and then comes back empty.
+     */
+    @Query(value = """
+            SELECT b.id FROM recipe_batches b
+             WHERE b.id = :id AND b.status IN ('QUEUED', 'RUNNING')
+               FOR UPDATE
+            """, nativeQuery = true)
+    Optional<UUID> lockIfStartsRows(@Param("id") UUID id);
+
     /** Records when the first row started, and QUEUED → RUNNING. 0 when the batch may no longer start rows. */
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query(value = """

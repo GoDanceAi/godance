@@ -13,8 +13,9 @@ import org.springframework.beans.factory.annotation.Autowired;
  * Nightly run of the Privacy Policy's retention schedule (see
  * {@link DataRetentionService}): purges generation jobs older than 90 days,
  * deletes conversations archived more than 30 days ago, audit rows older
- * than a year, and uploaded input files that nothing uses and whose expiry
- * has passed. Bound to a cron trigger (03:30 UTC daily) in
+ * than a year, uploaded input files that nothing uses and whose expiry has
+ * passed, and recipe batches whose jobs have all been purged. Bound to a
+ * cron trigger (03:30 UTC daily) in
  * {@link ai.godance.config.QuartzJobsConfig}.
  */
 @DisallowConcurrentExecution
@@ -31,10 +32,11 @@ public class DataRetentionJob implements Job {
 
     /** What one pass did. */
     record Summary(int jobsPurged, int jobsFailed, int conversationsDeleted, int auditRowsDeleted,
-                   int unapprovedChildAccountsDeleted, int inputFilesDeleted, int inputFilesFailed) { }
+                   int unapprovedChildAccountsDeleted, int inputFilesDeleted, int inputFilesFailed,
+                   int batchesDeleted) { }
 
     /**
-     * One pass over all five rules. Each rule runs even when an earlier one
+     * One pass over all six rules. Each rule runs even when an earlier one
      * threw; whatever it left undone is picked up by the next run.
      */
     static Summary run(DataRetentionService retention, Instant now) {
@@ -68,14 +70,22 @@ public class DataRetentionJob implements Job {
         } catch (RuntimeException e) {
             log.error("DataRetentionJob: input file delete failed", e);
         }
+        // After the job purge: a batch goes on the night its last job is purged.
+        int batches = 0;
+        try {
+            batches = retention.deleteFinishedBatches(now);
+        } catch (RuntimeException e) {
+            log.error("DataRetentionJob: recipe batch delete failed", e);
+        }
         Summary summary = new Summary(jobs.purged(), jobs.failed(), conversations, auditRows, children,
-                inputFiles.deleted(), inputFiles.failed());
+                inputFiles.deleted(), inputFiles.failed(), batches);
         log.info("DataRetentionJob: purged {} generation job(s) ({} could not be purged, retried next run), "
-                        + "deleted {} archived conversation(s), {} audit row(s), {} unapproved child account(s) "
-                        + "and {} unused input file(s) ({} could not be deleted, retried next run)",
+                        + "deleted {} archived conversation(s), {} audit row(s), {} unapproved child account(s), "
+                        + "{} unused input file(s) ({} could not be deleted, retried next run) "
+                        + "and {} finished recipe batch(es)",
                 summary.jobsPurged(), summary.jobsFailed(), summary.conversationsDeleted(),
                 summary.auditRowsDeleted(), summary.unapprovedChildAccountsDeleted(),
-                summary.inputFilesDeleted(), summary.inputFilesFailed());
+                summary.inputFilesDeleted(), summary.inputFilesFailed(), summary.batchesDeleted());
         return summary;
     }
 }
