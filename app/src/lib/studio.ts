@@ -212,8 +212,11 @@ const ESTIMATE_DELAY_MS = 400;
  * priced parameters have been still for a moment. Null while asking or when
  * the API could not say; the request can be sent either way.
  */
-export function useEstimate(body: GenerationBody | null): number | null {
-  const key = body ? JSON.stringify(estimateRequest(body)) : null;
+export function useEstimate(body: GenerationBody | null, inputImages = 0): number | null {
+  // A recipe that names its own inputs carries them under `recipe`, so their count is given apart.
+  const key = body
+    ? JSON.stringify({ ...estimateRequest(body), ...(inputImages > 0 ? { input_images: inputImages } : {}) })
+    : null;
   const [answer, setAnswer] = useState<{ key: string; cents: number } | null>(null);
 
   useEffect(() => {

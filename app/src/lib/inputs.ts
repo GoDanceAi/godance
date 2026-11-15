@@ -6,7 +6,16 @@
  * user's uploaded files (`file_id`) or an output of one of their own jobs
  * (`job_output`).
  */
-import { apiFetch, ApiError, type InputFile, type InputRef, type InputRole, type MediaModality, type ModelInputs } from './api';
+import {
+  apiFetch,
+  ApiError,
+  type InputFile,
+  type InputRef,
+  type InputRole,
+  type MediaModality,
+  type ModelInputs,
+  type RecipeInputSlot,
+} from './api';
 
 /** The image types an upload may be. */
 export const INPUT_ACCEPT = 'image/png,image/jpeg,image/webp';
@@ -154,4 +163,59 @@ export function inputErrorMessage(err: unknown, fallback = 'The image could not 
 /** The code of an API error, or null. */
 export function errorCode(err: unknown): string | null {
   return err instanceof ApiError ? err.code ?? null : null;
+}
+
+/** The name a slot is saved under when the user has given it none: its role, numbered from the second on. */
+function defaultName(role: InputRole, nth: number): string {
+  const base = ROLE_LABEL[role].toLowerCase();
+  return nth === 0 ? base : `${base} ${nth + 1}`;
+}
+
+/**
+ * The slots with a name each, as a recipe would keep them: a slot's own
+ * name, or its role's. A mask is not a recipe input and keeps no name.
+ */
+export function withNames(slots: Slot[]): Slot[] {
+  const taken = new Set(slots.filter((slot) => slot.name).map((slot) => slot.name as string));
+  const counts: Partial<Record<InputRole, number>> = {};
+  return slots.map((slot) => {
+    if (slot.role === 'mask' || slot.name) return slot;
+    let nth = counts[slot.role] ?? 0;
+    let name = defaultName(slot.role, nth);
+    while (taken.has(name)) {
+      nth += 1;
+      name = defaultName(slot.role, nth);
+    }
+    counts[slot.role] = nth + 1;
+    taken.add(name);
+    return { ...slot, name };
+  });
+}
+
+/** What a recipe keeps of the form's inputs: each slot's name, role and hint. Never a file. */
+export function slotsToSave(slots: Slot[]): RecipeInputSlot[] {
+  return withNames(slots)
+    .filter((slot) => slot.role !== 'mask')
+    .map((slot) => ({ slot: slot.name as string, role: slot.role, hint: (slot.hint ?? '').trim() }));
+}
+
+/**
+ * The inputs a recipe's slots get from the form, by slot name, and the
+ * first slot that has none. A recipe that names its inputs runs only when
+ * every one of them is filled.
+ */
+export function recipeInputs(
+  recipeSlots: RecipeInputSlot[],
+  slots: Slot[],
+  pending: InputRef = { file_id: 'FILE_ID' },
+): { inputs: Record<string, InputRef>; missing: string | null } {
+  const named = withNames(slots);
+  const inputs: Record<string, InputRef> = {};
+  let missing: string | null = null;
+  for (const slot of recipeSlots) {
+    const filled = named.find((each) => each.name === slot.slot && each.role === slot.role && each.input !== null);
+    if (filled) inputs[slot.slot] = filled.input!.ref ?? pending;
+    else missing ??= slot.slot;
+  }
+  return { inputs, missing };
 }

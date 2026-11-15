@@ -9,6 +9,7 @@ import {
   roomFor,
   slotKey,
   uploadInput,
+  withNames,
   type FormInput,
   type Slot,
 } from '../lib/inputs';
@@ -133,7 +134,9 @@ export default function InputSlots({ modality, takes, slots, onChange, disabled 
                       {slot.input ? (
                         <>
                           <div className="relative">
+                            {/* A gallery sample that cannot be loaded leaves its slot empty, with the hint. */}
                             <img src={slot.input.preview} alt={`${which}: ${slot.input.label}`}
+                                 onError={() => { if (slot.input?.sample) remove(slot); }}
                                  className="aspect-square w-full rounded-sm bg-bg-muted object-cover" />
                             {slot.input.sample && (
                               <span className="pill absolute left-1.5 top-1.5">Sample</span>
@@ -147,9 +150,9 @@ export default function InputSlots({ modality, takes, slots, onChange, disabled 
                               {slot.input.sample ? 'Replace' : 'Remove'}
                             </button>
                             {onDescribe && role !== 'mask' && (
-                              <button type="button" className="btn btn-ghost btn-sm px-0"
-                                      onClick={() => onDescribe(slot.input!)} aria-label={`Describe ${which} as a prompt`}>
-                                Describe as prompt
+                              // Named by its own words, then by which image, so "Prompt" still names one field only.
+                              <button type="button" className="btn btn-ghost btn-sm px-0" onClick={() => onDescribe(slot.input!)}>
+                                Describe as prompt<span className="sr-only">: {which}</span>
                               </button>
                             )}
                           </div>
@@ -254,5 +257,65 @@ function AddControls({ id, which, busy, offerPicker, onFile, onPickOutput, guard
       )}
       <span className="text-xs text-fg-faint">or drop an image here</span>
     </div>
+  );
+}
+
+/** The longest a slot's name and hint may be, as the API has them. */
+const SLOT_NAME_MAX = 40;
+const SLOT_HINT_MAX = 200;
+
+/**
+ * The name and the hint each input is saved under when the form is kept as a
+ * recipe. A recipe keeps the slots, never the images in them. `slots` are
+ * the ones the model can use; `all` is the whole list the edit is made in.
+ */
+export function SlotNames({ slots, all, onChange }: {
+  slots: Slot[];
+  all: Slot[];
+  onChange: (all: Slot[]) => void;
+}) {
+  const named = withNames(slots).filter((slot) => slot.role !== 'mask');
+  const baseId = useId();
+  if (named.length === 0) return null;
+
+  const set = (key: string, patch: Partial<Pick<Slot, 'name' | 'hint'>>) =>
+    onChange(all.map((slot) => (slot.key === key ? { ...slot, ...patch } : slot)));
+
+  return (
+    <fieldset className="mb-4 space-y-3" aria-label="Recipe inputs">
+      <p className="text-sm font-medium text-fg">Inputs of the recipe</p>
+      <p className="text-xs text-fg-subtle">
+        A recipe keeps each input's name and hint, so it can be filled again. It does not keep your images.
+      </p>
+      {named.map((slot) => (
+        <div key={slot.key} className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
+          <div>
+            <label htmlFor={`${baseId}-${slot.key}-name`} className="block text-xs text-fg-subtle">
+              Name of the {ROLE_LABEL[slot.role].toLowerCase()}
+            </label>
+            <input
+              id={`${baseId}-${slot.key}-name`}
+              className="input mt-1"
+              value={slot.name ?? ''}
+              maxLength={SLOT_NAME_MAX}
+              onChange={(e) => set(slot.key, { name: e.target.value })}
+            />
+          </div>
+          <div>
+            <label htmlFor={`${baseId}-${slot.key}-hint`} className="block text-xs text-fg-subtle">
+              Hint: what to put here
+            </label>
+            <input
+              id={`${baseId}-${slot.key}-hint`}
+              className="input mt-1"
+              value={slot.hint ?? ''}
+              maxLength={SLOT_HINT_MAX}
+              placeholder="One product on a plain background"
+              onChange={(e) => set(slot.key, { hint: e.target.value })}
+            />
+          </div>
+        </div>
+      ))}
+    </fieldset>
   );
 }

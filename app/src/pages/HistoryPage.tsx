@@ -6,7 +6,7 @@ import { COMPARE_MAX, COMPARE_MIN, compareLink, toggleSelected } from '../lib/co
 import { costText, fetchSavedJobs, listJobs, useWatchedJob } from '../lib/jobs';
 import { formatAge, formatDateTime } from '../lib/time';
 import { Icon } from '../components/Brand';
-import { JobThumb } from '../components/JobMedia';
+import { animateLink, JobInputs, JobThumb, useCanAnimate } from '../components/JobMedia';
 import JobStatusPill from '../components/JobStatusPill';
 import SaveJobButton from '../components/SaveJobButton';
 
@@ -290,6 +290,7 @@ function JobCard({ initial, onSavedChange, select }: {
   const [savedState, setSavedState] = useState<Pick<JobView, 'saved' | 'mediaExpiresAt'> | null>(null);
   const job = savedState ? { ...watched, ...savedState } : watched;
   const title = job.prompt || (job.purged ? 'Prompt deleted with the files' : 'Untitled generation');
+  const canAnimate = useCanAnimate(job);
   const changed = (next: JobView) => {
     setSavedState({ saved: next.saved, mediaExpiresAt: next.mediaExpiresAt });
     onSavedChange(next);
@@ -331,6 +332,18 @@ function JobCard({ initial, onSavedChange, select }: {
           {/* Above the card's link, which covers the whole card. */}
           <SaveJobButton job={job} onChange={changed} className="btn btn-ghost btn-sm relative z-10 -mr-2 px-2 py-1" />
         </div>
+        {(canAnimate || (job.inputs?.length ?? 0) > 0) && (
+          <div className="flex flex-wrap items-end justify-between gap-2">
+            <JobInputs job={job} size="sm" />
+            {canAnimate && (
+              // Above the card's link, which covers the whole card.
+              <Link to={animateLink(job.id, 0)} className="btn btn-ghost btn-sm relative z-10 -mr-2 ml-auto px-2 py-1"
+                    aria-label={`Animate this: ${title}`}>
+                Animate this
+              </Link>
+            )}
+          </div>
+        )}
       </div>
     </li>
   );

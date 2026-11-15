@@ -482,6 +482,13 @@ export interface RecipeVariable {
   default: string;
 }
 
+/** An input slot of a recipe: its name, what the image is to the job, and a hint for whoever fills it. */
+export interface RecipeInputSlot {
+  slot: string;
+  role: InputRole;
+  hint: string;
+}
+
 /** One version of a recipe. A version never changes once written. */
 export interface UserRecipeVersion {
   id: string;
@@ -491,6 +498,7 @@ export interface UserRecipeVersion {
   model: string;
   params: Record<string, unknown>;
   created_at: string;
+  inputs?: RecipeInputSlot[];   // its input slots (round 11); absent from an API older than that
 }
 
 /** A recipe the user keeps, with its latest version and what its attempts cost. */

@@ -1,4 +1,11 @@
-import { apiFetch, type MediaModality, type RecipeVariable, type UserRecipe, type UserRecipeVersion } from './api';
+import {
+  apiFetch,
+  type MediaModality,
+  type RecipeInputSlot,
+  type RecipeVariable,
+  type UserRecipe,
+  type UserRecipeVersion,
+} from './api';
 import { isUuid } from './ids';
 import type { GenerationBody } from './studio';
 
@@ -20,6 +27,7 @@ export interface RecipeSetup {
   variables: RecipeVariable[];
   model: string;
   params: Record<string, unknown>;
+  inputs?: RecipeInputSlot[];   // the input slots, when inputs are on; left out otherwise, which keeps none
 }
 
 /** GET /v1/recipes: the caller's recipes, newest first; `before` is a recipe id, for the page after it. */

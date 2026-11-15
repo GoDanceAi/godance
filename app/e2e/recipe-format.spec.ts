@@ -51,7 +51,52 @@ test.describe('a recipe', () => {
       template: null,
       run: { model: 'gpt-image-2', promptLang: 'en', params: { size: '1024x1024', n: 1 } },
       url: `${GALLERY}/gallery/${SLUG}`,
+      // Round 11: a recipe's input slots, empty for one that takes no input.
+      inputs: [],
     });
+  });
+
+  test('keeps its input slots as the round 11 contract has them', () => {
+    const slots = [{ slot: 'product photo', role: 'image', hint: 'One product on a plain background',
+      sample_url: 'https://media.godance.ai/gallery/paper/input-0.webp', extra: true }];
+
+    expect(parse(recipe({ inputs: slots }))?.inputs).toEqual([{
+      slot: 'product photo',
+      role: 'image',
+      hint: 'One product on a plain background',
+      sampleUrl: 'https://media.godance.ai/gallery/paper/input-0.webp',
+    }]);
+    // A video takes a first frame, a last frame and reference images; a hint may be missing.
+    const video = recipe({ modality: 'VIDEO', run: run({ model: 'seedance-2.0' }), inputs: [
+      { slot: 'opening', role: 'first_frame', sample_url: 'https://media.godance.ai/a.webp' },
+      { slot: 'style', role: 'reference_image', hint: 7, sample_url: 'https://media.godance.ai/b%20c.webp' },
+    ] });
+    expect(parse(video)?.inputs.map((slot) => [slot.slot, slot.role, slot.hint])).toEqual([
+      ['opening', 'first_frame', ''], ['style', 'reference_image', ''],
+    ]);
+  });
+
+  test('drops input slots it cannot read, whole, and keeps the recipe', () => {
+    const good = { slot: 'product photo', role: 'image', hint: 'x', sample_url: 'https://media.godance.ai/a.webp' };
+    const unreadable: unknown[] = [
+      'one',
+      [],
+      [good, { ...good, slot: 'b' }, { ...good, slot: 'c' }, { ...good, slot: 'd' }, { ...good, slot: 'e' }],   // more than four
+      [good, good],                                             // the same name twice
+      [{ ...good, slot: 'product photo!' }],
+      [{ ...good, role: 'first_frame' }],                       // not a role an image recipe has
+      [{ ...good, role: 'mask' }],
+      [{ ...good, sample_url: 'http://media.godance.ai/a.webp' }],   // not https
+      [{ ...good, sample_url: 'javascript:alert(1)' }],
+      [{ ...good, sample_url: '/a.webp' }],
+      [{ ...good, sample_url: undefined }],
+      [good, 'two'],
+    ];
+    for (const inputs of unreadable) {
+      const parsed = parse(recipe({ inputs }));
+      expect(parsed, JSON.stringify(inputs)).not.toBeNull();
+      expect(parsed?.inputs, JSON.stringify(inputs)).toEqual([]);
+    }
   });
 
   test('is ignored whole when its shape does not match', () => {
