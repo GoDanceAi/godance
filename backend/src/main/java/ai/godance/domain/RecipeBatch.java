@@ -1,6 +1,7 @@
 package ai.godance.domain;
 
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -115,7 +116,8 @@ public class RecipeBatch {
 
     @PrePersist
     void onCreate() {
-        if (createdAt == null) createdAt = Instant.now();
+        // To the microsecond, which is what the database keeps: the batch reads back as it was written.
+        if (createdAt == null) createdAt = Instant.now().truncatedTo(ChronoUnit.MICROS);
         if (status == null) status = BatchStatus.QUEUED;
     }
 
