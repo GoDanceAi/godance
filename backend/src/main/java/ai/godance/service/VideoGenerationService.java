@@ -64,12 +64,15 @@ public class VideoGenerationService {
     private final WebhookSigner webhookSigner;
     private final WebhookDestinations webhookDestinations;
     private final WebClient webhookClient;
+    private final VideoInputs videoInputs;
 
     public VideoGenerationService(GenerationQuotes quotes,
                                   VideoProviderGateway gateway, GenerationJobSettlement settlement,
                                   ObjectStorageClient storage, ObjectMapper json,
                                   WebhookSigner webhookSigner,
-                                  WebhookDestinations webhookDestinations) {
+                                  WebhookDestinations webhookDestinations,
+                                  VideoInputs videoInputs) {
+        this.videoInputs = videoInputs;
         this.quotes = quotes;
         this.gateway = gateway;
         this.settlement = settlement;
@@ -90,7 +93,21 @@ public class VideoGenerationService {
      */
     public UUID submit(UUID userId, UUID apiKeyId, VideoRequest submitted, String webhookUrl,
                        JobOrigin origin) {
+        return submit(userId, apiKeyId, submitted, webhookUrl, origin, VideoInputs.Refs.NONE);
+    }
+
+    /**
+     * {@link #submit(UUID, UUID, VideoRequest, String, JobOrigin)} for a
+     * request that may start from images. {@code inputs} are the request's
+     * first frame, last frame and reference images as the caller named them;
+     * each is checked and loaded before anything is charged, and recorded
+     * with the job in the transaction that takes its pre-debit.
+     */
+    public UUID submit(UUID userId, UUID apiKeyId, VideoRequest submitted, String webhookUrl,
+                       JobOrigin origin, VideoInputs.Refs inputs) {
         webhookDestinations.requireAllowed(webhookUrl);   // before any charge (spec risk R-02)
+        // With inputs switched off, a request that names one answers inputs_disabled and nothing else.
+        videoInputs.requireEnabledFor(inputs);
         // 404 / 400 (including an n the model cannot return) before any charge.
         // The quote is the pre-debit, the same figure POST /v1/estimates returns.
         Quote quote = quotes.video(submitted.model(), submitted.n(), submitted.durationSeconds());
@@ -98,15 +115,17 @@ public class VideoGenerationService {
         // The length that is priced is the length the provider is asked for:
         // the adapter never falls back to a default of its own.
         int duration = quote.seconds();
-        VideoRequest request = new VideoRequest(submitted.model(), submitted.prompt(),
-                submitted.size(), duration, submitted.n());
+        // 400, 403 or 404 for an input the model does not take, the account may not use, or that is not the caller's.
+        List<InputService.ResolvedInput> resolved = videoInputs.resolve(userId, model, inputs);
+        VideoRequest request = videoInputs.attach(new VideoRequest(submitted.model(), submitted.prompt(),
+                submitted.size(), duration, submitted.n()), resolved);
         int clips = quote.n();
         long cost = quote.costCents();
         String requestId = "vid_" + UUID.randomUUID().toString().replace("-", "").substring(0, 24);
 
         GenerationJob job = newJob(userId, model, request, duration, cost, requestId, webhookUrl);
         origin.applyTo(job);
-        if (!settlement.accept(job, apiKeyId)) {
+        if (!settlement.accept(job, apiKeyId, resolved)) {
             throw new InsufficientCreditException();
         }
 
