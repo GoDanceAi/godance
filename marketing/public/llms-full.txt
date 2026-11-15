@@ -7,7 +7,7 @@
 > description (OpenAPI 3.1) is https://api.godance.ai/v1/openapi.yaml.
 
 Contents: Authentication · Models and capabilities · Estimates · Chat · Images · Edits ·
-Files and inputs · Video · Jobs · Recipes · Errors · Limits and retention · Regions
+Files and inputs · Video · Jobs · Recipes · Batches · Errors · Limits and retention · Regions
 
 Conventions used on every route:
 
@@ -28,7 +28,7 @@ Conventions used on every route:
 
 An API key looks like `gd_live_…`. Create one in the app (https://app.godance.ai, Settings →
 API keys); the key is shown once. A key calls the model API: chat, images, video, jobs,
-files, recipes, estimates and usage. Creating and revoking keys, billing and the account
+files, recipes, batches, estimates and usage. Creating and revoking keys, billing and the account
 itself need a signed-in session, so a key gets 403 on those routes.
 
 - No key, or an unknown, revoked or expired one: 401.
@@ -538,7 +538,7 @@ curl https://api.godance.ai/v1/jobs/$JOB_ID \
    {"index": 0, "url": "https://…signed…", "contentType": "image/png", "sizeBytes": 812345, "revisedPrompt": null},
    {"index": 1, "url": "https://…signed…", "contentType": "image/png", "sizeBytes": 798110, "revisedPrompt": null}],
  "purged": false, "mediaExpiresAt": "2027-02-10T09:00:00Z", "saved": false,
- "channel": "API", "recipe": null, "inputs": []}
+ "channel": "API", "recipe": null, "inputs": [], "batch": null}
 ```
 
 - `status`: `QUEUED` → `RUNNING` → `DONE` or `FAILED`. When `FAILED`, `errorMessage` says
@@ -551,7 +551,10 @@ curl https://api.godance.ai/v1/jobs/$JOB_ID \
 - `inputs`: the images the job was given: `[{"role", "file_id" or "job_output", "url"}]`,
   `role` being `image`, `mask`, `first_frame`, `last_frame` or `reference_image`.
 - `recipe`: `{"id", "version", "variables"}` when the job ran one of your recipes.
-- `channel`: `API` for a job made with a key, `STUDIO` for one made in the web app.
+- `channel`: `API` for a job made with a key, `STUDIO` for one made in the web app,
+  `BATCH` for a row of a batch. Accept values you do not know.
+- `batch`: `{"id", "row"}` when the job is a row of one of your batches (see Batches), else
+  null.
 
 `GET /v1/jobs` lists your jobs as a bare JSON array, newest first. Parameters: `limit` (1
 to 100; without it every job is returned), `before` (a job id: older jobs only),
@@ -663,6 +666,164 @@ jobs = requests.get(f"{API}/v1/jobs", headers=HEADERS, params={"recipe": recipe[
   `recipe_variable_unknown`, `recipe_variable_too_long`, `recipe_input_missing`,
   `recipe_input_unknown`, `recipe_inputs_conflict`, `invalid_recipe`; 409
   `recipe_limit_reached`.
+- To run a version over many rows, a sheet of products or names, use a batch (next section).
+
+## Batches
+
+A batch runs one recipe version over many rows. Each row is a set of values for the
+version's variables and becomes one ordinary job, so a batch costs exactly what its jobs
+cost and charges nothing of its own. It runs on Godance's side: your script can stop and
+come back. Field names are snake_case. Another account's batch answers 404
+`batch_not_found`, as one that does not exist.
+
+- `POST /v1/recipe-batches/estimate` takes the body of a create and answers `{"rows",
+  "total_cents", "balance_cents", "enough", "limits": {"max_rows", "max_concurrency"}}`:
+  `total_cents` is the sum of what each row's job would reserve, and `enough` compares it
+  with the balance now. Nothing is charged and nothing is created.
+- `POST /v1/recipe-batches` creates the batch: 201, `status: "QUEUED"`. `version_id` and
+  `rows` (1 to 500) are required. A row is `{"variables": {"name": "value"}}`; a variable
+  left out keeps its default. For a version with input slots a row also has `inputs`, an
+  input reference per slot by slot name, as in a single run. Optional: `model` and
+  `params` (left out, the version's; a `params` you send replaces the version's whole),
+  `max_concurrency` (1 to 4, default 2) and `webhook_url`.
+- `GET /v1/recipe-batches` lists yours, newest first (`limit` 1 to 100, default 20;
+  `before` a batch id; `recipe_id`). `GET /v1/recipe-batches/{id}` is one, with its counts.
+- `GET /v1/recipe-batches/{id}/rows` lists its rows in row order (`limit` 1 to 100,
+  default 50; `after` the `index` of the last row you already have).
+- `POST /v1/recipe-batches/{id}/cancel` skips every row that has not started (`SKIPPED`);
+  running rows finish and are charged as usual. `POST /v1/recipe-batches/{id}/resume`
+  continues a `PAUSED` batch from the row where it stopped. Both answer the batch.
+- `GET /v1/recipe-batches/{id}/results.csv`: one line per row, `index`, `status`, a column
+  per variable, `job_id`, `cost_cents`, `error`, then a signed link to each output as
+  `output_1` to `output_n`. `GET /v1/recipe-batches/{id}/results.zip`: every output file,
+  named like `0-blue-1.png`.
+
+```bash
+# What it would cost. Nothing is charged and nothing starts.
+curl https://api.godance.ai/v1/recipe-batches/estimate \
+  -H "Authorization: Bearer $GODANCE_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "version_id": "0d6b2f3a-8c7d-4c58-9d0a-5f2f4f7f3a10",
+    "rows": [
+      {"variables": {"color": "blue"}},
+      {"variables": {"color": "green", "surface": "oak table"}}
+    ]
+  }'
+
+# The same body creates it; its rows start a few seconds later.
+curl https://api.godance.ai/v1/recipe-batches \
+  -H "Authorization: Bearer $GODANCE_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "version_id": "0d6b2f3a-8c7d-4c58-9d0a-5f2f4f7f3a10",
+    "rows": [
+      {"variables": {"color": "blue"}},
+      {"variables": {"color": "green", "surface": "oak table"}}
+    ],
+    "max_concurrency": 2
+  }'
+
+# Then the results, a line per row with a link to each output.
+curl -o results.csv https://api.godance.ai/v1/recipe-batches/$BATCH_ID/results.csv \
+  -H "Authorization: Bearer $GODANCE_API_KEY"
+```
+
+```json
+{"rows": 2, "total_cents": 12, "balance_cents": 1500, "enough": true,
+ "limits": {"max_rows": 500, "max_concurrency": 4}}
+
+{"id": "3c0e8a52-6f1d-4b7e-a0c4-2b9d7e5f1a63", "recipe_id": "…", "recipe_title": "Mug on a kitchen shelf",
+ "version_id": "0d6b2f3a-8c7d-4c58-9d0a-5f2f4f7f3a10", "modality": "IMAGE", "model": "gpt-image-2",
+ "params": {"size": "1024x1024", "n": 1}, "status": "QUEUED", "pause_reason": null,
+ "pause_detail": null, "max_concurrency": 2, "rows_total": 2, "rows_done": 0, "rows_failed": 0,
+ "rows_running": 0, "rows_skipped": 0, "estimated_total_cents": 12, "spent_cents": 0,
+ "created_at": "2026-11-15T09:00:00Z", "started_at": null, "completed_at": null}
+```
+
+A row from `GET /v1/recipe-batches/{id}/rows`:
+
+```json
+{"index": 0, "status": "DONE", "variables": {"color": "blue", "surface": "kitchen shelf"},
+ "job_id": "6f1c0b9e-2d4a-4c3b-9a57-0e8d4b2f7c11", "cost_cents": 6, "error": null,
+ "outputs": [{"index": 0, "url": "https://…signed…", "content_type": "image/png"}]}
+```
+
+```python
+import csv, os, time, requests
+
+API = "https://api.godance.ai"
+HEADERS = {"Authorization": f"Bearer {os.environ['GODANCE_API_KEY']}"}
+
+recipe = requests.get(f"{API}/v1/recipes", headers=HEADERS, params={"limit": 1}).json()[0]
+version = recipe["latest_version"]
+names = [variable["name"] for variable in version["variables"]]
+
+# One row per line of products.csv, whose header names the recipe's variables.
+# An empty cell keeps the variable's default.
+with open("products.csv", newline="", encoding="utf-8") as sheet:
+    rows = [{"variables": {name: line[name] for name in names if line.get(name)}}
+            for line in csv.DictReader(sheet)]
+
+body = {"version_id": version["id"], "rows": rows, "max_concurrency": 2}
+estimate = requests.post(f"{API}/v1/recipe-batches/estimate", headers=HEADERS, json=body).json()
+print(estimate["rows"], "rows for", estimate["total_cents"], "cents")
+if not estimate["enough"]:
+    raise SystemExit("Not enough credit: top up at https://app.godance.ai first.")
+
+created = requests.post(f"{API}/v1/recipe-batches", headers=HEADERS, json=body)
+if created.status_code == 400:
+    problem = created.json()                     # a refused row names its index in "row"
+    raise SystemExit(f"{problem.get('code')}: {problem['detail']}")
+created.raise_for_status()
+batch = created.json()
+
+while batch["status"] in ("QUEUED", "RUNNING"):
+    time.sleep(10)
+    batch = requests.get(f"{API}/v1/recipe-batches/{batch['id']}", headers=HEADERS).json()
+    print(batch["rows_done"], "of", batch["rows_total"], "done;", batch["spent_cents"], "cents")
+
+if batch["status"] == "PAUSED":
+    # insufficient_credit: top up; spending_cap: wait for the cap's day or month to turn over.
+    print("Paused:", batch["pause_reason"], batch["pause_detail"])
+    # then: requests.post(f"{API}/v1/recipe-batches/{batch['id']}/resume", headers=HEADERS)
+else:
+    results = requests.get(f"{API}/v1/recipe-batches/{batch['id']}/results.csv", headers=HEADERS)
+    results.raise_for_status()
+    with open("results.csv", "wb") as out:
+        out.write(results.content)
+```
+
+- Status: a batch is `QUEUED` → `RUNNING` → `DONE`, or `PAUSED` or `CANCELLED`. A row is
+  `PENDING` → `RUNNING` → `DONE` or `FAILED`, or `SKIPPED` after a cancel. `rows_done`,
+  `rows_failed`, `rows_running` and `rows_skipped` count rows; the rest of `rows_total` are
+  pending. `completed_at` is set when the last row has ended.
+- Charging: each row's job reserves its price when it starts, like any job, and appears in
+  `GET /v1/jobs` with `channel: "BATCH"` and `batch: {"id", "row"}`. A row whose job fails
+  is `FAILED` with the job's error, its reservation is returned, and the batch carries on.
+  `spent_cents` is what the finished rows' jobs were charged. A row is never submitted
+  twice.
+- Pausing: when the balance cannot cover the next row's job the batch becomes `PAUSED`
+  with `pause_reason: "insufficient_credit"`; when a spending cap of the account or of the
+  batch's API key would be passed, `pause_reason: "spending_cap"` and `pause_detail` says
+  which cap. Nothing is charged for the row that was refused. It stays paused until you
+  resume it.
+- A batch made with an API key runs its jobs against that key's spending caps. Deleting
+  the key cancels the batch, and so does deleting the recipe.
+- Webhook: jobs in a batch send no webhooks of their own. With `webhook_url` the batch
+  sends one signed POST when it ends, `{"event": "recipe_batch.completed", "batch": {…},
+  "results": {"csv", "zip"}}` (the paths of the two files), signed as job webhooks are
+  (see Jobs). It is sent once and not retried.
+- Links in the CSV and in a row's `outputs` are signed when you ask and expire. Download
+  the CSV again for fresh links rather than storing them.
+- Refusals, nothing written and nothing charged: 400 `batch_too_large` (more than 500
+  rows), `invalid_batch`, or one row's refusal with the code a single run would get
+  (`recipe_variable_unknown`, for instance; `invalid_batch_row` when it has none), the
+  row's 0-based index in `row` and a `detail` starting `row N:`; 404 `recipe_not_found`;
+  409 `batch_limit_reached` (an account can have two batches that have not finished).
+  Resuming a batch that is not paused answers 409 `batch_not_resumable`. `results.zip`
+  answers 413 `results_too_large` when the outputs total more than 500 MB; use the CSV's
+  links instead.
 
 ## Errors
 
@@ -685,8 +846,8 @@ document also carries OpenAI's `error` object: `{"message", "type", "param", "co
 | 402 | `insufficient_credit`: top up. Without a `code`: a spending cap was reached, and topping up does not lift it. |
 | 403 | A key on a route that needs a signed-in session, or a refusal named by `code` (`inputs_disabled`, …). |
 | 404 | No such model, job, file, recipe or video for this account. Another account's answers the same. |
-| 409 | The request cannot be carried out as things stand (`job_not_saveable`, `saved_limit_reached`, `video_not_ready`, …). |
-| 413, 415, 422 | An input image that is too large, of the wrong type, or not accepted. |
+| 409 | The request cannot be carried out as things stand (`job_not_saveable`, `saved_limit_reached`, `video_not_ready`, `batch_not_resumable`, `batch_limit_reached`, …). |
+| 413, 415, 422 | An input image that is too large, of the wrong type, or not accepted. A batch's `results.zip` over 500 MB is 413 `results_too_large`. |
 | 429 | Too many requests. `Retry-After` says how many seconds to wait. |
 | 502 | `generation_failed`: the job a request waited for failed. The reservation is returned. |
 
@@ -734,6 +895,10 @@ sentence and `e.code` is set; elsewhere read `e.response.json()["detail"]`.
 - `n` is at most the model's `max_n` (1 when not stated). List pages: `limit` up to 100 on
   jobs, files, recipes and videos, up to 200 on usage.
 - An account keeps up to 500 recipes, and a recipe up to 200 versions.
+- A batch has at most 500 rows and runs 1 to 4 of them at a time (2 unless you say). An
+  account can have two batches that have not finished. A batch row's files and values
+  are kept as long as its job is; once none of a batch's jobs has files left, the batch is
+  deleted and its jobs stay in `GET /v1/jobs` with what they cost.
 - A waiting image request (a sync key) is held for about 90 seconds; a result over 25 MB
   comes back as links, not base64.
 - A chat request body is at most 256 KB.

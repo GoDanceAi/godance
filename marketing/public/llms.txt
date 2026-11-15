@@ -56,6 +56,17 @@
   recipe: {version_id, variables: {name: value}} in place of prompt (both → 400
   prompt_and_recipe). The filled-in template is the job's prompt and price. The job
   then has recipe: {id, version, variables}; GET /v1/jobs?recipe={id} lists its jobs
+- POST /v1/recipe-batches — run one recipe version over up to 500 rows ({version_id,
+  rows: [{variables, inputs}], model, params, max_concurrency 1-4, webhook_url}). Each row
+  is an ordinary job (channel "BATCH", batch: {id, row}); the batch charges nothing
+  itself, and it pauses (it does not fail) when credit or a spending cap runs out:
+  POST /v1/recipe-batches/{id}/resume continues it, POST /v1/recipe-batches/{id}/cancel
+  skips the rows not started. POST /v1/recipe-batches/estimate prices it first. Two
+  unfinished batches per account (409 batch_limit_reached)
+- GET /v1/recipe-batches, GET /v1/recipe-batches/{id}, GET /v1/recipe-batches/{id}/rows,
+  GET /v1/recipe-batches/{id}/results.csv and GET /v1/recipe-batches/{id}/results.zip —
+  your batches, their progress, each row's status with its job and signed output links,
+  and the results as files. One signed recipe_batch.completed webhook when a batch ends
 - POST /v1/estimates — price of an image or video request before sending it
   ({model, n, size, seconds} → estimated_cost_cents, the exact amount the request would
   reserve); no charge, no job

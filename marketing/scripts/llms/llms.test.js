@@ -27,10 +27,7 @@ const routes = openApiRoutes(read(OPENAPI));
 const llms = read('../../public/llms.txt');
 const llmsFull = read('../../public/llms-full.txt');
 
-/**
- * The sections of llms-full.txt, in order. `optional` ones may be absent:
- * "Batches" arrives with the batch routes, between Recipes and Errors.
- */
+/** The sections of llms-full.txt, in order. */
 const SECTIONS = [
   { title: 'Authentication' },
   { title: 'Models and capabilities' },
@@ -42,7 +39,7 @@ const SECTIONS = [
   { title: 'Video' },
   { title: 'Jobs' },
   { title: 'Recipes' },
-  { title: 'Batches', optional: true },
+  { title: 'Batches' },
   { title: 'Errors' },
   { title: 'Limits and retention' },
   { title: 'Regions' },
