@@ -448,7 +448,8 @@ paths:
         poster image where the job has one; no model stores one today, so it
         answers 404 `video_content_not_found`. `spritesheet` answers 400
         `variant_not_supported`. A video that is not finished answers 409
-        `video_not_ready`; a failed one 404 `video_content_not_found`.
+        `video_not_ready`; a failed one 404 `video_content_not_found`; a file
+        storage cannot hand over just now 503 `video_content_unavailable`.
       security: [{ apiKey: [] }, { session: [] }]
       parameters:
         - { $ref: "#/components/parameters/VideoId" }
@@ -465,6 +466,7 @@ paths:
         "401": { $ref: "#/components/responses/VideoError" }
         "404": { $ref: "#/components/responses/VideoError" }
         "409": { $ref: "#/components/responses/VideoError" }
+        "503": { $ref: "#/components/responses/VideoError" }
   /v1/videos/{id}/remix:
     post:
       operationId: remixVideo

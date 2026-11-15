@@ -147,7 +147,8 @@ public class OpenAiVideos {
      * @throws OpenAiVideoRefusedException 404 {@code video_not_found}; 409
      *         {@code video_not_ready} while it is queued or in progress; 404
      *         {@code video_content_not_found} when it failed or has no file
-     *         of that kind
+     *         of that kind; 503 {@code video_content_unavailable} when
+     *         storage could not hand the file over
      */
     public Content content(UUID userId, UUID videoId, Variant variant) {
         GenerationJob job = owned(userId, videoId);
@@ -163,7 +164,12 @@ public class OpenAiVideos {
                 .orElseThrow(() -> OpenAiVideoRefusedException.contentNotFound(variant == Variant.THUMBNAIL
                         ? "This video has no thumbnail."
                         : "This video has no stored file."));
-        return new Content(storage.open(file.getStorageKey()), file.getContentType(), file.getSizeBytes());
+        try {
+            return new Content(storage.open(file.getStorageKey()), file.getContentType(), file.getSizeBytes());
+        } catch (IllegalStateException e) {
+            // Storage could not hand the file over: it is down, or the file is being deleted right now.
+            throw OpenAiVideoRefusedException.contentUnavailable();
+        }
     }
 
     /**

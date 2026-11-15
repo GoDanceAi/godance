@@ -16,6 +16,8 @@ public final class OpenAiVideoRefusedException extends ResponseStatusException {
     public static final String CODE_NOT_FOUND = "video_not_found";
     /** The video has no such content: it failed, or it has no file of that kind. 404. */
     public static final String CODE_CONTENT_NOT_FOUND = "video_content_not_found";
+    /** The file is recorded but storage could not hand it over just now. 503. */
+    public static final String CODE_CONTENT_UNAVAILABLE = "video_content_unavailable";
     /** The video is still queued or in progress, so it has no content yet. 409. */
     public static final String CODE_NOT_READY = "video_not_ready";
     /** The video is still queued or in progress, so it cannot be deleted. 409. */
@@ -57,6 +59,12 @@ public final class OpenAiVideoRefusedException extends ResponseStatusException {
 
     public static OpenAiVideoRefusedException contentNotFound(String detail) {
         return new OpenAiVideoRefusedException(HttpStatus.NOT_FOUND, detail, CODE_CONTENT_NOT_FOUND, null);
+    }
+
+    public static OpenAiVideoRefusedException contentUnavailable() {
+        return new OpenAiVideoRefusedException(HttpStatus.SERVICE_UNAVAILABLE,
+                "The video's file could not be read just now. Try again in a moment.",
+                CODE_CONTENT_UNAVAILABLE, null);
     }
 
     public static OpenAiVideoRefusedException notReady(String status) {

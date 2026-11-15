@@ -863,6 +863,19 @@ class OpenAiVideoIntegrationTest {
         assertThat(contentProblem(other, done.getId(), "", 404).get("code").asString()).isEqualTo("video_not_found");
     }
 
+    @Test
+    void content_givenAFileStorageNoLongerHas_expects503AndNotAnEmptyDownload() {
+        Account me = account(0L);
+        GenerationJob job = videoJob(me.id(), JobStatus.DONE, 10);
+        // The job records an output, but the object is not there: storage lost it, or a delete is under way.
+        outputRows.save(new GenerationJobOutput(job.getId(), 0, "videos/" + job.getId() + "/0.mp4", "video/mp4", 99, null));
+
+        JsonNode problem = contentProblem(me, job.getId(), "", 503);
+
+        assertThat(problem.get("code").asString()).isEqualTo("video_content_unavailable");
+        assertThat(problem.get("error").get("type").asString()).isEqualTo("server_error");
+    }
+
     // ===== Delete =====================================================
 
     @Test
