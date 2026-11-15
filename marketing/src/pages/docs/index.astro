@@ -35,6 +35,21 @@ const chatSnippet = `curl https://api.godance.ai/v1/chat/completions \\
     "stream": true
   }'`;
 
+const chatImageSnippet = `curl https://api.godance.ai/v1/chat/completions \\
+  -H "Authorization: Bearer $GODANCE_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "model": "gpt-5.4",
+    "messages": [{
+      "role": "user",
+      "content": [
+        { "type": "text", "text": "What is in this photo?" },
+        { "type": "image_url",
+          "image_url": { "url": "https://example.com/photos/mug.jpg", "detail": "auto" } }
+      ]
+    }]
+  }'`;
+
 const imageSnippet = `curl https://api.godance.ai/v1/images/generations \\
   -H "Authorization: Bearer $GODANCE_API_KEY" \\
   -H "Content-Type: application/json" \\
@@ -317,7 +332,7 @@ def verify(payload, header, secret):
     </p>
     <ul class="mt-4 space-y-2 text-fg-muted">
       <li><code class="code-chip">model</code> (required) — any text model from the <a href="/models" class="underline" style="color: var(--color-primary)">model catalog</a>.</li>
-      <li><code class="code-chip">messages</code> (required) — array of objects with <code class="code-chip">role</code> and <code class="code-chip">content</code>; <code class="code-chip">content</code> is a plain string.</li>
+      <li><code class="code-chip">messages</code> (required) — array of objects with <code class="code-chip">role</code> and <code class="code-chip">content</code>; <code class="code-chip">content</code> is a string, or OpenAI's array of text and image parts (see <a href="#chat-images" class="underline" style="color: var(--color-primary)">images in chat</a>).</li>
       <li><code class="code-chip">max_tokens</code>, <code class="code-chip">temperature</code> — optional.</li>
       <li><code class="code-chip">stream</code> — optional, defaults to <code class="code-chip">false</code>.</li>
     </ul>
@@ -333,6 +348,35 @@ def verify(payload, header, secret):
       <code class="code-chip">response_format</code>, …) aren't supported and are ignored.
     </p>
     <pre class="code-block mt-4"><code>{chatSnippet}</code></pre>
+
+    <h3 id="chat-images" class="scroll-mt-24 text-xl font-semibold mt-10 mb-4 text-fg">Images in chat</h3>
+    <p class="text-fg-muted">
+      A message's <code class="code-chip">content</code> can be OpenAI's array of parts, so a
+      model that can see is sent images the same way OpenAI's SDK sends them. The response is
+      unchanged: the answer's <code class="code-chip">content</code> is a string. Streaming
+      works the same way.
+    </p>
+    <p class="mt-4 text-fg-muted">
+      <strong class="text-fg">Not switched on yet.</strong> Image parts are part of
+      <a href="#files" class="underline" style="color: var(--color-primary)">inputs</a>, which are
+      being rolled out. Until they are switched on, a request with an image part answers
+      <code class="code-chip">403</code> with <code class="code-chip">code: "inputs_disabled"</code>.
+      Text parts work now, and a request whose content is a string is unaffected.
+    </p>
+    <pre class="code-block mt-4"><code>{chatImageSnippet}</code></pre>
+    <ul class="mt-4 space-y-2 text-fg-muted">
+      <li><strong class="text-fg">Parts.</strong> <code class="code-chip">&#123;"type": "text", "text": "…"&#125;</code> and <code class="code-chip">&#123;"type": "image_url", "image_url": &#123;"url": "…", "detail": "auto"&#125;&#125;</code>. <code class="code-chip">detail</code> is optional: <code class="code-chip">auto</code>, <code class="code-chip">low</code>, <code class="code-chip">high</code> or <code class="code-chip">original</code>, passed on to providers that take it. Images belong in <code class="code-chip">user</code> messages. Any other part type answers <code class="code-chip">400</code> with <code class="code-chip">code: "unsupported_content_part"</code>.</li>
+      <li><strong class="text-fg">Three ways to name an image.</strong> <code class="code-chip">url</code> may be:
+        a base64 data URL (<code class="code-chip">data:image/png;base64,…</code>);
+        an <code class="code-chip">https</code> URL, which Godance fetches once, without following redirects, from public addresses only;
+        or <code class="code-chip">https://api.godance.ai/v1/files/&#123;id&#125;/content</code> for one of <a href="#files" class="underline" style="color: var(--color-primary)">your own files</a>, which is read from storage rather than fetched.
+        Anything else answers <code class="code-chip">400</code> with <code class="code-chip">code: "invalid_image_url"</code>.</li>
+      <li><strong class="text-fg">Limits.</strong> At most 10 images in a request, each at most 20&nbsp;MB, PNG, JPEG or WebP, still images only. A data URL counts towards the request body, which is limited to 256&nbsp;KB (a larger body answers <code class="code-chip">413</code>); for a larger image use an <code class="code-chip">https</code> URL or upload it as a file. An <code class="code-chip">https</code> image must answer within 10 seconds with an image content type.</li>
+      <li><strong class="text-fg">Which models.</strong> A model accepts images when <code class="code-chip">godance.capabilities.inputs.images</code> is present on <a href="#models" class="underline" style="color: var(--color-primary)">GET /v1/models</a>; its <code class="code-chip">max</code> is the most images one request to it may carry. The <a href="/models" class="underline" style="color: var(--color-primary)">model catalog</a> lists them. Any other model answers <code class="code-chip">400</code> with <code class="code-chip">code: "model_does_not_accept_images"</code>, and a fallback model that cannot see is never used for a request with images.</li>
+      <li><strong class="text-fg">What the provider receives.</strong> The image itself, inline, never your URL. Details stored inside the file, such as where a photo was taken, are removed first. Godance does not keep the image.</li>
+      <li><strong class="text-fg">Price.</strong> A provider counts an image as input tokens and reports them in <code class="code-chip">usage.prompt_tokens</code>, which is what you are charged for. The amount reserved up front allows for each image at the most its model can count it as, and the difference is returned when the request settles.</li>
+      <li><strong class="text-fg">Refusals,</strong> each before anything is charged: <code class="code-chip">400 image_fetch_failed</code> (unreachable, not a public address, a redirect, not an image, too slow), <code class="code-chip">413 image_too_large</code>, <code class="code-chip">400 image_type_unsupported</code>, <code class="code-chip">400 too_many_images</code>, and <code class="code-chip">404 file_not_found</code> for a file that is not yours.</li>
+    </ul>
 
     <!-- ===== Images ===== -->
     <h2 id="images" class="scroll-mt-24 text-2xl font-bold mt-16 mb-4 text-fg">POST /v1/images/generations</h2>

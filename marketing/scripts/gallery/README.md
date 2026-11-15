@@ -35,6 +35,7 @@ other host, and it is removed from anything printed or saved.
 | `fetch` | Reads each list at its pinned commit, after checking its licence file. Drops posts already seen and posts on the removal list. | no |
 | `screen` | Sets aside what cannot be used, with a reason for each. `--classify` also has a text model read what is left against the content standard. | only with `--classify` |
 | `translate` | Completes each prompt in English and Chinese, keeps its blanks as a template, and gives each candidate its slug. | when a list supplies one language only |
+| `sample` | For each candidate that needs an input image: proposes its input slots and generates a sample input for each, on Godance. Only after `screen --inputs`. | yes |
 | `generate` | Runs each candidate on Godance, downloads the output at once, and records the cost. | yes |
 | `review` | Builds the review sheet. | no |
 | `publish` | Writes a recipe for each entry the operator approved. | no |
@@ -58,6 +59,16 @@ node scripts/gallery/cli.js publish --apply
 Each stage can be run again and picks up where it stopped. `--source <id>`
 limits a command to one list.
 
+A batch that takes input recipes adds two things: `--inputs objects` on
+`screen`, and the `sample` stage between `translate` and `generate`:
+
+```bash
+node scripts/gallery/cli.js screen --inputs objects --apply
+node scripts/gallery/cli.js translate --apply --max-spend-cents 6000
+node scripts/gallery/cli.js sample    --apply --max-spend-cents 6000
+node scripts/gallery/cli.js generate  --apply --max-spend-cents 6000
+```
+
 ### screen
 
 Screening only narrows. Nothing it does approves an entry: what it does not
@@ -66,6 +77,52 @@ when it is broken in the list, needs an input image, video or audio, is in
 a language other than English or Chinese, has a blank with no default, is
 too long, is written for a longer clip than `--max-video-seconds` (default
 10), or mentions a term in `config/screen-terms.json`.
+
+`--inputs` decides what happens to an entry that needs an input image:
+
+- **`none`** (the default) sets every one aside, as before.
+- **`objects`** lets through the entries whose input is a product or an
+  object. An entry that mentions a person (the words under `input_people` in
+  `config/screen-terms.json`) stays set aside, with the word that marked it
+  as its reason. The rule is broad on purpose: a doubtful entry is set
+  aside.
+- **`people`** lets person entries through too. It is refused, before
+  anything is read, unless `docs/gallery-content-standard.md` carries the
+  line `**Person samples:** allowed`. Only the operator changes that line,
+  and raises the standard's version with it.
+
+An entry that needs a video or audio input is always set aside.
+
+### sample
+
+A recipe with inputs shows a sample input beside its output, and a visitor
+swaps in their own. The sample is generated on Godance. It is never an
+image from a source list: the lists' images are not read at all.
+
+For each candidate that passed `screen --inputs`:
+
+1. A Godance text model reads the prompt and proposes its slots: each
+   slot's name, its role (`image` for an image recipe; `first_frame`,
+   `last_frame` or `reference_image` for a video), a hint in English and
+   Chinese, and a prompt for the slot's sample. The prompt is handed over
+   as text to read, not as instructions.
+2. The proposal is checked before any picture is paid for. An entry let
+   through as an object cannot get a slot, a hint or a sample that mentions
+   a person, and what the content standard's terms set aside in a prompt
+   they set aside in a slot too. A refused proposal fails the entry, with
+   its reason.
+3. One sample per slot is generated on the image model `model-map.json`
+   names under `sample.model` (the first image model otherwise), in the
+   shape of the run it feeds, and saved as `<slug>/input-<n>.webp`.
+
+It is a paid stage like `generate`: a dry run unless `--apply`, nothing
+spent without `--max-spend-cents`, the same budget guard, and the same
+resume rules. A sample job in flight holds its money and is picked up by
+its id on the next run; `--retry-failed` and `--retry-uncertain` work as
+they do for `generate`. The dry run prints what it would do and what it
+would cost.
+
+The operator edits slot names and hints in the review sheet.
 
 ### translate and templates
 
@@ -104,6 +161,17 @@ schema checks every recipe against them.
   poster when `ffmpeg` is installed; without it the tool says so and leaves
   the poster out.
 
+**Input recipes.** Before anything is submitted, the tool uploads one small
+image to check that the account can use inputs. If it cannot, the run stops
+with the reason and what to do about it (inputs switched off on the API, an
+account that is not an adult's, or the input terms not accepted), and
+nothing is submitted or spent: not even the recipes that need no input. An
+upload is free. Then, for each input recipe, the samples are uploaded
+through `POST /v1/files`; an image recipe runs through
+`POST /v1/images/edits` with the file ids, and a video carries its
+`first_frame`, `last_frame` and `reference_images`. A candidate whose
+sample is not finished waits for `sample`.
+
 **No double payment.** A run's record is saved before its request is sent
 and again, with the job id, the moment the API accepts it. A later run
 resumes that job by its id.
@@ -123,6 +191,11 @@ Open it in a browser. For each candidate it shows the output, the prompt in
 both languages, the source and author, the screening notes and the cost.
 Mark each one approved or rejected; a rejection needs a reason. Apply the
 content standard to the output as well as to the prompt.
+
+For an input recipe the sheet shows each sample before the output, with its
+slot, the prompt that made the sample, and both costs. The standard applies
+to each sample as well. Slot names and hints can be edited there; the edits
+travel in `decisions.json` and are what `publish` writes.
 
 **Save decisions.json** downloads the decisions. Put the file in
 `.gallery-work/review/`. The page also keeps the choices in the browser, so
@@ -188,9 +261,12 @@ All in `config/`, all committed:
   not the configured licence, is refused and nothing is read from it.
 - **`model-map.json`** — which model to run a list's prompts on when
   Godance does not serve the one it was written for; the text models used
-  to classify and translate; the sizes requested for each frame shape.
+  to classify and translate (and, under `text.sample`, to propose slots);
+  the image model for sample inputs (`sample.model`); the sizes requested
+  for each frame shape.
 - **`screen-terms.json`** — the terms that set an entry aside, by rule of
-  the content standard. A starting list, meant to be extended.
+  the content standard, and under `input_people` the words that mark an
+  input as being of a person. A starting list, meant to be extended.
 - **`removal-list.json`** — written by `remove`.
 
 ## The work folder
@@ -203,9 +279,10 @@ published.
 |---|---|
 | `sources/` | the lists' text files at their pinned commits |
 | `entries.json`, `screened.json`, `translated.json` | the state of each stage |
+| `samples.json` | each input recipe's slots, and its samples with their job ids |
 | `runs.json` | one record per run, with its job id |
 | `ledger.json` | every cent spent, one line per paid call |
-| `media/` | generated images and videos |
+| `media/` | generated images and videos, and sample inputs |
 | `review/index.html`, `review/decisions.json` | the sheet, and the operator's decisions |
 | `manifest.json` | media to upload, and to delete |
 

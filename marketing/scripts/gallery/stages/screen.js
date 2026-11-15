@@ -7,6 +7,17 @@
  * a rule of the content standard. Then, optionally, a text model reads what
  * is left against the standard.
  *
+ * Entries that need an input image (round 11). `inputs` says what to do
+ * with them:
+ *   none     set them all aside, as before. The default.
+ *   objects  let through the ones whose input is a product or an object;
+ *            one whose input is about a person stays set aside, and says so.
+ *   people   let those through as well. The command line refuses this
+ *            unless the content standard says person samples are allowed.
+ * An entry that needs a video or an audio input is always set aside. An
+ * entry let through here is marked as an input recipe, and gets its slots
+ * and a sample input from the `sample` stage.
+ *
  * Screening only narrows. Nothing here approves an entry: whatever is not
  * set aside is a candidate for the operator's review, no more.
  */
@@ -19,6 +30,7 @@ import { oneLine } from '../lib/text.js';
 export const REASONS = {
   markup: 'broken in the list',
   'needs-input': 'needs an input image, video or audio',
+  'input-person': 'needs an input image of a person',
   language: 'written in neither English nor Chinese',
   blank: 'has a blank with no default',
   'long-prompt': 'prompt too long',
@@ -50,18 +62,58 @@ export function compileTerms(config) {
   return compiled;
 }
 
+/** What `screen` may do with entries that need an input image. */
+export const INPUT_MODES = /** @type {const} */ (['none', 'objects', 'people']);
+
+/**
+ * The words that mark an input as being about a person, from the
+ * `input_people` list in screen-terms.json, as patterns. Matched like the
+ * standard's terms: a Latin term as a whole word, a Chinese one anywhere.
+ */
+export function compilePeopleTerms(config) {
+  return compileTerms({ rules: { people: { terms: config?.input_people?.terms ?? [] } } }).map(({ term, pattern }) => ({ term, pattern }));
+}
+
+/** Everything an entry says, in every language it has. */
+const everythingIn = (entry) => [entry.title, entry.title_zh, entry.prompt, ...Object.values(entry.variants ?? {})].filter(Boolean).join('\n');
+
+/**
+ * Whether an entry's input is about a person: the first term of the people
+ * list its text mentions, or null. Broad on purpose. It reads the whole
+ * prompt, not only the words about the input, so a prompt that puts an
+ * uploaded product in a model's hand counts as a person too.
+ */
+export function inputPersonTerm(entry, peopleTerms = []) {
+  const everything = everythingIn(entry);
+  return peopleTerms.find(({ pattern }) => pattern.test(everything))?.term ?? null;
+}
+
+/**
+ * Whether an entry is to become a recipe with inputs: it needs an input
+ * image and `inputs` lets such entries through. Says nothing of whether it
+ * was set aside for another reason.
+ */
+export const isInputEntry = (entry, inputs = 'none') => entry.needs_input === 'image' && inputs !== 'none';
+
 /**
  * The fixed rules for one entry. Returns every reason that applies; an empty
  * list means the entry stays a candidate.
  *
  * @param {object} entry
- * @param {{ terms?: object[], maxVideoSeconds?: number, maxPromptChars?: Record<string, number> }} options
+ * @param {{ terms?: object[], maxVideoSeconds?: number, maxPromptChars?: Record<string, number>, inputs?: 'none' | 'objects' | 'people', peopleTerms?: object[] }} options
  * @returns {{ rule: string, note: string }[]}
  */
-export function screenEntry(entry, { terms = [], maxVideoSeconds = 10, maxPromptChars = {} } = {}) {
+export function screenEntry(entry, { terms = [], maxVideoSeconds = 10, maxPromptChars = {}, inputs = 'none', peopleTerms = [] } = {}) {
   const reasons = [];
   for (const problem of entry.problems ?? []) reasons.push({ rule: 'markup', note: problem });
-  if (entry.needs_input) reasons.push({ rule: 'needs-input', note: `it needs an input ${entry.needs_input}` });
+  if (entry.needs_input) {
+    if (!isInputEntry(entry, inputs)) {
+      reasons.push({ rule: 'needs-input', note: `it needs an input ${entry.needs_input}` });
+    } else if (inputs !== 'people') {
+      const term = inputPersonTerm(entry, peopleTerms);
+      if (term) reasons.push({ rule: 'input-person', note: `it needs an input image of a person: it mentions "${term}"` });
+    }
+  }
   if (entry.lang === 'other') reasons.push({ rule: 'language', note: 'it is written in neither English nor Chinese' });
 
   const { text: filled, unresolved } = resolvePlaceholders(entry.prompt ?? '');
@@ -76,7 +128,7 @@ export function screenEntry(entry, { terms = [], maxVideoSeconds = 10, maxPrompt
     reasons.push({ rule: 'long-clip', note: `written for a ${entry.stated_seconds}-second clip; the limit is ${maxVideoSeconds}` });
   }
 
-  const everything = [entry.title, entry.title_zh, entry.prompt, ...Object.values(entry.variants ?? {})].filter(Boolean).join('\n');
+  const everything = everythingIn(entry);
   const matched = new Set();
   for (const { rule, term, pattern } of terms) {
     if (matched.has(rule) || !pattern.test(everything)) continue;
@@ -86,14 +138,35 @@ export function screenEntry(entry, { terms = [], maxVideoSeconds = 10, maxPrompt
   return reasons;
 }
 
-/** Screen every entry with the fixed rules. Returns { [id]: { status, reasons, notes } }. */
-export function screenEntries(entries, options) {
+/**
+ * Screen every entry with the fixed rules. Returns { [id]: { status, reasons, notes } }.
+ * A candidate that needs an input image also carries `input`: whether its
+ * input is an object or a person, which later stages and the reviewer read.
+ */
+export function screenEntries(entries, options = {}) {
   const screened = {};
   for (const entry of entries) {
     const reasons = screenEntry(entry, options);
-    screened[entry.id] = { status: reasons.length > 0 ? 'set-aside' : 'candidate', reasons, notes: [] };
+    const record = { status: reasons.length > 0 ? 'set-aside' : 'candidate', reasons, notes: [] };
+    if (record.status === 'candidate' && isInputEntry(entry, options.inputs)) {
+      const person = inputPersonTerm(entry, options.peopleTerms);
+      record.input = person ? 'person' : 'object';
+      record.notes.push(person
+        ? `input recipe: its input is about a person (it mentions "${person}")`
+        : 'input recipe: its input reads as a product or an object');
+    }
+    screened[entry.id] = record;
   }
   return screened;
+}
+
+/**
+ * Whether the content standard allows sample inputs that show a person. It
+ * says so in one line, "**Person samples:** allowed"; anything else,
+ * "not allowed" included, means no.
+ */
+export function personSamplesAllowed(standard) {
+  return /^\*\*Person samples:\*\*\s*allowed\s*$/m.test(standard ?? '');
 }
 
 /** How many entries each reason set aside. An entry with several reasons counts under each. */

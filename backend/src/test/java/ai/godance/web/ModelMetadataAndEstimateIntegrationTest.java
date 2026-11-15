@@ -137,8 +137,39 @@ class ModelMetadataAndEstimateIntegrationTest {
         assertThat(godance.get("imagen-4")).containsEntry("display_name", "Imagen 4")
                 .doesNotContainKey("capabilities");
         // A text model has none of the three; its existing fields are unchanged.
-        assertThat(godance.get("gpt-4o")).doesNotContainKeys("display_name", "description", "capabilities")
+        assertThat(godance.get("deepseek-v4-pro")).doesNotContainKeys("display_name", "description", "capabilities")
                 .containsKeys("modality", "requires_async", "pricing", "markup_percent");
+        // A chat model that can see states that, and nothing else (V32); its existing fields are unchanged too.
+        assertThat(godance.get("gpt-4o")).doesNotContainKeys("display_name", "description")
+                .containsEntry("capabilities", Map.of("inputs", Map.of("images", Map.of("max", 10))))
+                .containsKeys("modality", "requires_async", "pricing", "markup_percent");
+    }
+
+    @Test
+    void models_givenV32_expectsImageInputsOnExactlyTheChatModelsTheirProvidersDocument() {
+        Map<String, Map<String, Object>> godance = modelsById();
+
+        Set<String> accept = godance.entrySet().stream()
+                .filter(e -> "TEXT".equals(e.getValue().get("modality")))
+                .filter(e -> e.getValue().get("capabilities") instanceof Map<?, ?> c && c.containsKey("inputs"))
+                .map(Map.Entry::getKey).collect(Collectors.toSet());
+
+        assertThat(accept).containsExactlyInAnyOrder(
+                "gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-5.5", "gpt-5.4", "gpt-5.4-nano",
+                "claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5",
+                "gemini-3.1-flash-lite");
+        for (String model : accept) {
+            assertThat(godance.get(model).get("capabilities")).as(model)
+                    .isEqualTo(Map.of("inputs", Map.of("images", Map.of("max", 10))));
+            assertThat(catalog.metadata(model).capabilities().inputs().maxImages()).as(model).isEqualTo(10);
+        }
+        // No image or video model was given anything by this migration: the only ones that
+        // take inputs are the image models V33 seeded for edits.
+        assertThat(godance.entrySet().stream()
+                .filter(e -> !"TEXT".equals(e.getValue().get("modality")))
+                .filter(e -> e.getValue().get("capabilities") instanceof Map<?, ?> c && c.containsKey("inputs"))
+                .map(Map.Entry::getKey))
+                .containsExactlyInAnyOrder("gpt-image-2", "gpt-image-1.5", "seedream-5.0", "flux-2-pro");
     }
 
     @Test

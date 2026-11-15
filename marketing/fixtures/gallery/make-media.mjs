@@ -1,14 +1,15 @@
 // @ts-check
 /**
  * Draws the placeholder images for the fixture recipes: every image output,
- * its thumbnail, and every video poster named in fixtures/gallery/recipes/.
+ * its thumbnail, every video poster and every sample input named in
+ * fixtures/gallery/recipes/.
  * The pictures are abstract shapes made here, coloured from the recipe's
  * slug. Nothing is downloaded or copied from anywhere.
  *
  *   node fixtures/gallery/make-media.mjs
  *
- * The two tiny .webm clips were recorded once from a canvas animation and
- * are committed as they are; this script leaves them alone.
+ * The tiny .webm clips were recorded once from a canvas animation and are
+ * committed as they are; this script leaves them alone.
  */
 import { mkdir, readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -59,6 +60,10 @@ async function draw(/** @type {string} */ file, /** @type {number} */ width, /**
 
 for (const name of (await readdir(recipesDir)).filter((n) => n.endsWith('.json')).sort()) {
   const recipe = JSON.parse(await readFile(path.join(recipesDir, name), 'utf8'));
+  // A recipe with inputs: the sample for each slot.
+  for (const slot of recipe.inputs ?? []) {
+    await draw(slot.sample.file, slot.sample.width, slot.sample.height, 512);
+  }
   for (const run of recipe.runs) {
     for (const output of run.outputs) {
       if (recipe.modality === 'IMAGE') {

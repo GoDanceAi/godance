@@ -20,6 +20,9 @@ import ai.godance.domain.Provider;
 import ai.godance.gateway.ChatDtos.ChatChoice;
 import ai.godance.gateway.ChatDtos.ChatChunk;
 import ai.godance.gateway.ChatDtos.ChatMessage;
+import ai.godance.gateway.ChatDtos.ContentPart;
+import ai.godance.gateway.ChatDtos.ImagePart;
+import ai.godance.gateway.ChatDtos.TextPart;
 import ai.godance.gateway.ChatDtos.ChatRequest;
 import ai.godance.gateway.ChatDtos.ChatResponse;
 import ai.godance.gateway.ChatDtos.ChunkChoice;
@@ -146,11 +149,30 @@ public class GoogleVertexProvider implements ProviderAdapter {
                 continue;
             }
             String geminiRole = "assistant".equalsIgnoreCase(m.role()) ? "model" : "user";
-            contents.add(new GeminiContent(geminiRole, List.of(new GeminiPart(m.content()))));
+            contents.add(new GeminiContent(geminiRole, partsOf(m)));
         }
         int maxTokens = request.maxTokens() == null ? DEFAULT_MAX_TOKENS : request.maxTokens();
         GeminiGenerationConfig cfg = new GeminiGenerationConfig(request.temperature(), maxTokens);
         return new GeminiRequest(contents, systemInstruction, cfg);
+    }
+
+    /**
+     * A message's parts for generateContent. Text is one text part, as it
+     * always was. A message with an image keeps its parts in order, each
+     * image inline:
+     * {@code {"inlineData": {"mimeType": "image/png", "data": "…base64…"}}}.
+     */
+    private static List<GeminiPart> partsOf(ChatMessage m) {
+        if (!m.hasImages()) return List.of(new GeminiPart(m.content()));
+        List<GeminiPart> parts = new ArrayList<>(m.parts().size());
+        for (ContentPart part : m.parts()) {
+            if (part instanceof TextPart text) {
+                parts.add(new GeminiPart(text.text()));
+            } else if (part instanceof ImagePart image) {
+                parts.add(new GeminiPart(null, new GeminiInlineData(image.mediaType(), image.base64())));
+            }
+        }
+        return parts;
     }
 
     private static ChatResponse toDomain(GeminiResponse r, String requestedModel) {
@@ -205,7 +227,15 @@ public class GoogleVertexProvider implements ProviderAdapter {
 
     record GeminiContent(String role, List<GeminiPart> parts) { }
 
-    record GeminiPart(String text) { }
+    /** A text part, or an inline image. A text part serializes as {@code {"text": …}} and nothing more. */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    record GeminiPart(String text, @JsonProperty("inlineData") GeminiInlineData inlineData) {
+        GeminiPart(String text) {
+            this(text, null);
+        }
+    }
+
+    record GeminiInlineData(@JsonProperty("mimeType") String mimeType, String data) { }
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
     record GeminiGenerationConfig(

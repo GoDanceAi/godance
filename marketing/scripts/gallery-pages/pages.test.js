@@ -39,6 +39,28 @@ const recipes = readdirSync(FIXTURES)
 const bySlug = Object.fromEntries(recipes.map((recipe) => [recipe.slug, recipe]));
 const models = [...new Set(recipes.flatMap((recipe) => recipe.runs.map((run) => run.model)))];
 
+/** The recipes that take an input image, and the ones that take none. */
+const withInputs = recipes.filter((recipe) => recipe.inputs);
+const withoutInputs = recipes.filter((recipe) => !recipe.inputs);
+
+/** What stands for an uploaded file's id in a recipe's request: FILE_ID, or FILE_ID_1 … with several slots. */
+const fileId = (recipe, index) => (recipe.inputs.length === 1 ? 'FILE_ID' : `FILE_ID_${index + 1}`);
+
+/** The fields a recipe's slots add to its request, each naming its upload. */
+function inputFields(recipe) {
+  const pointers = recipe.inputs.map((slot, index) => ({ role: slot.role, pointer: { file_id: fileId(recipe, index) } }));
+  const of = (role) => pointers.filter((each) => each.role === role).map((each) => each.pointer);
+  if (recipe.modality === 'IMAGE') return { images: of('image') };
+  return {
+    ...(of('first_frame').length ? { first_frame: of('first_frame')[0] } : {}),
+    ...(of('last_frame').length ? { last_frame: of('last_frame')[0] } : {}),
+    ...(of('reference_image').length ? { reference_images: of('reference_image') } : {}),
+  };
+}
+
+/** A media URL as the pages write it: each part of the path percent-encoded. */
+const mediaUrl = (file) => MEDIA + file.split('/').map(encodeURIComponent).join('/');
+
 const outDirs = [];
 after(async () => {
   for (const dir of outDirs) await rm(dir, { recursive: true, force: true });
@@ -178,6 +200,13 @@ describe('gallery on, against the fixtures', { timeout: 300_000 }, () => {
     assert.ok(recipes.some((r) => r.prompt.zh_origin === 'list'), 'a prompt translated by the list');
     assert.ok(recipes.some((r) => r.prompt.variables?.length), 'a prompt with variables');
     assert.ok(recipes.some((r) => r.runs.length > 1), 'a recipe with two runs');
+    // Round 11: recipes that take an input image.
+    assert.ok(recipes.some((r) => r.modality === 'IMAGE' && r.inputs?.length === 1 && r.inputs[0].role === 'image'), 'an image recipe with one image slot');
+    assert.ok(recipes.some((r) => r.modality === 'VIDEO' && r.inputs?.some((slot) => slot.role === 'first_frame')), 'a video recipe with a first_frame slot');
+    assert.ok(recipes.some((r) => r.inputs?.length > 1), 'a recipe with more than one slot');
+    assert.ok(withInputs.some((r) => r.inputs.some((slot) => /[ '()]/.test(slot.sample.file))), 'a sample whose path has characters a shell reads');
+    assert.ok(withInputs.some((r) => r.inputs.some((slot) => !slot.hint.zh)) && withInputs.some((r) => r.inputs.some((slot) => slot.hint.zh)), 'hints with and without Chinese');
+    assert.ok(withoutInputs.length > 0, 'and recipes without inputs');
   });
 
   test('one page per recipe, each with its own title and canonical URL', () => {
@@ -446,7 +475,7 @@ describe('gallery on, against the fixtures', { timeout: 300_000 }, () => {
   });
 
   test('the API snippet reproduces the run, and its body is valid JSON for any prompt', () => {
-    for (const recipe of recipes) {
+    for (const recipe of withoutInputs) {
       const found = snippets(pageOf(dir, recipe.slug));
       assert.equal(found.length, recipe.runs.length * 2, `${recipe.slug}: a request and a poll per run`);
 
@@ -468,6 +497,129 @@ describe('gallery on, against the fixtures', { timeout: 300_000 }, () => {
         assert.equal(poll.kind, 'poll');
         assert.ok(poll.text.includes('curl https://api.godance.ai/v1/jobs/$JOB_ID'), poll.text);
       });
+    }
+  });
+
+  test('a recipe with inputs shows the upload, then the request that names it, then the poll', () => {
+    for (const recipe of withInputs) {
+      const found = snippets(pageOf(dir, recipe.slug));
+      assert.deepEqual(found.map((snippet) => snippet.kind), recipe.runs.flatMap(() => ['upload', 'create', 'poll']), recipe.slug);
+
+      recipe.runs.forEach((run, i) => {
+        const [upload, create, poll] = found.slice(i * 3, i * 3 + 3);
+
+        // One upload per slot: fetch the sample from the media base, then POST it to /v1/files.
+        assert.equal(upload.text.match(/^curl https:\/\/api\.godance\.ai\/v1\/files \\$/gm)?.length, recipe.inputs.length, upload.text);
+        recipe.inputs.forEach((slot, n) => {
+          const saved = `input-${n + 1}.webp`;
+          assert.ok(upload.text.includes(`# ${slot.slot}: the sample from this page, or an image of your own\n`), upload.text);
+          assert.ok(upload.text.includes(`curl -o ${saved} '${mediaUrl(slot.sample.file).replace(/'/g, '%27')}'\n`), upload.text);
+          assert.ok(upload.text.includes(`  -F "file=@${saved}"\n`), upload.text);
+          assert.ok(upload.text.includes(`in place of ${fileId(recipe, n)}`), upload.text);
+        });
+        assert.ok(upload.text.includes('-H "Authorization: Bearer $GODANCE_API_KEY"'), upload.text);
+
+        // The request: an edit for an image, the video request for a video, as a quoted here-document.
+        const endpoint = recipe.modality === 'VIDEO' ? 'videos/generations' : 'images/edits';
+        assert.ok(create.text.startsWith(`curl https://api.godance.ai/v1/${endpoint} \\\n`), create.text);
+        const heredoc = /<<'JSON'\n([\s\S]*)\nJSON$/.exec(create.text);
+        assert.ok(heredoc, `${recipe.slug}: a quoted here-document`);
+        const body = JSON.parse(heredoc[1]);
+        assert.deepEqual(body, { model: run.model, prompt: recipe.prompt[run.prompt_lang], ...run.params, ...inputFields(recipe), gallery_recipe: recipe.slug });
+        assert.equal(Object.keys(body).at(-1), 'gallery_recipe');
+
+        assert.ok(poll.text.includes('curl https://api.godance.ai/v1/jobs/$JOB_ID'), poll.text);
+      });
+
+      // The text between them says where the id goes.
+      const html = pageOf(dir, recipe.slug);
+      const note = inner(html, 'data-upload-note').replace(/\s+/g, ' ');
+      for (let n = 0; n < recipe.inputs.length; n += 1) assert.ok(note.includes(fileId(recipe, n)), note);
+      assert.match(inner(html, 'data-api-intro="inputs"').replace(/\s+/g, ' '), /first upload .* then send the request that names/);
+    }
+    // A recipe without inputs has no upload and none of this text.
+    for (const recipe of withoutInputs) {
+      const html = pageOf(dir, recipe.slug);
+      assert.ok(!html.includes('data-upload-note') && !html.includes('/v1/files') && !html.includes('FILE_ID'), recipe.slug);
+    }
+  });
+
+  test('the upload runs in a shell as shown, whatever a sample\'s path holds', (t) => {
+    const recipe = withInputs.find((r) => r.inputs.some((slot) => /[ '()]/.test(slot.sample.file)));
+    const { text } = snippets(pageOf(dir, recipe.slug))[0];
+
+    // Paste it into bash with curl replaced by something that prints its arguments, one per line.
+    const script = `curl() { printf '%s\\n' "$@"; printf -- '--end--\\n'; }\n${text}\n`;
+    const shell = spawnSync('bash', ['-c', script], {
+      encoding: 'utf8',
+      env: { PATH: process.env.PATH, GODANCE_API_KEY: 'gd_test_key', HOME: '/nonexistent' },
+    });
+    if (shell.error) return t.skip(`bash is not available: ${shell.error.message}`);
+    assert.equal(shell.status, 0, shell.stderr);
+
+    const calls = shell.stdout.split('--end--\n').filter(Boolean).map((call) => call.trimEnd().split('\n'));
+    assert.equal(calls.length, recipe.inputs.length * 2, 'a fetch and an upload per slot');
+    recipe.inputs.forEach((slot, n) => {
+      // The sample's address arrives as one argument, and decodes to the sample's own path.
+      assert.deepEqual(calls[n * 2].slice(0, 2), ['-o', `input-${n + 1}.webp`]);
+      assert.equal(calls[n * 2].length, 3);
+      assert.equal(decodeURIComponent(calls[n * 2][2]), MEDIA + slot.sample.file);
+      assert.deepEqual(calls[n * 2 + 1], ['https://api.godance.ai/v1/files', '-H', 'Authorization: Bearer gd_test_key', '-F', `file=@input-${n + 1}.webp`]);
+    });
+  });
+
+  test('a recipe with inputs shows each sample beside the output, labelled with its slot and hint', () => {
+    for (const recipe of recipes) {
+      const html = pageOf(dir, recipe.slug);
+      const block = /<div\b[^>]*data-recipe-inputs[^>]*>([\s\S]*?)<\/section>\s*<section\b[^>]*aria-labelledby="gallery-io-out"/.exec(html);
+      assert.equal(block !== null, Boolean(recipe.inputs), recipe.slug);
+      if (!recipe.inputs) {
+        assert.ok(!/data-input-slot|Sample input/.test(html), recipe.slug);
+        continue;
+      }
+      const slots = [...block[1].matchAll(/<li\b[^>]*data-input-slot="([^"]*)"[^>]*>([\s\S]*?)<\/li>/g)];
+      assert.deepEqual(slots.map((match) => decode(match[1])), recipe.inputs.map((slot) => slot.slot), recipe.slug);
+      slots.forEach((match, n) => {
+        const slot = recipe.inputs[n];
+        const item = match[2];
+        const picture = tags(item, 'img')[0];
+        assert.equal(attr(picture, 'src'), mediaUrl(slot.sample.file));
+        assert.equal(attr(picture, 'width'), String(slot.sample.width));
+        assert.equal(attr(picture, 'height'), String(slot.sample.height));
+        assert.ok(attr(picture, 'alt').includes(slot.hint.en), attr(picture, 'alt'));
+        assert.equal(attr(tags(item, 'a')[0], 'href'), mediaUrl(slot.sample.file), 'the sample opens full size');
+        assert.equal(inner(item, 'data-input-name'), slot.slot);
+        assert.equal(inner(item, 'data-input-role'), { image: 'Image', first_frame: 'First frame', last_frame: 'Last frame', reference_image: 'Reference image' }[slot.role]);
+        assert.equal(inner(item, 'data-input-hint'), slot.hint.en);
+        assert.equal(inner(item, 'data-input-hint-zh'), slot.hint.zh ?? null);
+        if (slot.hint.zh) assert.equal(attr(tags(item, 'p').find((tag) => attr(tag, 'data-input-hint-zh') !== null), 'lang'), 'zh-Hans');
+      });
+      assert.match(inner(html, 'data-input-note').replace(/\s+/g, ' '), /generated on Godance to stand in for your own image/);
+      // The output comes after the samples, in the same block.
+      const output = recipe.runs[0].outputs[0];
+      const after = html.slice(html.indexOf('aria-labelledby="gallery-io-out"'));
+      assert.ok(after.indexOf(mediaUrl(output.file)) > 0, recipe.slug);
+      assert.ok(html.indexOf(mediaUrl(recipe.inputs[0].sample.file)) < html.indexOf('aria-labelledby="gallery-io-out"'), recipe.slug);
+    }
+  });
+
+  test('"How it was made" lists each sample\'s own model and cost, beside the run\'s', () => {
+    for (const recipe of recipes) {
+      const html = pageOf(dir, recipe.slug);
+      const sections = [...html.matchAll(/<section\b[^>]*data-sample-facts="([^"]*)"[^>]*>([\s\S]*?)<\/section>/g)];
+      assert.deepEqual(sections.map((match) => decode(match[1])), (recipe.inputs ?? []).map((slot) => slot.slot), recipe.slug);
+      sections.forEach((match, n) => {
+        const made = recipe.inputs[n].sample.generated_from;
+        const text = decode(match[2].replace(/<[^>]+>/g, '\n'));
+        assert.ok(text.includes(made.model), `${recipe.slug}: the sample's model`);
+        for (const [key, value] of Object.entries(made.params)) assert.ok(text.includes(key) && text.includes(String(value)), `${recipe.slug}: ${key}`);
+        assert.equal(inner(match[2], 'data-sample-cost'), `$${(made.cost_cents / 100).toFixed(2)}`);
+        assert.ok(match[2].includes(`datetime="${made.generated_on}"`));
+        assert.equal(inner(match[2], 'data-sample-prompt'), made.prompt);
+      });
+      // The run's own facts are still the run's.
+      assert.equal(inner(html, 'data-cost'), `$${(recipe.runs[0].cost_cents / 100).toFixed(2)}`, recipe.slug);
+      assert.equal(/data-sample-cost-note/.test(html), Boolean(recipe.inputs), recipe.slug);
     }
   });
 
@@ -576,7 +728,54 @@ describe('gallery on, against the fixtures', { timeout: 300_000 }, () => {
     for (const recipe of recipes) {
       const card = new RegExp(`<a\\b[^>]*data-recipe="${recipe.slug}"[\\s\\S]*?</a>`).exec(html)[0];
       assert.equal(/data-video-mark/.test(card), recipe.modality === 'VIDEO', recipe.slug);
+      // A mark, and what the filter reads, on the recipes that take an input image.
+      assert.equal(/data-input-mark/.test(card), Boolean(recipe.inputs), recipe.slug);
+      assert.equal(attr(tags(card, 'a')[0], 'data-input'), recipe.inputs ? 'image' : null, recipe.slug);
     }
+  });
+
+  test('the gallery page offers "Uses your image", which keeps the recipes that take an input', () => {
+    const html = read(dir, 'gallery/index.html');
+    const filter = tags(html, 'a').find((tag) => attr(tag, 'data-filter') === 'input' && attr(tag, 'data-value') === 'image');
+    assert.ok(filter, 'the filter is on the page');
+    assert.equal(attr(filter, 'href'), '?input=image');
+    assert.match(html, />Uses your image<\/a>/);
+    assert.ok(tags(html, 'a').some((tag) => attr(tag, 'data-filter') === 'input' && attr(tag, 'data-value') === ''), 'and a way back to all');
+
+    // Run the page's own script against stand-ins for its cards, with ?input=image in the address.
+    const source = [...html.matchAll(/<script(?![^>]*application\/ld\+json)[^>]*>([\s\S]*?)<\/script>/g)]
+      .map((match) => match[1])
+      .find((text) => text.includes('data-gallery-search'));
+    assert.ok(source, 'the gallery script');
+    const cards = recipes.map((recipe) => ({
+      hidden: false,
+      dataset: { recipe: recipe.slug, modality: recipe.modality.toLowerCase(), tags: JSON.stringify(recipe.tags), ...(recipe.inputs ? { input: 'image' } : {}) },
+    }));
+    const link = (dataset) => ({ dataset, classList: { toggle() {} }, setAttribute() {}, removeAttribute() {}, addEventListener() {}, pathname: '/gallery' });
+    const filters = [link({ filter: 'input', value: '' }), link({ filter: 'input', value: 'image' })];
+    const count = { textContent: '' };
+    const empty = { hidden: true };
+    const root = {
+      querySelectorAll: (selector) => (selector === '[data-recipe]' ? cards : selector === '[data-filter]' ? filters : []),
+      querySelector: (selector) => ({ '[data-gallery-count]': count, '[data-gallery-empty]': empty, '[data-gallery-js]': { hidden: true } }[selector] ?? null),
+      getAttribute: () => '/gallery/_search.json',
+    };
+    const shown = (search) => {
+      for (const card of cards) card.hidden = false;
+      vm.runInNewContext(source, {
+        document: { querySelector: (selector) => (selector === '[data-gallery]' ? root : null), activeElement: null },
+        location: { search, pathname: '/gallery' },
+        window: { addEventListener() {} },
+        history: { pushState() {}, replaceState() {} },
+        URLSearchParams,
+        fetch: () => new Promise(() => {}),
+      });
+      return cards.filter((card) => !card.hidden).map((card) => card.dataset.recipe);
+    };
+    assert.deepEqual(shown('?input=image'), withInputs.map((r) => r.slug));
+    assert.equal(count.textContent, `${withInputs.length} of ${recipes.length} recipes`);
+    assert.deepEqual(shown(''), recipes.map((r) => r.slug));
+    assert.deepEqual(shown('?input=image&type=video'), withInputs.filter((r) => r.modality === 'VIDEO').map((r) => r.slug));
   });
 
   test('the model filter is plain links, and search data is not inlined', () => {
@@ -620,6 +819,7 @@ describe('gallery on, against the fixtures', { timeout: 300_000 }, () => {
           thumb: thumb === null ? null : MEDIA + thumb,
           published_on: recipe.published_on,
           ...(recipe.prompt.template ? { has_variables: true } : {}),
+          ...(recipe.inputs ? { has_inputs: true } : {}),
         };
       }),
     );
@@ -627,6 +827,9 @@ describe('gallery on, against the fixtures', { timeout: 300_000 }, () => {
     // has_variables is true where there is a template to fill in, and absent everywhere else.
     assert.deepEqual(data.recipes.filter((r) => 'has_variables' in r).map((r) => [r.slug, r.has_variables]).sort(),
       recipes.filter((r) => r.prompt.template).map((r) => [r.slug, true]).sort());
+    // has_inputs is true where the recipe takes an input image, and absent everywhere else.
+    assert.deepEqual(data.recipes.filter((r) => 'has_inputs' in r).map((r) => [r.slug, r.has_inputs]).sort(),
+      withInputs.map((r) => [r.slug, true]).sort());
   });
 
   test('/gallery/<slug>.json matches the coordination shape', () => {
@@ -642,11 +845,42 @@ describe('gallery on, against the fixtures', { timeout: 300_000 }, () => {
           ...(recipe.prompt.template ? { template: recipe.prompt.template, variables: recipe.prompt.variables } : {}),
         },
         run: { model: run.model, prompt_lang: run.prompt_lang, params: run.params },
+        ...(recipe.inputs
+          ? { inputs: recipe.inputs.map((slot) => ({ slot: slot.slot, role: slot.role, hint: slot.hint.en, sample_url: mediaUrl(slot.sample.file) })) }
+          : {}),
         url: `${SITE}/gallery/${recipe.slug}`,
       });
     }
     const json = readdirSync(path.join(dir, 'gallery')).filter((name) => name.endsWith('.json'));
     assert.deepEqual(json.sort(), ['_search.json', 'index.json', ...recipes.map((r) => `${r.slug}.json`)].sort());
+  });
+
+  test('a recipe with inputs serves them as the round-11 contract has them', () => {
+    const data = JSON.parse(read(dir, 'gallery/enamel-teapot-on-marble.json'));
+    assert.deepEqual(data.inputs, [
+      {
+        slot: 'product photo',
+        role: 'image',
+        hint: 'One product on a plain background',
+        sample_url: 'https://media.example.test/gallery/enamel-teapot-on-marble/input-0.webp',
+      },
+    ]);
+    assert.deepEqual(Object.keys(data.inputs[0]), ['slot', 'role', 'hint', 'sample_url']);
+    assert.ok(Object.keys(data).includes('inputs'), 'a top-level key');
+
+    // A video: a first frame and a reference image, each sample's address absolute and encoded.
+    const video = JSON.parse(read(dir, 'gallery/paper-boat-sets-off.json'));
+    assert.deepEqual(video.inputs.map((slot) => [slot.slot, slot.role]), [['first frame', 'first_frame'], ['style reference', 'reference_image']]);
+    for (const slot of video.inputs) {
+      assert.ok(slot.sample_url.startsWith(MEDIA), slot.sample_url);
+      assert.equal(new URL(slot.sample_url).href, slot.sample_url, 'a URL as it stands');
+    }
+    assert.equal(decodeURIComponent(video.inputs[1].sample_url), `${MEDIA}paper-boat-sets-off/input-1 (boat's style).webp`);
+
+    // A recipe without inputs has no such key at all.
+    for (const recipe of withoutInputs) {
+      assert.ok(!('inputs' in JSON.parse(read(dir, `gallery/${recipe.slug}.json`))), recipe.slug);
+    }
   });
 
   test('a recipe with variables serves its template as the round-10 contract has it', () => {
@@ -748,6 +982,22 @@ describe('gallery on, with "Run this" on', { timeout: 300_000 }, () => {
       assert.equal(attr(cta, 'href'),
         `https://app.godance.ai/create/${kind}?example=${recipe.slug}&utm_source=godance&utm_medium=gallery&utm_campaign=${recipe.slug}`, recipe.slug);
       assert.ok(!/Get an API key/.test(html), recipe.slug);
+    }
+  });
+
+  test('a recipe with inputs adds one line: run this with your own', () => {
+    for (const recipe of recipes) {
+      const html = pageOf(dir, recipe.slug);
+      const line = inner(html, 'data-run-own');
+      if (!recipe.inputs) {
+        assert.equal(line, null, recipe.slug);
+        assert.ok(!/Run this with your own/.test(html), recipe.slug);
+        continue;
+      }
+      assert.match(line.replace(/\s+/g, ' ').trim(), recipe.inputs.length === 1
+        ? /^Run this with your own image: it opens with the sample in place, ready to swap\.$/
+        : /^Run this with your own images: it opens with the samples in place, ready to swap\.$/);
+      assert.equal(html.match(/data-run-own/g).length, 1, 'one line');
     }
   });
 });

@@ -4,12 +4,14 @@
  * Used by /gallery and by each model page.
  *
  * Without JavaScript every card is listed and the model filter works, because
- * each model is a link to its own page. With it, the type and tag filters and
- * the search box appear; their state lives in the query string
- * (?type=video&tag=street&q=fog), so a filtered view can be linked and
- * survives a reload. Search data is fetched the first time search is used.
+ * each model is a link to its own page. With it, the type, input and tag
+ * filters and the search box appear; their state lives in the query string
+ * (?type=video&input=image&tag=street&q=fog), so a filtered view can be
+ * linked and survives a reload. Search data is fetched the first time search
+ * is used.
  */
 import RecipeCard from './RecipeCard.astro';
+import { hasInputs } from './inputs';
 import { GALLERY_PATH, galleryTags, modelPath, type Recipe } from '../../lib/gallery-recipes';
 
 interface Props {
@@ -26,6 +28,8 @@ const { recipes, mediaBase, models, activeModel } = Astro.props;
 const tags = galleryTags(recipes);
 const hasImages = recipes.some((r) => r.modality === 'IMAGE');
 const hasVideos = recipes.some((r) => r.modality === 'VIDEO');
+// The input filter is offered only when it would change the list.
+const someUseImages = recipes.some(hasInputs) && !recipes.every(hasInputs);
 const noun = (n: number) => `${n} recipe${n === 1 ? '' : 's'}`;
 ---
 
@@ -57,6 +61,13 @@ const noun = (n: number) => `${n} recipe${n === 1 ? '' : 's'}`;
           <a href="?" class="pill" data-filter="type" data-value="">All</a>
           <a href="?type=image" class="pill" data-filter="type" data-value="image">Images</a>
           <a href="?type=video" class="pill" data-filter="type" data-value="video">Videos</a>
+        </div>
+      )}
+      {someUseImages && (
+        <div class="gallery-filter-row" role="group" aria-label="Filter by input">
+          <span class="gallery-filter-label">Input</span>
+          <a href="?" class="pill" data-filter="input" data-value="">All</a>
+          <a href="?input=image" class="pill" data-filter="input" data-value="image">Uses your image</a>
         </div>
       )}
       {tags.length > 0 && (
@@ -140,12 +151,13 @@ const noun = (n: number) => `${n} recipe${n === 1 ? '' : 's'}`;
 
     function read() {
       var p = new URLSearchParams(location.search);
-      return { type: p.get('type') || '', tag: p.get('tag') || '', q: p.get('q') || '' };
+      return { type: p.get('type') || '', input: p.get('input') || '', tag: p.get('tag') || '', q: p.get('q') || '' };
     }
 
     function query(state) {
       var p = new URLSearchParams();
       if (state.type) p.set('type', state.type);
+      if (state.input) p.set('input', state.input);
       if (state.tag) p.set('tag', state.tag);
       if (state.q) p.set('q', state.q);
       var s = p.toString();
@@ -175,6 +187,7 @@ const noun = (n: number) => `${n} recipe${n === 1 ? '' : 's'}`;
       cards.forEach(function (card) {
         var slug = card.dataset.recipe;
         var ok = (!state.type || card.dataset.modality === state.type) &&
+                 (!state.input || card.dataset.input === state.input) &&
                  (!state.tag || tagsOf[slug].indexOf(state.tag) !== -1);
         if (ok && terms.length && texts) {
           var text = texts[slug] || '';
@@ -222,7 +235,7 @@ const noun = (n: number) => `${n} recipe${n === 1 ? '' : 's'}`;
     var clear = root.querySelector('[data-gallery-clear]');
     if (clear) clear.addEventListener('click', function (event) {
       event.preventDefault();
-      go({ type: '', tag: '', q: '' }, false);
+      go({ type: '', input: '', tag: '', q: '' }, false);
     });
 
     if (input) {

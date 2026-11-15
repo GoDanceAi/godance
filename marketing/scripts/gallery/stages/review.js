@@ -16,8 +16,14 @@
  * A prompt that keeps its blanks shows its template in both languages, each
  * {{name}} marker marked, and the default of every variable in English and
  * in Chinese: the defaults are held to the content standard like the prompt.
+ *
+ * An input recipe shows each sample input before the output it produced,
+ * with its slot: the name and the hints, which the operator can change
+ * here, the prompt the sample was generated from, and what it cost. The
+ * sample is held to the content standard like the output.
  */
 import { parseTemplate } from '../../../src/lib/gallery-template.js';
+import { recipeInputs } from './sample.js';
 
 /** JSON safe inside a <script> element. */
 const embed = (data) =>
@@ -26,8 +32,8 @@ const embed = (data) =>
     .replaceAll(String.fromCharCode(0x2028), '\\u2028')
     .replaceAll(String.fromCharCode(0x2029), '\\u2029');
 
-/** What the sheet shows for each candidate that has a finished run. */
-export function reviewItems({ entries, screened, translated, runs }) {
+/** What the sheet shows for each candidate that has a finished run. `samples` holds the slots of input recipes. */
+export function reviewItems({ entries, screened, translated, runs, samples = {} }) {
   const items = [];
   for (const entry of entries) {
     const record = translated[entry.id];
@@ -46,6 +52,9 @@ export function reviewItems({ entries, screened, translated, runs }) {
         : null,
       changes: record.changes,
       run: { model: run.model, prompt_lang: run.prompt_lang, params: run.params, cost_cents: run.cost_cents, generated_on: run.generated_on, outputs: run.outputs },
+      // An input recipe: its slots, each with the sample the run was made with. Null for any other.
+      inputs: run.inputs ? recipeInputs(samples[entry.id]) : null,
+      input_subject: run.inputs ? (samples[entry.id]?.input ?? null) : null,
       source: { list: entry.list, list_commit: entry.list_commit, licence: entry.licence, author: entry.author, author_url: entry.author_url, original_url: entry.original_url },
       // What screening noted, then what translation did: a template that could not be kept says why.
       notes: [...(screened[entry.id]?.notes ?? []), ...(record.notes ?? [])],
@@ -96,6 +105,7 @@ export function reviewSheet({ items, standardVersion, decisions = null, mediaBas
   table.vars { border-collapse: collapse; font-size: 13px; margin: 4px 0 8px; }
   table.vars th, table.vars td { border: 1px solid var(--line); padding: 3px 8px; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
   table.vars th { color: var(--muted); font-weight: 600; }
+  table.vars input { font: inherit; width: 100%; min-width: 9em; box-sizing: border-box; padding: 2px 4px; }
 </style>
 </head>
 <body>
@@ -149,6 +159,15 @@ export function reviewSheet({ items, standardVersion, decisions = null, mediaBas
 
   for (const item of data.items) {
     const media = el('div', { className: 'media' });
+    // An input recipe: each sample input first, then what it produced.
+    const slotFields = [];
+    for (const slot of item.inputs ?? []) {
+      media.append(el('div', { className: 'label', textContent: 'Sample input: ' + slot.slot + ' (' + slot.role + ')' }));
+      media.append(el('img', { loading: 'lazy', src: data.mediaBase + slot.sample.file, width: slot.sample.width, height: slot.sample.height, alt: '' }));
+      media.append(el('div', { className: 'meta', textContent: slot.sample.width + ' × ' + slot.sample.height + ' · generated on ' + slot.sample.generated_from.model
+        + ' · ' + slot.sample.generated_from.cost_cents + ' cent' + (slot.sample.generated_from.cost_cents === 1 ? '' : 's') }));
+    }
+    if (item.inputs) media.append(el('div', { className: 'label', textContent: 'Output' }));
     for (const output of item.run.outputs) {
       if (item.modality === 'VIDEO') {
         const video = el('video', { controls: true, preload: 'metadata', src: data.mediaBase + output.file });
@@ -197,6 +216,27 @@ export function reviewSheet({ items, standardVersion, decisions = null, mediaBas
     } else if (item.prompt.variables?.length) {
       body.append(el('div', { className: 'meta', textContent: 'Blanks filled with their defaults: ' + item.prompt.variables.map((v) => v.name + ' = ' + v.default).join('; ') }));
     }
+    if (item.inputs) {
+      // The slots: what the gallery will say to put in each, and what each sample was made from.
+      const sampleCents = item.inputs.reduce((total, slot) => total + slot.sample.generated_from.cost_cents, 0);
+      body.append(el('div', { className: 'label', textContent: 'Input slots (' + (item.input_subject === 'person' ? 'about a person' : 'about an object')
+        + ') · samples ' + sampleCents + ' cent' + (sampleCents === 1 ? '' : 's') + ' + run ' + cost + '. The standard applies to each sample, and a hint never asks for a real person, a child, or anyone who has not agreed.' }));
+      const earlier = decisions[item.id]?.slots ?? [];
+      const table = el('table', { className: 'vars' });
+      table.append(el('tr', {}, el('th', { textContent: 'Slot name' }), el('th', { textContent: 'Role' }), el('th', { textContent: 'Hint, English' }), el('th', { textContent: 'Hint, Chinese' })));
+      item.inputs.forEach((slot, index) => {
+        const name = el('input', { type: 'text', value: earlier[index]?.slot ?? slot.slot, ariaLabel: 'Slot name' });
+        const en = el('input', { type: 'text', value: earlier[index]?.hint?.en ?? slot.hint.en, ariaLabel: 'Hint in English' });
+        const zh = el('input', { type: 'text', lang: 'zh-Hans', value: earlier[index]?.hint?.zh ?? slot.hint.zh ?? '', ariaLabel: 'Hint in Chinese' });
+        slotFields.push({ name, en, zh });
+        table.append(el('tr', {}, el('td', {}, name), el('td', { textContent: slot.role }), el('td', {}, en), el('td', {}, zh)));
+      });
+      body.append(table);
+      for (const slot of item.inputs) {
+        body.append(el('div', { className: 'label', textContent: 'Prompt the sample for "' + slot.slot + '" was generated from' }),
+          el('pre', { textContent: slot.sample.generated_from.prompt }));
+      }
+    }
     if (item.notes.length) {
       body.append(el('div', { className: 'label', textContent: 'Notes' }));
       const list = el('ul', { className: 'notes' });
@@ -206,12 +246,17 @@ export function reviewSheet({ items, standardVersion, decisions = null, mediaBas
 
     const reason = el('input', { type: 'text', placeholder: 'Reason (needed for a rejection)', value: decisions[item.id]?.reason ?? '' });
     const warn = el('span', { className: 'warn' });
+    // The slots as the operator left them: saved with the decision, and used when the recipe is written.
+    const slotsNow = () => slotFields.map((field) => ({ slot: field.name.value, hint: { en: field.en.value, zh: field.zh.value } }));
     const choose = (decision) => {
       if (decision === null) delete decisions[item.id];
-      else decisions[item.id] = { slug: item.slug, decision, reason: reason.value, decided_on: today() };
+      else decisions[item.id] = { slug: item.slug, decision, reason: reason.value, decided_on: today(), ...(slotFields.length ? { slots: slotsNow() } : {}) };
       persist(); refresh();
     };
     reason.addEventListener('input', () => { if (decisions[item.id]) { decisions[item.id].reason = reason.value; persist(); refresh(); } });
+    for (const field of slotFields) for (const input of [field.name, field.en, field.zh]) {
+      input.addEventListener('input', () => { if (decisions[item.id]) { decisions[item.id].slots = slotsNow(); persist(); } });
+    }
     const decide = el('div', { className: 'decide' },
       el('button', { textContent: 'Approve', onclick: () => choose('approved') }),
       el('button', { textContent: 'Reject', onclick: () => choose('rejected') }),

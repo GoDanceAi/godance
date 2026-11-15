@@ -21,6 +21,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Primary;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -94,6 +95,7 @@ class InputRetentionIntegrationTest {
     @TestConfiguration
     static class StandInCheck {
         @Bean
+        @Primary   // in place of the built-in check, which asks a model
         InputPersonCheck inputPersonCheck() {
             return (userId, image, contentType) -> InputPersonCheck.Verdict.NO_PERSON;
         }

@@ -25,6 +25,7 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.boot.webtestclient.autoconfigure.AutoConfigureWebTestClient;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Primary;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.MultipartBodyBuilder;
@@ -107,6 +108,7 @@ class InputFileIntegrationTest {
     @TestConfiguration
     static class StandInCheck {
         @Bean
+        @Primary   // in place of the built-in check, which asks a model
         InputPersonCheck inputPersonCheck() {
             return (userId, image, contentType) -> {
                 CHECKS.incrementAndGet();
