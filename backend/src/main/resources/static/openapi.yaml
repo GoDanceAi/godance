@@ -60,6 +60,13 @@ tags:
       are switched on, uploading and every request that names an input answer
       403 `inputs_disabled`.
   - name: Recipes
+  - name: Batches
+    description: |
+      One version of a recipe run over many rows. Each row becomes an ordinary
+      job, so a batch charges nothing itself: every cent is a job's. The
+      server starts the rows, a few at a time; when credit or a spending cap
+      refuses one, the batch is PAUSED (it does not fail) until it is resumed.
+      A row is never submitted twice.
   - name: Estimates
   - name: Usage
   - name: API keys
@@ -841,6 +848,203 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+  /v1/recipe-batches/estimate:
+    post:
+      operationId: estimateRecipeBatch
+      tags: [Batches]
+      summary: What a batch would cost, before it is created.
+      description: |
+        Takes the body of `POST /v1/recipe-batches` and runs the same checks.
+        Nothing is written and nothing is charged. `total_cents` is the sum of
+        what each row's job would reserve; `enough` compares it with the
+        balance now. A batch can be created either way.
+      security: [{ apiKey: [] }, { session: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BatchRequest" }
+      responses:
+        "200":
+          description: The estimate.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BatchEstimate" }
+        "400": { $ref: "#/components/responses/BatchRefused" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/recipe-batches:
+    post:
+      operationId: createRecipeBatch
+      tags: [Batches]
+      summary: Run one recipe version over many rows.
+      description: |
+        Answers 201 with the batch, `QUEUED`. Creating a batch charges nothing
+        and starts nothing: the server starts its rows a few seconds later,
+        `max_concurrency` at a time, and each row's job reserves its own price
+        when it starts.
+
+        Every row is checked first, by the rules of a single run. If one
+        would be refused the whole request answers 400 with that refusal's
+        `code` (`recipe_variable_unknown`, for instance, or
+        `invalid_batch_row` when it has none), the row's 0-based index in
+        `row`, and nothing written.
+
+        Problem codes: `batch_too_large` (400, more than 500 rows),
+        `invalid_batch` (400), `recipe_not_found` (404, the version is not
+        one of the caller's), `batch_limit_reached` (409, two batches that
+        are not finished already).
+      security: [{ apiKey: [] }, { session: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BatchRequest" }
+            example:
+              version_id: 0d6b2f3a-8c7d-4c58-9d0a-5f2f4f7f3a10
+              rows:
+                - { variables: { color: blue } }
+                - { variables: { color: green, surface: oak table } }
+              max_concurrency: 2
+      responses:
+        "201":
+          description: The batch, `QUEUED`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Batch" }
+        "400": { $ref: "#/components/responses/BatchRefused" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    get:
+      operationId: listRecipeBatches
+      tags: [Batches]
+      summary: The caller's batches, newest first.
+      description: A bare JSON array.
+      security: [{ apiKey: [] }, { session: [] }]
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+        - { name: before, in: query, description: A batch id. Only batches older than it., schema: { type: string, format: uuid } }
+        - { name: recipe_id, in: query, description: A recipe id. Only that recipe's batches., schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Batches.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Batch" } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /v1/recipe-batches/{id}:
+    get:
+      operationId: getRecipeBatch
+      tags: [Batches]
+      summary: One batch, with its counts.
+      description: Another account's batch answers 404 `batch_not_found`, exactly as one that does not exist.
+      security: [{ apiKey: [] }, { session: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/BatchId" }
+      responses:
+        "200":
+          description: The batch.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Batch" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/recipe-batches/{id}/rows:
+    get:
+      operationId: listRecipeBatchRows
+      tags: [Batches]
+      summary: A batch's rows, in row order.
+      description: A bare JSON array. Each output link is signed when the row is read and expires.
+      security: [{ apiKey: [] }, { session: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/BatchId" }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+        - { name: after, in: query, description: The index of the last row already read., schema: { type: integer, minimum: 0 } }
+      responses:
+        "200":
+          description: Rows.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/BatchRow" } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/recipe-batches/{id}/cancel:
+    post:
+      operationId: cancelRecipeBatch
+      tags: [Batches]
+      summary: Cancel a batch. Rows that have not started are skipped.
+      description: Rows that are running finish and are charged as usual. Cancelling a batch that has ended changes nothing.
+      security: [{ apiKey: [] }, { session: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/BatchId" }
+      responses:
+        "200":
+          description: The batch.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Batch" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/recipe-batches/{id}/resume:
+    post:
+      operationId: resumeRecipeBatch
+      tags: [Batches]
+      summary: Continue a paused batch from the row where it stopped.
+      description: Top up, or wait for the cap's period to turn over, then resume. A batch that is not paused answers 409 `batch_not_resumable`.
+      security: [{ apiKey: [] }, { session: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/BatchId" }
+      responses:
+        "200":
+          description: The batch.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Batch" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/recipe-batches/{id}/results.csv:
+    get:
+      operationId: downloadRecipeBatchCsv
+      tags: [Batches]
+      summary: The results as a CSV file, one line per row.
+      description: |
+        Columns: `index`, `status`, one for each of the recipe's variables,
+        `job_id`, `cost_cents`, `error`, then a signed link to each output as
+        `output_1` to `output_n`. The links expire; download the file again
+        for fresh ones.
+      security: [{ apiKey: [] }, { session: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/BatchId" }
+      responses:
+        "200":
+          description: The file.
+          content:
+            text/csv:
+              schema: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/recipe-batches/{id}/results.zip:
+    get:
+      operationId: downloadRecipeBatchZip
+      tags: [Batches]
+      summary: Every output file of a batch, as a zip.
+      description: When the outputs total more than 500 MB it answers 413 `results_too_large`; use the CSV's links instead.
+      security: [{ apiKey: [] }, { session: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/BatchId" }
+      responses:
+        "200":
+          description: The file.
+          content:
+            application/zip:
+              schema: { type: string, format: binary }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "413": { $ref: "#/components/responses/TooLarge" }
   /v1/estimates:
     post:
       operationId: createEstimate
@@ -1642,6 +1846,11 @@ components:
       in: path
       required: true
       schema: { type: string, format: uuid }
+    BatchId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
     ConversationId:
       name: id
       in: path
@@ -1716,6 +1925,15 @@ components:
       content:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }
+    BatchRefused:
+      description: |
+        The batch request is refused and nothing is written: `batch_too_large`,
+        `invalid_batch`, or one row's refusal. A row's refusal carries the code
+        a single run would get (`invalid_batch_row` when it has none), the
+        row's 0-based index in `row`, and a `detail` that starts `row N:`.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/BatchProblem" }
     VideoError:
       description: A problem document that also carries OpenAI's `error` object. `code` says which refusal.
       content:
@@ -2094,13 +2312,18 @@ components:
         purged: { type: boolean, description: The files and prompt have been deleted. }
         mediaExpiresAt: { type: [string, "null"], format: date-time, description: When the files and prompt are due to be deleted; null while saved. }
         saved: { type: boolean }
-        channel: { type: [string, "null"], enum: [STUDIO, API, null], description: How the job was made. }
+        channel: { type: [string, "null"], enum: [STUDIO, API, BATCH, null], description: "How the job was made. `BATCH` for a job a recipe batch made." }
         galleryRecipe: { type: [string, "null"] }
         recipe:
           oneOf:
             - { $ref: "#/components/schemas/JobRecipe" }
             - { type: "null" }
         inputs: { type: array, items: { $ref: "#/components/schemas/JobInput" } }
+        batch:
+          description: The recipe batch and the row the job was made for. Null for a job outside a batch.
+          oneOf:
+            - { $ref: "#/components/schemas/JobBatch" }
+            - { type: "null" }
     JobOutput:
       type: object
       properties:
@@ -2122,6 +2345,11 @@ components:
         id: { type: string, format: uuid }
         version: { type: integer }
         variables: { type: [object, "null"], additionalProperties: { type: string } }
+    JobBatch:
+      type: object
+      properties:
+        id: { type: string, format: uuid, description: The batch. }
+        row: { type: integer, description: "The index of the job's row in `GET /v1/recipe-batches/{id}/rows`." }
     SavedJobs:
       type: object
       properties:
@@ -2217,6 +2445,88 @@ components:
         latest_version: { $ref: "#/components/schemas/RecipeVersion" }
         attempts: { type: integer, description: How many jobs ran any version. }
         spent_cents: { type: integer, description: What the finished ones were charged. }
+    BatchProblem:
+      description: A problem document for a refused batch request.
+      allOf:
+        - { $ref: "#/components/schemas/Problem" }
+        - type: object
+          properties:
+            row: { type: integer, description: The 0-based index of the row that was refused. Present only for a row's refusal. }
+    BatchRequest:
+      type: object
+      description: The body of `POST /v1/recipe-batches` and of its estimate.
+      required: [version_id, rows]
+      properties:
+        version_id: { type: string, format: uuid, description: The recipe version every row runs. }
+        model: { type: string, description: "Left out, the version's model." }
+        params: { type: object, description: "Left out, the version's params. One that is sent replaces them as a whole; it takes `size`, `n`, `seconds`, `style` and `quality`." }
+        rows: { type: array, minItems: 1, maxItems: 500, items: { $ref: "#/components/schemas/BatchRowRequest" } }
+        max_concurrency: { type: integer, minimum: 1, maximum: 4, default: 2, description: How many rows run at a time. }
+        webhook_url: { type: string, format: uri, description: "Where to POST once, when the batch ends: one signed `recipe_batch.completed` event." }
+    BatchRowRequest:
+      type: object
+      description: One row of a batch request.
+      properties:
+        variables: { type: object, additionalProperties: { type: string }, description: A value for any of the version's variables. One left out keeps its default. }
+        inputs:
+          type: object
+          description: For a recipe with input slots, an input for every slot, by slot name.
+          additionalProperties: { $ref: "#/components/schemas/InputRef" }
+    BatchLimits:
+      type: object
+      description: What the server allows a batch.
+      properties:
+        max_rows: { type: integer }
+        max_concurrency: { type: integer }
+    BatchEstimate:
+      type: object
+      properties:
+        rows: { type: integer }
+        total_cents: { type: integer, description: The sum of what each row's job would reserve. }
+        balance_cents: { type: integer }
+        enough: { type: boolean, description: Whether the balance now covers the total. A batch can be created either way. }
+        limits: { $ref: "#/components/schemas/BatchLimits" }
+    Batch:
+      type: object
+      description: A recipe batch. Field names are snake_case.
+      properties:
+        id: { type: string, format: uuid }
+        recipe_id: { type: [string, "null"], format: uuid, description: Null once the recipe has been deleted. }
+        recipe_title: { type: [string, "null"] }
+        version_id: { type: [string, "null"], format: uuid }
+        modality: { type: string, enum: [IMAGE, VIDEO] }
+        model: { type: string }
+        params: { type: object }
+        status: { type: string, enum: [QUEUED, RUNNING, PAUSED, DONE, CANCELLED] }
+        pause_reason: { type: [string, "null"], enum: [insufficient_credit, spending_cap, null], description: Why the batch is PAUSED. }
+        pause_detail: { type: [string, "null"], description: "For `spending_cap`, which cap." }
+        max_concurrency: { type: integer }
+        rows_total: { type: integer }
+        rows_done: { type: integer }
+        rows_failed: { type: integer }
+        rows_running: { type: integer }
+        rows_skipped: { type: integer }
+        estimated_total_cents: { type: integer }
+        spent_cents: { type: integer, description: What the finished rows' jobs were charged. A batch charges nothing itself. }
+        created_at: { type: string, format: date-time }
+        started_at: { type: [string, "null"], format: date-time }
+        completed_at: { type: [string, "null"], format: date-time, description: When the last row ended. }
+    BatchRow:
+      type: object
+      properties:
+        index: { type: integer }
+        status: { type: string, enum: [PENDING, RUNNING, DONE, FAILED, SKIPPED] }
+        variables: { type: [object, "null"], additionalProperties: { type: string }, description: The value each variable had. Null once the row's job has been purged. }
+        job_id: { type: [string, "null"], format: uuid, description: The row's job. Null until the row has started. }
+        cost_cents: { type: [integer, "null"], description: "What the row's job was charged: null until the row has ended, 0 for a row that failed." }
+        error: { type: [string, "null"] }
+        outputs: { type: array, items: { $ref: "#/components/schemas/BatchRowOutput" } }
+    BatchRowOutput:
+      type: object
+      properties:
+        index: { type: integer }
+        url: { type: string, format: uri, description: A signed link; it expires. }
+        content_type: { type: string }
     EstimateRequest:
       type: object
       required: [model]
