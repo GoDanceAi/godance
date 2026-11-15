@@ -4,6 +4,7 @@ import { ApiError, type UserRecipe } from '../lib/api';
 import { formatCents } from '../lib/auth';
 import { formatAge, formatDateTime } from '../lib/time';
 import { attemptsText, listRecipes } from '../lib/user-recipes';
+import RecipesTabs from '../components/RecipesTabs';
 
 const PAGE_SIZE = 24;
 
@@ -50,7 +51,10 @@ export default function RecipesPage() {
 
   return (
     <div className="mx-auto max-w-6xl px-6 py-8">
-      <h1 className="text-2xl font-bold tracking-tight text-fg">Recipes</h1>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-2xl font-bold tracking-tight text-fg">Recipes</h1>
+        <RecipesTabs />
+      </div>
       <p className="mt-2 text-sm text-fg-muted">
         A recipe keeps a setup that works: the prompt with its variables, the model and the settings.
         Every run of it is counted here, with what it cost.

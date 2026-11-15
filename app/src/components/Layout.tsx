@@ -29,7 +29,10 @@ export default function Layout({ children }: Props) {
   const navigate = useNavigate();
   // On the sign-in and sign-up pages, the header's links keep where the
   // visitor was going too (lib/return-to).
-  const from = destinationFrom(useLocation().state);
+  const location = useLocation();
+  const from = destinationFrom(location.state);
+  // Batches sit under Recipes (the "Recipes | Batches" strip), so on a batch page Recipes is the current link.
+  const onBatches = location.pathname === '/batches' || location.pathname.startsWith('/batches/');
 
   const [logoutFailed, setLogoutFailed] = useState(false);
 
@@ -53,9 +56,11 @@ export default function Layout({ children }: Props) {
     : NAV;
   const links = (
     <>
-      {nav.map((item) => (
+      {nav.map((item) => (item.to === '/recipes' && onBatches ? (
+        <Link key={item.to} to={item.to} className="nav-link active" aria-current="page">{item.label}</Link>
+      ) : (
         <NavLink key={item.to} to={item.to} className={linkClass}>{item.label}</NavLink>
-      ))}
+      )))}
       {(isAdmin || needsTwoFactor) && <NavLink to="/admin" className={linkClass}>Admin</NavLink>}
     </>
   );

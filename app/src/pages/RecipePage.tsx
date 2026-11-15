@@ -22,6 +22,7 @@ import { JobInputs, JobThumb } from '../components/JobMedia';
 import JobStatusPill from '../components/JobStatusPill';
 import SaveJobButton from '../components/SaveJobButton';
 import VariableValues from '../components/VariableValues';
+import RecipeBatches from '../components/batch/RecipeBatches';
 import { ROLE_LABEL } from '../lib/inputs';
 
 const PAGE_SIZE = 24;
@@ -120,6 +121,7 @@ function RecipeDetail({ initial }: { initial: UserRecipe }) {
 
       <div className="mt-5 flex flex-wrap items-center gap-2">
         <Link to={studioLink(recipe)} className="btn btn-primary">Open in Studio</Link>
+        <Link to={`/recipes/${recipe.id}/batch`} className="btn btn-secondary">Run as batch</Link>
         <button type="button" onClick={() => void remove()} disabled={deleting} className="btn btn-danger">
           {deleting ? 'Deleting…' : 'Delete recipe'}
         </button>
@@ -154,6 +156,8 @@ function RecipeDetail({ initial }: { initial: UserRecipe }) {
           <p className="mt-2 text-xs text-fg-faint">Earlier versions couldn't be loaded.</p>
         )}
       </section>
+
+      <RecipeBatches recipeId={recipe.id} />
 
       <Attempts recipe={recipe} />
     </article>

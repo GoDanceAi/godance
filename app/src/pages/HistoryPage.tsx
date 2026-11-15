@@ -182,7 +182,7 @@ export default function HistoryPage() {
         </p>
       ) : (
         <p className="mt-2 text-sm text-fg-muted">
-          Images and videos you generate, in the Studio or with an API key.
+          Images and videos you generate, in the Studio, in a batch or with an API key.
         </p>
       )}
 
@@ -320,7 +320,11 @@ function JobCard({ initial, onSavedChange, select }: {
         >
           {title}
         </Link>
-        <p className="truncate font-mono text-[11px] text-fg-subtle">{job.model}</p>
+        <p className="flex items-center gap-2 text-[11px] text-fg-subtle">
+          <span className="min-w-0 truncate font-mono">{job.model}</span>
+          {/* A row of a recipe batch: told apart from what was made one at a time. */}
+          {job.channel === 'BATCH' && <span className="pill shrink-0" data-batch-badge>Batch</span>}
+        </p>
         <div className="mt-auto flex items-center justify-between gap-2 text-xs text-fg-subtle">
           <span aria-live="polite"><JobStatusPill status={job.status} /></span>
           <span className="tabular-nums">{costText(job)}</span>

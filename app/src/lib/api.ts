@@ -14,12 +14,34 @@ export class ApiError extends Error {
   status: number;
   detail?: string;
   code?: string;             // problem+json `code`, for a client to branch on
-  constructor(status: number, message: string, detail?: string, code?: string) {
+  problem?: Record<string, unknown>;   // the whole problem+json body, for its other members (a batch's `row`)
+  constructor(status: number, message: string, detail?: string, code?: string, problem?: Record<string, unknown>) {
     super(message);
     this.status = status;
     this.detail = detail;
     this.code = code;
+    this.problem = problem;
   }
+}
+
+/**
+ * The error a failed response stands for: its problem+json detail and code
+ * when it has them, "HTTP <status>" otherwise. For a call that cannot go
+ * through {@link apiFetch} (a file download); apiFetch reads errors the same way.
+ */
+export async function apiErrorFrom(res: Response): Promise<ApiError> {
+  let detail = `HTTP ${res.status}`;
+  let code: string | undefined;
+  let problem: Record<string, unknown> | undefined;
+  try {
+    const body = (await res.json()) as { detail?: string; title?: string; code?: string };
+    detail = body.detail || body.title || detail;
+    code = body.code;
+    if (body !== null && typeof body === 'object') problem = body as Record<string, unknown>;
+  } catch {
+    /* non-JSON body — keep the default */
+  }
+  return new ApiError(res.status, detail, undefined, code, problem);
 }
 
 type ApiOptions = Omit<RequestInit, 'body'> & {
@@ -67,16 +89,7 @@ export async function apiFetch<T = unknown>(path: string, opts: ApiOptions = {})
 
   if (!res.ok) {
     // Backend uses RFC 7807 problem+json for errors.
-    let detail = `HTTP ${res.status}`;
-    let code: string | undefined;
-    try {
-      const body = (await res.json()) as { detail?: string; title?: string; code?: string };
-      detail = body.detail || body.title || detail;
-      code = body.code;
-    } catch {
-      /* non-JSON body — keep the default */
-    }
-    throw new ApiError(res.status, detail, undefined, code);
+    throw await apiErrorFrom(res);
   }
 
   if (res.status === 204) return undefined as T;
@@ -450,6 +463,13 @@ export interface JobView {
   galleryRecipe?: string | null;       // the gallery recipe it was a run of, by slug
   recipe?: JobRecipe | null;           // the user's recipe it ran; null for a plain prompt, or once that recipe is deleted
   inputs?: JobInput[];                 // the images it was given (round 11); empty for none, and once purged
+  batch?: JobBatch | null;             // the batch it is a row of (round 12); null or absent for any other job
+}
+
+/** The batch a job belongs to, and which of its rows the job is (0-based). */
+export interface JobBatch {
+  id: string;
+  row: number;
 }
 
 /** The user's recipe a job ran: which version, and the value each variable had (null once purged). */
@@ -459,8 +479,11 @@ export interface JobRecipe {
   variables: Record<string, string> | null;
 }
 
-/** STUDIO: made by a signed-in session. API: made with an API key. The API decides which. */
-export type JobChannel = 'STUDIO' | 'API';
+/**
+ * STUDIO: made by a signed-in session. API: made with an API key. BATCH: a
+ * row of a recipe batch (round 12). The API decides which.
+ */
+export type JobChannel = 'STUDIO' | 'API' | 'BATCH';
 
 /** GET /v1/jobs/saved: how many generations the account has saved, and the most it can. */
 export interface SavedJobs {
@@ -512,6 +535,86 @@ export interface UserRecipe {
   latest_version: UserRecipeVersion;
   attempts: number;                       // jobs that ran any of its versions
   spent_cents: number;                    // what the finished ones were charged
+}
+
+// ===== Recipe batches (/v1/recipe-batches, round 12) =====
+// One version of a recipe run over many rows; each row becomes one job.
+
+export type BatchStatus = 'QUEUED' | 'RUNNING' | 'PAUSED' | 'DONE' | 'CANCELLED';
+
+/** Why a batch stopped starting rows: the balance ran out, or a spending cap would be passed. */
+export type BatchPauseReason = 'insufficient_credit' | 'spending_cap';
+
+/** SKIPPED: the batch was cancelled before the row started. */
+export type BatchRowStatus = 'PENDING' | 'RUNNING' | 'DONE' | 'FAILED' | 'SKIPPED';
+
+/**
+ * A batch. The fields from `recipe_title` down are newer than the first
+ * contract and optional here, so the pages still work against an API
+ * without them.
+ */
+export interface Batch {
+  id: string;
+  recipe_id: string | null;        // null once the recipe is deleted
+  version_id: string | null;
+  model: string;
+  status: BatchStatus;
+  pause_reason: BatchPauseReason | null;
+  rows_total: number;
+  rows_done: number;
+  rows_failed: number;
+  estimated_total_cents: number;
+  spent_cents: number;
+  created_at: string;
+  completed_at: string | null;
+  recipe_title?: string | null;
+  max_concurrency?: number;
+  pause_detail?: string | null;    // which cap paused it, in the API's words
+  rows_running?: number;           // right in every status: a paused or cancelled batch can have rows finishing
+  rows_skipped?: number;
+  started_at?: string | null;
+}
+
+/** One file a finished row produced. The link is signed when the row is read. */
+export interface BatchRowOutput {
+  index: number;
+  url: string;
+  content_type: string;
+}
+
+/** One row of a batch. `index` counts from 0; `variables` is null once the row's job is purged. */
+export interface BatchRow {
+  index: number;
+  status: BatchRowStatus;
+  variables: Record<string, string> | null;
+  job_id: string | null;
+  cost_cents: number | null;
+  error: string | null;
+  outputs?: BatchRowOutput[];      // empty unless the row is DONE and its files are still kept
+}
+
+/** POST /v1/recipe-batches/estimate: what the whole batch would cost, against the balance. */
+export interface BatchEstimate {
+  rows: number;
+  total_cents: number;
+  balance_cents: number;
+  enough: boolean;
+  limits?: { max_rows: number; max_concurrency: number };
+}
+
+/** One row of a request: values for some of the variables, and an input for each slot of the version. */
+export interface BatchRequestRow {
+  variables: Record<string, string>;
+  inputs?: Record<string, InputRef>;
+}
+
+/** The body of POST /v1/recipe-batches, and of its estimate. `params`, when sent, replaces the version's. */
+export interface BatchRequest {
+  version_id: string;
+  model: string;
+  params: Record<string, unknown>;
+  rows: BatchRequestRow[];
+  max_concurrency: number;
 }
 
 // ===== /v1/admin/** (admin console — mirror backend admin DTOs) =====
@@ -650,6 +753,7 @@ export interface AdminFunnelStages {
   first_studio_job: number;
   first_paid_top_up: number;
   first_api_job: number;
+  first_batch?: number;   // started a recipe batch (round 12); absent from an API older than that
 }
 
 /** Sign-ups of one UTC ISO week, e.g. "2026-W47". */
