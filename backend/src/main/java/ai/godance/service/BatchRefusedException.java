@@ -55,7 +55,7 @@ public final class BatchRefusedException extends ResponseStatusException {
     }
 
     public static BatchRefusedException resultsTooLarge(long bytes, long maxBytes, String csvPath) {
-        return new BatchRefusedException(HttpStatus.PAYLOAD_TOO_LARGE,
+        return new BatchRefusedException(HttpStatus.CONTENT_TOO_LARGE,
                 "this batch's outputs total " + megabytes(bytes) + " MB, more than the " + megabytes(maxBytes)
                         + " MB a zip may hold. Download " + csvPath + " for a link to each output.",
                 CODE_RESULTS_TOO_LARGE);

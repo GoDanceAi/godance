@@ -130,6 +130,7 @@ class RecipeBatchRecoveryIntegrationTest {
 
     @BeforeEach
     void reset() {
+        RecipeBatchFixture.endLeftoverBatches(jdbc);
         openAiMock.resetAll();
         webhookReceiver.resetAll();
         webhookReceiver.stubFor(post(urlEqualTo("/cb")).willReturn(aResponse().withStatus(200)));

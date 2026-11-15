@@ -9,6 +9,7 @@ import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import static com.github.tomakehurst.wiremock.client.WireMock.containing;
 import static com.github.tomakehurst.wiremock.client.WireMock.matchingJsonPath;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
+import static com.github.tomakehurst.wiremock.client.WireMock.urlPathMatching;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.ArrayList;
@@ -109,6 +110,7 @@ class RecipeBatchIntegrationTest {
 
     @BeforeEach
     void reset() {
+        RecipeBatchFixture.endLeftoverBatches(jdbc);
         openAiMock.resetAll();
         fx = new RecipeBatchFixture(http, users, ledger, runner);
     }
@@ -352,6 +354,48 @@ class RecipeBatchIntegrationTest {
         });
         assertThat(jdbc.queryForObject("SELECT count(*) FROM usage_records WHERE user_id = ? AND api_key_id = ?",
                 Integer.class, u.id(), key.id())).isEqualTo(2);
+    }
+
+    @Test
+    void tick_givenAVideoRecipe_expectsEachRowAVideoJobWithTheBatchsSettings() throws Exception {
+        Signed u = fx.signupWithBalance(1000_00L);
+        openAiMock.stubFor(com.github.tomakehurst.wiremock.client.WireMock.post(urlEqualTo("/v1/videos"))
+                .willReturn(aResponse().withStatus(200).withHeader("content-type", "application/json")
+                        .withBody("{\"id\":\"vid_batch\",\"status\":\"queued\"}")));
+        openAiMock.stubFor(com.github.tomakehurst.wiremock.client.WireMock.get(urlPathMatching("/v1/videos/vid_batch"))
+                .willReturn(aResponse().withStatus(200).withHeader("content-type", "application/json")
+                        .withBody("{\"id\":\"vid_batch\",\"status\":\"completed\"}")));
+        openAiMock.stubFor(com.github.tomakehurst.wiremock.client.WireMock.get(urlEqualTo("/v1/videos/vid_batch/content"))
+                .willReturn(aResponse().withStatus(200).withHeader("content-type", "video/mp4")
+                        .withBody("FAKE-MP4-BYTES".getBytes(java.nio.charset.StandardCharsets.UTF_8))));
+        Recipe recipe = fx.createRecipe(u, "VIDEO", "{{subject}} circling under falling rain.",
+                List.of(variable("subject", "Koi")), "sora-2", Map.of("seconds", 4));
+
+        // The estimate is two rows of what POST /v1/estimates gives one 4-second clip.
+        Map<?, ?> one = http.post().uri("/v1/estimates").header(HttpHeaders.AUTHORIZATION, u.bearer())
+                .contentType(MediaType.APPLICATION_JSON).bodyValue(Map.of("model", "sora-2", "seconds", 4))
+                .exchange().expectStatus().isOk().expectBody(Map.class).returnResult().getResponseBody();
+        int perRow = ((Number) one.get("estimated_cost_cents")).intValue();
+        Map<String, Object> body = batchBody(recipe.versionId(), List.of(row("subject", "Paper boats"), row()), 1);
+        post(u.bearer(), "/v1/recipe-batches/estimate", body)
+                .expectStatus().isOk()
+                .expectBody().jsonPath("$.total_cents").isEqualTo(2 * perRow);
+
+        String batchId = fx.createBatch(u.bearer(), body);
+        Map<String, Object> done = fx.runUntil(u.bearer(), batchId, "DONE");
+
+        assertThat(done).containsEntry("rows_done", 2).containsEntry("modality", "VIDEO")
+                .containsEntry("spent_cents", 2 * perRow);
+        GenerationJob first = jobOfRow(u, batchId, 0);
+        assertThat(first.getModality().name()).isEqualTo("VIDEO");
+        assertThat(first.getChannel().name()).isEqualTo("BATCH");
+        assertThat(first.getPrompt()).containsEntry("prompt", "Paper boats circling under falling rain.")
+                .containsEntry("duration_seconds", 4);
+        // A row that gives no value runs with the variable's default.
+        assertThat(jobOfRow(u, batchId, 1).getPrompt()).containsEntry("prompt", "Koi circling under falling rain.");
+        List<Map<String, Object>> rowViews = fx.batchRows(u.bearer(), batchId);
+        assertThat(((Map<?, ?>) rowViews.get(1).get("variables")).get("subject")).isEqualTo("Koi");
+        assertThat(((Map<?, ?>) ((List<?>) rowViews.get(0).get("outputs")).get(0)).get("content_type")).isEqualTo("video/mp4");
     }
 
     // ===== Owner only =================================================

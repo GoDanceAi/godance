@@ -15,6 +15,7 @@ import java.util.UUID;
 
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.reactive.server.WebTestClient;
 
 import com.github.tomakehurst.wiremock.WireMockServer;
@@ -194,6 +195,22 @@ final class RecipeBatchFixture {
     private static boolean settled(Map<String, Object> view, String status) {
         boolean ends = "DONE".equals(status) || "CANCELLED".equals(status);
         return !ends || view.get("completed_at") != null;
+    }
+
+    /**
+     * Ends every batch an earlier test of the class left open. The runner
+     * advances every open batch there is, whoever owns it, so a batch one
+     * test leaves queued would be run by the next test's passes and call
+     * that test's provider. Each test starts with none.
+     */
+    static void endLeftoverBatches(JdbcTemplate jdbc) {
+        jdbc.update("UPDATE recipe_batch_rows SET status = 'SKIPPED', completed_at = now() "
+                + "WHERE status IN ('PENDING', 'RUNNING')");
+        jdbc.update("UPDATE recipe_batches SET status = 'CANCELLED', pause_reason = NULL, pause_detail = NULL, "
+                + "completed_at = now() WHERE completed_at IS NULL");
+        // And no webhook of theirs is still owed.
+        jdbc.update("UPDATE recipe_batches SET webhook_sent_at = now() "
+                + "WHERE webhook_url IS NOT NULL AND webhook_sent_at IS NULL");
     }
 
     /** Every image request the provider gets answers with one tiny PNG. */
