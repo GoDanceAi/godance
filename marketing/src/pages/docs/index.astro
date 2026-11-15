@@ -142,6 +142,31 @@ curl -X PATCH https://api.godance.ai/v1/keys/$KEY_ID \\
   -H "Content-Type: application/json" \\
   -d '{ "image_response": "sync" }'`;
 
+const videoInputSnippet = `# Animate the first image of one of your own image jobs.
+curl https://api.godance.ai/v1/videos/generations \\
+  -H "Authorization: Bearer $GODANCE_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "model": "seedance-2.0",
+    "prompt": "The paper boat drifts away from the bank, slow push-in.",
+    "seconds": 5,
+    "first_frame": { "job_output": { "job_id": "5b0e7c1e-…", "index": 0 } }
+  }'`;
+
+const videoReferenceSnippet = `{
+  "model": "seedance-2.0",
+  "prompt": "The teapot in Image 1 on the counter in Image 2, steam rising.",
+  "seconds": 5,
+  "reference_images": [
+    { "file_id": "0d6b2f3a-…" },
+    { "job_output": { "job_id": "5b0e7c1e-…", "index": 0 } }
+  ]
+}`;
+
+const videoCapabilitiesSnippet = `"capabilities": {
+  "inputs": { "first_frame": true, "last_frame": true, "reference_images": { "max": 9 } }
+}`;
+
 const jobSnippet = `{
   "id": "6f1c0b9e-2d4a-4c3b-9a57-0e8d4b2f7c11",
   "status": "DONE",
@@ -493,6 +518,58 @@ def verify(payload, header, secret):
       first, send the same fields to
       <a href="#estimates" class="underline" style="color: var(--color-primary)"><code class="code-chip">POST /v1/estimates</code></a>.
     </p>
+
+    <h3 id="video-inputs" class="scroll-mt-24 text-xl font-semibold mt-10 mb-4 text-fg">Start a video from an image</h3>
+    <p class="text-fg-muted">
+      A clip can start from an image, end on one, or follow reference images. The usual way to
+      work: settle the look in stills, which cost cents, then animate the one you chose.
+    </p>
+    <p class="mt-4 text-fg-muted">
+      <strong class="text-fg">Not switched on yet.</strong> These fields are part of
+      <a href="#files" class="underline" style="color: var(--color-primary)">inputs</a>, which are
+      being rolled out. Until they are switched on, a request that carries one answers
+      <code class="code-chip">403</code> with <code class="code-chip">code: "inputs_disabled"</code>.
+      A request without them is unaffected.
+    </p>
+    <pre class="code-block mt-4"><code>{videoInputSnippet}</code></pre>
+    <ul class="mt-4 space-y-2 text-fg-muted">
+      <li><strong class="text-fg">First and last frame.</strong> <code class="code-chip">first_frame</code> is the image the clip starts from and <code class="code-chip">last_frame</code> the one it ends on. A last frame is taken only together with a first frame.</li>
+      <li><strong class="text-fg">Reference images.</strong> <code class="code-chip">reference_images</code> is a list of images the clip follows: an object, a place, a look. A prompt refers to them by position, and the order of the list is the order they are counted in: on Seedance, "Image 1" (图片1) is the first in the list. Godance does not rewrite the prompt. On Seedance, reference images and a first or last frame are separate ways to work and cannot be sent together.</li>
+      <li><strong class="text-fg">Animate one of your image outputs.</strong> Each of the three fields takes either <a href="#input-references" class="underline" style="color: var(--color-primary)">form of input</a>: a <code class="code-chip">file_id</code> for an upload, or a <code class="code-chip">job_output</code> for an image one of your own jobs made, which needs no upload.</li>
+    </ul>
+    <pre class="code-block mt-4"><code>{videoReferenceSnippet}</code></pre>
+    <p class="mt-4 text-fg-muted">
+      <strong class="text-fg">Which models take what.</strong> A model says what it takes under
+      <code class="code-chip">godance.capabilities.inputs</code> on
+      <a href="#models" class="underline" style="color: var(--color-primary)">GET /v1/models</a>.
+      A field that is not listed is not taken.
+    </p>
+    <pre class="code-block mt-4"><code>{videoCapabilitiesSnippet}</code></pre>
+    <div class="mt-4 card p-0 overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead class="border-b border-border bg-bg-muted text-left text-fg-subtle">
+          <tr>
+            <th scope="col" class="px-4 py-2.5 font-semibold">Model</th>
+            <th scope="col" class="px-4 py-2.5 font-semibold">First frame</th>
+            <th scope="col" class="px-4 py-2.5 font-semibold">Last frame</th>
+            <th scope="col" class="px-4 py-2.5 font-semibold">Reference images</th>
+            <th scope="col" class="px-4 py-2.5 font-semibold">Image types</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-border text-fg-muted">
+          <tr><th scope="row" class="px-4 py-2.5 text-left font-mono font-normal text-fg">seedance-2.0</th><td class="px-4 py-2.5">yes</td><td class="px-4 py-2.5">yes</td><td class="px-4 py-2.5">up to 9</td><td class="px-4 py-2.5">JPEG, PNG, WebP</td></tr>
+          <tr><th scope="row" class="px-4 py-2.5 text-left font-mono font-normal text-fg">kling-3.0</th><td class="px-4 py-2.5">yes</td><td class="px-4 py-2.5">yes</td><td class="px-4 py-2.5">no</td><td class="px-4 py-2.5">JPEG, PNG, at most 10&nbsp;MB</td></tr>
+          <tr><th scope="row" class="px-4 py-2.5 text-left font-mono font-normal text-fg">minimax-hailuo-2.3</th><td class="px-4 py-2.5">yes</td><td class="px-4 py-2.5">no</td><td class="px-4 py-2.5">no</td><td class="px-4 py-2.5">JPEG, PNG, WebP</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <ul class="mt-4 space-y-2 text-fg-muted">
+      <li><strong class="text-fg">Shape.</strong> An input image's width divided by its height must be between 0.4 and 2.5, and each side should be at least 300 pixels. Godance never crops an image. When a frame's shape is not the clip's, Seedance crops the frame from its centre; Kling takes the clip's shape from the frame.</li>
+      <li><strong class="text-fg">People.</strong> Seedance does not take a reference image that shows a real person's face.</li>
+      <li><strong class="text-fg">Price.</strong> The same as a clip from text. An input image is not charged for.</li>
+      <li><strong class="text-fg">Refusals,</strong> each before anything is charged: <code class="code-chip">400 input_not_supported</code> (the model does not take the field, takes fewer reference images, or does not take the inputs together), <code class="code-chip">400 input_aspect_mismatch</code> (the image's shape is outside the range, which the answer names along with the image's own size), <code class="code-chip">415 input_type_unsupported</code> and <code class="code-chip">413 input_too_large</code> (the model's provider does not take that type or size), and everything under <a href="#input-refusals" class="underline" style="color: var(--color-primary)">what is refused, and why</a>.</li>
+      <li><strong class="text-fg">The job</strong> lists what it started from, in the order given, under <a href="#job-inputs" class="underline" style="color: var(--color-primary)"><code class="code-chip">inputs</code></a>.</li>
+    </ul>
 
     <!-- ===== Jobs ===== -->
     <h2 id="jobs" class="scroll-mt-24 text-2xl font-bold mt-16 mb-4 text-fg">GET /v1/jobs/&#123;id&#125;</h2>

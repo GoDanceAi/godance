@@ -1,7 +1,10 @@
 package ai.godance.gateway.providers;
 
+import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -16,6 +19,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import ai.godance.config.VolcengineProperties;
 import ai.godance.domain.Provider;
 import ai.godance.gateway.VideoDtos.GeneratedVideo;
+import ai.godance.gateway.VideoDtos.VideoInput;
 import ai.godance.gateway.VideoDtos.VideoRequest;
 import ai.godance.gateway.VideoProviderAdapter;
 import reactor.core.publisher.Mono;
@@ -33,6 +37,18 @@ import reactor.core.publisher.Mono;
  * <p>API surface is simplified for v1; the real Ark endpoint may require
  * additional signing or model-specific payload tweaks. WireMock-recorded
  * cassettes will lock in the real shape when we wire production keys.
+ *
+ * <p><b>Images.</b> A clip may start from a first frame, end on a last
+ * frame, or follow reference images. Each goes into {@code content} after
+ * the text, as an {@code image_url} item with a {@code role} of
+ * {@code first_frame}, {@code last_frame} or {@code reference_image},
+ * holding the image itself as a base64 data URL. A prompt refers to the
+ * images by position ("Image 1" is the first image item), so the order of
+ * the request's reference images is the order sent. A request without
+ * images is sent exactly as before: the one text item.
+ * Source: Ark's "create a video generation task" reference
+ * (docs.volcengine.com/docs/ark/create-video-generation-task-api), read
+ * 2026-11-14.
  */
 @Component
 public class VolcengineArkVideoProvider implements VideoProviderAdapter {
@@ -40,6 +56,17 @@ public class VolcengineArkVideoProvider implements VideoProviderAdapter {
     private static final Logger log = LoggerFactory.getLogger(VolcengineArkVideoProvider.class);
     private static final String STATUS_SUCCEEDED = "succeeded";
     private static final int DEFAULT_DURATION_SECONDS = 5;
+
+    /**
+     * What Ark documents for an input image: JPEG, PNG or WebP (it takes
+     * more, but these are the types an input can be); a width-to-height
+     * ratio between 0.4 and 2.5; under 30 MB. A first frame, a first and a
+     * last frame, and reference images are separate modes that cannot be
+     * mixed. Ark crops a frame from its centre when its shape is not the
+     * clip's; that is documented for callers, not prevented.
+     */
+    private static final InputRules INPUT_RULES = new InputRules(
+            Set.of("image/jpeg", "image/png", "image/webp"), 0.4, 2.5, 30L * 1024 * 1024 - 1, false);
 
     private final WebClient apiClient;
     private final WebClient downloadClient;
@@ -70,10 +97,15 @@ public class VolcengineArkVideoProvider implements VideoProviderAdapter {
     }
 
     @Override
+    public InputRules inputRules() {
+        return INPUT_RULES;
+    }
+
+    @Override
     public Mono<List<GeneratedVideo>> generate(VideoRequest request) {
         ArkSubmit body = new ArkSubmit(
                 request.model(),
-                List.of(new ArkContent("text", request.prompt())),
+                contentOf(request),
                 request.durationSeconds() == null ? DEFAULT_DURATION_SECONDS : request.durationSeconds(),
                 request.size() == null ? "1280x720" : request.size());
 
@@ -117,10 +149,30 @@ public class VolcengineArkVideoProvider implements VideoProviderAdapter {
         return downloadClient.get().uri(s).retrieve().bodyToMono(byte[].class);
     }
 
+    /** The text, then each image in the order Ark counts them: first frame, last frame, reference images. */
+    private static List<Object> contentOf(VideoRequest request) {
+        List<Object> content = new ArrayList<>();
+        content.add(new ArkContent("text", request.prompt()));
+        if (request.firstFrame() != null) content.add(ArkImage.of(request.firstFrame(), "first_frame"));
+        if (request.lastFrame() != null) content.add(ArkImage.of(request.lastFrame(), "last_frame"));
+        for (VideoInput reference : request.referenceImages()) content.add(ArkImage.of(reference, "reference_image"));
+        return content;
+    }
+
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    record ArkSubmit(String model, List<ArkContent> content, int duration, String ratio) { }
+    record ArkSubmit(String model, List<Object> content, int duration, String ratio) { }
 
     record ArkContent(String type, String text) { }
+
+    /** An image item: the image as a data URL, and what it is to the clip. */
+    record ArkImage(String type, @JsonProperty("image_url") ArkImageUrl imageUrl, String role) {
+        static ArkImage of(VideoInput image, String role) {
+            String url = "data:" + image.contentType() + ";base64," + Base64.getEncoder().encodeToString(image.bytes());
+            return new ArkImage("image_url", new ArkImageUrl(url), role);
+        }
+    }
+
+    record ArkImageUrl(String url) { }
 
     record ArkSubmitResponse(String id) { }
 

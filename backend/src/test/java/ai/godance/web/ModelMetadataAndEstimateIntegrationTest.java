@@ -131,8 +131,12 @@ class ModelMetadataAndEstimateIntegrationTest {
                 "sizes", List.of("1024x1024", "1536x1024", "1024x1536", "auto"),
                 "default_size", "auto", "max_n", 10,
                 "inputs", Map.of("images", Map.of("max", 16, "mask", true))));
+        // Round 11: a video model that takes a first frame says so, in the contract's shape.
         assertThat(godance.get("minimax-hailuo-2.3").get("capabilities"))
-                .isEqualTo(Map.of("default_seconds", 6, "max_n", 1));
+                .isEqualTo(Map.of("default_seconds", 6, "max_n", 1,
+                        "inputs", Map.of("first_frame", true, "last_frame", false)));
+        // A video model whose provider confirms no input says nothing about inputs.
+        assertThat(godance.get("runway-gen4").get("capabilities").toString()).doesNotContain("inputs");
         // Unknown capabilities are left out, not published as empty.
         assertThat(godance.get("imagen-4")).containsEntry("display_name", "Imagen 4")
                 .doesNotContainKey("capabilities");
@@ -164,12 +168,13 @@ class ModelMetadataAndEstimateIntegrationTest {
             assertThat(catalog.metadata(model).capabilities().inputs().maxImages()).as(model).isEqualTo(10);
         }
         // No image or video model was given anything by this migration: the only ones that
-        // take inputs are the image models V33 seeded for edits.
+        // take inputs are the image models V33 seeded for edits and the video models V34 seeded.
         assertThat(godance.entrySet().stream()
                 .filter(e -> !"TEXT".equals(e.getValue().get("modality")))
                 .filter(e -> e.getValue().get("capabilities") instanceof Map<?, ?> c && c.containsKey("inputs"))
                 .map(Map.Entry::getKey))
-                .containsExactlyInAnyOrder("gpt-image-2", "gpt-image-1.5", "seedream-5.0", "flux-2-pro");
+                .containsExactlyInAnyOrder("gpt-image-2", "gpt-image-1.5", "seedream-5.0", "flux-2-pro",
+                        "seedance-2.0", "kling-3.0", "minimax-hailuo-2.3");
     }
 
     @Test
