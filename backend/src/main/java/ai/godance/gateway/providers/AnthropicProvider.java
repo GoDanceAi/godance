@@ -2,6 +2,8 @@ package ai.godance.gateway.providers;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.LinkedHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -22,6 +24,9 @@ import ai.godance.domain.Provider;
 import ai.godance.gateway.ChatDtos.ChatChoice;
 import ai.godance.gateway.ChatDtos.ChatChunk;
 import ai.godance.gateway.ChatDtos.ChatMessage;
+import ai.godance.gateway.ChatDtos.ContentPart;
+import ai.godance.gateway.ChatDtos.ImagePart;
+import ai.godance.gateway.ChatDtos.TextPart;
 import ai.godance.gateway.ChatDtos.ChatRequest;
 import ai.godance.gateway.ChatDtos.ChatResponse;
 import ai.godance.gateway.ChatDtos.ChunkChoice;
@@ -163,11 +168,38 @@ public class AnthropicProvider implements ProviderAdapter {
                 system = system == null ? m.content() : system + "\n\n" + m.content();
                 continue;
             }
-            messages.add(new AnthropicMessage(m.role(), m.content()));
+            messages.add(new AnthropicMessage(m.role(), contentOf(m)));
         }
         int maxTokens = request.maxTokens() == null ? DEFAULT_MAX_TOKENS : request.maxTokens();
         return new AnthropicRequest(request.model(), maxTokens, system, messages,
                 request.temperature(), stream);
+    }
+
+    /**
+     * A message's content for the Messages API. Text is a plain string, as
+     * it always was. A message with an image is a list of content blocks,
+     * each image inline as base64:
+     * {@code {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "…"}}}.
+     */
+    private static Object contentOf(ChatMessage m) {
+        if (!m.hasImages()) return m.content();
+        List<Map<String, Object>> blocks = new ArrayList<>(m.parts().size());
+        for (ContentPart part : m.parts()) {
+            Map<String, Object> block = new LinkedHashMap<>();
+            if (part instanceof TextPart text) {
+                block.put("type", "text");
+                block.put("text", text.text());
+            } else if (part instanceof ImagePart image) {
+                Map<String, Object> source = new LinkedHashMap<>();
+                source.put("type", "base64");
+                source.put("media_type", image.mediaType());
+                source.put("data", image.base64());
+                block.put("type", "image");
+                block.put("source", source);
+            }
+            blocks.add(block);
+        }
+        return blocks;
     }
 
     private static ChatResponse toDomain(AnthropicResponse r, String requestedModel) {
@@ -208,7 +240,8 @@ public class AnthropicProvider implements ProviderAdapter {
             boolean stream
     ) { }
 
-    record AnthropicMessage(String role, String content) { }
+    /** {@code content} is a string for text, and a list of content blocks for a message with an image. */
+    record AnthropicMessage(String role, Object content) { }
 
     record AnthropicResponse(
             String id,

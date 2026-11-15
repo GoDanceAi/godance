@@ -79,5 +79,20 @@
         "election", "vaccine", "weight loss", "包治", "稳赚", "暴富", "比特币", "投票", "选举", "疫苗", "减肥"
       ]
     }
+  },
+  "input_people": {
+    "about": "Words that mark an input image as being about a person. `screen --inputs objects` keeps such an entry set aside; only an entry that mentions none of these goes on as a product or object recipe. Broad on purpose: it reads the whole prompt, so a product placed in someone's hand counts as a person. For the operator to extend. Matching is as for the rules above.",
+    "terms": [
+      "selfie", "selfies", "portrait", "portraits", "headshot", "face", "faces", "facial", "identity", "likeness",
+      "person", "people", "human", "humans", "man", "woman", "men", "women", "girl", "girls", "boy", "boys",
+      "guy", "lady", "male", "female", "child", "children", "kid", "kids", "baby", "toddler", "teen", "adult",
+      "model", "models", "character", "characters", "couple", "family", "friend", "friends", "bride", "groom",
+      "wedding", "him", "her", "his", "hers", "he", "she", "himself", "herself", "yourself", "myself", "me",
+      "my face", "your face", "your photo", "my photo", "hair", "hairstyle", "skin", "eyes", "lips", "body",
+      "pose", "posing", "outfit", "wearing", "dressed", "makeup", "beard", "smile", "smiling", "hand", "hands",
+      "holding", "avatar", "cosplay", "influencer", "actor", "actress", "singer", "athlete", "人物", "人像", "肖像",
+      "自拍", "脸", "面部", "五官", "本人", "男", "女", "人", "角色", "模特", "头发", "发型", "皮肤", "眼睛", "身体", "姿势",
+      "穿", "妆", "手持", "手拿", "孩", "宝宝", "情侣", "家人", "朋友", "婚纱"
+    ]
   }
 }

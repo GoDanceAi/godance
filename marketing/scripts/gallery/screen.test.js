@@ -10,7 +10,10 @@ import { findBlanks, resolvePlaceholders } from './lib/placeholders.js';
 import { priceBook } from './lib/pricing.js';
 import { detectInputNeed, detectLanguage, slugify, statedSeconds, statedShape, uniqueSlug } from './lib/text.js';
 import { configPaths } from './lib/work.js';
-import { classifierMessages, classifyEntries, compileTerms, countReasons, readVerdict, screenEntries, screenEntry } from './stages/screen.js';
+import {
+  INPUT_MODES, REASONS, classifierMessages, classifyEntries, compilePeopleTerms, compileTerms, countReasons, inputPersonTerm,
+  personSamplesAllowed, readVerdict, screenEntries, screenEntry,
+} from './stages/screen.js';
 import { API_BASE, CATALOGUE, FAKE_KEY, fakeWorld, noSleep, tempDir } from './testing.js';
 
 describe('placeholders', () => {
@@ -160,6 +163,95 @@ describe('screening', () => {
     const config = JSON.parse(await readFile(configPaths().screenTerms, 'utf8'));
     assert.deepEqual(Object.keys(config.rules), ['1', '2', '3', '4', '5', '6', '7']);
     assert.ok(compileTerms(config).length > 100);
+  });
+});
+
+describe('entries that need an input image', () => {
+  const peopleTerms = compilePeopleTerms({ input_people: { terms: ['portrait', 'face', 'her', 'hand', '人像', '脸'] } });
+  const product = entry({ id: 'p', needs_input: 'image', title: 'Product On Marble', prompt: 'Place the product from the uploaded photo on a marble counter.' });
+  const person = entry({ id: 'q', needs_input: 'image', title: 'Watercolour', prompt: 'Turn the uploaded photo into a watercolour portrait.' });
+
+  test('by default every one is set aside, exactly as before', () => {
+    assert.deepEqual(INPUT_MODES, ['none', 'objects', 'people']);
+    for (const options of [{}, { peopleTerms }, { inputs: 'none', peopleTerms }]) {
+      assert.deepEqual(screenEntry(product, options), [{ rule: 'needs-input', note: 'it needs an input image' }]);
+      assert.deepEqual(screenEntry(person, options), [{ rule: 'needs-input', note: 'it needs an input image' }]);
+    }
+    assert.equal(screenEntries([product], { peopleTerms }).p.input, undefined);
+  });
+
+  test('--inputs objects lets a product entry through, marked as an object input', () => {
+    assert.deepEqual(screenEntry(product, { inputs: 'objects', peopleTerms }), []);
+    const screened = screenEntries([product], { inputs: 'objects', peopleTerms });
+    assert.equal(screened.p.status, 'candidate');
+    assert.equal(screened.p.input, 'object');
+    assert.deepEqual(screened.p.notes, ['input recipe: its input reads as a product or an object']);
+  });
+
+  test('--inputs objects keeps a person entry set aside, and says why', () => {
+    assert.deepEqual(screenEntry(person, { inputs: 'objects', peopleTerms }),
+      [{ rule: 'input-person', note: 'it needs an input image of a person: it mentions "portrait"' }]);
+    const screened = screenEntries([product, person], { inputs: 'objects', peopleTerms });
+    assert.equal(screened.q.status, 'set-aside');
+    assert.equal(screened.q.input, undefined);
+    assert.deepEqual(countReasons(screened, ['q']), { 'input-person': 1 });
+    assert.equal(REASONS['input-person'], 'needs an input image of a person');
+  });
+
+  test('a person is found anywhere in the entry: the title, a variant, in Chinese, in a hand that holds the product', () => {
+    for (const about of [
+      { title: 'Her Favourite Mug' },
+      { variants: { en: 'Place the product on a counter.', zh: '把产品放在人像旁边' } },
+      { prompt: '把上传照片中的产品放在她的脸旁边', lang: 'zh' },
+      { prompt: 'The uploaded product held in a hand, studio light.' },
+    ]) {
+      const reasons = screenEntry({ ...product, ...about }, { inputs: 'objects', peopleTerms });
+      assert.deepEqual(rules(reasons), ['input-person'], JSON.stringify(about));
+    }
+    // A Latin term matches a whole word only: "her" is not in "there" or "weather".
+    assert.equal(inputPersonTerm({ ...product, prompt: 'Put the uploaded product over there, in the weather.' }, peopleTerms), null);
+  });
+
+  test('--inputs people lets a person entry through too, marked as a person input', () => {
+    assert.deepEqual(screenEntry(person, { inputs: 'people', peopleTerms }), []);
+    const screened = screenEntries([product, person], { inputs: 'people', peopleTerms });
+    assert.deepEqual([screened.p.input, screened.q.input], ['object', 'person']);
+    assert.deepEqual(screened.q.notes, ['input recipe: its input is about a person (it mentions "portrait")']);
+  });
+
+  test('an entry that needs a video or an audio input is always set aside', () => {
+    for (const inputs of INPUT_MODES) {
+      for (const kind of ['video', 'audio']) {
+        assert.deepEqual(screenEntry(entry({ needs_input: kind }), { inputs, peopleTerms }), [{ rule: 'needs-input', note: `it needs an input ${kind}` }]);
+      }
+    }
+  });
+
+  test('an input entry is still held to every other rule', () => {
+    const terms = compileTerms({ rules: { 2: { name: 'brands', terms: ['Nike'] } } });
+    const reasons = screenEntry({ ...product, prompt: 'Place the uploaded Nike shoe on [SURFACE].' }, { inputs: 'objects', peopleTerms, terms });
+    assert.deepEqual(rules(reasons), ['blank', 'standard-2']);
+  });
+
+  test('the standard allows person samples only when it says so in so many words', () => {
+    assert.equal(personSamplesAllowed('# Standard\n\n**Version:** 3\n\n**Person samples:** allowed\n'), true);
+    for (const text of [
+      '**Person samples:** not allowed', '**Person samples:** Allowed later', '**Person samples:**', 'Person samples: allowed',
+      'They are **Person samples:** allowed', '', null, undefined,
+    ]) {
+      assert.equal(personSamplesAllowed(text), false, String(text));
+    }
+  });
+
+  test('the committed standard does not allow person samples, and the committed list of person words compiles', async () => {
+    const standard = await readFile(new URL('../../../docs/gallery-content-standard.md', import.meta.url), 'utf8');
+    assert.equal(personSamplesAllowed(standard), false);
+    assert.match(standard, /^\*\*Version:\*\* 2$/m);
+    const config = JSON.parse(await readFile(configPaths().screenTerms, 'utf8'));
+    const committed = compilePeopleTerms(config);
+    assert.ok(committed.length > 80);
+    assert.equal(inputPersonTerm(person, committed), 'portrait');
+    assert.equal(inputPersonTerm(product, committed), null);
   });
 });
 

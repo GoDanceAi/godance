@@ -13,7 +13,7 @@ import {
   recipeFileName,
   recipeSchema,
 } from '../../src/lib/gallery-schema.js';
-import { imageRecipe, templatedRecipe, videoRecipe } from './example-recipes.js';
+import { imageRecipe, inputRecipe, templatedRecipe, videoInputRecipe, videoRecipe } from './example-recipes.js';
 
 /** The rule and path of every problem, which is what the tests compare. */
 const found = (data, options) => checkRecipe(data, options).map(({ rule, path }) => `${rule} @ ${path}`);
@@ -59,6 +59,38 @@ describe('a valid recipe', () => {
     recipe.runs.push({ ...structuredClone(recipe.runs[0]), model: 'another-model', prompt_lang: 'zh' });
     recipe.runs[0].outputs.push({ ...recipe.runs[0].outputs[0], file: 'paper-lantern-street-at-dusk/gpt-image-2-1.webp' });
     assert.deepEqual(checkRecipe(recipe), []);
+  });
+
+  test('a recipe with an input slot and its sample, as in the round-11 contract, is accepted', () => {
+    assert.deepEqual(checkRecipe(inputRecipe(), { file: 'product-on-a-marble-counter.json' }), []);
+    assert.deepEqual(checkRecipe(videoInputRecipe(), { file: 'paper-boat-sets-off.json' }), []);
+    assert.deepEqual(recipeSchema.parse(inputRecipe()), inputRecipe());
+    assert.deepEqual(recipeSchema.parse(videoInputRecipe()), videoInputRecipe());
+  });
+
+  test('a recipe may have up to four slots; a hint needs no Chinese; a video takes each of its roles', () => {
+    const image = inputRecipe();
+    for (const name of ['logo', 'backdrop', 'prop']) {
+      const slot = structuredClone(image.inputs[0]);
+      slot.slot = name;
+      slot.sample.file = `product-on-a-marble-counter/input-${image.inputs.length}.webp`;
+      delete slot.hint.zh;
+      image.inputs.push(slot);
+      image.runs[0].inputs[name] = slot.sample.file;
+    }
+    assert.equal(image.inputs.length, 4);
+    assert.deepEqual(checkRecipe(image), []);
+
+    const video = videoInputRecipe();
+    for (const [name, role] of [['last frame', 'last_frame'], ['style', 'reference_image'], ['subject', 'reference_image']]) {
+      const slot = structuredClone(video.inputs[0]);
+      slot.slot = name;
+      slot.role = role;
+      slot.sample.file = `paper-boat-sets-off/input-${video.inputs.length}.webp`;
+      video.inputs.push(slot);
+      video.runs[0].inputs[name] = slot.sample.file;
+    }
+    assert.deepEqual(checkRecipe(video), []);
   });
 
   test('params takes whatever request fields the API has', () => {
@@ -214,7 +246,110 @@ const TEMPLATE_BREAKS = [
   ['template-render', 'a prompt edited after its template was made', (r) => (r.prompt.en += ' '), 'prompt.template.en'],
 ];
 
+/** The same, starting from the image recipe with an input slot (round 11). */
+const INPUT_BREAKS = [
+  // at most four slots, each named by the variable naming rule, no two alike
+  ['input-slots', 'an empty list of inputs', (r) => (r.inputs = []), 'inputs'],
+  ['input-slots', 'five slots', (r) => {
+    for (let i = 1; i < 5; i++) {
+      const slot = structuredClone(r.inputs[0]);
+      slot.slot = `slot ${i}`;
+      r.inputs.push(slot);
+      r.runs[0].inputs[slot.slot] = slot.sample.file;
+    }
+  }, 'inputs'],
+  ['input-slots', 'a slot name with punctuation', (r) => {
+    r.inputs[0].slot = 'product photo!';
+    r.runs[0].inputs = { 'product photo!': r.inputs[0].sample.file };
+  }, 'inputs[0].slot'],
+  ['input-slots', 'a slot name that is not ASCII', (r) => {
+    r.inputs[0].slot = '产品照片';
+    r.runs[0].inputs = { 产品照片: r.inputs[0].sample.file };
+  }, 'inputs[0].slot'],
+  ['input-slots', 'a slot with no name', (r) => delete r.inputs[0].slot, 'inputs[0].slot'],
+  ['input-slots', 'two slots with one name', (r) => r.inputs.push(structuredClone(r.inputs[0])), 'inputs[1].slot'],
+
+  // a slot's role fits the modality
+  ['input-role', 'a video role on an image recipe', (r) => (r.inputs[0].role = 'first_frame'), 'inputs[0].role'],
+  ['input-role', 'a mask, which the gallery does not carry', (r) => (r.inputs[0].role = 'mask'), 'inputs[0].role'],
+  ['input-role', 'a role that does not exist', (r) => (r.inputs[0].role = 'photo'), 'inputs[0].role'],
+  ['input-role', 'no role', (r) => delete r.inputs[0].role, 'inputs[0].role'],
+
+  // a sample is always present, and says how it was generated
+  ['input-sample', 'a slot with no sample', (r) => delete r.inputs[0].sample, 'inputs[0].sample'],
+  ['input-sample', 'a sample with no generated_from', (r) => delete r.inputs[0].sample.generated_from, 'inputs[0].sample.generated_from'],
+  ['input-sample', 'a generated_from with no model', (r) => delete r.inputs[0].sample.generated_from.model, 'inputs[0].sample.generated_from.model'],
+  ['input-sample', 'a generated_from with no prompt', (r) => delete r.inputs[0].sample.generated_from.prompt, 'inputs[0].sample.generated_from.prompt'],
+  ['input-sample', 'a generated_from with no params', (r) => delete r.inputs[0].sample.generated_from.params, 'inputs[0].sample.generated_from.params'],
+  ['input-sample', 'a generated_from with no cost', (r) => delete r.inputs[0].sample.generated_from.cost_cents, 'inputs[0].sample.generated_from.cost_cents'],
+  ['input-sample', 'a generated_from with no date', (r) => delete r.inputs[0].sample.generated_from.generated_on, 'inputs[0].sample.generated_from.generated_on'],
+  ['input-sample', 'a sample that is a video', (r) => (r.inputs[0].sample.content_type = 'video/mp4'), 'inputs[0].sample.content_type'],
+  ['media-path', 'a sample that is a URL', (r) => {
+    r.inputs[0].sample.file = 'https://cdn.example/input-0.webp';
+    r.runs[0].inputs['product photo'] = 'https://cdn.example/input-0.webp';
+  }, 'inputs[0].sample.file'],
+  ['shape', 'a hint that is one text, not { en }', (r) => (r.inputs[0].hint = 'One product'), 'inputs[0].hint'],
+  ['shape', 'a hint with no English', (r) => delete r.inputs[0].hint.en, 'inputs[0].hint.en'],
+
+  // every run was made with the samples
+  ['input-runs', 'a run that names no inputs', (r) => delete r.runs[0].inputs, 'runs[0].inputs'],
+  ['input-runs', 'a run that leaves a slot out', (r) => (r.runs[0].inputs = {}), 'runs[0].inputs'],
+  ['input-runs', 'a run made with another file than the sample',
+    (r) => (r.runs[0].inputs['product photo'] = 'product-on-a-marble-counter/other.webp'), 'runs[0].inputs'],
+  ['input-runs', 'a run that names a slot the recipe does not have',
+    (r) => (r.runs[0].inputs.logo = 'product-on-a-marble-counter/input-0.webp'), 'runs[0].inputs'],
+];
+
+/** The same, starting from the video recipe with a first frame. */
+const VIDEO_INPUT_BREAKS = [
+  ['input-role', 'an image role on a video recipe', (r) => (r.inputs[0].role = 'image'), 'inputs[0].role'],
+  ['input-role', 'two first frames', (r) => {
+    const second = structuredClone(r.inputs[0]);
+    second.slot = 'another frame';
+    r.inputs.push(second);
+    r.runs[0].inputs['another frame'] = second.sample.file;
+  }, 'inputs[1].role'],
+  ['input-role', 'two last frames', (r) => {
+    for (const name of ['last frame', 'final frame']) {
+      const slot = structuredClone(r.inputs[0]);
+      slot.slot = name;
+      slot.role = 'last_frame';
+      r.inputs.push(slot);
+      r.runs[0].inputs[name] = slot.sample.file;
+    }
+  }, 'inputs[2].role'],
+];
+
 describe('each rule rejects a recipe that breaks it', () => {
+  for (const [rule, what, breakIt, path] of INPUT_BREAKS) {
+    test(`${rule}: ${what}`, () => {
+      const recipe = inputRecipe();
+      breakIt(recipe);
+      assert.deepEqual(found(recipe), [`${rule} @ ${path}`]);
+    });
+  }
+
+  for (const [rule, what, breakIt, path] of VIDEO_INPUT_BREAKS) {
+    test(`${rule}: ${what}`, () => {
+      const recipe = videoInputRecipe();
+      breakIt(recipe);
+      assert.deepEqual(found(recipe), [`${rule} @ ${path}`]);
+    });
+  }
+
+  test('input-runs: a recipe without inputs whose run names one', () => {
+    const recipe = imageRecipe();
+    recipe.runs[0].inputs = { 'product photo': 'paper-lantern-street-at-dusk/input-0.webp' };
+    assert.deepEqual(found(recipe), ['input-runs @ runs[0].inputs']);
+  });
+
+  test('input-runs: every run of a recipe with inputs is checked', () => {
+    const recipe = inputRecipe();
+    recipe.runs.push({ ...structuredClone(recipe.runs[0]), model: 'another-model' });
+    delete recipe.runs[1].inputs;
+    assert.deepEqual(found(recipe), ['input-runs @ runs[1].inputs']);
+  });
+
   for (const [rule, what, breakIt, path] of TEMPLATE_BREAKS) {
     test(`${rule}: ${what}`, () => {
       const recipe = templatedRecipe();
@@ -294,7 +429,7 @@ describe('each rule rejects a recipe that breaks it', () => {
   }
 
   test('the table above covers every rule a single recipe can break', () => {
-    const covered = new Set([...BREAKS, ...VIDEO_BREAKS, ...TEMPLATE_BREAKS].map(([rule]) => rule));
+    const covered = new Set([...BREAKS, ...VIDEO_BREAKS, ...TEMPLATE_BREAKS, ...INPUT_BREAKS, ...VIDEO_INPUT_BREAKS].map(([rule]) => rule));
     const folderRules = ['slug-file-name', 'json', 'duplicate-slug', 'folder']; // covered below and in validate.test.js
     for (const rule of Object.keys(RULES)) {
       if (!folderRules.includes(rule)) assert.ok(covered.has(rule), `no test breaks the rule "${rule}"`);

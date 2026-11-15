@@ -48,10 +48,22 @@ export function priceBook(models) {
       const model = find(id);
       return Math.ceil(withFee(model, (model.godance.pricing.per_image_microcents ?? 0) * n));
     },
-    /** Whole cents a video job holds. */
-    video(id, seconds, n = 1) {
+    /**
+     * Whole cents an image job that works from `inputs` input images holds:
+     * the images it makes, plus the model's price per input image when the
+     * catalogue states one (per_input_image_microcents; nothing when it
+     * does not).
+     */
+    edit(id, n = 1, inputs = 1) {
       const model = find(id);
-      return Math.ceil(withFee(model, (model.godance.pricing.per_second_microcents ?? 0) * seconds * n));
+      const pricing = model.godance.pricing;
+      return Math.ceil(withFee(model, (pricing.per_image_microcents ?? 0) * n + (pricing.per_input_image_microcents ?? 0) * inputs));
+    },
+    /** Whole cents a video job holds, with the model's price per input image for `inputs` of them when it states one. */
+    video(id, seconds, n = 1, inputs = 0) {
+      const model = find(id);
+      const pricing = model.godance.pricing;
+      return Math.ceil(withFee(model, (pricing.per_second_microcents ?? 0) * seconds * n + (pricing.per_input_image_microcents ?? 0) * inputs));
     },
     /** Cents (a fraction) for a text call of this many tokens. */
     text(id, inputTokens, outputTokens) {

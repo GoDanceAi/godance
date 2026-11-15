@@ -26,6 +26,7 @@ import ai.godance.gateway.ChatDtos.ChatMessage;
 import ai.godance.gateway.ChatDtos.ChatRequest;
 import ai.godance.gateway.ChatDtos.ChatResponse;
 import ai.godance.gateway.ChatDtos.Usage;
+import ai.godance.gateway.ChatImageTokens;
 import ai.godance.gateway.CostCalculator;
 import ai.godance.gateway.ModelCatalog;
 import ai.godance.gateway.ModelCatalog.ModelInfo;
@@ -105,8 +106,12 @@ public class ChatCompletionService {
                 new ResponseStatusException(HttpStatus.NOT_FOUND,
                         "unknown model: " + request.model()));
 
-        long estimateCents = Math.max(1L,
-                calculator.estimateInputCents(primary, estimatedInputTokens));
+        // A request with images goes only to models that accept that many;
+        // refused here, before any charge, when the model asked for does not.
+        int images = imageCount(request.messages());
+        if (images > 0) keepModelsThatAcceptImages(attemptModels, route, request.model(), images);
+
+        long estimateCents = estimateCents(primary, attemptModels, estimatedInputTokens, images);
 
         if (!ledger.preDebit(userId, apiKeyId, estimateCents, requestId)) {
             throw new InsufficientCreditException();
@@ -199,6 +204,75 @@ public class ChatCompletionService {
         if (req.model().equals(modelName)) return req;
         return new ChatRequest(modelName, req.messages(), req.maxTokens(),
                 req.temperature(), req.stream());
+    }
+
+    // ===== Images (round 11 brief 02) ================================
+
+    /** How many images the request's messages carry. */
+    static int imageCount(List<ChatMessage> messages) {
+        int count = 0;
+        for (ChatMessage m : messages) count += m.imageCount();
+        return count;
+    }
+
+    /**
+     * Refuses a request with {@code images} images when the model it names
+     * does not accept that many, with {@code model_does_not_accept_images}.
+     * The controller calls this before it fetches anything; the same rule
+     * runs again where the request is priced. A routed (virtual) id is not
+     * judged here: which models it becomes is decided there.
+     */
+    public void requireAcceptsImages(String model, int images) {
+        if (images <= 0) return;
+        catalog.find(model).ifPresent(direct -> requireAcceptsImages(direct, images));
+    }
+
+    private void requireAcceptsImages(ModelInfo model, int images) {
+        int max = catalog.metadata(model.modelName()).capabilities().inputs().maxImages();
+        if (max <= 0) throw ChatImageRefusedException.modelDoesNotAcceptImages(model.modelName());
+        if (images > max) throw ChatImageRefusedException.modelAcceptsFewerImages(model.modelName(), max, images);
+    }
+
+    private boolean acceptsImages(String modelName, int images) {
+        return catalog.find(modelName).isPresent()
+                && catalog.metadata(modelName).capabilities().inputs().maxImages() >= images;
+    }
+
+    /**
+     * Leaves in {@code attemptModels} only the models that accept this many
+     * images. A direct call must be to such a model, so a fallback never
+     * quietly answers for a model that cannot see. A routed id needs at
+     * least one such candidate.
+     */
+    private void keepModelsThatAcceptImages(List<String> attemptModels, ResolvedRoute route,
+                                            String requested, int images) {
+        if (!route.fromVirtual()) {
+            catalog.find(attemptModels.get(0)).ifPresent(direct -> requireAcceptsImages(direct, images));
+        }
+        attemptModels.removeIf(m -> !acceptsImages(m, images));
+        if (attemptModels.isEmpty()) throw ChatImageRefusedException.modelDoesNotAcceptImages(requested);
+    }
+
+    /**
+     * The pre-debit. Text only, it is what it always was: the input tokens
+     * at the first candidate's price. With images, each one adds that
+     * model's largest documented token count ({@link ChatImageTokens}), and
+     * the hold is the highest such figure over every model that may answer,
+     * so whichever one does, the images were covered.
+     */
+    private long estimateCents(ModelInfo primary, List<String> attemptModels, int textTokens, int images) {
+        if (images <= 0) {
+            return Math.max(1L, calculator.estimateInputCents(primary, textTokens));
+        }
+        long highest = 1L;
+        for (String name : attemptModels) {
+            ModelInfo model = catalog.find(name).orElse(null);
+            if (model == null) continue;
+            long tokens = (long) textTokens + (long) images * ChatImageTokens.perImage(model);
+            highest = Math.max(highest,
+                    calculator.estimateInputCents(model, (int) Math.min(Integer.MAX_VALUE, tokens)));
+        }
+        return highest;
     }
 
     /** chars/3 heuristic. Over-estimates by ~33% vs OpenAI's BPE ratio — refund covers the slack. */
@@ -371,8 +445,11 @@ public class ChatCompletionService {
                 new ResponseStatusException(HttpStatus.NOT_FOUND,
                         "unknown model: " + request.model()));
 
-        long estimateCents = Math.max(1L,
-                calculator.estimateInputCents(primary, estimatedInputTokens));
+        // Same as execute(): only models that accept the images, and a hold that covers them.
+        int images = imageCount(request.messages());
+        if (images > 0) keepModelsThatAcceptImages(attemptModels, route, request.model(), images);
+
+        long estimateCents = estimateCents(primary, attemptModels, estimatedInputTokens, images);
 
         boolean debited;
         try {
