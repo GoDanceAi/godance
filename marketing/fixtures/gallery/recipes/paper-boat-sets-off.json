@@ -1,0 +1,106 @@
+{
+  "slug": "paper-boat-sets-off",
+  "title": {
+    "en": "Paper boat sets off",
+    "zh": "纸船启航"
+  },
+  "modality": "VIDEO",
+  "tags": [
+    "toys",
+    "water"
+  ],
+  "prompt": {
+    "en": "Starting from the uploaded still, the paper boat drifts away from the bank as ripples spread, in the look of the reference image, slow push-in, early morning light.",
+    "zh": "从上传的静帧开始，纸船缓缓漂离岸边，水面泛起涟漪，画面风格参照参考图，镜头缓慢推进，清晨的光线。",
+    "zh_origin": "machine"
+  },
+  "inputs": [
+    {
+      "slot": "first frame",
+      "role": "first_frame",
+      "hint": {
+        "en": "The still the clip starts from: one object, no people"
+      },
+      "sample": {
+        "file": "paper-boat-sets-off/input-0.webp",
+        "content_type": "image/webp",
+        "width": 1536,
+        "height": 1024,
+        "generated_from": {
+          "model": "gpt-image-2",
+          "prompt": "A folded paper boat resting at the edge of a still pond, early morning, no people, no text.",
+          "params": {
+            "size": "1536x1024",
+            "n": 1
+          },
+          "cost_cents": 6,
+          "generated_on": "2026-11-12"
+        }
+      }
+    },
+    {
+      "slot": "style reference",
+      "role": "reference_image",
+      "hint": {
+        "en": "A picture whose colours and texture the clip should take",
+        "zh": "一张图片，视频将沿用它的色彩与质感"
+      },
+      "sample": {
+        "file": "paper-boat-sets-off/input-1 (boat's style).webp",
+        "content_type": "image/webp",
+        "width": 1024,
+        "height": 1024,
+        "generated_from": {
+          "model": "gpt-image-2",
+          "prompt": "A sheet of watercolour paper washed in soft blue and grey, visible grain, no objects, no text.",
+          "params": {
+            "size": "1024x1024",
+            "n": 1
+          },
+          "cost_cents": 6,
+          "generated_on": "2026-11-12"
+        }
+      }
+    }
+  ],
+  "runs": [
+    {
+      "model": "seedance-2.0",
+      "prompt_lang": "en",
+      "params": {
+        "seconds": 5,
+        "size": "1280x720"
+      },
+      "inputs": {
+        "first frame": "paper-boat-sets-off/input-0.webp",
+        "style reference": "paper-boat-sets-off/input-1 (boat's style).webp"
+      },
+      "cost_cents": 84,
+      "generated_on": "2026-11-13",
+      "outputs": [
+        {
+          "file": "paper-boat-sets-off/seedance-2.0-0.webm",
+          "poster": "paper-boat-sets-off/seedance-2.0-0-poster.webp",
+          "content_type": "video/webm",
+          "duration_seconds": 5,
+          "width": 1280,
+          "height": 720
+        }
+      ]
+    }
+  ],
+  "source": {
+    "list": "example-org/invented-video-prompts",
+    "list_commit": "0000000000000000000000000000000000000000",
+    "licence": "CC-BY-4.0",
+    "author": "fixture_cai",
+    "author_url": "https://example.com/@fixture_cai",
+    "original_url": "https://example.com/@fixture_cai/posts/11022",
+    "changes": []
+  },
+  "review": {
+    "approved_on": "2026-11-14",
+    "standard_version": 2
+  },
+  "published_on": "2026-11-14"
+}
