@@ -25,8 +25,8 @@ info:
     account) needs a signed-in session, and answers an API key with 403.
 
     **Errors.** Every error is an RFC 7807 problem document
-    (`application/problem+json`) with `type`, `title`, `status` and `detail`.
-    Many carry `code`, a stable string to branch on. On the routes that follow
+    (`application/problem+json`) with `title`, `status` and `detail`. Many
+    carry `code`, a stable string to branch on. On the routes that follow
     OpenAI's Videos API (`/v1/videos`, not `/v1/videos/generations`) the same
     document also carries OpenAI's `error` object, which is where OpenAI's
     SDKs read a message from.
@@ -1725,13 +1725,13 @@ components:
     Problem:
       type: object
       description: An RFC 7807 problem document. Further members appear with some codes, such as `limit` or `terms_version`.
-      required: [type, title, status]
+      required: [title, status]
       properties:
-        type: { type: string }
+        type: { type: string, description: "Usually absent, which RFC 7807 reads as `about:blank`." }
         title: { type: string }
         status: { type: integer }
         detail: { type: string, description: A sentence for a person. }
-        instance: { type: string }
+        instance: { type: string, description: The path of the request. }
         code: { type: string, description: "A stable string to branch on, where the refusal has one." }
       additionalProperties: true
     VideoProblem:

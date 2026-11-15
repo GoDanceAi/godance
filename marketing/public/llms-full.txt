@@ -671,12 +671,13 @@ jobs = requests.get(f"{API}/v1/jobs", headers=HEADERS, params={"recipe": recipe[
 Every error is an RFC 7807 problem document, `Content-Type: application/problem+json`:
 
 ```json
-{"type": "about:blank", "title": "Payment Required", "status": 402,
- "detail": "insufficient credit; top up via /v1/billing/topup", "code": "insufficient_credit"}
+{"title": "Payment Required", "status": 402,
+ "detail": "insufficient credit; top up via /v1/billing/topup",
+ "instance": "/v1/images/generations", "code": "insufficient_credit"}
 ```
 
-`detail` is a sentence for a person. `code`, where present, is a stable string to branch
-on. On the OpenAI-shaped video routes (`/v1/videos`, not `/v1/videos/generations`) the
+`status` repeats the HTTP status. `detail` is a sentence for a person. `code`, where
+present, is a stable string to branch on. On the OpenAI-shaped video routes (`/v1/videos`, not `/v1/videos/generations`) the
 document also carries OpenAI's `error` object: `{"message", "type", "param", "code"}`.
 
 | Status | Meaning |

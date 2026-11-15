@@ -445,6 +445,7 @@ class OpenAiVideoIntegrationTest {
         // Still a problem document…
         assertThat(problem.get("status").asInt()).isEqualTo(400);
         assertThat(problem.get("title").asString()).isEqualTo("Bad Request");
+        assertThat(problem.get("instance").asString()).isEqualTo("/v1/videos");
         assertThat(problem.get("detail").asString()).contains("seconds must be a whole number");
         assertThat(problem.get("param").asString()).isEqualTo("seconds");
         // …and OpenAI's error object, which is where its SDK reads the message, the code and the field.
