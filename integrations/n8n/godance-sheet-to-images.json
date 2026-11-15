@@ -1,0 +1,1106 @@
+{
+  "name": "Godance: Google Sheet rows to images",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "8094bf07-189d-4cb9-a0f0-4f0a96a52648",
+      "name": "When clicking ‘Execute workflow’",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1100,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "sheet",
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "options": {}
+      },
+      "id": "0e2cfaa3-9e54-47df-a5c3-50bbafa9bf3e",
+      "name": "Get the rows",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -880,
+        300
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "39b3ae99-4aa0-4b1d-a96b-30de596019e7",
+              "leftValue": "={{ !!$json.prompt && !$json.status }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "817584a2-fded-4793-aaea-4f48c6b63da7",
+      "name": "Not run yet?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -660,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "378ebda5-c11b-4db2-ad81-ab9f859cc9d9",
+      "name": "Loop Over Items",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.godance.ai/v1/images/generations",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: $json.model, prompt: $json.prompt, size: $json.size || undefined, async: true }) }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "73a6f764-2d03-499f-a6a6-d6cd09db9f0b",
+      "name": "Create the image job",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -180,
+        320
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": null,
+          "name": "Godance API"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "89469f59-6a9a-4bb4-ac3e-0bdf8179f2cb",
+              "leftValue": "={{ !!$json.job_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c7dec6c1-bbfb-42f5-aa2e-007a22e6dae2",
+      "name": "Job accepted?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        40,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "7bb11081-50d1-496f-aa58-ba36b3e4a29b",
+              "name": "row_number",
+              "value": "={{ $('Loop Over Items').item.json.row_number }}",
+              "type": "number"
+            },
+            {
+              "id": "a3337db3-d298-4d35-a153-25209f8aeeac",
+              "name": "status",
+              "value": "RUNNING",
+              "type": "string"
+            },
+            {
+              "id": "21f92d46-8b68-46a2-a81f-a8eba1f4c138",
+              "name": "job_id",
+              "value": "={{ $json.job_id }}",
+              "type": "string"
+            },
+            {
+              "id": "3979d758-a0a8-4c32-aeea-71cd0f5874bf",
+              "name": "output_url",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "e127180f-7d48-487f-a238-d183b66ab43d",
+              "name": "error_message",
+              "value": "",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "f58ef16a-b126-4d17-a127-d13a48417c7a",
+      "name": "Row is running",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        260,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "60219307-ff6d-4edd-aa55-a41a65cbce84",
+              "name": "row_number",
+              "value": "={{ $('Loop Over Items').item.json.row_number }}",
+              "type": "number"
+            },
+            {
+              "id": "acfc36f6-34af-4ad9-ad3e-4f23ad799240",
+              "name": "status",
+              "value": "FAILED",
+              "type": "string"
+            },
+            {
+              "id": "d0de2760-6a8e-4f23-ae71-a2fdaad6bd01",
+              "name": "error_message",
+              "value": "={{ $json.detail || $json.title || ($json.error ? ($json.error.message || String($json.error)) : '') || 'The request was refused' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "887c6563-4c8f-4c44-aef9-2082f8bcc095",
+      "name": "Row was refused",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        260,
+        440
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "sheet",
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [
+            "row_number"
+          ],
+          "schema": [
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "job_id",
+              "displayName": "job_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "output_url",
+              "displayName": "output_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "cost_cents",
+              "displayName": "cost_cents",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "error_message",
+              "displayName": "error_message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "46716404-9100-4108-a3d0-f3b039170274",
+      "name": "Update the row",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        520,
+        320
+      ],
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "f9f90a79-8e55-4aa6-a0e7-f74875cc94aa",
+              "leftValue": "={{ $json.status === 'RUNNING' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c80d1d16-ff47-4d0a-a45a-7c813da5ed08",
+      "name": "Still running?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        740,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a0003fce-2cc0-4db2-a1ff-846753112afd",
+              "name": "row_number",
+              "value": "={{ $json.row_number }}",
+              "type": "number"
+            },
+            {
+              "id": "0c8e4eaf-88d9-4758-a9bf-598bbbcf63c7",
+              "name": "job_id",
+              "value": "={{ $json.job_id }}",
+              "type": "string"
+            },
+            {
+              "id": "e94a1a08-b4e0-412e-a7ff-831d86383424",
+              "name": "tries",
+              "value": 0,
+              "type": "number"
+            },
+            {
+              "id": "f8e0b026-51db-4ecb-a0b0-fa51150f54df",
+              "name": "wait_seconds",
+              "value": 5,
+              "type": "number"
+            },
+            {
+              "id": "432d9d38-6991-4af7-af99-e1f619c1720c",
+              "name": "max_wait_seconds",
+              "value": 60,
+              "type": "number"
+            },
+            {
+              "id": "f8782b40-5ced-463e-a4e4-491ae30b4358",
+              "name": "max_tries",
+              "value": 20,
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "6627e270-cc18-410d-aca3-6322102700a2",
+      "name": "Start checking",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1000,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": "={{ $json.wait_seconds }}",
+        "unit": "seconds"
+      },
+      "id": "107e340d-2609-424e-a8af-cbd0fd09ddd2",
+      "name": "Wait before checking",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1220,
+        220
+      ],
+      "webhookId": "3d36782a-9b58-428a-ad7b-b9eb619edb90"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.godance.ai/v1/jobs/{{ $json.job_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "1eda9b53-4ee3-4de9-ac29-4aa40422d0d1",
+      "name": "Get the job",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1440,
+        220
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": null,
+          "name": "Godance API"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "12577d7e-974b-4a20-aff7-6e561e1109b1",
+              "leftValue": "={{ $json.status === 'DONE' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "25c5f353-28e3-482e-a4d3-36d2eeb53711",
+      "name": "Job done?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1660,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "e65f0882-4846-4fcf-a8cb-5cae33e75510",
+              "name": "row_number",
+              "value": "={{ $('Wait before checking').item.json.row_number }}",
+              "type": "number"
+            },
+            {
+              "id": "6b0e7bef-220d-469d-a135-c64f3790670e",
+              "name": "status",
+              "value": "DONE",
+              "type": "string"
+            },
+            {
+              "id": "a2bf8a17-ec2d-418f-a8ff-dd3aaec2834d",
+              "name": "output_url",
+              "value": "={{ $json.outputUrl }}",
+              "type": "string"
+            },
+            {
+              "id": "ad946147-4d82-4269-a562-63b62cbb5178",
+              "name": "cost_cents",
+              "value": "={{ $json.actualCostCents }}",
+              "type": "number"
+            },
+            {
+              "id": "19f5c10c-6f00-4ad8-a68b-0570a1e1525a",
+              "name": "error_message",
+              "value": "",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a58fb9c7-d80a-4670-a926-586a03ad030d",
+      "name": "Row is done",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1900,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "4f31e9f0-41ce-42eb-a8bc-2fbae09cd13e",
+              "leftValue": "={{ ['FAILED', 'CANCELLED'].includes($json.status) || ($json.status >= 400 && $json.status < 500 && $json.status !== 429) }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "6cd67370-bfd4-4489-a53a-8e59fe21740e",
+      "name": "Job failed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1900,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "924e3ece-4833-4843-aae9-d1f42520928f",
+              "name": "row_number",
+              "value": "={{ $('Wait before checking').item.json.row_number }}",
+              "type": "number"
+            },
+            {
+              "id": "e92b5cf0-2ba8-4dc2-a4cd-bd7ad4b65201",
+              "name": "status",
+              "value": "FAILED",
+              "type": "string"
+            },
+            {
+              "id": "738d5137-0b4f-4589-a503-21046e737af8",
+              "name": "error_message",
+              "value": "={{ $json.errorMessage || $json.detail || $json.title || 'The job failed' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "2e161656-7d22-4e70-a33b-6733331d0082",
+      "name": "Row failed",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2140,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "5cf9d8b8-2138-4be9-a186-9ca697106a9c",
+              "leftValue": "={{ $('Wait before checking').item.json.tries + 1 < $('Wait before checking').item.json.max_tries }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "abf3e300-332a-456b-a544-83039d3dc0b4",
+      "name": "Checks left?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2140,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c7a85ee6-bad0-4294-a861-7b32bc1e6276",
+              "name": "row_number",
+              "value": "={{ $('Wait before checking').item.json.row_number }}",
+              "type": "number"
+            },
+            {
+              "id": "e2672539-4508-4518-afa1-283e17ffcc24",
+              "name": "job_id",
+              "value": "={{ $('Wait before checking').item.json.job_id }}",
+              "type": "string"
+            },
+            {
+              "id": "8362a03f-ef48-4e06-a37e-8f594843fe9b",
+              "name": "tries",
+              "value": "={{ $('Wait before checking').item.json.tries + 1 }}",
+              "type": "number"
+            },
+            {
+              "id": "f7d70d41-3ff9-44ee-a57f-f70826a4e886",
+              "name": "wait_seconds",
+              "value": "={{ Math.min($('Wait before checking').item.json.wait_seconds * 2, $('Wait before checking').item.json.max_wait_seconds) }}",
+              "type": "number"
+            },
+            {
+              "id": "0a54cc08-fb0f-4a82-a2a7-8ae0c8543b0d",
+              "name": "max_wait_seconds",
+              "value": "={{ $('Wait before checking').item.json.max_wait_seconds }}",
+              "type": "number"
+            },
+            {
+              "id": "85a5dd1f-6dcf-4dbe-a81c-ba1a24736d7f",
+              "name": "max_tries",
+              "value": "={{ $('Wait before checking').item.json.max_tries }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "5eef01cb-15a1-4e64-a5bc-f6cdada9b148",
+      "name": "Wait longer",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2380,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "0bebdfdb-9f2c-45bd-a7c4-f15c811bd637",
+              "name": "row_number",
+              "value": "={{ $('Wait before checking').item.json.row_number }}",
+              "type": "number"
+            },
+            {
+              "id": "1c73cc26-5fc8-4801-a042-65c8a19ecb6f",
+              "name": "status",
+              "value": "TIMEOUT",
+              "type": "string"
+            },
+            {
+              "id": "92b5c619-f8bc-4507-aac4-d9f83bc64129",
+              "name": "error_message",
+              "value": "={{ 'Still running after ' + $('Wait before checking').item.json.max_tries + ' checks. The job carries on: find it by its job_id in your Godance history.' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "07209312-0ac6-44b6-a340-b367377b4207",
+      "name": "Row timed out",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2380,
+        580
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Godance: sheet rows to images\n\n### How it works\nEach row of a Google Sheet becomes one Godance image job. You run the workflow by hand. It reads the sheet and takes every row that has a prompt and an empty status, one at a time: it creates the job, writes the job id to the row, then checks the job after 5 seconds and waits twice as long each time, up to 60 seconds, for at most 20 checks. A finished job writes its link and its cost in cents to the row. A row that fails gets the reason in error_message, and the workflow carries on with the next row.\n\n### Setup\n1. Create a **Header Auth** credential named **Godance API**: Name `Authorization`, Value `Bearer ` followed by your Godance API key. Use a key with a daily cap.\n2. Give the sheet a header row with these columns: prompt, model, size, status, job_id, output_url, cost_cents, error_message.\n3. In **Get the rows** and **Update the row**, choose your Google account, the spreadsheet and the sheet.\n4. Every row is a paid job. Price one first with `POST /v1/estimates`, and multiply by your rows.\n\n### Customization\nChange the first wait, the longest wait and the number of checks in **Start checking**. To run a row again, clear its status cell.",
+        "height": 600,
+        "width": 560
+      },
+      "id": "6bbac1b2-2fb2-49a1-a5f7-3a6195f6484c",
+      "name": "Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1160,
+        -420
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Read the sheet\nRows with a prompt and an empty status are run, one at a time. Every other row is left alone.",
+        "height": 300,
+        "width": 900,
+        "color": 7
+      },
+      "id": "08df3994-ccd2-4237-ab21-4751779b1c67",
+      "name": "Read the sheet",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1160,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Create the job\nOne image job per row. A refusal, such as no credit, a spending cap reached or an unknown model, becomes the row's error.",
+        "height": 420,
+        "width": 680,
+        "color": 7
+      },
+      "id": "bda3d20b-4483-4d1d-aafb-928a0cd368a3",
+      "name": "Create the job",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -240,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### This node spends credit\nEach row it sends is a paid image job. It is never retried, so no row is sent twice.",
+        "height": 160,
+        "width": 300,
+        "color": 3
+      },
+      "id": "d53be49c-4989-4f93-a1b9-fa70fbfa7d56",
+      "name": "This node spends credit",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -240,
+        20
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Write the row\nEvery outcome is written by this one node. A row that is still running goes on to be checked; any other goes back for the next row.",
+        "height": 300,
+        "width": 480,
+        "color": 7
+      },
+      "id": "c667cf6e-304e-45cf-a674-d76296b49c7d",
+      "name": "Write the row",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        460,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Wait for the job\nChecks the job, waiting longer each time. It stops when the job is done, when it failed, or after the number of checks set in Start checking.",
+        "height": 780,
+        "width": 1640,
+        "color": 7
+      },
+      "id": "4a6c734c-efce-430a-a2c3-c52dc1e9f351",
+      "name": "Wait for the job",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        960,
+        -20
+      ]
+    }
+  ],
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Get the rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get the rows": {
+      "main": [
+        [
+          {
+            "node": "Not run yet?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Not run yet?": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Create the image job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create the image job": {
+      "main": [
+        [
+          {
+            "node": "Job accepted?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Job accepted?": {
+      "main": [
+        [
+          {
+            "node": "Row is running",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Row was refused",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Row is running": {
+      "main": [
+        [
+          {
+            "node": "Update the row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Row was refused": {
+      "main": [
+        [
+          {
+            "node": "Update the row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update the row": {
+      "main": [
+        [
+          {
+            "node": "Still running?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Still running?": {
+      "main": [
+        [
+          {
+            "node": "Start checking",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Start checking": {
+      "main": [
+        [
+          {
+            "node": "Wait before checking",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait before checking": {
+      "main": [
+        [
+          {
+            "node": "Get the job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get the job": {
+      "main": [
+        [
+          {
+            "node": "Job done?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Job done?": {
+      "main": [
+        [
+          {
+            "node": "Row is done",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Job failed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Row is done": {
+      "main": [
+        [
+          {
+            "node": "Update the row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Job failed?": {
+      "main": [
+        [
+          {
+            "node": "Row failed",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Checks left?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Row failed": {
+      "main": [
+        [
+          {
+            "node": "Update the row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Checks left?": {
+      "main": [
+        [
+          {
+            "node": "Wait longer",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Row timed out",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait longer": {
+      "main": [
+        [
+          {
+            "node": "Wait before checking",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Row timed out": {
+      "main": [
+        [
+          {
+            "node": "Update the row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false,
+  "tags": []
+}
