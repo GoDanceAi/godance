@@ -19,6 +19,7 @@ import ai.godance.gateway.VideoDtos.VideoInput;
 import ai.godance.gateway.VideoDtos.VideoRequest;
 import ai.godance.gateway.VideoProviderAdapter.InputRules;
 import ai.godance.gateway.VideoProviderGateway;
+import ai.godance.service.InputService.InputFacts;
 import ai.godance.service.InputService.InputUse;
 import ai.godance.service.InputService.ResolvedInput;
 import ai.godance.web.dto.InputDtos.InputRef;
@@ -118,7 +119,52 @@ public class VideoInputs {
     public List<ResolvedInput> resolve(UUID userId, ModelInfo model, Refs refs) {
         if (refs.isEmpty()) return List.of();
         inputs.requireEnabled();
+        Named named = named(model, refs);
+        List<ResolvedInput> resolved = inputs.resolve(userId, named.uses());
+        for (int i = 0; i < resolved.size(); i++) {
+            ResolvedInput input = resolved.get(i);
+            requireAccepted(model.modelName(), named.fields().get(i), input.contentType(),
+                    (long) input.bytes().length, input.width(), input.height(), named.rules());
+        }
+        return resolved;
+    }
 
+    /**
+     * {@link #resolve} without loading any image, for a request that will
+     * run later (a row of a recipe batch): the same checks of the model, the
+     * account and each input, against what is on record about the input.
+     * An uploaded file's type, size and shape are on record; a job output's
+     * shape is not, and is checked when the row's job starts.
+     */
+    public void check(UUID userId, ModelInfo model, Refs refs) {
+        if (refs.isEmpty()) return;
+        inputs.requireEnabled();
+        Named named = named(model, refs);
+        List<InputFacts> facts = inputs.inspect(userId, named.uses());
+        for (int i = 0; i < facts.size(); i++) {
+            InputFacts input = facts.get(i);
+            requireAccepted(model.modelName(), named.fields().get(i), input.contentType(),
+                    input.sizeBytes(), input.width(), input.height(), named.rules());
+        }
+    }
+
+    /**
+     * Refuses inputs the model cannot take, knowing only which fields the
+     * request has and how many reference images: what each one points to is
+     * not looked at. For a caller that knows the shape of a request before
+     * it knows the inputs themselves (a recipe's slots).
+     */
+    public void requireSupported(ModelInfo model, Refs refs) {
+        if (refs.isEmpty()) return;
+        inputs.requireEnabled();
+        named(model, refs);
+    }
+
+    /** A request's inputs, each with the field it came in, once the model is known to take them. */
+    private record Named(List<InputUse> uses, List<String> fields, InputRules rules) { }
+
+    /** Everything that can be checked from the model and the shape of the request alone. */
+    private Named named(ModelInfo model, Refs refs) {
         String name = model.modelName();
         ModelCapabilities.Inputs takes = catalog.metadata(name).capabilities().inputs();
         InputRules rules = gateway.inputRules(model);
@@ -163,27 +209,28 @@ public class VideoInputs {
             uses.add(new InputUse(InputRole.REFERENCE_IMAGE, refs.referenceImages().get(i)));
             fields.add("reference_images[" + i + "]");
         }
-
-        List<ResolvedInput> resolved = inputs.resolve(userId, uses);
-        for (int i = 0; i < resolved.size(); i++) {
-            requireAccepted(name, fields.get(i), resolved.get(i), rules);
-        }
-        return resolved;
+        return new Named(uses, fields, rules);
     }
 
-    /** The image against what the provider documents: its type, its size in bytes, its shape. */
-    private static void requireAccepted(String model, String field, ResolvedInput input, InputRules rules) {
-        if (!rules.contentTypes().contains(input.contentType())) {
-            throw InputRefusedException.typeUnsupported(field + " is " + typeName(input.contentType())
+    /**
+     * The image against what the provider documents: its type, its size in
+     * bytes, its shape. A size or shape that is not known (null) is not
+     * checked here.
+     */
+    private static void requireAccepted(String model, String field, String contentType, Long sizeBytes,
+                                        Integer width, Integer height, InputRules rules) {
+        if (!rules.contentTypes().contains(contentType)) {
+            throw InputRefusedException.typeUnsupported(field + " is " + typeName(contentType)
                     + ". The model " + model + " takes " + typeNames(rules) + " images.");
         }
-        if (input.bytes().length > rules.maxBytes()) {
-            throw InputRefusedException.tooLarge(field + " is " + megabytes(input.bytes().length)
+        if (sizeBytes != null && sizeBytes > rules.maxBytes()) {
+            throw InputRefusedException.tooLarge(field + " is " + megabytes(sizeBytes)
                     + " MB. The model " + model + " takes images of at most " + megabytes(rules.maxBytes()) + " MB.");
         }
-        double aspect = (double) input.width() / input.height();
+        if (width == null || height == null) return;
+        double aspect = (double) width / height;
         if (aspect < rules.minAspect() || aspect > rules.maxAspect()) {
-            throw VideoInputRefusedException.aspectMismatch(model, field, input.width(), input.height(),
+            throw VideoInputRefusedException.aspectMismatch(model, field, width, height,
                     rules.minAspect(), rules.maxAspect());
         }
     }

@@ -254,6 +254,20 @@ godance:
     # answers 409 recipe_limit_reached.
     max-per-account: ${RECIPES_MAX_PER_ACCOUNT:500}   # recipes one account can have
     max-versions:    ${RECIPES_MAX_VERSIONS:200}      # versions one recipe can have
+  batches:
+    # Recipe batches (RecipeBatchService, RecipeBatchRunner): one version of a
+    # recipe run over many rows, each row an ordinary job. A batch charges
+    # nothing itself, so these only bound how much one account can queue and
+    # how hard a batch may drive the providers.
+    max-rows:                    ${BATCHES_MAX_ROWS:500}             # rows one batch may have; past it, 400 batch_too_large
+    default-concurrency:         ${BATCHES_DEFAULT_CONCURRENCY:2}    # rows at a time when the request names no number
+    max-concurrency:             ${BATCHES_MAX_CONCURRENCY:4}        # the most rows at a time a request may ask for
+    max-unfinished-per-account:  ${BATCHES_MAX_UNFINISHED:2}         # queued, running or paused batches one account may have
+    results-zip-max:             ${BATCHES_RESULTS_ZIP_MAX:500MB}    # past it results.zip answers 413 and points to the CSV
+    # How often the runner looks for rows to start (Quartz cron, with seconds).
+    # A never-firing expression such as "0 0 0 1 1 ? 2099" stops batches from
+    # starting rows; jobs that are already running still finish.
+    tick-cron:                   ${BATCHES_TICK_CRON:0/3 * * * * ?}
   retention:
     # The most generations one account can save (JobSaveService). A saved
     # generation is kept past the 90-day deletion, at no charge, for as long

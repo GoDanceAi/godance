@@ -128,6 +128,9 @@ public interface GenerationJobRepository extends JpaRepository<GenerationJob, UU
 
     List<GenerationJob> findByStatus(JobStatus status);
 
+    /** The job made for a batch row (V36), if one was: the database allows at most one. */
+    Optional<GenerationJob> findByBatchRowId(UUID batchRowId);
+
     // Status changes are conditional updates, so a worker and the sweep can
     // race without either overwriting the other's outcome: whichever ends an
     // open job first wins, and the loser's update matches no row.

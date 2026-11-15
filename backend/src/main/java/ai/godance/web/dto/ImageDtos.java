@@ -135,6 +135,10 @@ public final class ImageDtos {
      *       uploaded file or one of the owner's job outputs) and a link
      *       signed when the job is read, null once that file is gone. Empty
      *       for a job with none, and once the job is purged.</li>
+     *   <li>{@code batch}: the recipe batch and the row the job was made for
+     *       (round 12), or null for a job outside a batch, and once the
+     *       batch has been deleted. A job in a batch has {@code channel}
+     *       {@code BATCH}.</li>
      * </ul>
      */
     public record JobView(
@@ -159,14 +163,16 @@ public final class ImageDtos {
             JobChannel channel,
             String galleryRecipe,
             RecipeRunView recipe,
-            List<JobInputView> inputs
+            List<JobInputView> inputs,
+            @JsonInclude(JsonInclude.Include.ALWAYS) JobBatchView batch
     ) {
         /**
          * {@code outputs} carry links already signed; {@code outputUrl} is the
          * first of them, or the stored link for a job that has none recorded.
+         * {@code batch} is the batch row the job was made for, or null.
          */
         public static JobView from(GenerationJob j, List<JobOutputView> outputs, Instant mediaExpiresAt,
-                                   RecipeVersion recipeVersion, List<JobInputView> inputs) {
+                                   RecipeVersion recipeVersion, List<JobInputView> inputs, JobBatchView batch) {
             boolean purged = j.getPurgedAt() != null;
             List<JobOutputView> shown = purged ? List.of() : outputs;
             String outputUrl = shown.isEmpty() ? j.getOutputUrl() : shown.get(0).url();
@@ -182,7 +188,8 @@ public final class ImageDtos {
                     j.getChannel(), j.getGalleryRecipe(),
                     recipeVersion == null ? null : new RecipeRunView(recipeVersion.getRecipeId(),
                             recipeVersion.getNumber(), purged ? null : recipeVariablesOf(j)),
-                    purged || inputs == null ? List.of() : inputs);
+                    purged || inputs == null ? List.of() : inputs,
+                    batch);
         }
 
         /** The value each variable had in this run, as the job's request stored them. */
@@ -232,6 +239,12 @@ public final class ImageDtos {
             int version,
             @JsonInclude(JsonInclude.Include.ALWAYS) Map<String, String> variables
     ) { }
+
+    /**
+     * {@code batch} on a job: the recipe batch it was made for, and the
+     * index of its row there ({@code GET /v1/recipe-batches/{id}/rows}).
+     */
+    public record JobBatchView(UUID id, int row) { }
 
     /**
      * {@code GET /v1/jobs/saved}: how many generations the caller has saved,

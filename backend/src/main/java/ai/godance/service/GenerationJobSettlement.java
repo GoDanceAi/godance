@@ -14,6 +14,7 @@ import ai.godance.domain.JobStatus;
 import ai.godance.domain.UsageRecord;
 import ai.godance.repository.GenerationJobOutputRepository;
 import ai.godance.repository.GenerationJobRepository;
+import ai.godance.repository.RecipeBatchRowRepository;
 import ai.godance.repository.UsageRecordRepository;
 
 /**
@@ -38,15 +39,17 @@ public class GenerationJobSettlement {
     private final UsageRecordRepository usage;
     private final GenerationJobOutputRepository outputs;
     private final InputService inputs;
+    private final RecipeBatchRowRepository batchRows;
 
     public GenerationJobSettlement(GenerationJobRepository jobs, CreditLedgerService ledger,
                                    UsageRecordRepository usage, GenerationJobOutputRepository outputs,
-                                   InputService inputs) {
+                                   InputService inputs, RecipeBatchRowRepository batchRows) {
         this.jobs = jobs;
         this.ledger = ledger;
         this.usage = usage;
         this.outputs = outputs;
         this.inputs = inputs;
+        this.batchRows = batchRows;
     }
 
     /** A file the worker stored for a job, recorded when the job ends DONE (V23). */
@@ -77,6 +80,14 @@ public class GenerationJobSettlement {
         }
         job.setStatus(JobStatus.QUEUED);
         jobs.save(job);
+        // A batch row's job (round 12): the row takes the job's id here, with the
+        // pre-debit, so the id is on the row before any provider is called. A row
+        // that is not a claimed row still waiting for its job refuses it, and the
+        // database refuses a second job for a row; either way this transaction
+        // rolls back and nothing was charged. A row is never submitted twice.
+        if (job.getBatchRowId() != null && batchRows.attachJob(job.getBatchRowId(), job.getId()) != 1) {
+            throw new IllegalStateException("batch row " + job.getBatchRowId() + " is not waiting for a job");
+        }
         inputs.attach(job, resolvedInputs);
         return true;
     }

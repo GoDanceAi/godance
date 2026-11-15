@@ -116,6 +116,23 @@ public class GenerationJob {
     @Column(name = "recipe_version_id", updatable = false)
     private UUID recipeVersionId;
 
+    /**
+     * The batch row the job was made for (V36), or null. One job per row:
+     * the database refuses a second. Cleared by the database when the batch
+     * is deleted.
+     */
+    @Column(name = "batch_row_id", updatable = false)
+    private UUID batchRowId;
+
+    /**
+     * How the job's batch was made (V36): {@link JobChannel#STUDIO} or
+     * {@link JobChannel#API}; null for a job outside a batch. Kept when the
+     * batch is deleted, which {@code batchRowId} is not.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "batch_channel", updatable = false)
+    private JobChannel batchChannel;
+
     @PrePersist
     void onCreate() {
         if (createdAt == null) createdAt = Instant.now();
@@ -184,6 +201,12 @@ public class GenerationJob {
     public void setGalleryRecipe(String galleryRecipe) { this.galleryRecipe = galleryRecipe; }
 
     public Instant getSavedAt() { return savedAt; }
+
+    public UUID getBatchRowId() { return batchRowId; }
+    public void setBatchRowId(UUID batchRowId) { this.batchRowId = batchRowId; }
+
+    public JobChannel getBatchChannel() { return batchChannel; }
+    public void setBatchChannel(JobChannel batchChannel) { this.batchChannel = batchChannel; }
 
     @Override
     public boolean equals(Object o) {

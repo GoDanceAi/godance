@@ -50,6 +50,14 @@ public class FunnelService {
      * NOWPAYMENTS or BINANCE_PAY ledger entry; promotional and referral
      * credit does not count. The source is decided in the contract's order:
      * a gallery recipe in the first touch, then a referral, then a campaign.
+     *
+     * <p>Recipe batches (round 12). {@code first_batch} is when the user
+     * first made a batch. A batch made with an API key is API use from the
+     * moment it is made, so it counts toward {@code first_api_job} when it
+     * is earlier than any API job; a batch made in the Studio does not, and
+     * neither do its jobs. A batch is deleted once its jobs are purged, so
+     * both are also read off the jobs it made, which stay: a batch's job
+     * has channel BATCH and keeps how its batch was made.
      */
     private static final String FIRSTS = """
             WITH firsts AS (
@@ -64,8 +72,16 @@ public class FunnelService {
                        END AS source,
                        (SELECT min(j.created_at) FROM generation_jobs j
                          WHERE j.user_id = u.id AND j.channel = 'STUDIO') AS first_studio_job,
-                       (SELECT min(j.created_at) FROM generation_jobs j
-                         WHERE j.user_id = u.id AND j.channel = 'API') AS first_api_job,
+                       LEAST(
+                           (SELECT min(j.created_at) FROM generation_jobs j
+                             WHERE j.user_id = u.id
+                               AND (j.channel = 'API' OR (j.channel = 'BATCH' AND j.batch_channel = 'API'))),
+                           (SELECT min(b.created_at) FROM recipe_batches b
+                             WHERE b.user_id = u.id AND b.created_by_channel = 'API')) AS first_api_job,
+                       LEAST(
+                           (SELECT min(b.created_at) FROM recipe_batches b WHERE b.user_id = u.id),
+                           (SELECT min(j.created_at) FROM generation_jobs j
+                             WHERE j.user_id = u.id AND j.channel = 'BATCH')) AS first_batch,
                        (SELECT min(l.occurred_at) FROM credit_ledger l
                          WHERE l.user_id = u.id AND l.delta_cents > 0
                            AND l.source IN ('STRIPE', 'NOWPAYMENTS', 'BINANCE_PAY')) AS first_paid_top_up
@@ -81,6 +97,7 @@ public class FunnelService {
                    count(f.first_studio_job)  AS first_studio_job,
                    count(f.first_paid_top_up) AS first_paid_top_up,
                    count(f.first_api_job)     AS first_api_job,
+                   count(f.first_batch)       AS first_batch,
                    round(cast(percentile_cont(0.5) WITHIN GROUP (
                        ORDER BY extract(epoch FROM f.first_api_job - f.created_at) / 86400.0) AS numeric), 1)
                                               AS median_days_to_api_job
@@ -117,7 +134,8 @@ public class FunnelService {
                    count(*)                   AS signed_up,
                    count(g.first_studio_job)  AS first_studio_job,
                    count(g.first_paid_top_up) AS first_paid_top_up,
-                   count(g.first_api_job)     AS first_api_job
+                   count(g.first_api_job)     AS first_api_job,
+                   count(g.first_batch)       AS first_batch
               FROM grouped g
              GROUP BY g.bucket
             HAVING count(*) >= :minGroup
@@ -135,7 +153,11 @@ public class FunnelService {
                    count(*)                  AS jobs,
                    count(DISTINCT j.user_id) FILTER (WHERE EXISTS (
                        SELECT 1 FROM generation_jobs a
-                        WHERE a.user_id = j.user_id AND a.channel = 'API')) AS users_with_api_job
+                        WHERE a.user_id = j.user_id
+                          AND (a.channel = 'API' OR (a.channel = 'BATCH' AND a.batch_channel = 'API')))
+                       OR EXISTS (
+                       SELECT 1 FROM recipe_batches b
+                        WHERE b.user_id = j.user_id AND b.created_by_channel = 'API')) AS users_with_api_job
               FROM generation_jobs j
              WHERE j.gallery_recipe IS NOT NULL
                AND j.created_at >= :from AND j.created_at < :to
@@ -159,7 +181,8 @@ public class FunnelService {
             @JsonProperty("first_paid_top_up") long firstPaidTopUp,
             @JsonProperty("first_api_job")     long firstApiJob,
             @JsonInclude(JsonInclude.Include.ALWAYS)
-            @JsonProperty("median_days_to_api_job") Double medianDaysToApiJob
+            @JsonProperty("median_days_to_api_job") Double medianDaysToApiJob,
+            @JsonProperty("first_batch")       long firstBatch
     ) { }
 
     /** The sign-ups one source brought: {@code gallery}, {@code referral}, {@code utm:<source>}, {@code utm:other} or {@code none}. */
@@ -168,7 +191,8 @@ public class FunnelService {
             @JsonProperty("signed_up")         long signedUp,
             @JsonProperty("first_studio_job")  long firstStudioJob,
             @JsonProperty("first_paid_top_up") long firstPaidTopUp,
-            @JsonProperty("first_api_job")     long firstApiJob
+            @JsonProperty("first_api_job")     long firstApiJob,
+            @JsonProperty("first_batch")       long firstBatch
     ) { }
 
     public record GalleryRecipe(
@@ -204,13 +228,14 @@ public class FunnelService {
                 rs.getString("week"), rs.getLong("signed_up"), rs.getLong("first_studio_job"),
                 rs.getLong("first_paid_top_up"), rs.getLong("first_api_job"),
                 rs.getObject("median_days_to_api_job") == null
-                        ? null : rs.getBigDecimal("median_days_to_api_job").doubleValue()));
+                        ? null : rs.getBigDecimal("median_days_to_api_job").doubleValue(),
+                rs.getLong("first_batch")));
 
         List<Source> sources = jdbc.query(BY_SOURCE,
                 Map.of("from", fromTs, "to", toTs, "minGroup", MIN_GROUP, "topUtm", TOP_UTM_SOURCES),
                 (rs, i) -> new Source(
                         rs.getString("source"), rs.getLong("signed_up"), rs.getLong("first_studio_job"),
-                        rs.getLong("first_paid_top_up"), rs.getLong("first_api_job")));
+                        rs.getLong("first_paid_top_up"), rs.getLong("first_api_job"), rs.getLong("first_batch")));
 
         List<GalleryRecipe> recipes = jdbc.query(GALLERY_RECIPES,
                 Map.of("from", fromTs, "to", toTs, "minGroup", MIN_GROUP, "topRecipes", TOP_RECIPES),
