@@ -16,6 +16,7 @@ const endpoints = [
   { id: 'chat-completions', label: 'POST /v1/chat/completions', summary: 'streaming + non-streaming' },
   { id: 'images', label: 'POST /v1/images/generations', summary: 'a job_id to poll, or the images themselves with a sync key' },
   { id: 'videos', label: 'POST /v1/videos/generations', summary: 'async-only, signed webhook' },
+  { id: 'videos-openai', label: 'POST /v1/videos', summary: "the same video jobs in OpenAI's shape, for OpenAI SDK video code" },
   { id: 'jobs', label: 'GET /v1/jobs/{id}', summary: 'async job status, outputs, history and saving a job' },
   { id: 'files', label: 'POST /v1/files', summary: 'upload an image to use as an input, and point a request at it' },
   { id: 'recipes', label: 'CRUD /v1/recipes', summary: 'keep a prompt template with variables, run it, and total what its attempts cost' },
@@ -165,6 +166,74 @@ const videoReferenceSnippet = `{
 
 const videoCapabilitiesSnippet = `"capabilities": {
   "inputs": { "first_frame": true, "last_frame": true, "reference_images": { "max": 9 } }
+}`;
+
+const openAiVideoSdkSnippet = `from openai import OpenAI
+
+client = OpenAI(base_url="https://api.godance.ai/v1", api_key="gd_live_...")
+
+video = client.videos.create_and_poll(
+    model="seedance-2.0",
+    prompt="A paper boat drifts down a gutter after rain.",
+    seconds="8",
+    size="1280x720",
+)
+if video.status == "failed":
+    raise RuntimeError(video.error.message)
+client.videos.download_content(video.id, variant="video").write_to_file("out.mp4")`;
+
+const openAiVideoCurlSnippet = `# Create
+curl https://api.godance.ai/v1/videos \\
+  -H "Authorization: Bearer $GODANCE_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "model": "seedance-2.0",
+    "prompt": "A paper boat drifts down a gutter after rain.",
+    "seconds": "8"
+  }'
+
+# Read it until status is "completed" or "failed"
+curl https://api.godance.ai/v1/videos/$VIDEO_ID \\
+  -H "Authorization: Bearer $GODANCE_API_KEY"
+
+# Download the file
+curl -o out.mp4 https://api.godance.ai/v1/videos/$VIDEO_ID/content \\
+  -H "Authorization: Bearer $GODANCE_API_KEY"`;
+
+const openAiVideoObjectSnippet = `{
+  "id": "7f000101-a1de-1f5a-81a1-def16cd70039",
+  "object": "video",
+  "model": "seedance-2.0",
+  "status": "completed",
+  "progress": 100,
+  "created_at": 1794741865,
+  "completed_at": 1794741867,
+  "expires_at": 1802517865,
+  "prompt": "A paper boat drifts down a gutter after rain.",
+  "seconds": "8",
+  "size": "1280x720",
+  "error": null,
+  "remixed_from_video_id": null,
+  "cost_cents": 129,
+  "job_url": "/v1/jobs/7f000101-a1de-1f5a-81a1-def16cd70039"
+}`;
+
+const openAiVideoErrorSnippet = `HTTP/1.1 400 Bad Request
+Content-Type: application/problem+json
+
+{
+  "title": "Bad Request",
+  "status": 400,
+  "detail": "seconds must be a whole number of seconds, as a string (\\"8\\") or a number (8)",
+  "instance": "/v1/videos",
+  "code": "invalid_parameter",
+  "param": "seconds",
+  "error": {
+    "message": "seconds must be a whole number of seconds, as a string (\\"8\\") or a number (8)",
+    "type": "invalid_request_error",
+    "param": "seconds",
+    "code": "invalid_parameter"
+  }
 }`;
 
 const jobSnippet = `{
@@ -341,6 +410,33 @@ def verify(payload, header, secret):
         and start switching <code class="code-chip">model</code> values.
       </li>
     </ol>
+
+    <!-- ===== Ask your AI assistant ===== -->
+    <h2 id="ai-assistants" class="scroll-mt-24 text-2xl font-bold mt-12 mb-4 text-fg">Ask your AI assistant</h2>
+    <p class="text-fg-muted">
+      If an AI assistant writes your code, give it one file. It holds every route on this page
+      with a curl example and a Python example, using the real field names, so the assistant
+      does not have to guess:
+    </p>
+    <ul class="mt-4 space-y-2 text-fg-muted">
+      <li>
+        <a href="/llms-full.txt" class="underline" style="color: var(--color-primary)"><code class="code-chip">https://godance.ai/llms-full.txt</code></a>
+        — the complete reference. Paste the link, or the file itself, into the conversation and
+        say what you want to build.
+      </li>
+      <li>
+        <a href="https://api.godance.ai/v1/openapi.yaml" class="underline" style="color: var(--color-primary)"><code class="code-chip">https://api.godance.ai/v1/openapi.yaml</code></a>
+        — the same API as an OpenAPI 3.1 description, for tools that read one.
+      </li>
+      <li>
+        <a href="/llms.txt" class="underline" style="color: var(--color-primary)"><code class="code-chip">https://godance.ai/llms.txt</code></a>
+        — the short summary.
+      </li>
+    </ul>
+    <p class="mt-4 text-fg-muted">
+      Give the assistant an API key through an environment variable
+      (<code class="code-chip">GODANCE_API_KEY</code>), not by pasting it into the conversation.
+    </p>
 
     <h2 class="text-2xl font-bold mt-12 mb-4 text-fg">Endpoint reference</h2>
     <ul class="space-y-2 text-fg-muted">
@@ -570,6 +666,43 @@ def verify(payload, header, secret):
       <li><strong class="text-fg">Refusals,</strong> each before anything is charged: <code class="code-chip">400 input_not_supported</code> (the model does not take the field, takes fewer reference images, or does not take the inputs together), <code class="code-chip">400 input_aspect_mismatch</code> (the image's shape is outside the range, which the answer names along with the image's own size), <code class="code-chip">415 input_type_unsupported</code> and <code class="code-chip">413 input_too_large</code> (the model's provider does not take that type or size), and everything under <a href="#input-refusals" class="underline" style="color: var(--color-primary)">what is refused, and why</a>.</li>
       <li><strong class="text-fg">The job</strong> lists what it started from, in the order given, under <a href="#job-inputs" class="underline" style="color: var(--color-primary)"><code class="code-chip">inputs</code></a>.</li>
     </ul>
+
+    <!-- ===== Video (OpenAI shape) ===== -->
+    <h2 id="videos-openai" class="scroll-mt-24 text-2xl font-bold mt-16 mb-4 text-fg">Video (OpenAI shape)</h2>
+    <p class="text-fg-muted">
+      <code class="code-chip">POST /v1/videos</code> and the routes beside it are OpenAI's Videos
+      API over the same video jobs, so video code written for OpenAI's SDK works with the base
+      URL, the key and the model changed. A video's <code class="code-chip">id</code> is its
+      job's id, and the same job is at
+      <a href="#jobs" class="underline" style="color: var(--color-primary)"><code class="code-chip">GET /v1/jobs/&#123;id&#125;</code></a>.
+      <a href="#videos" class="underline" style="color: var(--color-primary)"><code class="code-chip">POST /v1/videos/generations</code></a>
+      is unchanged; use whichever shape your code already speaks.
+    </p>
+    <pre class="code-block mt-4"><code>{openAiVideoSdkSnippet}</code></pre>
+    <ul class="mt-4 space-y-2 text-fg-muted">
+      <li><strong class="text-fg">The model.</strong> <code class="code-chip">model</code> is a Godance video model, such as <code class="code-chip">seedance-2.0</code>, and it is required. OpenAI shut down its own Videos API and its <code class="code-chip">sora-2</code> models on 24 September 2026; its SDK still has these calls and marks them deprecated, and they work here.</li>
+      <li><strong class="text-fg">Create.</strong> <code class="code-chip">POST /v1/videos</code> takes JSON or the multipart form OpenAI's SDK sends: <code class="code-chip">model</code>, <code class="code-chip">prompt</code>, <code class="code-chip">seconds</code> (a string such as <code class="code-chip">"8"</code>, as in OpenAI's API; a number is taken too), <code class="code-chip">size</code> and <code class="code-chip">input_reference</code>. It answers <code class="code-chip">200</code> with the video, <code class="code-chip">queued</code>. <code class="code-chip">webhook_url</code>{recipesOn && <Fragment>, <code class="code-chip">gallery_recipe</code></Fragment>} and <code class="code-chip">recipe</code> work as on <code class="code-chip">POST /v1/videos/generations</code>, and so do the price and its reservation.</li>
+      <li><strong class="text-fg">Read.</strong> <code class="code-chip">GET /v1/videos/&#123;id&#125;</code> is one video. <code class="code-chip">GET /v1/videos</code> lists yours, newest first, as OpenAI pages: <code class="code-chip">data</code>, <code class="code-chip">first_id</code>, <code class="code-chip">last_id</code>, <code class="code-chip">has_more</code>; pass <code class="code-chip">last_id</code> as <code class="code-chip">after</code> for the next page (<code class="code-chip">limit</code> 1 to 100, default 20; <code class="code-chip">order</code> <code class="code-chip">desc</code> or <code class="code-chip">asc</code>). Every video job of yours is listed, whichever route made it.</li>
+      <li><strong class="text-fg">Download.</strong> <code class="code-chip">GET /v1/videos/&#123;id&#125;/content</code> sends the file itself; it does not redirect. <code class="code-chip">variant=video</code> is the default. <code class="code-chip">variant=thumbnail</code> answers <code class="code-chip">404</code> with <code class="code-chip">code: "video_content_not_found"</code>: no model stores a poster image today.</li>
+      <li><strong class="text-fg">Delete.</strong> <code class="code-chip">DELETE /v1/videos/&#123;id&#125;</code> deletes the video's files and prompt now, as the 90-day clean-up would, and answers <code class="code-chip">&#123;"id", "object": "video.deleted", "deleted": true&#125;</code>. Nothing is refunded. The job stays at <code class="code-chip">GET /v1/jobs/&#123;id&#125;</code>, <code class="code-chip">purged</code>, with what it cost. A video that is still queued or in progress answers <code class="code-chip">409</code> with <code class="code-chip">code: "video_not_deletable"</code>.</li>
+    </ul>
+    <p class="mt-6 text-fg-muted">The video object. Times are seconds since the epoch:</p>
+    <pre class="code-block mt-4"><code>{openAiVideoObjectSnippet}</code></pre>
+    <ul class="mt-4 space-y-2 text-fg-muted">
+      <li><code class="code-chip">status</code> — <code class="code-chip">queued</code>, <code class="code-chip">in_progress</code>, <code class="code-chip">completed</code> or <code class="code-chip">failed</code>. <code class="code-chip">progress</code> is 0 until the video is completed, then 100. OpenAI's SDK polls every five seconds until the video is completed or failed.</li>
+      <li><code class="code-chip">error</code> — set when <code class="code-chip">failed</code>: <code class="code-chip">&#123;"code": "generation_failed", "message": "…"&#125;</code>. The reserved credit is returned.</li>
+      <li><code class="code-chip">cost_cents</code>, <code class="code-chip">job_url</code> — Godance additions. <code class="code-chip">cost_cents</code> is the amount reserved while the video is queued or in progress, the amount charged once it is completed, and 0 when it failed.</li>
+      <li><code class="code-chip">expires_at</code> — when the files are deleted: 90 days after the video was created, or null while its job is <a href="#saving-a-job" class="underline" style="color: var(--color-primary)">saved</a>.</li>
+      <li><code class="code-chip">size</code> — the size you asked for, or the model's default size where it has one.</li>
+    </ul>
+    <pre class="code-block mt-4"><code>{openAiVideoCurlSnippet}</code></pre>
+    <ul class="mt-4 space-y-2 text-fg-muted">
+      <li><strong class="text-fg">Starting from an image.</strong> <code class="code-chip">input_reference</code> is the image the video starts from, the same as <a href="#video-inputs" class="underline" style="color: var(--color-primary)"><code class="code-chip">first_frame</code></a>. With OpenAI's SDK send a file: <code class="code-chip">input_reference=open("first.png", "rb")</code>; it is checked and stored as an upload to <a href="#files" class="underline" style="color: var(--color-primary)"><code class="code-chip">POST /v1/files</code></a> is. To use an image that is already stored, send <code class="code-chip">extra_body=&#123;"input_reference": &#123;"file_id": "…"&#125;&#125;</code> from the SDK, or in JSON <code class="code-chip">"input_reference": &#123;"file_id": "…"&#125;</code> or <code class="code-chip">&#123;"job_output": &#123;"job_id": "…", "index": 0&#125;&#125;</code>. An <code class="code-chip">image_url</code> answers <code class="code-chip">400</code> with <code class="code-chip">code: "image_url_not_supported"</code>. <strong class="text-fg">Not switched on yet:</strong> like every <a href="#files" class="underline" style="color: var(--color-primary)">input</a>, it answers <code class="code-chip">403</code> with <code class="code-chip">code: "inputs_disabled"</code> until inputs are switched on. A video from text is unaffected.</li>
+      <li><strong class="text-fg">Errors</strong> are problem responses, as everywhere. On these routes each one also carries OpenAI's <code class="code-chip">error</code> object, so the SDK's exception shows the sentence and has <code class="code-chip">code</code> and <code class="code-chip">param</code> set.</li>
+      <li><strong class="text-fg">Not supported,</strong> each with a <code class="code-chip">code</code> of its own: remix (<code class="code-chip">404 video_remix_not_supported</code>), edits (<code class="code-chip">404 video_edits_not_supported</code>), extensions (<code class="code-chip">404 video_extensions_not_supported</code>), characters (<code class="code-chip">404 video_characters_not_supported</code>) and <code class="code-chip">variant=spritesheet</code> (<code class="code-chip">400 variant_not_supported</code>).</li>
+      <li><strong class="text-fg">Other refusals:</strong> <code class="code-chip">404 video_not_found</code> (also for a video that is not yours), <code class="code-chip">409 video_not_ready</code> (content of a video that is not finished), <code class="code-chip">400 invalid_parameter</code> (<code class="code-chip">param</code> names the field), and everything <code class="code-chip">POST /v1/videos/generations</code> answers.</li>
+    </ul>
+    <pre class="code-block mt-4"><code>{openAiVideoErrorSnippet}</code></pre>
 
     <!-- ===== Jobs ===== -->
     <h2 id="jobs" class="scroll-mt-24 text-2xl font-bold mt-16 mb-4 text-fg">GET /v1/jobs/&#123;id&#125;</h2>
@@ -907,10 +1040,16 @@ def verify(payload, header, secret):
         non-streaming, and <code class="code-chip">GET /v1/models</code>. Catalog entries carry an
         extra <code class="code-chip">godance</code> object (modality, list price, platform fee
         and, for image and video models, what the model accepts) that OpenAI clients ignore.
+        Video works through <code class="code-chip">client.videos</code>
+        (<a href="#videos-openai" class="underline" style="color: var(--color-primary)">Video (OpenAI shape)</a>),
+        and images through <code class="code-chip">client.images</code> with an API key set to
+        <a href="#image-responses" class="underline" style="color: var(--color-primary)">synchronous image responses</a>.
       </li>
       <li>
-        <strong class="text-fg">Same request, different response:</strong> image and video
-        generation return <code class="code-chip">202</code> + <code class="code-chip">job_id</code>
+        <strong class="text-fg">Same request, different response:</strong> image generation
+        with a key that is not set to synchronous responses, and
+        <code class="code-chip">POST /v1/videos/generations</code>, return
+        <code class="code-chip">202</code> + <code class="code-chip">job_id</code>
         instead of the finished output, so the SDK's typed result won't contain images. Call
         these endpoints with a plain HTTP client (or your SDK's raw-response mode) and read
         <code class="code-chip">job_id</code>.
@@ -923,7 +1062,10 @@ def verify(payload, header, secret):
         keep their usual meaning — <code class="code-chip">400</code> invalid request,
         <code class="code-chip">401</code> bad key, <code class="code-chip">402</code> insufficient
         credit or spending cap reached, <code class="code-chip">404</code> unknown model or job —
-        so SDKs still raise their usual status errors.
+        so SDKs still raise their usual status errors. On the
+        <a href="#videos-openai" class="underline" style="color: var(--color-primary)">OpenAI-shaped video routes</a>
+        the body also carries OpenAI's <code class="code-chip">error</code> object, so the
+        SDK's exception shows the message.
       </li>
     </ul>
 
