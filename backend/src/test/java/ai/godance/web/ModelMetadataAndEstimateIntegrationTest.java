@@ -131,8 +131,12 @@ class ModelMetadataAndEstimateIntegrationTest {
                 "sizes", List.of("1024x1024", "1536x1024", "1024x1536", "auto"),
                 "default_size", "auto", "max_n", 10,
                 "inputs", Map.of("images", Map.of("max", 16, "mask", true))));
+        // Round 11: a video model that takes a first frame says so, in the contract's shape.
         assertThat(godance.get("minimax-hailuo-2.3").get("capabilities"))
-                .isEqualTo(Map.of("default_seconds", 6, "max_n", 1));
+                .isEqualTo(Map.of("default_seconds", 6, "max_n", 1,
+                        "inputs", Map.of("first_frame", true, "last_frame", false)));
+        // A video model whose provider confirms no input says nothing about inputs.
+        assertThat(godance.get("runway-gen4").get("capabilities").toString()).doesNotContain("inputs");
         // Unknown capabilities are left out, not published as empty.
         assertThat(godance.get("imagen-4")).containsEntry("display_name", "Imagen 4")
                 .doesNotContainKey("capabilities");

@@ -1,6 +1,8 @@
 package ai.godance.gateway.providers;
 
+import java.util.Base64;
 import java.util.List;
+import java.util.Set;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,6 +33,17 @@ import reactor.core.publisher.Mono;
  * <p>China-hosted (Kuaishou), so {@code KLING} is Alicloud-allowed. The
  * API surface is simplified for v1; recorded cassettes will lock in the
  * real signing + payload shape when production keys land.
+ *
+ * <p><b>Images.</b> A request with a first frame goes to
+ * {@code /v1/videos/image2video} instead, with the frame in {@code image}
+ * and a last frame in {@code image_tail}, each as plain base64 with no
+ * {@code data:} prefix, and is polled at
+ * {@code /v1/videos/image2video/{task_id}}. Kling takes the clip's shape
+ * from the frame, so no {@code aspect_ratio} is sent. A request without
+ * images is sent exactly as before.
+ * Source: Kling's image-to-video reference
+ * (kling.ai/document-api/api/video/3-0-omni/image-to-video and its legacy
+ * page), read 2026-11-14.
  */
 @Component
 public class KlingVideoProvider implements VideoProviderAdapter {
@@ -38,6 +51,16 @@ public class KlingVideoProvider implements VideoProviderAdapter {
     private static final Logger log = LoggerFactory.getLogger(KlingVideoProvider.class);
     private static final String STATUS_SUCCEED = "succeed";
     private static final int DEFAULT_DURATION_SECONDS = 5;
+    private static final String TEXT_TO_VIDEO = "/v1/videos/text2video";
+    private static final String IMAGE_TO_VIDEO = "/v1/videos/image2video";
+
+    /**
+     * What Kling documents for an input image: JPEG or PNG, a width-to-height
+     * ratio between 1:2.5 and 2.5:1, and at most 10 MB. It takes no
+     * reference images on this model.
+     */
+    private static final InputRules INPUT_RULES = new InputRules(
+            Set.of("image/jpeg", "image/png"), 0.4, 2.5, 10L * 1024 * 1024, false);
 
     private final WebClient apiClient;
     private final WebClient downloadClient;
@@ -67,15 +90,24 @@ public class KlingVideoProvider implements VideoProviderAdapter {
     }
 
     @Override
+    public InputRules inputRules() {
+        return INPUT_RULES;
+    }
+
+    @Override
     public Mono<List<GeneratedVideo>> generate(VideoRequest request) {
-        KlingSubmit body = new KlingSubmit(
-                request.model(),
-                request.prompt(),
-                request.durationSeconds() == null ? DEFAULT_DURATION_SECONDS : request.durationSeconds(),
-                aspectRatio(request.size()));
+        int duration = request.durationSeconds() == null ? DEFAULT_DURATION_SECONDS : request.durationSeconds();
+        // A clip that starts from a frame is another endpoint, with its own task list.
+        boolean fromImage = request.firstFrame() != null;
+        String path = fromImage ? IMAGE_TO_VIDEO : TEXT_TO_VIDEO;
+        Object body = fromImage
+                ? new KlingImageSubmit(request.model(), request.prompt(), duration,
+                        base64(request.firstFrame().bytes()),
+                        request.lastFrame() == null ? null : base64(request.lastFrame().bytes()))
+                : new KlingSubmit(request.model(), request.prompt(), duration, aspectRatio(request.size()));
 
         return apiClient.post()
-                .uri("/v1/videos/text2video")
+                .uri(path)
                 .bodyValue(body)
                 .retrieve()
                 .bodyToMono(KlingEnvelope.class)
@@ -85,15 +117,19 @@ public class KlingVideoProvider implements VideoProviderAdapter {
                         return Mono.error(new IllegalStateException(
                                 "Kling submit returned no task_id: " + env.message()));
                     }
-                    return pollUntilDone(taskId).timeout(props.pollTimeout());
+                    return pollUntilDone(path, taskId).timeout(props.pollTimeout());
                 })
                 .flatMap(this::downloadBytes)
                 .map(bytes -> List.of(new GeneratedVideo(bytes, "video/mp4")));
     }
 
-    private Mono<KlingEnvelope> pollUntilDone(String taskId) {
+    private static String base64(byte[] bytes) {
+        return Base64.getEncoder().encodeToString(bytes);
+    }
+
+    private Mono<KlingEnvelope> pollUntilDone(String path, String taskId) {
         return apiClient.get()
-                .uri("/v1/videos/text2video/{id}", taskId)
+                .uri(path + "/{id}", taskId)
                 .retrieve()
                 .bodyToMono(KlingEnvelope.class)
                 .flatMap(env -> {
@@ -102,7 +138,7 @@ public class KlingVideoProvider implements VideoProviderAdapter {
                     return switch (status) {
                         case STATUS_SUCCEED -> Mono.just(env);
                         case "submitted", "processing" -> Mono.delay(props.pollInterval())
-                                .then(Mono.defer(() -> pollUntilDone(taskId)));
+                                .then(Mono.defer(() -> pollUntilDone(path, taskId)));
                         default -> {
                             log.warn("Kling task {} terminal status: {}", taskId, status);
                             yield Mono.error(new IllegalStateException(
@@ -135,6 +171,16 @@ public class KlingVideoProvider implements VideoProviderAdapter {
             String prompt,
             int duration,
             @JsonProperty("aspect_ratio") String aspectRatio
+    ) { }
+
+    /** Image to video: the first frame, and the last when there is one, as plain base64. */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    record KlingImageSubmit(
+            @JsonProperty("model_name") String modelName,
+            String prompt,
+            int duration,
+            String image,
+            @JsonProperty("image_tail") String imageTail
     ) { }
 
     record KlingEnvelope(int code, String message, KlingData data) { }
