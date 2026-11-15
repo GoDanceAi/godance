@@ -1,0 +1,156 @@
+---
+/**
+ * "Run at scale" on a recipe's page: the same three ways the app offers a
+ * signed-in user, built into the page. A prompt for an AI assistant with the
+ * recipe in it, the request as code in three languages, and the n8n template.
+ *
+ * Nobody is signed in here, so there is no key to create: the code reads
+ * GODANCE_API_KEY, and the block links to sign-up. The Copy buttons are
+ * wired up by the script on the recipe page.
+ *
+ * Styled with utility classes and no <style> of its own. A recipe page's
+ * scoped styles are small enough to be inlined into the page; more of them
+ * would be written to a stylesheet of their own, which a build with the
+ * gallery off would then carry for no page.
+ */
+import type { Recipe, Run } from '../../lib/gallery-recipes';
+import {
+  ASSISTANT_PROMPT_VERSION,
+  N8N_CREDENTIAL,
+  N8N_README,
+  assistantPromptOf,
+  codeOf,
+  n8nOf,
+  placeholdersOf,
+} from './run-at-scale';
+
+interface Props {
+  recipe: Recipe;
+  run: Run;
+  /** The sign-up link, with the tags that say which recipe the visit came from. */
+  getKeyUrl: string;
+}
+
+const { recipe, run, getKeyUrl } = Astro.props;
+const isVideo = recipe.modality === 'VIDEO';
+const prompt = assistantPromptOf(recipe, run);
+const languages = codeOf(recipe, run);
+const { template, steps, row, inputsNote } = n8nOf(recipe, run);
+const placeholders = placeholdersOf(recipe);
+
+const link = 'underline';
+const linkStyle = 'color: var(--color-primary)';
+const summary = 'cursor-pointer px-4 py-3.5 font-semibold text-fg';
+const body = 'border-t border-border p-4';
+// On the dark code block, as the page's other snippets have it.
+const copyOnCode = 'color: #e5e7eb; background: rgba(255, 255, 255, 0.1); border-color: rgba(255, 255, 255, 0.18)';
+const promptStyle = 'white-space: pre-wrap; overflow-wrap: anywhere; max-height: 26rem; overflow-y: auto; '
+  + "font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace; "
+  + 'font-size: 13px; line-height: 1.6';
+---
+
+<section class="mt-14" data-run-at-scale>
+  <h2 class="text-2xl font-bold text-fg">Run at scale</h2>
+  <p class="mt-2 text-fg-muted">
+    Three ways to run this recipe many times over, outside this page. Each one needs an API key:
+    <a href={getKeyUrl} class={link} style={linkStyle} data-scale-get-key>get an API key</a> and set it as
+    <code class="code-chip">GODANCE_API_KEY</code>. No code here holds a key.
+  </p>
+
+  <div class="mt-6 space-y-4">
+    <!-- ===== Ask your AI assistant ===== -->
+    <details class="card p-0" open data-scale-part="assistant">
+      <summary class={summary}>Ask your AI assistant</summary>
+      <div class={body}>
+        <p class="text-sm text-fg-muted">
+          Paste this into ChatGPT, Claude or the assistant in your editor. It holds this recipe, where the API
+          is, and the rules a script must follow: the key stays in an environment variable, the cost is
+          estimated first, and it stops when the balance runs out.
+        </p>
+        <div class="mt-3 overflow-hidden rounded-md border border-border">
+          <div class="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-border bg-bg-muted">
+            <p class="text-sm font-semibold text-fg">Prompt for your AI assistant</p>
+            <button type="button" class="btn btn-secondary btn-sm" data-copy="scale-prompt">Copy</button>
+          </div>
+          <pre id="scale-prompt" class="m-0 px-4 py-3.5 text-fg" style={promptStyle} data-scale-prompt data-prompt-version={ASSISTANT_PROMPT_VERSION}>{prompt}</pre>
+        </div>
+      </div>
+    </details>
+
+    <!-- ===== Code ===== -->
+    <details class="card p-0" data-scale-part="code">
+      <summary class={summary}>Code</summary>
+      <div class={body}>
+        <p class="text-sm text-fg-muted">
+          The request that made this, in three languages. Each starts the job and reads it until it is done.
+          {!isVideo && (
+            <Fragment>
+              With a key set to synchronous image responses, the request can wait for the image instead: leave
+              <code class="code-chip">"async": true</code> out. See the <a href="/docs" class={link} style={linkStyle}>docs</a>.
+            </Fragment>
+          )}
+        </p>
+        {placeholders.length > 0 && (
+          <p class="mt-2 text-sm text-fg-muted" data-scale-upload-note>
+            This recipe takes {placeholders.length === 1 ? 'an input image' : 'input images'}: upload
+            {placeholders.length === 1 ? 'it' : 'each one'} first, and put the
+            <code class="code-chip">id</code> of {placeholders.length === 1 ? 'the upload' : 'each upload'} in
+            place of
+            {placeholders.map((name, i) => (
+              <Fragment>{i > 0 && (i === placeholders.length - 1 ? ' and ' : ', ')}<code class="code-chip">{name}</code></Fragment>
+            ))}.
+          </p>
+        )}
+        <div class="mt-3 space-y-3">
+          {languages.map(({ language, label, snippets }, i) => (
+            <details class="rounded-md border border-border" name="run-at-scale-language" open={i === 0} data-scale-language={language}>
+              <summary class="cursor-pointer px-4 py-2.5 text-sm font-semibold text-fg">{label}</summary>
+              <div class="space-y-3 px-4 pb-4">
+                {snippets.map((snippet, j) => (
+                  <figure>
+                    <figcaption class="text-xs font-semibold text-fg-subtle">{snippet.title}</figcaption>
+                    <div class="relative mt-1.5">
+                      <button type="button" class="btn btn-sm absolute" style={`top: 10px; right: 10px; ${copyOnCode}`} data-copy={`scale-${language}-${j}`}>Copy</button>
+                      <pre class="code-block" style="padding-top: 2.75rem"><code id={`scale-${language}-${j}`} data-scale-code={language}>{snippet.code}</code></pre>
+                    </div>
+                    {snippet.note && <p class="mt-1.5 text-xs text-fg-subtle">{snippet.note}</p>}
+                  </figure>
+                ))}
+              </div>
+            </details>
+          ))}
+        </div>
+      </div>
+    </details>
+
+    <!-- ===== No-code (n8n) ===== -->
+    <details class="card p-0" data-scale-part="n8n">
+      <summary class={summary}>No-code (n8n)</summary>
+      <div class={body}>
+        <p class="text-sm text-fg-muted">
+          Use the template <span class="font-mono text-fg">{template.file}</span>. {template.does}
+        </p>
+        <p class="mt-3">
+          <a href={template.url} class="btn btn-secondary btn-sm" rel="noopener" data-scale-n8n-template>Download the template</a>
+        </p>
+        <ol class="mt-4 list-decimal space-y-2 pl-5 text-sm text-fg-muted" data-scale-n8n-steps>
+          {steps.map((step) => <li>{step}</li>)}
+        </ol>
+        <h3 class="mt-5 text-sm font-semibold text-fg">In the sheet, for this recipe</h3>
+        <dl class="mt-2 text-sm" data-scale-n8n-row>
+          {row.map((cell) => (
+            <div class="flex flex-wrap gap-x-4 gap-y-1 py-0.5">
+              <dt class="font-mono text-fg-subtle">{cell.column}</dt>
+              <dd class="text-fg" style="overflow-wrap: anywhere">{cell.value}</dd>
+            </div>
+          ))}
+        </dl>
+        {inputsNote && <p class="mt-2 text-sm text-fg-muted" data-scale-n8n-inputs>{inputsNote}</p>}
+        <p class="mt-3 text-xs text-fg-subtle">
+          The credential is named <span class="font-mono">{N8N_CREDENTIAL}</span>. Every column, and what each
+          node does, is in the <a href={N8N_README} class={link} style={linkStyle} rel="noopener">templates' notes</a>.
+        </p>
+      </div>
+    </details>
+  </div>
+</section>
