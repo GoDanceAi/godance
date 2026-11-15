@@ -40,12 +40,21 @@ public class GenerationQuotes {
 
     /** An image request's quote. 404 for an unknown model, 400 for a non-image model or too large an {@code n}. */
     public Quote image(String modelName, Integer n) {
+        return image(modelName, n, 0);
+    }
+
+    /**
+     * The quote of an image request that works from {@code inputImages} input
+     * images (an edit): what {@link #image(String, Integer)} returns, plus the
+     * model's price for each input image. A mask is not counted.
+     */
+    public Quote image(String modelName, Integer n, int inputImages) {
         ModelInfo model = require(modelName);
         if (model.modality() != Modality.IMAGE) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "model " + modelName + " is not an image-generation model");
         }
-        return imageQuote(model, n);
+        return imageQuote(model, n, inputImages);
     }
 
     /** A video request's quote. 404 for an unknown model, 400 for a non-video model or too large an {@code n}. */
@@ -60,9 +69,22 @@ public class GenerationQuotes {
 
     /** A quote for any image or video model; {@code seconds} is ignored for an image model. 400 for any other. */
     public Quote any(String modelName, Integer n, Integer seconds) {
+        return any(modelName, n, seconds, null);
+    }
+
+    /**
+     * {@link #any(String, Integer, Integer)} for a request that works from
+     * input images. {@code inputImages} is how many; null is none. It prices
+     * an image model's edit; a video model charges nothing for its inputs, so
+     * it is ignored there.
+     */
+    public Quote any(String modelName, Integer n, Integer seconds, Integer inputImages) {
+        if (inputImages != null && inputImages < 0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "input_images must be 0 or more");
+        }
         ModelInfo model = require(modelName);
         return switch (model.modality()) {
-            case IMAGE -> imageQuote(model, n);
+            case IMAGE -> imageQuote(model, n, inputImages == null ? 0 : inputImages);
             case VIDEO -> videoQuote(model, n, seconds);
             default -> throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "model " + modelName + " is a " + model.modality()
@@ -72,7 +94,12 @@ public class GenerationQuotes {
 
     /** The price of {@code images} images, with the 1-cent minimum. */
     public long imagePriceCents(ModelInfo model, int images) {
-        return Math.max(1L, calculator.imageCostCents(model, images));
+        return imagePriceCents(model, images, 0);
+    }
+
+    /** The price of {@code images} images made from {@code inputImages} input images, with the 1-cent minimum. */
+    public long imagePriceCents(ModelInfo model, int images, int inputImages) {
+        return Math.max(1L, calculator.imageCostCents(model, images, inputImages));
     }
 
     /** The price of {@code clips} clips of {@code seconds} seconds each, with the 1-cent minimum. */
@@ -80,9 +107,9 @@ public class GenerationQuotes {
         return Math.max(1L, calculator.videoCostCents(model, seconds, clips));
     }
 
-    private Quote imageQuote(ModelInfo model, Integer n) {
+    private Quote imageQuote(ModelInfo model, Integer n, int inputImages) {
         int count = count(model, n);
-        return new Quote(model, count, null, imagePriceCents(model, count));
+        return new Quote(model, count, null, imagePriceCents(model, count, inputImages));
     }
 
     private Quote videoQuote(ModelInfo model, Integer n, Integer seconds) {

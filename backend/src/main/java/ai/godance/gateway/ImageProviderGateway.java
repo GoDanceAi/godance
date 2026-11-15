@@ -53,6 +53,16 @@ public class ImageProviderGateway {
         return adapter;
     }
 
+    /**
+     * Whether the model's adapter sends input images, read without a regional
+     * check: it is used to refuse an edit before it is charged. A model with
+     * no adapter sends none.
+     */
+    public boolean editsImages(ModelInfo model) {
+        ImageProviderAdapter adapter = adapters.get(model.provider());
+        return adapter != null && adapter.editsImages();
+    }
+
     public Region region() {
         return region;
     }

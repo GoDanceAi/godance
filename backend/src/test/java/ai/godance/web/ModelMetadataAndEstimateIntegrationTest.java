@@ -126,9 +126,11 @@ class ModelMetadataAndEstimateIntegrationTest {
                 .containsEntry("display_name", "FLUX1.1 [pro]")
                 .containsKey("description")
                 .containsEntry("capabilities", Map.of("default_size", "1024x1024", "max_n", 1));
+        // Round 11: an image model that takes input images says so, in the contract's shape.
         assertThat(godance.get("gpt-image-1.5").get("capabilities")).isEqualTo(Map.of(
                 "sizes", List.of("1024x1024", "1536x1024", "1024x1536", "auto"),
-                "default_size", "auto", "max_n", 10));
+                "default_size", "auto", "max_n", 10,
+                "inputs", Map.of("images", Map.of("max", 16, "mask", true))));
         assertThat(godance.get("minimax-hailuo-2.3").get("capabilities"))
                 .isEqualTo(Map.of("default_seconds", 6, "max_n", 1));
         // Unknown capabilities are left out, not published as empty.
@@ -161,11 +163,13 @@ class ModelMetadataAndEstimateIntegrationTest {
                     .isEqualTo(Map.of("inputs", Map.of("images", Map.of("max", 10))));
             assertThat(catalog.metadata(model).capabilities().inputs().maxImages()).as(model).isEqualTo(10);
         }
-        // No image or video model was given anything by this migration.
+        // No image or video model was given anything by this migration: the only ones that
+        // take inputs are the image models V33 seeded for edits.
         assertThat(godance.entrySet().stream()
                 .filter(e -> !"TEXT".equals(e.getValue().get("modality")))
-                .filter(e -> e.getValue().get("capabilities") instanceof Map<?, ?> c && c.containsKey("inputs")))
-                .isEmpty();
+                .filter(e -> e.getValue().get("capabilities") instanceof Map<?, ?> c && c.containsKey("inputs"))
+                .map(Map.Entry::getKey))
+                .containsExactlyInAnyOrder("gpt-image-2", "gpt-image-1.5", "seedream-5.0", "flux-2-pro");
     }
 
     @Test

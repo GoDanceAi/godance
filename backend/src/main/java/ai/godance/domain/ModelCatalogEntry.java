@@ -61,6 +61,14 @@ public class ModelCatalogEntry {
     @Column(name = "per_second_microcents", nullable = false)
     private long perSecondMicrocents;
 
+    /**
+     * What the provider charges for each input image of an edit, in
+     * microcents (V33). Null means it charges nothing, or that no per-image
+     * figure is known: either way nothing is added to the price.
+     */
+    @Column(name = "per_input_image_microcents")
+    private Long perInputImageMicrocents;
+
     @Column(name = "default_max_output_tokens")
     private Integer defaultMaxOutputTokens;
 
@@ -134,6 +142,8 @@ public class ModelCatalogEntry {
 
     public long getPerImageMicrocents() { return perImageMicrocents; }
     public void setPerImageMicrocents(long v) { this.perImageMicrocents = v; }
+    public Long getPerInputImageMicrocents() { return perInputImageMicrocents; }
+    public void setPerInputImageMicrocents(Long v) { this.perInputImageMicrocents = v; }
 
     public long getPerSecondMicrocents() { return perSecondMicrocents; }
     public void setPerSecondMicrocents(long v) { this.perSecondMicrocents = v; }
