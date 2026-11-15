@@ -82,6 +82,40 @@ test.describe('a new batch: the table', () => {
     ]);
   });
 
+  test('a CSV file dropped on the box is read into it, and the page stays where it is', async ({ page, api }) => {
+    await openNewBatch(page, api);
+
+    const data = await page.evaluateHandle(() => {
+      const transfer = new DataTransfer();
+      transfer.items.add(new File(['color,surface\nblue,oak desk\n'], 'dropped.csv', { type: 'text/csv' }));
+      return transfer;
+    });
+    await table(page).dispatchEvent('drop', { dataTransfer: data });
+
+    await expect(page.getByText('1 row, 2 columns')).toBeVisible();
+    await expect(page.getByText('Read from dropped.csv')).toBeVisible();
+    await expect(table(page)).toHaveValue('color,surface\nblue,oak desk\n');
+    await expect(preview(page).first()).toContainText('A blue mug on a oak desk, soft morning light');
+    await expect(page).toHaveURL(`/recipes/${recipeId(1)}/batch`);
+  });
+
+  test('a workbook is not a CSV: it is refused with what to do, and the table is left as it was', async ({ page, api }) => {
+    await openNewBatch(page, api);
+    await table(page).fill(THREE_ROWS);
+
+    // A spreadsheet's own file is a zip, not text.
+    await page.getByLabel('CSV file').setInputFiles({
+      name: 'mugs.xlsx',
+      mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      buffer: Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x00, 0x00]),
+    });
+
+    await expect(page.getByRole('region', { name: 'Rows' }).getByRole('alert'))
+      .toContainText('mugs.xlsx is not a CSV file. In your spreadsheet, export the sheet as CSV');
+    await expect(table(page)).toHaveValue(THREE_ROWS);
+    await expect(page.getByText('3 rows, 2 columns')).toBeVisible();
+  });
+
   test('a file that is not UTF-8 is still read, and says how to avoid the guess', async ({ page, api }) => {
     await openNewBatch(page, api);
 

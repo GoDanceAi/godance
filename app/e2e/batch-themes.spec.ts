@@ -1,9 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import zlib from 'node:zlib';
 import type { Page, TestInfo } from '@playwright/test';
 import { batchId, makeBatch, makeRows, mockBatchEstimate, serveBatch, type BatchState } from './batches';
 import { serveMedia } from './generation';
-import { INPUT_MODELS, inputsUser, PNG, serveUploads } from './inputs';
+import { INPUT_MODELS, inputsUser, serveUploads } from './inputs';
 import { expect, test, type MockApi } from './mock-api';
 import { makeRecipe, makeVersion, serveRecipes } from './user-recipes';
 
@@ -50,6 +51,38 @@ async function keep(page: Page, info: TestInfo, name: string, theme: Theme) {
   await page.screenshot({ path: path.join(EVIDENCE, `${name}-${theme}${suffix}.png`), fullPage: true });
 }
 
+/** An 8×8 PNG of one colour: a picture that can be seen where a row's image is shown. */
+function swatch(red: number, green: number, blue: number): Buffer {
+  const chunk = (type: string, data: Buffer) => {
+    const body = Buffer.concat([Buffer.from(type, 'ascii'), data]);
+    const length = Buffer.alloc(4);
+    length.writeUInt32BE(data.length);
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(zlib.crc32(body));
+    return Buffer.concat([length, body, crc]);
+  };
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(8, 0);   // width
+  header.writeUInt32BE(8, 4);   // height
+  header[8] = 8;                // bits per channel
+  header[9] = 2;                // red, green, blue
+  // Each line: a filter byte, then eight pixels.
+  const line = Buffer.from([0, ...Array.from({ length: 8 }, () => [red, green, blue]).flat()]);
+  const pixels = Buffer.concat(Array.from({ length: 8 }, () => line));
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk('IHDR', header),
+    chunk('IDAT', zlib.deflateSync(pixels)),
+    chunk('IEND', Buffer.alloc(0)),
+  ]);
+}
+
+const PHOTOS = [
+  { name: 'mug-blue.png', mimeType: 'image/png', buffer: swatch(37, 99, 235) },
+  { name: 'mug-green.png', mimeType: 'image/png', buffer: swatch(5, 150, 105) },
+  { name: 'mug-yellow.png', mimeType: 'image/png', buffer: swatch(234, 179, 8) },
+];
+
 /** A recipe with an input slot, a three-row table with a column of file names, and the three images. */
 async function openNewBatch(page: Page, api: MockApi, balance: number) {
   const recipe = makeRecipe({
@@ -64,8 +97,11 @@ async function openNewBatch(page: Page, api: MockApi, balance: number) {
   await page.goto(`/recipes/${recipe.id}/batch`);
   await page.getByLabel('Paste a table').fill(
     'color\tsurface\timage\nblue\toak desk\tmug-blue.png\ngreen\tmarble counter\tmug-green.png\nyellow\twindow sill\tmug-yellow.png');
-  await page.getByLabel('Images for product photo', { exact: true }).setInputFiles(
-    ['mug-blue.png', 'mug-green.png', 'mug-yellow.png'].map((name) => ({ name, mimeType: 'image/png', buffer: PNG })));
+  await page.getByLabel('Images for product photo', { exact: true }).setInputFiles(PHOTOS);
+  // Each of the first rows shows its own picture, drawn.
+  const first = page.getByRole('img', { name: 'product photo: mug-blue.png' });
+  await expect(first).toBeVisible();
+  await expect.poll(() => first.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(8);
   // The dot between the words and the price is for the eye only: the button's name is "Start batch $0.30".
   await expect(page.getByRole('button', { name: 'Start batch $0.30' })).toBeEnabled();
 }

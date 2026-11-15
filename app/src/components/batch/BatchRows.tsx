@@ -197,7 +197,7 @@ export default function BatchRows({ batch, linked }: { batch: Batch; linked: num
                     data-linked-row={isLinked ? 'true' : undefined}
                     className={isLinked ? 'bg-surface-alt' : undefined}
                   >
-                    <th scope="row" className="whitespace-nowrap px-3 py-2 text-left font-medium tabular-nums text-fg">
+                    <th scope="row" className="whitespace-nowrap px-3 py-2 text-left align-top font-medium tabular-nums text-fg">
                       {row.job_id ? (
                         <Link to={`/history/${row.job_id}`} className="text-brand-600 hover:underline"
                               aria-label={`Row ${rowNumber(row.index)}: open its generation`}>
@@ -206,7 +206,8 @@ export default function BatchRows({ batch, linked }: { batch: Batch; linked: num
                       ) : rowNumber(row.index)}
                       {isLinked && <span className="ml-2 text-[11px] font-normal text-fg-subtle">the row you came from</span>}
                     </th>
-                    <td className="max-w-[20rem] px-3 py-2 align-top">
+                    {/* Wide enough to read on a phone: there the table scrolls sideways in its box instead of squeezing this. */}
+                    <td className="min-w-[11rem] max-w-[20rem] px-3 py-2 align-top">
                       {values === null ? (
                         <span className="italic text-fg-subtle">Values deleted</span>
                       ) : values === '' ? (

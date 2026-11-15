@@ -253,26 +253,30 @@ test.describe('a batch with images: by order', () => {
 });
 
 test.describe('a batch with images: uploads', () => {
-  test('an upload the API refuses says why, and can be tried again without choosing the files again', async ({ page, api }) => {
+  test('uploads the API refuses say why, the files still waiting are not sent, and it can be tried again', async ({ page, api }) => {
     await openSlotBatch(page, api);
-    await table(page).fill('color\nblue\ngreen');
-    // The account's hourly upload limit: the files still waiting are not sent after it.
+    await table(page).fill('color\nblue\ngreen\nyellow\nwhite\nblack');
+    // The account's hourly upload limit.
     api.on('POST', '/v1/files', problem(429, 'Too many uploads.', 'rate_limited'));
 
-    await images(page).setInputFiles([png('a.png'), png('b.png')]);
+    await images(page).setInputFiles(['a', 'b', 'c', 'd', 'e'].map((name) => png(`${name}.png`)));
 
     const alert = page.getByRole('region', { name: 'Images' }).getByRole('alert');
-    await expect(alert).toContainText('2 images could not be uploaded: a.png, b.png.');
-    await expect(alert).toContainText('Too many uploads in a short time. Wait a little and try again.');
+    await expect(alert).toContainText('5 images could not be uploaded.');
+    await expect(alert.getByRole('listitem')).toHaveText(
+      ['a.png, b.png, c.png, d.png, e.png: Too many uploads in a short time. Wait a little and try again.']);
+    // Three go up at a time. The two still waiting were not sent: the same refusal would have met them.
+    expect(api.callsTo('POST', '/v1/files')).toHaveLength(3);
     await expect(rowCells(page, 1).last()).toHaveText('a.png could not be uploaded.');
+    await expect(rowCells(page, 5).last()).toHaveText('e.png could not be uploaded.');
     await expect(startSection(page)).toContainText('Some images could not be uploaded. Try the upload again to see the total.');
     await expect(startButton(page)).toBeDisabled();
 
     const stored = serveNamedUploads(api);
     await alert.getByRole('button', { name: 'Try the upload again' }).click();
 
-    await expect(allUploaded(page, 2)).toBeVisible();
-    expect([...stored].sort()).toEqual(['a.png', 'b.png']);
+    await expect(allUploaded(page, 5)).toBeVisible();
+    expect([...stored].sort()).toEqual(['a.png', 'b.png', 'c.png', 'd.png', 'e.png']);
     await expect(startButton(page)).toBeEnabled();
   });
 

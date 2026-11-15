@@ -67,8 +67,12 @@ export default function SlotImages({
   };
 
   const { wanted, done, failed } = uploader.counts;
-  const failures = needed.filter((file) => uploader.of(file)?.status === 'failed');
-  const firstFailure = failures.length > 0 ? uploader.of(failures[0]) : undefined;
+  // The files that could not be stored, by the reason each was given.
+  const failures = new Map<string, File[]>();
+  for (const file of needed) {
+    const upload = uploader.of(file);
+    if (upload?.status === 'failed') failures.set(upload.error, [...(failures.get(upload.error) ?? []), file]);
+  }
   const uploading = wanted > 0 && done + failed < wanted;
   // Said to a screen reader in steps, not once per file.
   const step = wanted === 0 ? 0 : Math.floor((done / wanted) * 10);
@@ -228,12 +232,14 @@ export default function SlotImages({
           </div>
           <p role="status" aria-live="polite" className="sr-only">{spoken}</p>
 
-          {failures.length > 0 && !uploading && (
+          {failed > 0 && !uploading && (
             <div role="alert" className="mt-2 text-sm text-danger">
-              <p>
-                {plural(failures.length, 'image')} could not be uploaded: {names(failures)}.
-                {firstFailure?.status === 'failed' && ` ${firstFailure.error}`}
-              </p>
+              <p>{plural(failed, 'image')} could not be uploaded.</p>
+              <ul className="mt-1 space-y-0.5">
+                {[...failures].map(([error, files]) => (
+                  <li key={error}><span className="font-medium">{names(files)}</span>: {error}</li>
+                ))}
+              </ul>
               <button type="button" className="btn btn-secondary btn-sm mt-2" onClick={uploader.retry}>
                 Try the upload again
               </button>

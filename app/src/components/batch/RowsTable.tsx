@@ -104,7 +104,7 @@ export default function RowsTable({ variables, slots, rowCount, rowAt, uploadOf,
                   data-row-refused={refused ? 'true' : undefined}
                   className={refused ? 'bg-[var(--color-danger-bg)]' : undefined}
                 >
-                  <th scope="row" className="whitespace-nowrap px-3 py-2 text-left font-medium tabular-nums text-fg">
+                  <th scope="row" className="whitespace-nowrap px-3 py-2 text-left align-top font-medium tabular-nums text-fg">
                     {rowNumber(index)}
                   </th>
                   {variables.map((variable) => {
@@ -139,7 +139,8 @@ export default function RowsTable({ variables, slots, rowCount, rowAt, uploadOf,
                   })}
                   <td className={`px-3 py-2 align-top ${bad ? 'text-danger' : 'text-fg-subtle'}`}>
                     {refused && <span className="block">Refused: {error?.reason}</span>}
-                    {row.problems.map((problem) => <span key={problem} className="block">{problem}</span>)}
+                    {/* eslint-disable-next-line react/no-array-index-key -- two problems of a row can read the same */}
+                    {row.problems.map((problem, i) => <span key={i} className="block">{problem}</span>)}
                     {!bad && 'Ready'}
                   </td>
                 </tr>

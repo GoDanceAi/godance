@@ -28,12 +28,23 @@ export default function RowsSource({ text, table, note, onChange }: {
   const readFile = async (file: File | undefined) => {
     if (!file) return;
     setFileProblem(null);
+    // A workbook (.xlsx, .numbers) is not text: it has to be exported first.
+    const notText = `${file.name} is not a CSV file. In your spreadsheet, export the sheet as CSV and choose that, `
+      + 'or copy the cells and paste them here.';
+    if (!/\.(csv|tsv|tab|txt)$/i.test(file.name) && !file.type.startsWith('text/')) {
+      setFileProblem(notText);
+      return;
+    }
     if (file.size > MAX_FILE_BYTES) {
       setFileProblem(`${file.name} is larger than 5 MB, which is more than a batch can hold. Split it and choose a part.`);
       return;
     }
     try {
       const decoded = decodeTableFile(new Uint8Array(await file.arrayBuffer()));
+      if (decoded.text.includes('\u0000')) {
+        setFileProblem(notText);
+        return;
+      }
       setFileName(file.name);
       onChange(decoded.text, decoded.note);
     } catch {
@@ -52,12 +63,20 @@ export default function RowsSource({ text, table, note, onChange }: {
       </p>
 
       <label htmlFor="batch-table" className="mt-3 block text-xs font-medium text-fg">Paste a table</label>
+      {/* A file dropped on the box is read into it. Left alone, the browser would leave the page to open the file. */}
       <textarea
         id="batch-table"
         value={text}
         onChange={(e) => {
           setFileName(null);
           onChange(e.target.value, null);
+        }}
+        onDragOver={(e) => { if (e.dataTransfer.types.includes('Files')) e.preventDefault(); }}
+        onDrop={(e) => {
+          const file = e.dataTransfer.files[0];
+          if (!file) return;   // dragged text goes in as text
+          e.preventDefault();
+          void readFile(file);
         }}
         rows={7}
         wrap="off"
@@ -83,6 +102,7 @@ export default function RowsSource({ text, table, note, onChange }: {
             }}
           />
         </label>
+        <span className="text-xs text-fg-faint">or drop one on the box</span>
         {text !== '' && (
           <button
             type="button"
