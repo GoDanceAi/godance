@@ -496,26 +496,33 @@ class ImageEditsIntegrationTest {
     }
 
     @Test
-    void edit_givenAnAsyncKeyOrASessionOrAsyncTrue_expects202WithTheJob() {
+    void edit_givenAnAsyncKeyOrASessionOrAsyncTrue_expects202WithTheJob() throws Exception {
         Account me = account(100_00L);
         MultipartForm edit = form("gpt-image-2", "Edit this.").image("image", InputFixtures.image("plain.png"), "a.png");
         stubOpenAiEdit(1);
 
+        // Every job started here is waited for: one still running when the test ends would call the provider during the next.
         for (String bearer : List.of(createKey(me, "async"), createKey(me, null), me.bearer())) {
-            multipart(bearer, edit).expectStatus().isAccepted()
-                    .expectBody().jsonPath("$.job_id").isNotEmpty().jsonPath("$.data").doesNotExist();
+            String body = multipart(bearer, edit).expectStatus().isAccepted()
+                    .expectBody(String.class).returnResult().getResponseBody();
+            assertThat(json.readTree(body).has("data")).isFalse();
+            assertThat(pollJob(me.bearer(), jobIdOf(body)).status()).isEqualTo(JobStatus.DONE);
         }
         // A sync key that asks for the job gets the job.
         String sync = createKey(me, "sync");
-        multipart(sync, form("gpt-image-2", "Edit this.").image("image", InputFixtures.image("plain.png"), "a.png").field("async", "true"))
-                .expectStatus().isAccepted();
-        http.post().uri("/v1/images/edits")
+        String asked = multipart(sync, form("gpt-image-2", "Edit this.").image("image", InputFixtures.image("plain.png"), "a.png").field("async", "true"))
+                .expectStatus().isAccepted()
+                .expectBody(String.class).returnResult().getResponseBody();
+        assertThat(pollJob(me.bearer(), jobIdOf(asked)).status()).isEqualTo(JobStatus.DONE);
+        String preferred = http.post().uri("/v1/images/edits")
                 .header(HttpHeaders.AUTHORIZATION, sync)
                 .header("Prefer", "respond-async")
                 .contentType(MediaType.MULTIPART_FORM_DATA)
                 .body(BodyInserters.fromMultipartData(edit.build()))
                 .exchange()
-                .expectStatus().isAccepted();
+                .expectStatus().isAccepted()
+                .expectBody(String.class).returnResult().getResponseBody();
+        assertThat(pollJob(me.bearer(), jobIdOf(preferred)).status()).isEqualTo(JobStatus.DONE);
     }
 
     @Test
