@@ -65,6 +65,17 @@ public class VideoProviderGateway {
         return adapter != null ? adapter.defaultDurationSeconds() : VideoProviderAdapter.STANDARD_CLIP_SECONDS;
     }
 
+    /**
+     * What the model's adapter accepts as an input image, read without a
+     * regional check, like {@link #defaultDurationSeconds}: it is used to
+     * refuse a request before it is charged. A model with no adapter accepts
+     * nothing.
+     */
+    public VideoProviderAdapter.InputRules inputRules(ModelInfo model) {
+        VideoProviderAdapter adapter = adapters.get(model.provider());
+        return adapter != null ? adapter.inputRules() : VideoProviderAdapter.InputRules.NONE;
+    }
+
     public Region region() {
         return region;
     }

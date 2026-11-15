@@ -1,7 +1,9 @@
 package ai.godance.gateway.providers;
 
 import java.time.Duration;
+import java.util.Base64;
 import java.util.List;
+import java.util.Set;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -16,6 +18,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import ai.godance.config.MiniMaxProperties;
 import ai.godance.domain.Provider;
 import ai.godance.gateway.VideoDtos.GeneratedVideo;
+import ai.godance.gateway.VideoDtos.VideoInput;
 import ai.godance.gateway.VideoDtos.VideoRequest;
 import ai.godance.gateway.VideoProviderAdapter;
 import reactor.core.publisher.Mono;
@@ -34,6 +37,14 @@ import reactor.core.publisher.Mono;
  * shared {@link MiniMaxProperties} (the text MiniMax adapter binds the
  * same {@code godance.providers.minimax} block); poll cadence is a
  * constant here since video latency differs from chat.
+ *
+ * <p><b>Images.</b> A clip may start from a first frame: the same request
+ * with {@code first_frame_image}, the frame as a base64 data URL. Hailuo 2.3
+ * takes no last frame and no reference images. A request without a frame is
+ * sent exactly as before.
+ * Source: MiniMax's image-to-video reference
+ * (platform.minimax.io/docs/api-reference/video-generation-i2v), read
+ * 2026-11-14.
  */
 @Component
 public class MiniMaxHailuoVideoProvider implements VideoProviderAdapter {
@@ -43,6 +54,13 @@ public class MiniMaxHailuoVideoProvider implements VideoProviderAdapter {
     private static final Duration POLL_TIMEOUT = Duration.ofMinutes(10);
     private static final String STATUS_SUCCESS = "Success";
     private static final int DEFAULT_DURATION_SECONDS = 6;
+
+    /**
+     * What MiniMax documents for a first frame: JPEG, PNG or WebP, a
+     * width-to-height ratio between 2:5 and 5:2, and under 20 MB.
+     */
+    private static final InputRules INPUT_RULES = new InputRules(
+            Set.of("image/jpeg", "image/png", "image/webp"), 0.4, 2.5, 20L * 1024 * 1024 - 1, false);
 
     private final WebClient apiClient;
     private final WebClient downloadClient;
@@ -70,11 +88,17 @@ public class MiniMaxHailuoVideoProvider implements VideoProviderAdapter {
     }
 
     @Override
+    public InputRules inputRules() {
+        return INPUT_RULES;
+    }
+
+    @Override
     public Mono<List<GeneratedVideo>> generate(VideoRequest request) {
         MiniMaxSubmit body = new MiniMaxSubmit(
                 request.model(),
                 request.prompt(),
-                request.durationSeconds() == null ? DEFAULT_DURATION_SECONDS : request.durationSeconds());
+                request.durationSeconds() == null ? DEFAULT_DURATION_SECONDS : request.durationSeconds(),
+                request.firstFrame() == null ? null : dataUrl(request.firstFrame()));
 
         return apiClient.post()
                 .uri("/v1/video_generation")
@@ -134,8 +158,13 @@ public class MiniMaxHailuoVideoProvider implements VideoProviderAdapter {
                 });
     }
 
+    private static String dataUrl(VideoInput image) {
+        return "data:" + image.contentType() + ";base64," + Base64.getEncoder().encodeToString(image.bytes());
+    }
+
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    record MiniMaxSubmit(String model, String prompt, int duration) { }
+    record MiniMaxSubmit(String model, String prompt, int duration,
+                         @JsonProperty("first_frame_image") String firstFrameImage) { }
 
     record MiniMaxSubmitResponse(@JsonProperty("task_id") String taskId) { }
 
