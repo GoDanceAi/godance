@@ -17,7 +17,7 @@ import { sendError, type SendError } from '../lib/send-error';
 import { rerunBody, startGeneration, useEstimate } from '../lib/studio';
 import { formatDate, formatDateTime } from '../lib/time';
 import CopyButton from '../components/CopyButton';
-import { JobOutputs } from '../components/JobMedia';
+import { JobInputs, JobOutputs } from '../components/JobMedia';
 import JobStatusPill from '../components/JobStatusPill';
 import SaveJobButton from '../components/SaveJobButton';
 import SendErrorNotice from '../components/SendErrorNotice';
@@ -159,6 +159,7 @@ function JobDetail({ initial }: { initial: JobView }) {
         </div>
       )}
 
+      <JobInputs job={job} className="mt-6" />
       {(job.status === 'DONE' || job.purged) && <JobOutputs job={job} className="mt-6" />}
       {job.status === 'DONE' && !job.purged && <KeptUntil job={job} />}
 

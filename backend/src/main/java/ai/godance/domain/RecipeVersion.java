@@ -54,6 +54,11 @@ public class RecipeVersion {
     @Column(name = "params", columnDefinition = "jsonb", nullable = false, updatable = false)
     private Map<String, Object> params;
 
+    /** The version's input slots (V35): each a {@code slot}, a {@code role} and a {@code hint}. Empty for none. */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "inputs", columnDefinition = "jsonb", nullable = false, updatable = false)
+    private List<Map<String, String>> inputs = new java.util.ArrayList<>();
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -81,6 +86,9 @@ public class RecipeVersion {
 
     public Map<String, Object> getParams() { return params; }
     public void setParams(Map<String, Object> params) { this.params = params; }
+
+    public List<Map<String, String>> getInputs() { return inputs == null ? List.of() : inputs; }
+    public void setInputs(List<Map<String, String>> inputs) { this.inputs = inputs; }
 
     public Instant getCreatedAt() { return createdAt; }
 

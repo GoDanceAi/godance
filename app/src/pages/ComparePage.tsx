@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { ApiError, type JobView } from '../lib/api';
 import { COMPARE_MAX, COMPARE_MIN, compareIds, diffFrom, durationText } from '../lib/compare';
 import { costText, fetchJob, outputItems } from '../lib/jobs';
+import { JobInputs } from '../components/JobMedia';
 import { formatDateTime } from '../lib/time';
 import JobStatusPill from '../components/JobStatusPill';
 import VariableValues from '../components/VariableValues';
@@ -144,6 +145,8 @@ function Column({ slot, position, base }: { slot: Slot; position: number; base: 
           <VariableValues recipe={job.recipe} className="mt-1.5" />
         </section>
       )}
+
+      <JobInputs job={job} size="sm" className="mt-4" />
 
       <section className="mt-4">
         <h3 className="text-xs font-semibold text-fg">Prompt</h3>

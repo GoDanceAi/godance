@@ -1,5 +1,6 @@
 package ai.godance.service;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -16,6 +17,7 @@ import ai.godance.domain.RecipeVersion;
 import ai.godance.repository.RecipeRepository;
 import ai.godance.repository.RecipeVersionRepository;
 import ai.godance.service.RecipeTemplate.Variable;
+import ai.godance.web.dto.InputDtos.InputRef;
 import ai.godance.web.dto.RecipeDtos.RecipeRef;
 
 /**
@@ -48,13 +50,32 @@ public class RecipeRunService {
      * null for a plain prompt; for a recipe, {@code variables} is the value
      * every variable ended up with, given or default.
      */
-    public record RunPrompt(String prompt, UUID recipeVersionId, Map<String, String> variables) {
+    public record RunPrompt(String prompt, UUID recipeVersionId, Map<String, String> variables,
+                            List<SlotInput> inputs) {
+
+        /** A prompt with no recipe inputs. */
+        public RunPrompt(String prompt, UUID recipeVersionId, Map<String, String> variables) {
+            this(prompt, recipeVersionId, variables, List.of());
+        }
+
+        /** Whether the recipe names its own inputs: it then runs with them and no others. */
+        public boolean hasInputs() {
+            return !inputs.isEmpty();
+        }
+
+        /** The inputs with this role, in the order the recipe's slots have them. */
+        public List<InputRef> inputsWithRole(String role) {
+            return inputs.stream().filter(input -> input.role().equals(role)).map(SlotInput::ref).toList();
+        }
 
         /** The origin of a job that runs this: what it already was, and the recipe version when there is one. */
         public JobOrigin origin(JobOrigin base) {
             return recipeVersionId == null ? base : base.withRecipe(recipeVersionId, variables);
         }
     }
+
+    /** What a slot of the recipe was given for this run: the slot's role, and the input named for it. */
+    public record SlotInput(String slot, String role, InputRef ref) { }
 
     /**
      * @param modality the kind of job the route makes
@@ -107,6 +128,29 @@ public class RecipeRunService {
         // What each variable ended up as, in the order the version declares them.
         Map<String, String> used = new LinkedHashMap<>();
         for (Variable v : declared) used.put(v.name(), given.get(v.name()) != null ? given.get(v.name()) : v.defaultValue());
-        return new RunPrompt(rendered, version.getId(), used);
+        return new RunPrompt(rendered, version.getId(), used, slotInputs(version, recipe.inputs()));
+    }
+
+    /**
+     * The input the request names for each slot of the version, in the
+     * slots' order. Every slot needs one; a name the version has no slot
+     * for is refused. Whether each input may be used, and is the caller's,
+     * is checked later, by the route that places it.
+     */
+    private static List<SlotInput> slotInputs(RecipeVersion version, Map<String, InputRef> given) {
+        Map<String, InputRef> named = given == null ? Map.of() : given;
+        List<Map<String, String>> slots = version.getInputs();
+        for (String name : named.keySet()) {
+            if (slots.stream().noneMatch(slot -> slot.get("slot").equals(name))) {
+                throw RecipeRefusedException.inputUnknown(name);
+            }
+        }
+        List<SlotInput> inputs = new ArrayList<>(slots.size());
+        for (Map<String, String> slot : slots) {
+            InputRef ref = named.get(slot.get("slot"));
+            if (ref == null) throw RecipeRefusedException.inputMissing(slot.get("slot"));
+            inputs.add(new SlotInput(slot.get("slot"), slot.get("role"), ref));
+        }
+        return List.copyOf(inputs);
     }
 }

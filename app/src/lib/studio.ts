@@ -7,6 +7,8 @@ import {
   type MediaModality,
   type UserRecipeVersion,
 } from './api';
+import type { InputRef } from './api';
+import type { InputFields } from './inputs';
 import { mediaModality } from './jobs';
 import type { Controls } from './media-models';
 import type { GalleryRecipe } from './recipe';
@@ -26,10 +28,14 @@ export interface StudioValues {
   seconds: number | null;
 }
 
-/** `recipe` on a generation request: a version of one of the caller's recipes, and values for its variables. */
+/**
+ * `recipe` on a generation request: a version of one of the caller's
+ * recipes, values for its variables, and an input for each of its slots.
+ */
 export interface RecipeRef {
   version_id: string;
   variables: Record<string, string>;
+  inputs?: Record<string, InputRef>;
 }
 
 /** A body for POST /v1/images/generations or /v1/videos/generations: `prompt`, or `recipe` in its place. */
@@ -44,10 +50,27 @@ export interface GenerationBody {
   quality?: string;
   gallery_recipe?: string;   // the gallery recipe this is a run of (galleryRecipeOf)
   async?: true;
+  // The images the request works from (lib/inputs.ts). An image request with `images` is an edit.
+  images?: InputRef[];
+  mask?: InputRef;
+  first_frame?: InputRef;
+  last_frame?: InputRef;
+  reference_images?: InputRef[];
 }
 
-export function generationPath(modality: MediaModality): string {
-  return modality === 'VIDEO' ? '/v1/videos/generations' : '/v1/images/generations';
+/**
+ * Where a request goes. An image request that carries input images is an
+ * edit; everything else is a generation. A recipe that names its own inputs
+ * goes to the generations route: the API decides, from the recipe's slots.
+ */
+export function generationPath(modality: MediaModality, body?: GenerationBody | null): string {
+  if (modality === 'VIDEO') return '/v1/videos/generations';
+  return body?.images?.length ? '/v1/images/edits' : '/v1/images/generations';
+}
+
+/** The request with these input fields. */
+export function withInputs(body: GenerationBody, fields: InputFields): GenerationBody {
+  return { ...body, ...fields };
 }
 
 // Images answer at once unless asked not to; video is always a job.
@@ -160,12 +183,32 @@ export function rerunBody(job: JobView, controls: Controls | null): GenerationBo
   if (modality === 'VIDEO' && positiveInt(p.seconds)) body.seconds = p.seconds;
   if (modality === 'IMAGE' && text(p.style)) body.style = p.style;
   if (modality === 'IMAGE' && text(p.quality)) body.quality = p.quality;
-  return withAsync(modality, body);
+  return withAsync(modality, { ...body, ...inputsOfJob(job) });
+}
+
+/**
+ * The inputs a job was given, as the fields that name them again: the same
+ * files and job outputs, in the same roles and order. A run made from an
+ * image is run again from that image; if one of them is gone by then, the
+ * API says which. Nothing for a job without inputs.
+ */
+function inputsOfJob(job: JobView): InputFields {
+  const refs = (role: string): InputRef[] => (job.inputs ?? [])
+    .filter((input) => input.role === role)
+    .flatMap((input): InputRef[] => (input.file_id ? [{ file_id: input.file_id }]
+      : input.job_output ? [{ job_output: input.job_output }] : []));
+  const fields: InputFields = {};
+  if (refs('image').length) fields.images = refs('image');
+  if (refs('mask').length) fields.mask = refs('mask')[0];
+  if (refs('first_frame').length) fields.first_frame = refs('first_frame')[0];
+  if (refs('last_frame').length) fields.last_frame = refs('last_frame')[0];
+  if (refs('reference_image').length) fields.reference_images = refs('reference_image');
+  return fields;
 }
 
 /** Submits a generation as a job. */
 export async function startGeneration(modality: MediaModality, body: GenerationBody): Promise<AsyncJobAcknowledged> {
-  const ack = await apiFetch<AsyncJobAcknowledged>(generationPath(modality), { method: 'POST', json: body });
+  const ack = await apiFetch<AsyncJobAcknowledged>(generationPath(modality, body), { method: 'POST', json: body });
   if (typeof ack?.job_id !== 'string') throw new Error('The generation could not be started.');
   return ack;
 }
@@ -176,6 +219,9 @@ function estimateRequest(body: GenerationBody): Record<string, unknown> {
   if (body.n !== undefined) req.n = body.n;
   if (body.size !== undefined) req.size = body.size;
   if (body.seconds !== undefined) req.seconds = body.seconds;
+  // An edit's input images are part of its price; a recipe's slot images count the same way.
+  const inputImages = body.images?.length ?? 0;
+  if (inputImages > 0) req.input_images = inputImages;
   return req;
 }
 
@@ -186,8 +232,11 @@ const ESTIMATE_DELAY_MS = 400;
  * priced parameters have been still for a moment. Null while asking or when
  * the API could not say; the request can be sent either way.
  */
-export function useEstimate(body: GenerationBody | null): number | null {
-  const key = body ? JSON.stringify(estimateRequest(body)) : null;
+export function useEstimate(body: GenerationBody | null, inputImages = 0): number | null {
+  // A recipe that names its own inputs carries them under `recipe`, so their count is given apart.
+  const key = body
+    ? JSON.stringify({ ...estimateRequest(body), ...(inputImages > 0 ? { input_images: inputImages } : {}) })
+    : null;
   const [answer, setAnswer] = useState<{ key: string; cents: number } | null>(null);
 
   useEffect(() => {

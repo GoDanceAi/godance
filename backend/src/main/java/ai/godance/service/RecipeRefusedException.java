@@ -52,6 +52,30 @@ public final class RecipeRefusedException extends ResponseStatusException {
                 "send either prompt or recipe, not both", CODE_PROMPT_AND_RECIPE);
     }
 
+    /** A slot of the recipe has no input in the request. 400. */
+    static RecipeRefusedException inputMissing(String slot) {
+        RecipeRefusedException e = new RecipeRefusedException(HttpStatus.BAD_REQUEST,
+                "the recipe's input \"" + slot + "\" has no value: name a file or a job output for it under recipe.inputs",
+                "recipe_input_missing");
+        e.getBody().setProperty("slot", slot);
+        return e;
+    }
+
+    /** The request names an input the recipe has no slot for. 400. */
+    static RecipeRefusedException inputUnknown(String slot) {
+        RecipeRefusedException e = new RecipeRefusedException(HttpStatus.BAD_REQUEST,
+                "the recipe has no input called \"" + slot + "\"", "recipe_input_unknown");
+        e.getBody().setProperty("slot", slot);
+        return e;
+    }
+
+    /** A recipe with slots, run with inputs outside {@code recipe.inputs} as well. 400. */
+    public static RecipeRefusedException inputsOutsideRecipe() {
+        return new RecipeRefusedException(HttpStatus.BAD_REQUEST,
+                "this recipe names its own inputs: give them under recipe.inputs, not as fields of the request",
+                "recipe_inputs_conflict");
+    }
+
     static RecipeRefusedException limitReached(String detail) {
         return new RecipeRefusedException(HttpStatus.CONFLICT, detail, CODE_LIMIT_REACHED);
     }

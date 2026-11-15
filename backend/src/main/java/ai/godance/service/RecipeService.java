@@ -31,6 +31,7 @@ import ai.godance.repository.RecipeRepository.Attempts;
 import ai.godance.repository.RecipeVersionRepository;
 import ai.godance.web.dto.RecipeDtos.CreateRecipeRequest;
 import ai.godance.web.dto.RecipeDtos.NewVersionRequest;
+import ai.godance.web.dto.RecipeDtos.RecipeInputSlot;
 import ai.godance.web.dto.RecipeDtos.RecipeVariable;
 import ai.godance.web.dto.RecipeDtos.RecipeVersionView;
 import ai.godance.web.dto.RecipeDtos.RecipeView;
@@ -90,7 +91,7 @@ public class RecipeService {
 
     /** What a version holds, checked and ready to store. */
     private record Content(String template, List<Map<String, String>> variables, String model,
-                           Map<String, Object> params) { }
+                           Map<String, Object> params, List<Map<String, String>> inputs) { }
 
     /** A new version, or the latest one when nothing had changed. */
     public record SavedVersion(RecipeVersionView version, boolean created) { }
@@ -109,7 +110,7 @@ public class RecipeService {
         if (req == null) throw RecipeRefusedException.invalid("a recipe needs a title, a modality, a template and a model");
         String title = title(req.title());
         Modality modality = modality(req.modality());
-        Content content = content(req.template(), req.variables(), req.model(), req.params());
+        Content content = content(req.template(), req.variables(), req.model(), req.params(), modality, req.inputs());
         String source = GalleryRecipeSlug.requireValidOrNull(req.sourceGalleryRecipe());
 
         // Counted and written one request at a time, so two cannot both take the last place.
@@ -206,9 +207,12 @@ public class RecipeService {
     @Transactional
     public SavedVersion newVersion(UUID userId, UUID recipeId, NewVersionRequest req) {
         if (req == null) throw RecipeRefusedException.invalid("a version needs a template and a model");
-        Content content = content(req.template(), req.variables(), req.model(), req.params());
         // The row lock numbers two saves of one recipe one after the other.
         recipes.lockOwned(recipeId, userId).orElseThrow(RecipeRefusedException::notFound);
+        Recipe owned = recipes.findById(recipeId).orElseThrow(RecipeRefusedException::notFound);
+        // A slot's role has to be one the recipe's modality uses, so the recipe is read first.
+        Content content = content(req.template(), req.variables(), req.model(), req.params(),
+                owned.getModality(), req.inputs());
         RecipeVersion latest = versions.findFirstByRecipeIdOrderByNumberDesc(recipeId).orElseThrow();
         if (same(latest, content)) return new SavedVersion(RecipeVersionView.from(latest), false);
 
@@ -217,9 +221,8 @@ public class RecipeService {
                     + " versions, the most a recipe can keep. Save the setup as a new recipe instead.");
         }
         RecipeVersion next = versions.save(version(recipeId, latest.getNumber() + 1, content));
-        Recipe recipe = recipes.findById(recipeId).orElseThrow();
-        recipe.setUpdatedAt(Instant.now());
-        recipes.save(recipe);
+        owned.setUpdatedAt(Instant.now());
+        recipes.save(owned);
         return new SavedVersion(RecipeVersionView.from(next), true);
     }
 
@@ -261,6 +264,7 @@ public class RecipeService {
         v.setVariables(content.variables());
         v.setModel(content.model());
         v.setParams(content.params());
+        v.setInputs(content.inputs());
         return v;
     }
 
@@ -269,6 +273,7 @@ public class RecipeService {
         return latest.getTemplate().equals(content.template())
                 && latest.getModel().equals(content.model())
                 && latest.getVariables().equals(content.variables())
+                && latest.getInputs().equals(content.inputs())
                 && CANONICAL.writeValueAsString(latest.getParams()).equals(CANONICAL.writeValueAsString(content.params()));
     }
 
@@ -293,7 +298,7 @@ public class RecipeService {
      * characters, at most 20 variables, each default at most 2,000.
      */
     private static Content content(String template, List<RecipeVariable> declared, String rawModel,
-                                   Map<String, Object> rawParams) {
+                                   Map<String, Object> rawParams, Modality modality, List<RecipeInputSlot> slots) {
         if (template == null || template.isBlank()) throw RecipeRefusedException.invalid("a recipe needs a template");
         if (template.length() > TEMPLATE_MAX) {
             throw RecipeRefusedException.invalid("the template is at most " + TEMPLATE_MAX + " characters");
@@ -335,6 +340,62 @@ public class RecipeService {
         if (CANONICAL.writeValueAsString(params).length() > PARAMS_MAX) {
             throw RecipeRefusedException.invalid("params is at most " + PARAMS_MAX + " characters of JSON");
         }
-        return new Content(template, stored, model, params);
+        return new Content(template, stored, model, params, inputs(modality, slots));
+    }
+
+    /** The most input slots a version has. */
+    static final int INPUT_SLOTS_MAX = 4;
+    /** The longest a slot's hint is. */
+    static final int HINT_MAX = 200;
+
+    /** The roles a slot may have, by what the recipe makes. */
+    static List<String> rolesOf(Modality modality) {
+        return modality == Modality.VIDEO
+                ? List.of("first_frame", "last_frame", "reference_image")
+                : List.of("image");
+    }
+
+    /**
+     * Checks a version's input slots and returns them as they are stored: at
+     * most four; each named by the template's naming rule, no two alike;
+     * each with a role the recipe's modality uses, and a video with at most
+     * one first frame and one last frame; a hint of at most 200 characters,
+     * which may be left out.
+     */
+    private static List<Map<String, String>> inputs(Modality modality, List<RecipeInputSlot> slots) {
+        if (slots == null || slots.isEmpty()) return new ArrayList<>();
+        if (slots.size() > INPUT_SLOTS_MAX) {
+            throw RecipeRefusedException.invalid("a recipe has at most " + INPUT_SLOTS_MAX + " inputs");
+        }
+        List<String> roles = rolesOf(modality);
+        List<Map<String, String>> stored = new ArrayList<>(slots.size());
+        Set<String> names = new HashSet<>();
+        Set<String> single = new HashSet<>();
+        for (RecipeInputSlot slot : slots) {
+            if (slot == null || !RecipeTemplate.isVariableName(slot.slot())) {
+                throw RecipeRefusedException.invalid("an input's name is 1–" + RecipeTemplate.NAME_MAX_LENGTH
+                        + " ASCII letters, digits, spaces, hyphens or underscores, starting and ending with a letter or digit");
+            }
+            if (!names.add(slot.slot())) {
+                throw RecipeRefusedException.invalid("the input \"" + slot.slot() + "\" is declared more than once");
+            }
+            if (slot.role() == null || !roles.contains(slot.role())) {
+                throw RecipeRefusedException.invalid("the role of the input \"" + slot.slot() + "\" must be "
+                        + String.join(" or ", roles) + " in " + (modality == Modality.VIDEO ? "a video" : "an image") + " recipe");
+            }
+            if (!slot.role().equals("reference_image") && !slot.role().equals("image") && !single.add(slot.role())) {
+                throw RecipeRefusedException.invalid("a video recipe has at most one " + slot.role() + " input");
+            }
+            String hint = slot.hint() == null ? "" : slot.hint().strip();
+            if (hint.length() > HINT_MAX) {
+                throw RecipeRefusedException.invalid("the hint of \"" + slot.slot() + "\" is at most " + HINT_MAX + " characters");
+            }
+            Map<String, String> row = new LinkedHashMap<>();
+            row.put("slot", slot.slot());
+            row.put("role", slot.role());
+            row.put("hint", hint);
+            stored.add(row);
+        }
+        return stored;
     }
 }

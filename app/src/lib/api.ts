@@ -279,6 +279,8 @@ export interface ModelPricing {
   output_microcents_per_1k?: number;
   // Image
   per_image_microcents?: number;
+  // Image: what each input image of an edit adds, where the provider charges for one
+  per_input_image_microcents?: number;
   // Video
   per_second_microcents?: number;
 }
@@ -293,6 +295,43 @@ export interface ModelCapabilities {
   durations?: number[];        // video: clip lengths in seconds
   default_seconds?: number;    // video: the length used when a request omits seconds
   max_n?: number;
+  inputs?: ModelInputs;        // the images a request may carry (round 11); absent means none
+}
+
+/**
+ * The images a model takes. An image model: `images`, up to `max`, and a
+ * mask when `mask` is true. A video model: a first frame, a last frame, and
+ * reference images up to their `max`. A missing part is not taken.
+ */
+export interface ModelInputs {
+  images?: { max: number; mask?: boolean };
+  first_frame?: boolean;
+  last_frame?: boolean;
+  reference_images?: { max: number };
+}
+
+/** How a request points at an input: one of the user's files, or an output of one of their jobs. */
+export type InputRef = { file_id: string } | { job_output: { job_id: string; index: number } };
+
+/** What an input is to the job that uses it. */
+export type InputRole = 'image' | 'mask' | 'first_frame' | 'last_frame' | 'reference_image';
+
+/** POST /v1/files: one stored input image. */
+export interface InputFile {
+  id: string;
+  bytes: number;
+  content_type: string;
+  width: number;
+  height: number;
+  contains_person: boolean | null;
+}
+
+/** One input a job was given. `url` is a signed link, or null once the file is gone. */
+export interface JobInput {
+  role: InputRole;
+  file_id?: string;
+  job_output?: { job_id: string; index: number };
+  url: string | null;
 }
 
 export interface GodanceModelExtension {
@@ -352,6 +391,7 @@ export interface Estimate {
   seconds: number | null;
   estimated_cost_cents: number;
   currency: string;
+  input_images?: number;   // echoed when the request named it
 }
 
 /** The 202 answer to an async generation request. */
@@ -409,6 +449,7 @@ export interface JobView {
   channel?: JobChannel | null;         // how it was made; null for a job from before this was recorded
   galleryRecipe?: string | null;       // the gallery recipe it was a run of, by slug
   recipe?: JobRecipe | null;           // the user's recipe it ran; null for a plain prompt, or once that recipe is deleted
+  inputs?: JobInput[];                 // the images it was given (round 11); empty for none, and once purged
 }
 
 /** The user's recipe a job ran: which version, and the value each variable had (null once purged). */
@@ -441,6 +482,13 @@ export interface RecipeVariable {
   default: string;
 }
 
+/** An input slot of a recipe: its name, what the image is to the job, and a hint for whoever fills it. */
+export interface RecipeInputSlot {
+  slot: string;
+  role: InputRole;
+  hint: string;
+}
+
 /** One version of a recipe. A version never changes once written. */
 export interface UserRecipeVersion {
   id: string;
@@ -450,6 +498,7 @@ export interface UserRecipeVersion {
   model: string;
   params: Record<string, unknown>;
   created_at: string;
+  inputs?: RecipeInputSlot[];   // its input slots (round 11); absent from an API older than that
 }
 
 /** A recipe the user keeps, with its latest version and what its attempts cost. */

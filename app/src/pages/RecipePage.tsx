@@ -18,10 +18,11 @@ import {
   studioLink,
   TITLE_MAX_LENGTH,
 } from '../lib/user-recipes';
-import { JobThumb } from '../components/JobMedia';
+import { JobInputs, JobThumb } from '../components/JobMedia';
 import JobStatusPill from '../components/JobStatusPill';
 import SaveJobButton from '../components/SaveJobButton';
 import VariableValues from '../components/VariableValues';
+import { ROLE_LABEL } from '../lib/inputs';
 
 const PAGE_SIZE = 24;
 
@@ -267,6 +268,23 @@ function VersionBody({ version }: { version: UserRecipeVersion }) {
             <dd className="text-fg">{settings}</dd>
           </>
         )}
+        {(version.inputs?.length ?? 0) > 0 && (
+          <>
+            <dt className="text-fg-subtle">Inputs</dt>
+            <dd className="text-fg">
+              <ul aria-label="Inputs of this version" className="space-y-1.5">
+                {version.inputs!.map((slot) => (
+                  <li key={slot.slot}>
+                    <span className="font-mono text-[13px]">{slot.slot}</span>{' '}
+                    <span className="text-xs text-fg-subtle">· {ROLE_LABEL[slot.role]}</span>
+                    {slot.hint && <span className="block text-xs text-fg-subtle">{slot.hint}</span>}
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-1.5 text-xs text-fg-subtle">Open it in the Studio to add an image for each.</p>
+            </dd>
+          </>
+        )}
       </dl>
     </div>
   );
@@ -416,6 +434,7 @@ function AttemptRow({ initial, selected, selectable, onToggle }: {
           <span className="break-all font-mono text-[11px]">{job.model}</span>
         </div>
         {job.recipe && <VariableValues recipe={job.recipe} />}
+        <JobInputs job={job} size="sm" />
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <SaveJobButton
             job={job}

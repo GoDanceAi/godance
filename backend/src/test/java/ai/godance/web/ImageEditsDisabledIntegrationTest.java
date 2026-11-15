@@ -137,6 +137,41 @@ class ImageEditsDisabledIntegrationTest {
     }
 
     @Test
+    void generate_givenInputsDisabledAndARecipeWithInputSlots_expects403InputsDisabledAndNothingCharged() {
+        String email = "recipe-slots-off-" + UUID.randomUUID() + "@godance.test";
+        String session = InputFixtures.signup(http, email);
+        UUID userId = users.findByEmail(email).orElseThrow().getId();
+        ledger.topUp(userId, 100_00L, CreditSource.PROMO, "seed-" + userId, "seed-" + userId, "test seed");
+        Map<String, Object> aFile = Map.of("file_id", UUID.randomUUID().toString());
+
+        // Keeping slots on a recipe names no image, so it needs no inputs. Running it does.
+        for (Map<String, Object> each : List.<Map<String, Object>>of(
+                Map.of("modality", "IMAGE", "model", "gpt-image-2", "route", "/v1/images/generations", "slot", "product", "role", "image"),
+                Map.of("modality", "IMAGE", "model", "gpt-image-2", "route", "/v1/images/edits", "slot", "product", "role", "image"),
+                Map.of("modality", "VIDEO", "model", "seedance-2.0", "route", "/v1/videos/generations", "slot", "opening", "role", "first_frame"))) {
+            Map<?, ?> recipe = http.post().uri("/v1/recipes")
+                    .header(HttpHeaders.AUTHORIZATION, session)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .bodyValue(Map.of("title", "With a slot " + UUID.randomUUID(), "modality", each.get("modality"),
+                            "template", "The product on a counter.", "variables", List.of(), "model", each.get("model"),
+                            "inputs", List.of(Map.of("slot", each.get("slot"), "role", each.get("role"), "hint", ""))))
+                    .exchange().expectStatus().isCreated().expectBody(Map.class).returnResult().getResponseBody();
+            String versionId = (String) ((Map<?, ?>) recipe.get("latest_version")).get("id");
+
+            expectDisabled(http.post().uri((String) each.get("route"))
+                    .header(HttpHeaders.AUTHORIZATION, session)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .bodyValue(Map.of("model", each.get("model"),
+                            "recipe", Map.of("version_id", versionId, "inputs", Map.of(each.get("slot"), aFile))))
+                    .exchange());
+        }
+
+        assertThat(users.findById(userId).orElseThrow().getCreditBalanceCents()).isEqualTo(100_00L);
+        assertThat(jobs.findByUserIdOrderByCreatedAtDesc(userId)).isEmpty();
+        assertThat(openAi.findAll(anyRequestedFor(anyUrl()))).isEmpty();
+    }
+
+    @Test
     void edit_givenNoCredentials_expects401() {
         http.post().uri("/v1/images/edits")
                 .contentType(MediaType.APPLICATION_JSON)

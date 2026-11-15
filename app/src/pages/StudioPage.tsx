@@ -1,11 +1,27 @@
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { Link, NavLink, useNavigate, useSearchParams } from 'react-router-dom';
-import { ApiError, type JobStatus, type JobView, type MediaModality, type ModelEntry, type SavedRecipe } from '../lib/api';
+import {
+  ApiError,
+  type JobStatus,
+  type JobView,
+  type MediaModality,
+  type ModelEntry,
+  type SavedRecipe,
+} from '../lib/api';
+import {
+  inputErrorMessage,
+  inputFields,
+  recipeInputs,
+  slotsToSave,
+  uploadSample,
+  usableSlots,
+  type Slot,
+} from '../lib/inputs';
 import { formatCents, useAuth } from '../lib/auth';
 import { getCurl, JOB_ID_VAR, postCurl } from '../lib/curl';
 import { isTerminal, outputItems, watchJob } from '../lib/jobs';
-import { controlsFor, groupByProvider, loadCatalog, mediaModels, modelName, priceLabel } from '../lib/media-models';
+import { cheapest, controlsFor, groupByProvider, loadCatalog, mediaModels, modelName, priceLabel } from '../lib/media-models';
 import { listSavedRecipes, saveRecipe, unsaveRecipe } from '../lib/saved-recipes';
 import { sendError, type SendError } from '../lib/send-error';
 import {
@@ -16,7 +32,9 @@ import {
   recipeRefOf,
   startGeneration,
   useEstimate,
+  withInputs,
   withRecipe,
+  type GenerationBody,
   type StudioValues,
 } from '../lib/studio';
 import {
@@ -27,6 +45,7 @@ import {
   type OwnRecipe,
   type Prefill,
 } from '../lib/studio-prefill';
+import type { DescribeSource } from '../lib/describe';
 import type { GalleryRecipe, RecipeLang } from '../lib/recipe';
 import {
   checkTemplate,
@@ -40,8 +59,12 @@ import {
 } from '../lib/template';
 import { paramsOf, type RecipeSetup } from '../lib/user-recipes';
 import CopyButton from '../components/CopyButton';
+import DescribeAsPrompt from '../components/DescribeAsPrompt';
+import Dialog from '../components/Dialog';
 import GalleryExamples from '../components/GalleryExamples';
-import { JobOutputs } from '../components/JobMedia';
+import InputSlots, { SlotNames } from '../components/InputSlots';
+import { AcceptInputTerms, InputTermsText } from '../components/InputTerms';
+import { JobInputs, JobOutputs } from '../components/JobMedia';
 import JobStatusPill from '../components/JobStatusPill';
 import MakeVariable from '../components/MakeVariable';
 import RecipeSource from '../components/RecipeSource';
@@ -76,6 +99,9 @@ function titleFrom(prompt: string): string {
   const line = prompt.trim().split('\n')[0].replace(/\s+/g, ' ');
   return line.length > 60 ? `${line.slice(0, 59).trimEnd()}…` : line;
 }
+
+/** A gallery sample that could not be made the user's own input when the form was submitted. */
+class SampleUploadError extends Error { }
 
 /** The job the result panel shows: known by id once accepted, read in full from its first poll. */
 interface Current {
@@ -119,6 +145,15 @@ export default function StudioPage({ modality }: { modality: MediaModality }) {
   // The gallery recipes this account saved. Null until read, and when the API has no such list.
   const [savedRecipes, setSavedRecipes] = useState<SavedRecipe[] | null>(null);
   const [recipeSaveError, setRecipeSaveError] = useState<string | null>(null);
+  // The images the form holds (lib/inputs.ts). Always empty while inputs are switched off.
+  const [slots, setSlots] = useState<Slot[]>([]);
+  // Opened by "Animate this": a line says why a still comes first.
+  const [animating, setAnimating] = useState(false);
+  // The input terms, opened by a submit that would upload a sample before they are accepted.
+  const [termsOpen, setTermsOpen] = useState(false);
+  // The image "Describe as prompt" was asked for, while its dialog is open.
+  const [describing, setDescribing] = useState<DescribeSource | null>(null);
+  const inputsOn = user?.inputs?.enabled === true;
   // The query this page wrote itself after a submit, which needs no loading.
   const ownSearch = useRef<string | null>(null);
   const resultRef = useRef<HTMLElement>(null);
@@ -163,17 +198,26 @@ export default function StudioPage({ modality }: { modality: MediaModality }) {
   // The form's starting values, once both the URL's and the catalog are in.
   useEffect(() => {
     if (!prefill || !models) return;
-    const fitted = fitValues(prefill.values, models, modality);
+    // "Animate this" picks the cheapest model that starts from a frame, unless the link names one that does.
+    const startsFromFrame = models.filter((m) => m.godance.capabilities?.inputs?.first_frame);
+    const animate = inputsOn && prefill.animate === true && startsFromFrame.length > 0;
+    const asked = animate && startsFromFrame.some((m) => m.id === prefill.values.model);
+    const fitted = fitValues(
+      animate && !asked ? { ...prefill.values, model: cheapest(startsFromFrame)!.id } : prefill.values,
+      models, modality);
+    setSlots(inputsOn ? prefill.slots ?? [] : []);
+    setAnimating(animate);
     setValues(fitted.values);
     setNote(prefill.note ?? fitted.note ?? null);
     setRecipe(prefill.recipe ? { recipe: prefill.recipe, lang: prefill.recipe.run.promptLang } : null);
     setTemplate(prefill.template ?? null);
     setTemplateOpen(false);
     setOwn(prefill.own ?? null);
-    setStartedEmpty(!prefill.job && !prefill.recipe && !prefill.own && Object.keys(prefill.values).length === 0);
+    setStartedEmpty(!prefill.job && !prefill.recipe && !prefill.own && !prefill.animate
+      && Object.keys(prefill.values).length === 0);
     setPrefill(null);
     setReady(true);
-  }, [prefill, models, modality]);
+  }, [prefill, models, modality, inputsOn]);
 
   // Credit added in another tab (a top-up, a parent's approval) shows when this one is back in view.
   useEffect(() => {
@@ -212,9 +256,27 @@ export default function StudioPage({ modality }: { modality: MediaModality }) {
     : null;
   // One of the user's own recipes runs by reference, so the API renders it and counts the attempt.
   const recipeRef = recipeRefOf(own?.version ?? null, template, values.prompt);
-  const request = plainRequest && recipeRef ? withRecipe(plainRequest, recipeRef) : plainRequest;
-  const price = useEstimate(request);
-  const canSubmit = request !== null && hasPrompt && !tooLong && !submitting;
+  // The images the request carries: the slots the chosen model can use, and nothing while inputs are off.
+  const takes = inputsOn ? model?.godance.capabilities?.inputs : undefined;
+  const usable = usableSlots(slots, takes, modality);
+  const filled = usable.filter((slot) => slot.input !== null);
+  // One of the user's recipes that names its own inputs runs with those, each under its slot's name.
+  const recipeSlots = recipeRef && inputsOn ? own?.version.inputs ?? [] : [];
+  const requestFor = (using: Slot[]): GenerationBody | null => {
+    if (!plainRequest) return null;
+    const sent = usableSlots(using, takes, modality).filter((slot) => slot.input !== null);
+    if (recipeRef && recipeSlots.length > 0) {
+      return withRecipe(plainRequest, { ...recipeRef, inputs: recipeInputs(recipeSlots, sent).inputs });
+    }
+    const body = sent.length > 0 ? withInputs(plainRequest, inputFields(sent)) : plainRequest;
+    return recipeRef ? withRecipe(body, recipeRef) : body;
+  };
+  const request = requestFor(slots);
+  const missingInput = recipeSlots.length > 0 ? recipeInputs(recipeSlots, filled).missing : null;
+  // An image edit is priced with its input images; a video's inputs cost nothing.
+  const inputImages = modality === 'IMAGE' ? filled.filter((slot) => slot.role === 'image').length : 0;
+  const price = useEstimate(request, inputImages);
+  const canSubmit = request !== null && hasPrompt && !tooLong && !submitting && missingInput === null;
   // What saving the form as a recipe keeps: each variable's value in the form is its default.
   const setup: RecipeSetup | null = plainRequest && hasPrompt && templateProblems.length === 0
     ? {
@@ -222,6 +284,8 @@ export default function StudioPage({ modality }: { modality: MediaModality }) {
         variables: template ? variablesToSave(template) : [],
         model: values.model,
         params: paramsOf(plainRequest),
+        // The slots are kept by name, role and hint. The images themselves are not.
+        ...(inputsOn ? { inputs: slotsToSave(usable) } : {}),
       }
     : null;
 
@@ -290,10 +354,28 @@ export default function StudioPage({ modality }: { modality: MediaModality }) {
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     if (!canSubmit || !request) return;
+    // A gallery sample still in place becomes the user's own input now. It is an upload, so the terms come first.
+    const samples = filled.filter((slot) => slot.input?.sample && slot.input.ref === null);
+    if (samples.length > 0 && !user.inputs?.accepted) {
+      setTermsOpen(true);
+      return;
+    }
     setSubmitting(true);
     setSubmitError(null);
     try {
-      const ack = await startGeneration(modality, request);
+      let sending = request;
+      if (samples.length > 0) {
+        const uploaded = await Promise.all(slots.map(async (slot) => {
+          if (!samples.some((sample) => sample.key === slot.key) || !slot.input) return slot;
+          const stored = await uploadSample(slot.input.preview);
+          return { ...slot, input: { ...slot.input, ref: { file_id: stored.id } } };
+        })).catch((err) => {
+          throw new SampleUploadError(inputErrorMessage(err, 'The sample image could not be uploaded. Replace it with an image of your own.'));
+        });
+        setSlots(uploaded);
+        sending = requestFor(uploaded) ?? request;
+      }
+      const ack = await startGeneration(modality, sending);
       setCurrent({ id: ack.job_id, status: ack.status ?? 'QUEUED', job: null, prompt: promptText ?? '' });
       // In the URL, so a reload picks the run back up.
       const next = new URLSearchParams({ job: ack.job_id });
@@ -301,7 +383,9 @@ export default function StudioPage({ modality }: { modality: MediaModality }) {
       setSearchParams(next, { replace: true });
       resultRef.current?.scrollIntoView?.({ block: 'nearest' });
     } catch (err) {
-      setSubmitError(sendError(err, 'The generation could not be started.'));
+      setSubmitError(err instanceof SampleUploadError
+        ? { outOfCredit: false, message: err.message }
+        : sendError(err, 'The generation could not be started.'));
     } finally {
       setSubmitting(false);
       void refresh();
@@ -462,6 +546,30 @@ export default function StudioPage({ modality }: { modality: MediaModality }) {
             )}
           </div>
 
+          {inputsOn && animating && (
+            <p className="text-xs text-fg-muted" data-animate-note>
+              Settling the look in a still first costs cents. Generating videos until one looks right costs far more.
+            </p>
+          )}
+          {inputsOn && (
+            <InputSlots
+              modality={modality}
+              takes={takes}
+              slots={slots}
+              onChange={setSlots}
+              disabled={!ready}
+              onDescribe={(input) => setDescribing({
+                fileId: input.ref && 'file_id' in input.ref ? input.ref.file_id : null,
+                url: input.preview,
+              })}
+            />
+          )}
+          {missingInput !== null && (
+            <p className="text-xs text-warning">
+              This recipe needs an image for “{missingInput}” before it can run.
+            </p>
+          )}
+
           {(controls.sizes || controls.durations || controls.maxN) && (
             <div className="grid grid-cols-2 gap-4">
               {controls.sizes && (
@@ -519,6 +627,7 @@ export default function StudioPage({ modality }: { modality: MediaModality }) {
           </div>
 
           <div className="border-t border-border pt-4">
+            {inputsOn && <SlotNames slots={usable} onChange={(named) => setSlots(named)} all={slots} />}
             <SaveRecipe
               own={own}
               setup={setup}
@@ -547,7 +656,7 @@ export default function StudioPage({ modality }: { modality: MediaModality }) {
                 </p>
                 {request ? (
                   <>
-                    <CodeSnippet title="Start the job" code={postCurl(generationPath(modality), request)} />
+                    <CodeSnippet title="Start the job" code={postCurl(generationPath(modality, request), request)} />
                     <CodeSnippet
                       title="Check on it"
                       code={getCurl(`/v1/jobs/${current?.id ?? JOB_ID_VAR}`)}
@@ -562,11 +671,36 @@ export default function StudioPage({ modality }: { modality: MediaModality }) {
           </div>
         </form>
 
+        {termsOpen && (
+          <Dialog title="Before you use an image" onClose={() => setTermsOpen(false)}>
+            <InputTermsText />
+            <div className="mt-4">
+              <AcceptInputTerms onAccepted={() => setTermsOpen(false)} />
+            </div>
+          </Dialog>
+        )}
+
+        {describing && (
+          <DescribeAsPrompt
+            source={describing}
+            hasPrompt={(promptText ?? '').trim() !== ''}
+            onClose={() => setDescribing(null)}
+            onUse={(text) => {
+              // The answer becomes the prompt, as plain text: a template in the form is given up.
+              setTemplate(null);
+              setTemplateOpen(false);
+              update({ prompt: text.slice(0, PROMPT_MAX_LENGTH) });
+              setDescribing(null);
+            }}
+          />
+        )}
+
         <section ref={resultRef} aria-label="Result" className="card scroll-mt-4">
           <Result
             current={current}
             modality={modality}
             onJobChange={(job) => setCurrent((cur) => (cur?.id === job.id ? { ...cur, job } : cur))}
+            onDescribe={inputsOn ? (url) => setDescribing({ fileId: null, url }) : undefined}
           />
         </section>
       </div>
@@ -639,10 +773,11 @@ function statusLine(current: Current, words: (typeof WORDS)[MediaModality]): str
   }
 }
 
-function Result({ current, modality, onJobChange }: {
+function Result({ current, modality, onJobChange, onDescribe }: {
   current: Current | null;
   modality: MediaModality;
   onJobChange: (job: JobView) => void;   // the job was saved or un-saved here
+  onDescribe?: (url: string) => void;    // "Describe as prompt" on an image it made
 }) {
   const words = WORDS[modality];
   const job = current?.job ?? null;
@@ -685,7 +820,8 @@ function Result({ current, modality, onJobChange }: {
         </>
       )}
 
-      {current?.status === 'DONE' && job && <JobOutputs job={job} className="mt-4" />}
+      {job && <JobInputs job={job} className="mt-4" />}
+      {current?.status === 'DONE' && job && <JobOutputs job={job} className="mt-4" onDescribe={onDescribe} />}
 
       {current && (isTerminal(current.status) || current.gone) && (
         <div className="mt-4 flex flex-wrap gap-2">

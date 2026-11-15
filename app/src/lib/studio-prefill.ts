@@ -1,6 +1,7 @@
 import type { JobView, MediaModality, ModelEntry, UserRecipe, UserRecipeVersion } from './api';
 import { loadRecipe } from './gallery';
-import { fetchJob, isJobId, mediaModality } from './jobs';
+import { slotKey, type Slot } from './inputs';
+import { fetchJob, isJobId, mediaModality, outputItems } from './jobs';
 import { cheapest, controlsFor, modelName } from './media-models';
 import { defaultsIn, isRecipeSlug, type GalleryRecipe, type RecipeLang } from './recipe';
 import { PROMPT_MAX_LENGTH, type StudioValues } from './studio';
@@ -39,6 +40,8 @@ export type PrefillRequest =
   | { kind: 'job'; jobId: string }
   | { kind: 'recipe'; recipeId: string }
   | { kind: 'example'; slug: string }
+  // "Animate this": an image output as a video's first frame, on the model the link names, if any.
+  | { kind: 'animate'; jobId: string; index: number; model?: string }
   | { kind: 'values'; values: PrefillValues }
   | { kind: 'none' };
 
@@ -53,6 +56,19 @@ function positiveInt(raw: string | null): number | null {
 export function readPrefill(params: URLSearchParams): PrefillRequest {
   const job = params.get('job');
   if (job && isJobId(job)) return { kind: 'job', jobId: job };
+
+  // "Animate this": one of the user's image outputs, by its job and its place among that job's outputs.
+  const animate = params.get('animate');
+  if (animate && isJobId(animate)) {
+    const output = params.get('output')?.trim() ?? '0';
+    const chosen = params.get('model')?.trim();
+    return {
+      kind: 'animate',
+      jobId: animate,
+      index: /^\d{1,2}$/.test(output) ? Number(output) : 0,
+      ...(chosen ? { model: chosen.slice(0, MODEL_ID_MAX) } : {}),
+    };
+  }
 
   const recipe = params.get('recipe');
   if (recipe && isRecipeId(recipe)) return { kind: 'recipe', recipeId: recipe };
@@ -83,6 +99,8 @@ export interface Prefill {
   template?: FormTemplate;           // the template the form holds, when what was loaded has variables
   otherModality?: MediaModality;     // what was asked for is the other kind; the Studio moves to that page
   note?: string;                     // what the link asked for that could not be loaded
+  slots?: Slot[];                    // the input slots the form starts with: a recipe's, or the frame to animate
+  animate?: boolean;                 // opened by "Animate this": the model is chosen for a first frame
 }
 
 /** One of the caller's recipes in the form: the recipe, and the version it was filled from or saved as. */
@@ -94,6 +112,25 @@ export interface OwnRecipe {
 const JOB_NOT_LOADED = "That generation couldn't be loaded, so the form starts empty.";
 const RECIPE_NOT_LOADED = "That recipe couldn't be loaded from the gallery, so the form starts empty.";
 const OWN_RECIPE_NOT_LOADED = "That recipe of yours couldn't be loaded, so the form starts empty.";
+const FRAME_NOT_LOADED = "That image couldn't be loaded as a first frame, so the form starts empty.";
+
+/** The empty slots of one of the user's recipes: each with its name and its hint, and no file. */
+function slotsOfVersion(version: UserRecipeVersion): Slot[] {
+  return (version.inputs ?? []).map((slot) => ({
+    key: slotKey(), role: slot.role, name: slot.slot, hint: slot.hint, input: null,
+  }));
+}
+
+/** A gallery recipe's slots, each holding its sample until the user replaces it. */
+function slotsOfRecipe(recipe: GalleryRecipe): Slot[] {
+  return recipe.inputs.map((slot) => ({
+    key: slotKey(),
+    role: slot.role,
+    name: slot.slot,
+    hint: slot.hint,
+    input: { ref: null, preview: slot.sampleUrl, label: 'Sample', sample: true },
+  }));
+}
 
 /** A gallery recipe's template in `lang`, each variable at that language's default. Null when it has none. */
 export function templateFromRecipe(recipe: GalleryRecipe, lang: RecipeLang): FormTemplate | null {
@@ -174,6 +211,7 @@ export async function resolvePrefill(request: PrefillRequest, modality: MediaMod
           values: valuesFromVersion(version),
           own: { recipe, version },
           template: templateFromVersion(version) ?? undefined,
+          slots: slotsOfVersion(version),
         };
       } catch {
         return { values: {}, note: OWN_RECIPE_NOT_LOADED };
@@ -185,7 +223,38 @@ export async function resolvePrefill(request: PrefillRequest, modality: MediaMod
       if (!recipe) return { values: {}, note: RECIPE_NOT_LOADED };
       if (recipe.modality !== modality) return { values: {}, otherModality: recipe.modality };
       const lang = recipe.run.promptLang;
-      return { values: valuesFromRecipe(recipe, lang), recipe, template: templateFromRecipe(recipe, lang) ?? undefined };
+      return {
+        values: valuesFromRecipe(recipe, lang),
+        recipe,
+        template: templateFromRecipe(recipe, lang) ?? undefined,
+        slots: slotsOfRecipe(recipe),
+      };
+    }
+    case 'animate': {
+      // Animating is making a video: asked for on the image page, it moves to the video one.
+      if (modality !== 'VIDEO') return { values: {}, otherModality: 'VIDEO' };
+      try {
+        const job = await fetchJob(request.jobId);
+        const image = job.status === 'DONE' && mediaModality(job) === 'IMAGE'
+          ? outputItems(job).find((item) => item.key === String(request.index) && item.kind === 'image')
+          : undefined;
+        if (!image) return { values: {}, note: FRAME_NOT_LOADED };
+        return {
+          values: request.model ? { model: request.model } : {},
+          animate: true,
+          slots: [{
+            key: slotKey(),
+            role: 'first_frame',
+            input: {
+              ref: { job_output: { job_id: job.id, index: request.index } },
+              preview: image.url,
+              label: 'One of your images',
+            },
+          }],
+        };
+      } catch {
+        return { values: {}, note: FRAME_NOT_LOADED };
+      }
     }
   }
 }

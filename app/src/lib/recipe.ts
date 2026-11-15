@@ -68,6 +68,17 @@ export interface GalleryRecipe {
   run: { model: string; promptLang: RecipeLang; params: RecipeParams };
   /** The recipe's page, and only when it is on the gallery's own origin. */
   url: string | null;
+  /** Its input slots, each with a sample generated for the gallery. Empty for a recipe that takes no input. */
+  inputs: GalleryInput[];
+}
+
+/** An input slot of a gallery recipe: what to put there, and the sample the gallery shows in its place. */
+export interface GalleryInput {
+  slot: string;
+  role: 'image' | 'first_frame' | 'last_frame' | 'reference_image';
+  hint: string;
+  /** An absolute https link to the sample image. */
+  sampleUrl: string;
 }
 
 export interface GalleryEntry {
@@ -141,7 +152,44 @@ export function parseRecipe(json: unknown, expected: { slug: string; galleryOrig
     template: templateOf(json.prompt, prompt),
     run: { model, promptLang, params: paramsOf(json.run.params) },
     url: pageUrlOf(json.url, expected.galleryOrigin),
+    inputs: inputsOf(json.inputs, modality),
   };
+}
+
+const SLOT_NAME = /^[A-Za-z0-9](?:[A-Za-z0-9 _-]{0,38}[A-Za-z0-9])?$/;
+const MAX_INPUTS = 4;
+const HINT_MAX = 300;
+
+/**
+ * A recipe's input slots. Anything that is not as the contract has it is
+ * dropped whole: a recipe with a slot the app cannot read is shown without
+ * inputs rather than with half of them.
+ */
+function inputsOf(raw: unknown, modality: RecipeModality): GalleryInput[] {
+  if (!Array.isArray(raw) || raw.length === 0 || raw.length > MAX_INPUTS) return [];
+  const roles = modality === 'VIDEO' ? ['first_frame', 'last_frame', 'reference_image'] : ['image'];
+  const inputs: GalleryInput[] = [];
+  for (const item of raw) {
+    if (!isRecord(item)) return [];
+    const { slot, role, hint, sample_url: sampleUrl } = item;
+    if (typeof slot !== 'string' || !SLOT_NAME.test(slot) || inputs.some((each) => each.slot === slot)) return [];
+    if (typeof role !== 'string' || !roles.includes(role)) return [];
+    if (typeof sampleUrl !== 'string') return [];
+    let url: URL;
+    try {
+      url = new URL(sampleUrl);
+    } catch {
+      return [];
+    }
+    if (url.protocol !== 'https:') return [];
+    inputs.push({
+      slot,
+      role: role as GalleryInput['role'],
+      hint: typeof hint === 'string' ? hint.slice(0, HINT_MAX) : '',
+      sampleUrl: url.toString(),
+    });
+  }
+  return inputs;
 }
 
 /** The gallery's list, from `<gallery>/gallery/index.json`. Entries that don't match are dropped; the rest are kept in order. */
