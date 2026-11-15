@@ -220,7 +220,7 @@ public class SecurityConfig {
                         .pathMatchers(HttpMethod.POST, "/v1/billing/webhooks/**").permitAll()
                         // The model API: a signed-in session or an API key.
                         .pathMatchers(HttpMethod.POST, "/v1/chat/completions",
-                                "/v1/images/generations", "/v1/videos/generations")
+                                "/v1/images/generations", "/v1/images/edits", "/v1/videos/generations")
                                 .hasAnyAuthority(sessionOr(ApiKeyAuthFilter.API_KEY_AUTHORITY))
                         .pathMatchers(HttpMethod.GET, "/v1/jobs", "/v1/jobs/*", "/v1/usage")
                                 .hasAnyAuthority(sessionOr(ApiKeyAuthFilter.API_KEY_AUTHORITY))

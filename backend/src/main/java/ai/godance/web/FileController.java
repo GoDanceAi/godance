@@ -1,7 +1,6 @@
 package ai.godance.web;
 
 import java.net.URI;
-import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
 
@@ -24,11 +23,8 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.server.ServerWebExchange;
 
-import ai.godance.config.InputsProperties;
-import ai.godance.config.RateLimitProperties.Limit;
 import ai.godance.security.ApiKeyAuthFilter;
 import ai.godance.security.JwtService;
-import ai.godance.security.RateLimiter;
 import ai.godance.service.InputRefusedException;
 import ai.godance.service.InputService;
 import ai.godance.web.dto.InputDtos.AcceptTermsRequest;
@@ -59,16 +55,12 @@ import reactor.core.scheduler.Schedulers;
 @RequestMapping("/v1")
 public class FileController {
 
-    static final Duration UPLOAD_LIMIT_WINDOW = Duration.ofHours(1);
-
     private final InputService inputs;
-    private final RateLimiter limiter;
-    private final InputsProperties props;
+    private final InputUploadIntake intake;
 
-    public FileController(InputService inputs, RateLimiter limiter, InputsProperties props) {
+    public FileController(InputService inputs, InputUploadIntake intake) {
         this.inputs = inputs;
-        this.limiter = limiter;
-        this.props = props;
+        this.intake = intake;
     }
 
     /**
@@ -81,18 +73,16 @@ public class FileController {
     @PostMapping("/files")
     public Mono<ResponseEntity<InputFileView>> upload(@AuthenticationPrincipal Jwt jwt, ServerWebExchange exchange) {
         UUID userId = JwtService.userIdFromSubject(jwt.getSubject());
-        String ip = clientIp(exchange);
+        String ip = InputUploadIntake.clientIp(exchange);
         inputs.requireEnabled();
         MediaType contentType = exchange.getRequest().getHeaders().getContentType();
         if (contentType == null || !MediaType.MULTIPART_FORM_DATA.isCompatibleWith(contentType)) {
             throw new ResponseStatusException(HttpStatus.UNSUPPORTED_MEDIA_TYPE,
                     "send the image as multipart/form-data, in a part named file");
         }
-        return limiter.check("input-upload-ip", ip, new Limit(props.uploadLimitPerIp(), UPLOAD_LIMIT_WINDOW))
-                .then(limiter.check("input-upload-account", userId.toString(),
-                        new Limit(props.uploadLimitPerAccount(), UPLOAD_LIMIT_WINDOW)))
-                .then(Mono.fromRunnable(() -> inputs.requireMayUpload(userId, ip))
-                        .subscribeOn(Schedulers.boundedElastic()))
+        // The limits, the account and the upload itself are taken in by the same code
+        // as an image sent with an edit, so neither route is a way around the other.
+        return intake.admit(userId, ip)
                 .then(Mono.defer(exchange::getMultipartData))
                 .flatMap(form -> {
                     requirePurpose(form.getFirst("purpose"));
@@ -101,12 +91,9 @@ public class FileController {
                         return Mono.error(new ResponseStatusException(HttpStatus.BAD_REQUEST,
                                 "the form needs a part named file"));
                     }
-                    // One byte past the limit is enough to know the file is too large.
-                    return InputUploads.read(file, inputs.maxBytes() + 1);
+                    return intake.store(userId, ip, file);
                 })
-                .onErrorMap(InputUploads::isTooLarge, e -> inputs.tooLarge(userId, ip))
-                .flatMap(bytes -> Mono.fromCallable(() -> inputs.upload(userId, bytes, ip))
-                        .subscribeOn(Schedulers.boundedElastic()))
+                .onErrorMap(InputUploads::isTooLarge, e -> intake.tooLarge(userId, ip))
                 .map(file -> ResponseEntity.status(HttpStatus.CREATED).body(InputFileView.from(file)));
     }
 
@@ -149,7 +136,7 @@ public class FileController {
                                              ServerWebExchange exchange) {
         UUID userId = JwtService.userIdFromSubject(jwt.getSubject());
         UUID fileId = fileId(id);
-        String ip = clientIp(exchange);
+        String ip = InputUploadIntake.clientIp(exchange);
         return Mono.fromRunnable(() -> inputs.delete(userId, fileId, ip))
                 .subscribeOn(Schedulers.boundedElastic())
                 .then(Mono.just(ResponseEntity.noContent().<Void>build()));
@@ -170,7 +157,7 @@ public class FileController {
                     "Sign in to accept the input terms; API keys can't.");
         }
         UUID userId = JwtService.userIdFromSubject(jwt.getSubject());
-        String ip = clientIp(exchange);
+        String ip = InputUploadIntake.clientIp(exchange);
         Integer version = req == null ? null : req.version();
         return Mono.fromRunnable(() -> inputs.acceptTerms(userId, version, ip))
                 .subscribeOn(Schedulers.boundedElastic())
@@ -215,14 +202,5 @@ public class FileController {
         } catch (IllegalArgumentException e) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "before must be a file id");
         }
-    }
-
-    private static String clientIp(ServerWebExchange exchange) {
-        var remote = exchange.getRequest().getRemoteAddress();
-        if (remote == null) return null;
-        var addr = remote.getAddress();
-        // Behind a reverse proxy (forward-headers-strategy=framework) the
-        // remote address can be UNRESOLVED — getAddress() returns null.
-        return addr != null ? addr.getHostAddress() : remote.getHostString();
     }
 }

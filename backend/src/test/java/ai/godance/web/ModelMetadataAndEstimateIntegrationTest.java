@@ -126,9 +126,11 @@ class ModelMetadataAndEstimateIntegrationTest {
                 .containsEntry("display_name", "FLUX1.1 [pro]")
                 .containsKey("description")
                 .containsEntry("capabilities", Map.of("default_size", "1024x1024", "max_n", 1));
+        // Round 11: an image model that takes input images says so, in the contract's shape.
         assertThat(godance.get("gpt-image-1.5").get("capabilities")).isEqualTo(Map.of(
                 "sizes", List.of("1024x1024", "1536x1024", "1024x1536", "auto"),
-                "default_size", "auto", "max_n", 10));
+                "default_size", "auto", "max_n", 10,
+                "inputs", Map.of("images", Map.of("max", 16, "mask", true))));
         assertThat(godance.get("minimax-hailuo-2.3").get("capabilities"))
                 .isEqualTo(Map.of("default_seconds", 6, "max_n", 1));
         // Unknown capabilities are left out, not published as empty.
