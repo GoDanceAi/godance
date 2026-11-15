@@ -166,6 +166,16 @@ describe('llms-full.txt', () => {
   });
 });
 
+describe('both files', () => {
+  test('say nothing of the gallery, which may be switched off', () => {
+    // While the gallery is off, nothing the site publishes mentions it (the "gallery off"
+    // checks in scripts/gallery-pages). These files are the same either way, so they leave
+    // out the request and response fields that exist only for it.
+    assert.doesNotMatch(llmsFull, /gallery/i, 'public/llms-full.txt');
+    assert.doesNotMatch(llms, /gallery/i, 'public/llms.txt');
+  });
+});
+
 describe('llms.txt', () => {
   test('names only routes the API has', () => {
     assert.deepEqual(unknownRoutes(llms, routes), [],

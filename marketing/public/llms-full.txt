@@ -18,6 +18,7 @@ Conventions used on every route:
 - Field names: a job (`GET /v1/jobs/{id}`) is camelCase. Requests, recipes, files and
   OpenAI's own shapes are snake_case. The examples below show each exactly.
 - Fields marked "Godance extension" are additions to OpenAI's shapes.
+- A response can carry fields that are not shown here. Ignore the ones you do not use.
 - Text is synchronous. Images and video run as jobs: a request is accepted, runs, and
   ends DONE or FAILED. A job reserves its price when accepted and returns it if it fails.
 - The Python examples use `requests` (pip install requests) or OpenAI's SDK
@@ -195,7 +196,7 @@ Images in chat. A user message's `content` can be OpenAI's array of parts:
 
 `POST /v1/images/generations` takes OpenAI's request: `model`, `prompt`, `size`, `n`,
 `style`, `quality`, `response_format` (`url` or `b64_json`). Godance extensions: `async`,
-`webhook_url`, `gallery_recipe`, `recipe` (see Recipes).
+`webhook_url`, `recipe` (see Recipes).
 
 Every image model runs as a job. What the request answers depends on the API key:
 
@@ -382,7 +383,7 @@ example `seedance-2.0`); there is no default model.
 ### Godance's shape: POST /v1/videos/generations
 
 Fields: `model`, `prompt`, `size`, `seconds`, `n`, and the Godance extensions
-`webhook_url`, `gallery_recipe`, `recipe`, `first_frame`, `last_frame`, `reference_images`.
+`webhook_url`, `recipe`, `first_frame`, `last_frame`, `reference_images`.
 Answers 202 with `{"job_id", "status", "poll_url"}`; poll `GET /v1/jobs/{id}`.
 
 ```bash
@@ -433,8 +434,8 @@ base URL, the key and the model changed. A video's `id` is its job's id.
 
 - `POST /v1/videos` creates a video. JSON, or the multipart form OpenAI's SDK sends.
   Fields: `model` (required), `prompt`, `seconds` (a string such as `"8"`; a number is
-  taken too), `size`, `input_reference`, and the Godance extensions `webhook_url`,
-  `gallery_recipe`, `recipe`. Answers 200 with the video object, `status: "queued"`.
+  taken too), `size`, `input_reference`, and the Godance extensions `webhook_url` and
+  `recipe`. Answers 200 with the video object, `status: "queued"`.
 - `GET /v1/videos/{id}` is one video. `GET /v1/videos?limit=&after=&order=` lists yours,
   newest first: `{"object": "list", "data": [...], "first_id", "last_id", "has_more"}`;
   pass `last_id` as `after` for the next page (`limit` 1 to 100, default 20).
@@ -537,7 +538,7 @@ curl https://api.godance.ai/v1/jobs/$JOB_ID \
    {"index": 0, "url": "https://…signed…", "contentType": "image/png", "sizeBytes": 812345, "revisedPrompt": null},
    {"index": 1, "url": "https://…signed…", "contentType": "image/png", "sizeBytes": 798110, "revisedPrompt": null}],
  "purged": false, "mediaExpiresAt": "2027-02-10T09:00:00Z", "saved": false,
- "channel": "API", "galleryRecipe": null, "recipe": null, "inputs": []}
+ "channel": "API", "recipe": null, "inputs": []}
 ```
 
 - `status`: `QUEUED` → `RUNNING` → `DONE` or `FAILED`. When `FAILED`, `errorMessage` says
@@ -615,7 +616,7 @@ curl https://api.godance.ai/v1/recipes \
 ```
 
 ```json
-{"id": "…", "title": "Mug on a kitchen shelf", "modality": "IMAGE", "source_gallery_recipe": null,
+{"id": "…", "title": "Mug on a kitchen shelf", "modality": "IMAGE",
  "created_at": "2026-11-14T09:00:00Z", "updated_at": "2026-11-14T09:00:00Z",
  "latest_version": {"id": "…", "number": 1,
    "template": "A {{color}} mug on a {{surface}}, soft morning light",
@@ -662,9 +663,6 @@ jobs = requests.get(f"{API}/v1/jobs", headers=HEADERS, params={"recipe": recipe[
   `recipe_variable_unknown`, `recipe_variable_too_long`, `recipe_input_missing`,
   `recipe_input_unknown`, `recipe_inputs_conflict`, `invalid_recipe`; 409
   `recipe_limit_reached`.
-- `gallery_recipe` (a slug: lowercase letters, digits, hyphens) on a generation request
-  records which public gallery recipe the request is a run of. It changes nothing about
-  the result or its price. Any other value answers 400 `invalid_gallery_recipe`.
 
 ## Errors
 
