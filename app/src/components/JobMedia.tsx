@@ -113,7 +113,7 @@ export function JobOutputs({ job, className = '', onDescribe }: {
                 <span className="flex shrink-0 flex-wrap justify-end gap-2">
                   {item.kind === 'image' && onDescribe && (
                     <button type="button" className="btn btn-ghost btn-sm" onClick={() => onDescribe(item.url)}>
-                      Describe as prompt<span className="sr-only">: {which}</span>
+                      Describe as prompt<span className="sr-only">for {which}</span>
                     </button>
                   )}
                   {item.kind === 'image' && canAnimate && (

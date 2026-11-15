@@ -152,7 +152,7 @@ export default function InputSlots({ modality, takes, slots, onChange, disabled 
                             {onDescribe && role !== 'mask' && (
                               // Named by its own words, then by which image, so "Prompt" still names one field only.
                               <button type="button" className="btn btn-ghost btn-sm px-0" onClick={() => onDescribe(slot.input!)}>
-                                Describe as prompt<span className="sr-only">: {which}</span>
+                                Describe as prompt<span className="sr-only">for {which}</span>
                               </button>
                             )}
                           </div>
