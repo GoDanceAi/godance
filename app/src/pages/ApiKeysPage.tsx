@@ -118,14 +118,14 @@ export default function ApiKeysPage() {
         <table className="w-full text-sm">
           <thead className="bg-surface-alt border-b border-border">
             <tr className="text-left text-fg-subtle">
-              <th scope="col" className="px-4 py-2.5 font-semibold">Key</th>
-              <th scope="col" className="px-4 py-2.5 font-semibold">Image responses</th>
-              <th scope="col" className="px-4 py-2.5 font-semibold">Spent, and its cap</th>
-              <th scope="col" className="px-4 py-2.5 font-semibold">Expires</th>
-              <th scope="col" className="px-4 py-2.5 font-semibold">Created</th>
+              <th scope="col" className="px-3 py-2.5 font-semibold">Key</th>
+              <th scope="col" className="px-3 py-2.5 font-semibold">Image responses</th>
+              <th scope="col" className="px-3 py-2.5 font-semibold">Spent, and its cap</th>
+              <th scope="col" className="px-3 py-2.5 font-semibold">Expires</th>
+              <th scope="col" className="px-3 py-2.5 font-semibold">Created</th>
               {/* Named for a screen reader without a hidden element: one positioned out of the
                   flow would not scroll with the table, and would widen the page on a phone. */}
-              <th scope="col" aria-label="Actions" className="px-4 py-2.5" />
+              <th scope="col" aria-label="Actions" className="px-3 py-2.5" />
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
@@ -137,11 +137,11 @@ export default function ApiKeysPage() {
             )}
             {keys?.map((k) => (
               <tr key={k.id}>
-                <td className="px-4 py-3">
+                <td className="px-3 py-3">
                   <p className="min-w-[9rem] break-words font-medium text-fg">{k.name}</p>
                   <p className="mt-0.5 whitespace-nowrap font-mono text-xs text-fg-muted">gd_live_{k.prefix}…</p>
                 </td>
-                <td className="px-4 py-3 text-fg-muted">
+                <td className="px-3 py-3 text-fg-muted">
                   {k.image_response ? (
                     <select
                       value={k.image_response}
@@ -157,7 +157,7 @@ export default function ApiKeysPage() {
                     </select>
                   ) : '—'}
                 </td>
-                <td className="px-4 py-3 text-fg-muted">
+                <td className="px-3 py-3 text-fg-muted">
                   {hasCaps(k) ? (
                     <>
                       <Spend label="Today" spent={k.spent_today_cents ?? 0} cap={k.daily_cap_cents} />
@@ -165,30 +165,33 @@ export default function ApiKeysPage() {
                     </>
                   ) : '—'}
                 </td>
-                <td className="px-4 py-3 text-fg-muted"><Expiry apiKey={k} /></td>
-                <td className="whitespace-nowrap px-4 py-3 text-xs text-fg-muted">
+                <td className="px-3 py-3 text-fg-muted"><Expiry apiKey={k} /></td>
+                <td className="whitespace-nowrap px-3 py-3 text-xs text-fg-muted">
                   <p>{new Date(k.createdAt).toLocaleDateString()}</p>
                   <p className="mt-0.5 text-fg-subtle">
                     {k.lastUsedAt ? `Last used ${new Date(k.lastUsedAt).toLocaleDateString()}` : 'Not used yet'}
                   </p>
                 </td>
-                <td className="whitespace-nowrap px-4 py-3 text-right">
-                  {hasCaps(k) && (
+                <td className="whitespace-nowrap px-3 py-3 text-right">
+                  {/* One above the other, so the table fits the page's width on a desktop. */}
+                  <div className="flex flex-col items-end gap-1.5">
+                    {hasCaps(k) && (
+                      <button
+                        type="button"
+                        onClick={() => setEditing(k)}
+                        aria-label={`Edit limits for ${k.name}`}
+                        className="text-xs font-medium text-brand-600 hover:underline"
+                      >
+                        Edit limits
+                      </button>
+                    )}
                     <button
-                      type="button"
-                      onClick={() => setEditing(k)}
-                      aria-label={`Edit limits for ${k.name}`}
-                      className="mr-4 text-xs font-medium text-brand-600 hover:underline"
+                      onClick={() => void revoke(k.id)}
+                      className="text-xs text-danger hover:underline font-medium"
                     >
-                      Edit limits
+                      Revoke
                     </button>
-                  )}
-                  <button
-                    onClick={() => void revoke(k.id)}
-                    className="text-xs text-danger hover:underline font-medium"
-                  >
-                    Revoke
-                  </button>
+                  </div>
                 </td>
               </tr>
             ))}
