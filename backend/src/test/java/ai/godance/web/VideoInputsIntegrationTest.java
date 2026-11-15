@@ -251,7 +251,7 @@ class VideoInputsIntegrationTest {
     }
 
     @Test
-    void generate_givenTenReferenceImagesOnSeedance_expectsInputNotSupportedBeforeCharge() {
+    void generate_givenTenReferenceImagesOnSeedance_expectsInputNotSupportedBeforeCharge() throws Exception {
         Account me = account(100_00L);
         UUID image = upload(me, InputFixtures.image("plain.png"), "a.png");
         List<Object> ten = new ArrayList<>();
@@ -264,7 +264,8 @@ class VideoInputsIntegrationTest {
         assertThat(problem.get("detail").asString()).contains("at most 9 reference images").contains("the request has 10");
         // Nine is the most it takes, and nine go through.
         stubArkRun("task_nine");
-        submit(me, body("seedance-2.0", "Nine.", "reference_images", ten.subList(0, 9))).expectStatus().isAccepted();
+        assertThat(runToTheEnd(me, body("seedance-2.0", "Nine.", "reference_images", ten.subList(0, 9))).status())
+                .isEqualTo(JobStatus.DONE);
     }
 
     @Test
@@ -291,7 +292,7 @@ class VideoInputsIntegrationTest {
     }
 
     @Test
-    void generate_givenFrameOutsideTheProvidersAspectRange_expectsInputAspectMismatchNamingBothBeforeCharge() {
+    void generate_givenFrameOutsideTheProvidersAspectRange_expectsInputAspectMismatchNamingBothBeforeCharge() throws Exception {
         Account me = account(100_00L);
         UUID wide = upload(me, InputFixtures.png(300, 100), "wide.png");       // 3:1, wider than 2.5
         UUID tall = upload(me, InputFixtures.png(100, 300), "tall.png");       // 1:3, narrower than 0.4
@@ -315,8 +316,8 @@ class VideoInputsIntegrationTest {
 
         // A shape at the edge of the range is taken: 250×100 is exactly 2.5.
         stubArkRun("task_edge");
-        submit(me, body("seedance-2.0", "Edge.", "first_frame", file(upload(me, InputFixtures.png(250, 100), "edge.png"))))
-                .expectStatus().isAccepted();
+        assertThat(runToTheEnd(me, body("seedance-2.0", "Edge.", "first_frame",
+                file(upload(me, InputFixtures.png(250, 100), "edge.png")))).status()).isEqualTo(JobStatus.DONE);
     }
 
     @Test
@@ -664,6 +665,18 @@ class VideoInputsIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(body)
                 .exchange();
+    }
+
+    /**
+     * Submits a request that is expected to be accepted, and waits for its
+     * job to end. Every test that starts a job waits for it: a job still
+     * running when its test ends would call the provider during the next.
+     */
+    private JobView runToTheEnd(Account account, Map<String, Object> body) throws InterruptedException {
+        AsyncJobAcknowledged ack = submit(account, body)
+                .expectStatus().isAccepted()
+                .expectBody(AsyncJobAcknowledged.class).returnResult().getResponseBody();
+        return pollJob(account, ack.jobId());
     }
 
     private JobView pollJob(Account account, UUID jobId) throws InterruptedException {
