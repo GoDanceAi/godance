@@ -449,8 +449,8 @@ test.describe('a new batch: 500 rows', () => {
     await expect(startButton(page)).toHaveText('Start batch · $50.00');
     expect(estimatesAsked(api).at(-1)?.rows).toHaveLength(500);
 
-    // One more keystroke's worth of work, measured in the page: the table is read again and
-    // the page drawn again within a tenth of the time a person would notice as a freeze.
+    // One more keystroke's worth of work, measured in the page: all 501 rows are read again
+    // and the page is drawn again, from the keystroke to the second frame after it.
     const redraw = await page.evaluate(async (text) => {
       const box = document.getElementById('batch-table') as HTMLTextAreaElement;
       const set = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
@@ -461,7 +461,8 @@ test.describe('a new batch: 500 rows', () => {
       return performance.now() - started;
     }, `${rows}\nlast\tone`);
     await expect(page.getByText('501 rows, 2 columns')).toBeVisible();
-    expect(redraw, 'reading and drawing 501 rows, in ms').toBeLessThan(1_000);
+    // About 20 ms on a developer's machine; the bound leaves room for a slow one.
+    expect(redraw, 'reading and drawing 501 rows, in ms').toBeLessThan(300);
 
     // Paging through it is immediate too.
     const paged = Date.now();
@@ -498,6 +499,31 @@ test.describe('a new batch: the page', () => {
     // The box that scrolls takes the focus, so the keyboard can scroll it.
     await region.focus();
     await expect(region).toBeFocused();
+  });
+
+  test('the page works from the keyboard: the table, the file control, the choices, and Start', async ({ page, api }) => {
+    await openNewBatch(page, api);
+    const started = mockBatchCreate(api);
+
+    // The file control is a real input behind its label: it takes the focus.
+    await page.getByLabel('CSV file').focus();
+    await expect(page.getByLabel('CSV file')).toBeFocused();
+
+    await table(page).focus();
+    await page.keyboard.insertText(THREE_ROWS);
+    await expect(page.getByText('3 rows, 2 columns')).toBeVisible();
+
+    // A column is chosen with the arrow keys.
+    await page.getByLabel('Column for surface').focus();
+    await page.keyboard.press('ArrowUp');
+    await expect(page.getByLabel('Column for surface').locator('option:checked')).toHaveText('color');
+    await page.keyboard.press('ArrowDown');
+    await expect(page.getByLabel('Column for surface').locator('option:checked')).toHaveText('surface');
+
+    await expect(startButton(page)).toBeEnabled();
+    await startButton(page).focus();
+    await page.keyboard.press('Enter');
+    await expect(page).toHaveURL(`/batches/${started.batch.id}`);
   });
 
   test('a recipe with no variables runs the same prompt on every row', async ({ page, api }) => {

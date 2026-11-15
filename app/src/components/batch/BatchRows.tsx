@@ -65,6 +65,7 @@ export default function BatchRows({ batch, linked }: { batch: Batch; linked: num
     asked.current += 1;
     const turn = asked.current;
     const rows = await fetchBatchRows(batch.id, page === 0 ? null : page * ROWS_PAGE - 1);
+    if (!Array.isArray(rows)) throw new Error('The rows could not be read.');
     if ((applied.current.get(page) ?? 0) < turn) {
       applied.current.set(page, turn);
       setPages((current) => new Map(current).set(page, rows));

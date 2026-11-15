@@ -100,6 +100,8 @@ test.describe('a batch with images: by a column of file names', () => {
     await expect(allUploaded(page, 3)).toBeVisible();
     await expect(uploaded(page)).toHaveAttribute('aria-valuenow', '3');
     await expect(uploaded(page)).toHaveAttribute('aria-valuemax', '3');
+    // And it is announced.
+    await expect(page.getByRole('region', { name: 'Images' }).getByRole('status')).toHaveText('All 3 images uploaded.');
     await expect(rowCells(page, 1).nth(2)).toContainText('uploaded');
     expect([...stored].sort()).toEqual(['mug-blue.png', 'mug-green.png', 'mug-yellow.png']);
     expect(api.callsTo('POST', '/v1/files')[0].headers['content-type']).toMatch(/^multipart\/form-data/);
@@ -324,6 +326,27 @@ test.describe('a batch with images: uploads', () => {
     await expect(page.getByText("This recipe can't be run as a batch from this account right now.")).toBeVisible();
     await expect(page.getByLabel('Paste a table')).toHaveCount(0);
     await expect(startButton(page)).toHaveCount(0);
+  });
+
+  test('images are not uploaded for a table that is too long to run, until it is shortened', async ({ page, api }) => {
+    await openSlotBatch(page, api);
+    const stored = serveNamedUploads(api);
+    // 501 rows, before the API has said how many a batch takes: more than it usually does.
+    await table(page).fill(['color', ...Array.from({ length: 501 }, (_, i) => `color ${i + 1}`)].join('\n'));
+
+    await images(page).setInputFiles([png('a.png'), png('b.png')]);
+
+    await expect(page.getByText('Images are uploaded once the table is short enough to run.')).toBeVisible();
+    await expect(startSection(page)).toContainText('This table has 501 rows, more than a batch usually takes. Shorten it to see the total.');
+    await expect(startButton(page)).toBeDisabled();
+    await page.waitForTimeout(500);
+    expect(stored).toHaveLength(0);
+    expect(estimatesAsked(api)).toHaveLength(0);
+
+    await table(page).fill('color\nblue\ngreen');
+    await expect(allUploaded(page, 2)).toBeVisible();
+    await expect(startButton(page)).toBeEnabled();
+    expect([...stored].sort()).toEqual(['a.png', 'b.png']);
   });
 
   test('500 images are matched to 500 rows and uploaded without freezing the page', async ({ page, api }) => {
