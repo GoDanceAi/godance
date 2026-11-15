@@ -149,6 +149,19 @@ public class S3ObjectStorageClient implements ObjectStorageClient {
     }
 
     @Override
+    public InputStream open(String key) {
+        try {
+            return s3.getObject(GetObjectRequest.builder()
+                    .bucket(props.bucket())
+                    .key(key)
+                    .build());
+        } catch (SdkException e) {
+            throw new IllegalStateException(
+                    "object storage read failed for key=" + key + ": " + e.getMessage(), e);
+        }
+    }
+
+    @Override
     public String presignedUrl(String key) {
         return presignedUrl(key, props.presignTtl());
     }

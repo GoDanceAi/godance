@@ -6,9 +6,12 @@ import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
+import org.springframework.web.server.ResponseStatusException;
 
 import ai.godance.domain.InputRole;
+import ai.godance.domain.Modality;
 import ai.godance.gateway.ModelCapabilities;
 import ai.godance.gateway.ModelCatalog;
 import ai.godance.gateway.ModelCatalog.ModelInfo;
@@ -73,6 +76,36 @@ public class VideoInputs {
      */
     public void requireEnabledFor(Refs refs) {
         if (!refs.isEmpty()) inputs.requireEnabled();
+    }
+
+    /**
+     * Refuses a first frame the model cannot take, knowing only the model's
+     * name. A multipart form ({@code POST /v1/videos} with an
+     * {@code input_reference} file) calls this before it stores the image,
+     * so a request that cannot run leaves no file. {@link #resolve} makes the
+     * same check again, with every other one, when the job is submitted.
+     *
+     * @throws ResponseStatusException 403 {@code inputs_disabled}; 404 for an unknown model; 400 for a model
+     *                                 that is not a video model, and {@code input_not_supported} for one that
+     *                                 takes no first frame
+     */
+    public void requireTakesFirstFrame(String modelName) {
+        inputs.requireEnabled();
+        ModelInfo model = catalog.find(modelName).orElseThrow(() ->
+                new ResponseStatusException(HttpStatus.NOT_FOUND, "unknown model: " + modelName));
+        if (model.modality() != Modality.VIDEO) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "model " + modelName + " is not a video model");
+        }
+        // An adapter that sends no images takes none, whatever the catalog row says.
+        boolean adapterSendsImages = !gateway.inputRules(model).contentTypes().isEmpty();
+        if (!(adapterSendsImages && catalog.metadata(modelName).capabilities().inputs().firstFrame())) {
+            throw VideoInputRefusedException.fieldNotSupported(modelName, "first_frame");
+        }
+    }
+
+    /** {@link InputService#requireMayUse}: switched on, an adult's account, the current terms accepted. */
+    public void requireMayUse(UUID userId) {
+        inputs.requireMayUse(userId);
     }
 
     /**

@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.ControllerAdvice;
 import org.springframework.web.reactive.result.method.annotation.ResponseEntityExceptionHandler;
 import org.springframework.web.server.ServerWebExchange;
 
+import ai.godance.security.OpenAiError;
 import reactor.core.publisher.Mono;
 
 /**
@@ -23,6 +24,10 @@ import reactor.core.publisher.Mono;
  * {@code data:} frame, which clients reading problem JSON cannot parse.
  * Fixing the type on the response skips that negotiation.
  *
+ * <p>On the routes that follow OpenAI's Videos API the problem also carries
+ * OpenAI's {@code error} object ({@link OpenAiError}); every other route's
+ * body is unchanged.
+ *
  * <p>Replaces Boot's own handler ({@code spring.webflux.problemdetails.enabled}),
  * which backs off when a {@link ResponseEntityExceptionHandler} bean exists.
  */
@@ -33,7 +38,10 @@ public class ProblemJsonExceptionHandler extends ResponseEntityExceptionHandler 
     @Override
     protected Mono<ResponseEntity<Object>> createResponseEntity(
             Object body, HttpHeaders headers, HttpStatusCode status, ServerWebExchange exchange) {
-        if (body instanceof ProblemDetail) {
+        if (body instanceof ProblemDetail problem) {
+            // On OpenAI's video routes the problem also carries OpenAI's error object,
+            // which is where its SDKs read an error's message from.
+            if (OpenAiError.appliesTo(exchange)) OpenAiError.addTo(problem);
             // The incoming headers may be read-only (an exception's own), so copy them.
             HttpHeaders withType = HttpHeaders.copyOf(headers);
             withType.setContentType(MediaType.APPLICATION_PROBLEM_JSON);

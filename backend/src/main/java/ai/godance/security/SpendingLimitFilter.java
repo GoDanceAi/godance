@@ -29,11 +29,16 @@ import reactor.core.scheduler.Schedulers;
 @Component
 public class SpendingLimitFilter {
 
-    /** Synchronous, credit-charging endpoints whose spend counts toward caps. */
+    /**
+     * Credit-charging endpoints whose spend counts toward caps.
+     * {@code /v1/videos} creates the same job as {@code /v1/videos/generations}
+     * (OpenAI's shape), so it is checked as that route is.
+     */
     private static final Set<String> BILLABLE_PATHS = Set.of(
             "/v1/chat/completions",
             "/v1/images/generations",
-            "/v1/videos/generations");
+            "/v1/videos/generations",
+            "/v1/videos");
 
     private final SpendingLimitService spendingLimits;
 

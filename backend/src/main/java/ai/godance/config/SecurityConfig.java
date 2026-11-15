@@ -215,6 +215,9 @@ public class SecurityConfig {
                         // Public read-only: model catalog (model picker) and
                         // provider status board (marketing /status page).
                         .pathMatchers(HttpMethod.GET, "/v1/models", "/v1/status").permitAll()
+                        // The API's own description, for tools and AI assistants. It says
+                        // nothing that the public documentation does not.
+                        .pathMatchers(HttpMethod.GET, "/v1/openapi.yaml").permitAll()
                         // Stripe (and any future) provider webhooks — authenticated by
                         // signature, not by JWT. Handler MUST reject bad signatures.
                         .pathMatchers(HttpMethod.POST, "/v1/billing/webhooks/**").permitAll()
@@ -223,6 +226,18 @@ public class SecurityConfig {
                                 "/v1/images/generations", "/v1/images/edits", "/v1/videos/generations")
                                 .hasAnyAuthority(sessionOr(ApiKeyAuthFilter.API_KEY_AUTHORITY))
                         .pathMatchers(HttpMethod.GET, "/v1/jobs", "/v1/jobs/*", "/v1/usage")
+                                .hasAnyAuthority(sessionOr(ApiKeyAuthFilter.API_KEY_AUTHORITY))
+                        // OpenAI's video routes (round 12): the same video jobs in OpenAI's shape,
+                        // for the job's owner. Each path is named, so nothing else under
+                        // /v1/videos opens to an API key by accident. The last four of the POSTs
+                        // and the last GET exist only to say that Godance does not offer them.
+                        .pathMatchers(HttpMethod.POST, "/v1/videos", "/v1/videos/*/remix",
+                                "/v1/videos/edits", "/v1/videos/extensions", "/v1/videos/characters")
+                                .hasAnyAuthority(sessionOr(ApiKeyAuthFilter.API_KEY_AUTHORITY))
+                        .pathMatchers(HttpMethod.GET, "/v1/videos", "/v1/videos/*", "/v1/videos/*/content",
+                                "/v1/videos/characters/*")
+                                .hasAnyAuthority(sessionOr(ApiKeyAuthFilter.API_KEY_AUTHORITY))
+                        .pathMatchers(HttpMethod.DELETE, "/v1/videos/*")
                                 .hasAnyAuthority(sessionOr(ApiKeyAuthFilter.API_KEY_AUTHORITY))
                         // Saving a generation, and un-saving it: the job's owner, as for reading it.
                         .pathMatchers(HttpMethod.PUT, "/v1/jobs/*/saved")
