@@ -16,20 +16,44 @@ import path from 'node:path';
 import { SLUG_PATTERN, checkRecipe, formatProblem, recipeFileName } from '../../../src/lib/gallery-schema.js';
 import { postKey } from '../lib/text.js';
 import { readJson, today, writeJson } from '../lib/work.js';
+import { recipeInputs } from './sample.js';
 
-/** The recipe for one approved entry, key for key in the order the format lists them. */
-export function buildRecipe({ entry, translated, run, decision, standardVersion, publishedOn }) {
+/**
+ * An input recipe's slots as they are published: as sampled, with the name
+ * and the hints the operator gave in the review sheet where they changed
+ * one. `edits` is the decision's `slots`, one per slot, in order.
+ */
+export function editedSlots(inputs, edits) {
+  return inputs.map((slot, index) => {
+    const edit = Array.isArray(edits) ? edits[index] : null;
+    const text = (value) => (typeof value === 'string' && value.trim() !== '' ? value.trim() : null);
+    const en = text(edit?.hint?.en) ?? slot.hint.en;
+    // An emptied Chinese hint is a hint with no Chinese; an untouched one stays.
+    const zh = edit?.hint && 'zh' in edit.hint ? text(edit.hint.zh) : (slot.hint.zh ?? null);
+    return { ...slot, slot: text(edit?.slot) ?? slot.slot, hint: zh === null ? { en } : { en, zh } };
+  });
+}
+
+/**
+ * The recipe for one approved entry, key for key in the order the format
+ * lists them. `inputs` are an input recipe's slots with their samples.
+ */
+export function buildRecipe({ entry, translated, run, decision, standardVersion, publishedOn, inputs = null }) {
+  const slots = inputs ? editedSlots(inputs, decision?.slots) : null;
   return {
     slug: translated.slug,
     title: translated.title,
     modality: entry.modality,
     tags: entry.category ? [entry.category] : [],
     prompt: translated.prompt,
+    ...(slots ? { inputs: slots } : {}),
     runs: [
       {
         model: run.model,
         prompt_lang: run.prompt_lang,
         params: run.params,
+        // The run was made with each slot's sample.
+        ...(slots ? { inputs: Object.fromEntries(slots.map((slot) => [slot.slot, slot.sample.file])) } : {}),
         cost_cents: run.cost_cents,
         generated_on: run.generated_on,
         outputs: run.outputs,
@@ -49,22 +73,25 @@ export function buildRecipe({ entry, translated, run, decision, standardVersion,
   };
 }
 
-/** Every media path a recipe refers to. */
-export const mediaOf = (recipe) =>
-  recipe.runs.flatMap((run) => run.outputs.flatMap((output) => [output.file, output.thumb, output.poster].filter(Boolean)));
+/** Every media path a recipe refers to: its outputs, and the sample of each input slot. */
+export const mediaOf = (recipe) => [
+  ...recipe.runs.flatMap((run) => run.outputs.flatMap((output) => [output.file, output.thumb, output.poster].filter(Boolean))),
+  ...(Array.isArray(recipe.inputs) ? recipe.inputs.map((slot) => slot?.sample?.file).filter(Boolean) : []),
+];
 
 /**
  * @param {object} options
  * @param {object[]} options.entries
  * @param {Record<string, object>} options.translated
  * @param {Record<string, object>} options.runs
+ * @param {Record<string, object>} [options.samples] The slots and samples of input recipes, from the sample stage.
  * @param {{ standard_version: number, decisions: Record<string, object> }} options.decisions The operator's file.
  * @param {string} options.contentDir Where recipes live.
  * @param {string} options.manifestFile
  * @param {boolean} [options.apply] Write the files. Without it, only report.
  * @returns {Promise<{ written: string[], already: string[], refused: { slug: string, why: string[] }[], media: string[] }>}
  */
-export async function publish({ entries, translated, runs, decisions, contentDir, manifestFile, apply = false, now = () => new Date() }) {
+export async function publish({ entries, translated, runs, samples = {}, decisions, contentDir, manifestFile, apply = false, now = () => new Date() }) {
   const result = { written: [], already: [], refused: [], media: [] };
   const standardVersion = decisions?.standard_version;
   const byId = new Map(entries.map((entry) => [entry.id, entry]));
@@ -81,7 +108,13 @@ export async function publish({ entries, translated, runs, decisions, contentDir
       continue;
     }
 
-    const recipe = buildRecipe({ entry, translated: record, run, decision, standardVersion, publishedOn: today(now()) });
+    // A run made with inputs is published with the slots and samples it was made with.
+    const inputs = run.inputs ? recipeInputs(samples[id]) : null;
+    if (run.inputs && !inputs) {
+      result.refused.push({ slug, why: ['it was run with inputs, but its slots and samples are not finished: run "sample" again'] });
+      continue;
+    }
+    const recipe = buildRecipe({ entry, translated: record, run, decision, standardVersion, publishedOn: today(now()), inputs });
     const fileName = recipeFileName(recipe.slug);
     const problems = checkRecipe(recipe, { file: fileName });
     if (problems.length > 0) {

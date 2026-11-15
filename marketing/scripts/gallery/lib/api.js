@@ -9,10 +9,12 @@
  */
 
 export class ApiError extends Error {
-  constructor(message, { status, retryable = false } = {}) {
+  constructor(message, { status, retryable = false, code = null } = {}) {
     super(message);
     this.name = 'ApiError';
     this.status = status ?? null;
+    /** The problem's `code`, when the API gave one: what kind of refusal it was. */
+    this.code = code;
     /**
      * Whether the API certainly did not accept the request: it answered with
      * a 4xx. With no answer, or a 5xx, a job may still have been created.
@@ -73,9 +75,48 @@ export function createApi({ base, key, fetch = globalThis.fetch, sleep = realSle
         throw new ApiError(redact(`${method} ${path}: ${response.status} ${detail}`.trim()), {
           status: response.status,
           retryable: response.status === 429 || response.status >= 500,
+          code: typeof json?.code === 'string' ? json.code : null,
         });
       }
       return { status: response.status, json };
+    }
+  }
+
+  /**
+   * POST a multipart form. Used for one thing: uploading an input file. The
+   * request is free and stores a file that expires by itself, so unlike a
+   * job it is safe to send again.
+   */
+  async function upload(path, form) {
+    if (!key) throw new ApiError('the API key is not set: export GODANCE_API_KEY');
+    for (let attempt = 0; ; attempt++) {
+      let response;
+      try {
+        response = await fetch(`${origin}${path}`, { method: 'POST', headers: { Accept: 'application/json', Authorization: `Bearer ${key}` }, body: form() });
+      } catch (error) {
+        throw new ApiError(redact(`POST ${path}: no response (${error.message})`));
+      }
+      if (response.status === 429 && attempt < maxRetries) {
+        const told = Number(response.headers.get('retry-after'));
+        await sleep(Number.isFinite(told) && told > 0 ? told * 1000 : Math.min(60_000, 2000 * 2 ** attempt));
+        continue;
+      }
+      const text = await response.text();
+      let json = null;
+      try {
+        json = text === '' ? null : JSON.parse(text);
+      } catch {
+        // not JSON; reported below when the status is an error
+      }
+      if (!response.ok) {
+        const detail = json?.detail ?? json?.title ?? text.slice(0, 200);
+        throw new ApiError(redact(`POST ${path}: ${response.status} ${detail}`.trim()), {
+          status: response.status,
+          retryable: response.status === 429 || response.status >= 500,
+          code: typeof json?.code === 'string' ? json.code : null,
+        });
+      }
+      return json;
     }
   }
 
@@ -100,6 +141,31 @@ export function createApi({ base, key, fetch = globalThis.fetch, sleep = realSle
     async submitImage(body) {
       const { json } = await call('POST', '/v1/images/generations', body);
       if (!json?.job_id) throw new ApiError('POST /v1/images/generations: accepted, but the response has no job_id');
+      return String(json.job_id);
+    },
+
+    /**
+     * Upload an image as one of the account's input files (POST /v1/files).
+     * Returns the file's id. The account must be allowed to use inputs: an
+     * adult's, with the input terms accepted, and inputs switched on. A
+     * refusal carries its code (inputs_disabled, inputs_terms_required,
+     * inputs_not_allowed_for_account, ...).
+     */
+    async uploadFile({ bytes, filename, contentType }) {
+      const json = await upload('/v1/files', () => {
+        const form = new FormData();
+        form.append('purpose', 'generation_input');
+        form.append('file', new Blob([bytes], { type: contentType }), filename);
+        return form;
+      });
+      if (!json?.id) throw new ApiError('POST /v1/files: accepted, but the response has no id');
+      return String(json.id);
+    },
+
+    /** Start an image job that works from input files (POST /v1/images/edits, as JSON). Returns its id. */
+    async submitEdit(body) {
+      const { json } = await call('POST', '/v1/images/edits', body);
+      if (!json?.job_id) throw new ApiError('POST /v1/images/edits: accepted, but the response has no job_id');
       return String(json.job_id);
     },
 

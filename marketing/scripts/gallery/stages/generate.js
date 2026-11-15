@@ -15,7 +15,20 @@
  * Output links expire, so each output is downloaded as soon as its job is
  * done. At most two jobs are in flight; a 429 is retried after a wait (see
  * lib/api.js).
+ *
+ * Input recipes (round 11). An entry with input slots is run with its
+ * sample inputs: each sample is uploaded as an input file (POST /v1/files,
+ * which is free), and the job names those files. An image recipe goes to
+ * POST /v1/images/edits; a video carries first_frame, last_frame and
+ * reference_images. The run records which sample each slot was given.
+ *
+ * The account has to be allowed to use inputs: an adult's, with the input
+ * terms accepted, on an API where inputs are switched on. That is checked
+ * with one upload before any job is submitted (`checkInputsAccount`), so a
+ * run that cannot work stops with a clear message and nothing spent.
  */
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 import { BudgetExceeded } from '../lib/budget.js';
 import { saveImage, saveVideo } from '../lib/media.js';
 import { pool } from '../lib/pool.js';
@@ -39,18 +52,70 @@ export function resolveModel(wanted, { prices, modelMap }) {
  * field names, and the cents it will hold. Images are made one at a time; a
  * video always states its seconds.
  */
-export function planRun(entry, translated, { prices, modelMap, videoSeconds = 5 }) {
+export function planRun(entry, translated, { prices, modelMap, videoSeconds = 5, inputs = null }) {
   const model = resolveModel(entry.model, { prices, modelMap });
   if (!model) return { error: `Godance does not serve "${entry.model}", and model-map.json gives no model to use instead` };
   const prompt = translated.prompt[translated.prompt_lang];
   const shape = statedShape(prompt);
+  const count = inputs?.length ?? 0;
   if (entry.modality === 'VIDEO') {
     const seconds = entry.stated_seconds ?? videoSeconds;
     const params = { seconds, size: modelMap.video_sizes[shape] };
-    return { model, prompt, params, hold: prices.video(model, seconds) };
+    return { model, prompt, params, hold: prices.video(model, seconds, 1, count) };
   }
   const params = { size: modelMap.image_sizes[shape], n: 1 };
-  return { model, prompt, params, hold: prices.image(model, 1) };
+  // With inputs it is an edit, which also holds the model's price per input image, if it has one.
+  return { model, prompt, params, hold: count > 0 ? prices.edit(model, 1, count) : prices.image(model, 1) };
+}
+
+/** Why an account cannot use inputs, in words the operator can act on, by the API's refusal code. */
+const INPUT_REFUSALS = {
+  inputs_disabled: 'inputs are switched off on this API (godance.inputs.enabled is false)',
+  inputs_terms_required: 'this account has not accepted the input terms: sign in to the app and accept them under Settings',
+  inputs_not_allowed_for_account: 'this account is not an adult\'s account, and only an adult\'s account can use inputs',
+  input_check_unavailable: 'the API cannot check uploads for a person, so it accepts none (godance.inputs.check-model is not set)',
+  input_person_not_allowed: 'the API found a person in the sample, and images of people are not accepted',
+};
+
+/** An input recipe cannot be run with this account or this API. Nothing was submitted. */
+export class InputsUnavailable extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'InputsUnavailable';
+  }
+}
+
+/**
+ * Check, before anything is spent, that this account can run a recipe with
+ * inputs: upload one sample as an input file, which costs nothing. An
+ * account that may not answers with a refusal that says why.
+ *
+ * @param {object} api
+ * @param {{ bytes: Uint8Array, contentType: string }} sample One sample input to try with.
+ */
+export async function checkInputsAccount(api, { bytes, contentType }) {
+  try {
+    await api.uploadFile({ bytes, filename: 'input-check.webp', contentType });
+  } catch (error) {
+    const why = INPUT_REFUSALS[error.code];
+    if (why) throw new InputsUnavailable(`input recipes cannot be run: ${why}. Nothing was submitted and nothing was spent.`);
+    throw new InputsUnavailable(`input recipes cannot be run: the upload that checks the account failed (${api.redact(error.message)}). Nothing was submitted and nothing was spent.`);
+  }
+}
+
+/** The file ids a job's request names, by role, for the slots of an input recipe. */
+function inputFields(modality, slots, fileIds) {
+  const ref = (index) => ({ file_id: fileIds[index] });
+  if (modality !== 'VIDEO') return { images: slots.map((_, index) => ref(index)) };
+  const fields = {};
+  const references = [];
+  slots.forEach((slot, index) => {
+    if (slot.role === 'first_frame') fields.first_frame = ref(index);
+    else if (slot.role === 'last_frame') fields.last_frame = ref(index);
+    else references.push(ref(index));
+  });
+  if (references.length > 0) fields.reference_images = references;
+  return fields;
 }
 
 /** What still holds money from an earlier, interrupted run. */
@@ -82,7 +147,8 @@ export function outputLinks(job) {
 }
 
 /**
- * @param {{ entry: object, translated: object }[]} items What to run, in order.
+ * @param {{ entry: object, translated: object, inputs?: object[] | null }[]} items What to run, in order.
+ *   `inputs` are an input recipe's slots with their samples (`recipeInputs`), or null.
  * @param {Record<string, object>} runs One record per entry id, from earlier runs; updated in place.
  * @param {object} ctx
  * @returns {Promise<object>} Counts of what happened.
@@ -97,7 +163,7 @@ export async function generate(items, runs, ctx) {
   const outcome = { done: 0, failed: 0, pending: 0, uncertain: 0, skipped: 0, stoppedByBudget: false };
   const waiting = { intervalMs: pollIntervalMs, timeoutMs: pollTimeoutMs, sleep, now };
 
-  await pool(items, Math.min(concurrency, 2), async ({ entry, translated }) => {
+  await pool(items, Math.min(concurrency, 2), async ({ entry, translated, inputs = null }) => {
     const id = entry.id;
     let run = runs[id];
     const kind = entry.modality === 'VIDEO' ? 'video' : 'image';
@@ -115,12 +181,35 @@ export async function generate(items, runs, ctx) {
     if (run?.job_id && run.status === 'accepted') {
       hold = budget.adopt(run.hold_cents); // resumed: already counted as in flight
     } else if (!(run?.job_id && run.status === 'downloading')) {
-      const plan = planRun(entry, translated, { prices, modelMap, videoSeconds });
+      const plan = planRun(entry, translated, { prices, modelMap, videoSeconds, inputs });
       if (plan.error) {
         runs[id] = { status: 'failed', error: plan.error };
         await save();
         outcome.failed++;
         return true;
+      }
+
+      // An input recipe: its samples go up as input files first. An upload is
+      // free and holds nothing, so one that fails leaves no trace to resume.
+      let inputRequest = null;
+      if (inputs) {
+        const fileIds = [];
+        try {
+          for (const [index, slot] of inputs.entries()) {
+            const bytes = await readFile(path.join(mediaDir, slot.sample.file));
+            fileIds.push(await api.uploadFile({ bytes, filename: `input-${index}.webp`, contentType: slot.sample.content_type }));
+          }
+        } catch (error) {
+          if (error.rejected || error.code === 'ENOENT') {
+            runs[id] = { status: 'failed', error: api.redact(`its sample input could not be uploaded: ${error.message}`) };
+            await save();
+            outcome.failed++;
+          } else {
+            outcome.pending++; // no clear answer: nothing was started, so the next run tries again
+          }
+          return true;
+        }
+        inputRequest = inputFields(entry.modality, inputs, fileIds);
       }
       const wasUncertain = run?.status === 'submitting';
       try {
@@ -138,15 +227,17 @@ export async function generate(items, runs, ctx) {
         model: plan.model,
         params: plan.params,
         prompt_lang: translated.prompt_lang,
+        // Which sample each slot was given, as the recipe's run records it.
+        ...(inputs ? { inputs: Object.fromEntries(inputs.map((slot) => [slot.slot, slot.sample.file])) } : {}),
         hold_cents: hold.amount,
         submitted_at: now().toISOString(),
       };
       await save(); // before the request: a crash from here on leaves a trace
 
-      const body = { model: plan.model, prompt: plan.prompt, ...plan.params };
+      const body = { model: plan.model, prompt: plan.prompt, ...plan.params, ...(inputRequest ?? {}) };
       let jobId;
       try {
-        jobId = kind === 'video' ? await api.submitVideo(body) : await api.submitImage(body);
+        jobId = kind === 'video' ? await api.submitVideo(body) : inputRequest ? await api.submitEdit(body) : await api.submitImage(body);
       } catch (error) {
         if (error.rejected) {
           hold.release();

@@ -25,6 +25,19 @@ export const LICENCES = /** @type {const} */ (['CC0-1.0', 'CC-BY-4.0', 'MIT', 'A
 /** Lowercase letters, digits and hyphens. */
 export const SLUG_PATTERN = /^[a-z0-9-]+$/;
 
+/** The most input slots one recipe may have. */
+export const MAX_INPUT_SLOTS = 4;
+
+/**
+ * What an input slot may be to a recipe, by the recipe's modality: an image
+ * recipe works from images; a video starts from a frame, ends on one, or
+ * follows reference images. These are the API's own role names.
+ */
+export const INPUT_ROLES = Object.freeze({
+  IMAGE: /** @type {const} */ (['image']),
+  VIDEO: /** @type {const} */ (['first_frame', 'last_frame', 'reference_image']),
+});
+
 /**
  * Every rule a recipe can break, by the id that problems are reported under.
  * The last three are about the folder, not one recipe, and are raised by the
@@ -44,6 +57,10 @@ export const RULES = Object.freeze({
   'run-cost': 'every run states cost_cents',
   'run-outputs': 'every run has at least one output',
   'video-seconds': 'a video run states params.seconds',
+  'input-slots': `a recipe with inputs has 1–${MAX_INPUT_SLOTS} slots, each named by the variable naming rule, and no two share a name`,
+  'input-role': 'a slot\'s role fits the recipe: "image" for an image recipe; "first_frame", "last_frame" or "reference_image" for a video, with at most one first and one last frame',
+  'input-sample': 'every slot has a sample input, an image generated on Godance, whose generated_from states the model, prompt, params, cost_cents and date',
+  'input-runs': 'every run of a recipe with inputs names, for each slot, the sample it was made with; a recipe without inputs has runs without them',
   'media-path': 'media paths are relative: no scheme, no leading slash, no ".."',
   licence: `source.licence is one of ${LICENCES.join(', ')}`,
   'https-url': 'source.original_url and source.author_url are https URLs',
@@ -268,6 +285,13 @@ const runOf = (params, output) =>
     model: text(),
     prompt_lang: z.enum(['en', 'zh'], { error: tag('shape', 'must be "en" or "zh"') }),
     params,
+    // For a recipe with inputs: the file each slot was given for this run, by
+    // slot name. It is always the slot's sample (checked by checkInputsOf).
+    inputs: z
+      .record(z.string(), z.string(), {
+        error: tag('input-runs', 'must be { "<slot name>": "<the sample file it was made with>" }'),
+      })
+      .optional(),
     // The job's actualCostCents at the time it was generated.
     cost_cents: wholeNumber(0, tag('run-cost', 'every run states its cost, a whole number of cents')),
     generated_on: isoDate(),
@@ -275,6 +299,132 @@ const runOf = (params, output) =>
       .array(output, { error: tag('run-outputs', 'every run has at least one output') })
       .min(1, tag('run-outputs', 'every run has at least one output')),
   });
+
+// ---------------------------------------------------------------------------
+// Input slots (round 11). A recipe may ask for images: a slot says what kind,
+// in words a visitor can act on, and carries a sample generated on Godance,
+// so the page can show input and output side by side and "Run this" has
+// something to start from. A sample is never taken from a source list.
+// ---------------------------------------------------------------------------
+
+/** How a sample was generated: the same facts a run states. */
+const generatedFrom = z.strictObject(
+  {
+    model: text('input-sample'),
+    prompt: text('input-sample'),
+    params: z.record(z.string(), z.unknown(), {
+      error: tag('input-sample', 'required: the request fields the sample was generated with'),
+    }),
+    cost_cents: wholeNumber(0, tag('input-sample', 'a sample states its cost, a whole number of cents')),
+    generated_on: z.iso.date({ error: tag('input-sample', 'a sample states the ISO date it was generated on, YYYY-MM-DD') }),
+  },
+  {
+    error: whenMissing(
+      tag('input-sample', 'a sample says how it was generated on Godance: { model, prompt, params, cost_cents, generated_on }'),
+    ),
+  },
+);
+
+const sampleInput = z.strictObject(
+  {
+    file: mediaPath(),
+    content_type: z
+      .string({ error: tag('input-sample', 'a sample is an image: a media type starting with "image/"') })
+      .regex(/^image\/[a-z0-9][a-z0-9.+-]*$/, tag('input-sample', 'a sample is an image: a media type starting with "image/"')),
+    width: pixels(),
+    height: pixels(),
+    generated_from: generatedFrom,
+  },
+  { error: whenMissing(tag('input-sample', 'every slot has a sample input, generated on Godance')) },
+);
+
+/** @param {'IMAGE' | 'VIDEO'} modality */
+const inputSlot = (modality) => {
+  const roles = INPUT_ROLES[modality];
+  const roleMessage = tag(
+    'input-role',
+    `must be ${roles.map((role) => `"${role}"`).join(', ')} in ${modality === 'VIDEO' ? 'a video' : 'an image'} recipe`,
+  );
+  const nameMessage = tag(
+    'input-slots',
+    `a slot's name is 1–${NAME_MAX_LENGTH} ASCII letters, digits, spaces, hyphens or underscores, starting and ending with a letter or digit`,
+  );
+  return z.strictObject({
+    slot: z.string({ error: nameMessage }).refine(isVariableName, nameMessage),
+    role: z.enum(roles, { error: roleMessage }),
+    // What to put in the slot, in words a visitor can act on.
+    hint: z.strictObject(
+      { en: text(), zh: text().optional() },
+      { error: whenMissing(tag('shape', 'required: { "en": … }, with an optional "zh"')) },
+    ),
+    sample: sampleInput,
+  });
+};
+
+/** @param {'IMAGE' | 'VIDEO'} modality */
+const inputSlots = (modality) => {
+  const message = tag('input-slots', `a recipe with inputs has 1–${MAX_INPUT_SLOTS} slots`);
+  return z.array(inputSlot(modality), { error: message }).min(1, message).max(MAX_INPUT_SLOTS, message);
+};
+
+/**
+ * The checks across a recipe's slots and its runs. They run once the shape
+ * is right, so a missing key is reported once, as what it is.
+ *
+ * @param {{ inputs?: { slot: string, role: string, sample: { file: string } }[], runs: { inputs?: Record<string, string> }[] }} recipe
+ * @param {{ addIssue: (issue: { code: 'custom', message: string, path: (string | number)[] }) => void }} ctx
+ */
+function checkInputsOf(recipe, ctx) {
+  /** @param {RuleId} rule @param {(string | number)[]} path @param {string} text */
+  const problem = (rule, path, text) => ctx.addIssue({ code: 'custom', message: tag(rule, text), path });
+  const slots = recipe.inputs ?? [];
+  // An empty list of slots is already reported as that; the runs cannot be judged against it.
+  if (recipe.inputs !== undefined && slots.length === 0) return;
+
+  let namesAreSound = true;
+  const seen = new Set();
+  const single = new Set();
+  slots.forEach((slot, i) => {
+    if (seen.has(slot.slot)) {
+      namesAreSound = false;
+      problem('input-slots', ['inputs', i, 'slot'], `"${slot.slot}" names more than one slot`);
+    }
+    seen.add(slot.slot);
+    // A video starts from one frame and ends on one; reference images may be several.
+    if (slot.role === 'first_frame' || slot.role === 'last_frame') {
+      if (single.has(slot.role)) {
+        problem('input-role', ['inputs', i, 'role'], `a video has at most one "${slot.role}"`);
+      }
+      single.add(slot.role);
+    }
+  });
+
+  recipe.runs.forEach((run, i) => {
+    if (slots.length === 0) {
+      if (run.inputs !== undefined) {
+        problem('input-runs', ['runs', i, 'inputs'], 'the recipe has no input slots, so a run names no inputs');
+      }
+      return;
+    }
+    if (run.inputs === undefined) {
+      problem('input-runs', ['runs', i, 'inputs'],
+        'the recipe has input slots, so every run names the sample each slot was given: { "<slot name>": "<sample file>" }');
+      return;
+    }
+    // The runs can only be judged against slot names that are themselves sound.
+    if (!namesAreSound) return;
+    const faults = [];
+    for (const slot of slots) {
+      const used = run.inputs[slot.slot];
+      if (used === undefined) faults.push(`it names nothing for "${slot.slot}"`);
+      else if (used !== slot.sample.file) faults.push(`"${slot.slot}" must be its sample, ${slot.sample.file}`);
+    }
+    for (const name of Object.keys(run.inputs)) {
+      if (!seen.has(name)) faults.push(`"${name}" is not a slot of this recipe`);
+    }
+    if (faults.length > 0) problem('input-runs', ['runs', i, 'inputs'], faults.join('; '));
+  });
+}
 
 // ---------------------------------------------------------------------------
 // The recipe
@@ -337,6 +487,11 @@ const recipeOf = (modality, run) =>
       )
       .superRefine(checkTemplateOf),
 
+    // The images this recipe works from, when it needs any: up to four slots,
+    // each with a sample generated on Godance. Absent for a recipe that runs
+    // from its prompt alone.
+    inputs: inputSlots(modality).optional(),
+
     runs: z
       .array(run, { error: tag('runs-min', 'a recipe has at least one run') })
       .min(1, tag('runs-min', 'a recipe has at least one run')),
@@ -366,7 +521,7 @@ const recipeOf = (modality, run) =>
     ),
 
     published_on: isoDate(),
-  });
+  }).superRefine(checkInputsOf);
 
 const imageRecipe = recipeOf('IMAGE', runOf(imageParams, imageOutput));
 const videoRecipe = recipeOf('VIDEO', runOf(videoParams, videoOutput));

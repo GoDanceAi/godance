@@ -4,11 +4,14 @@ Invented recipes for building and testing the gallery pages without real
 content. Nothing here comes from a source list: the titles, prompts, authors
 and links are made up, and the media is abstract shapes drawn for the purpose.
 
-- `recipes/` — eight recipes in the gallery format. Point the collection at
+- `recipes/` — ten recipes in the gallery format. Point the collection at
   it with `GALLERY_CONTENT_DIR=fixtures/gallery/recipes`.
-- `media/` — stand-in media, laid out as the recipes name it. The images are
-  drawn by `make-media.mjs`; the two `.webm` clips are a second of canvas
-  animation each. All of it is far smaller than the sizes the recipes state.
+- `media/` — stand-in media, laid out as the recipes name it. The images,
+  sample inputs among them, are drawn by `make-media.mjs`; the `.webm` clips
+  are a second of canvas animation each. All of it is far smaller than the
+  sizes the recipes state.
+- `invalid/` — recipes the format refuses, each for one reason. Not a
+  gallery folder: the tests read it to see the refusal.
 
 | Recipe | Covers |
 |---|---|
@@ -20,6 +23,12 @@ and links are made up, and the media is abstract shapes drawn for the purpose.
 | `ceramic-mug-json-prompt` | a prompt that is JSON, whose template ends in `}}` |
 | `glass-whale-over-rooftops` | two runs, on two models |
 | `handwritten-receipt-note` | a prompt with quotes, `$`, a backtick, newlines and `</script>`; two outputs |
+| `enamel-teapot-on-marble` | an image recipe with one input slot, role `image`; a hint in both languages |
+| `paper-boat-sets-off` | a video recipe with a `first_frame` slot and a `reference_image` slot; a hint in English only; a sample whose path has a space, brackets and an apostrophe |
+
+| Invalid recipe | Refused because |
+|---|---|
+| `invalid/sample-without-generated-from` | its sample input does not say how it was generated (`input-sample`) |
 
 ## Looking at the pages
 
