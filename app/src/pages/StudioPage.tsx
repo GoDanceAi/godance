@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { Link, NavLink, useNavigate, useSearchParams } from 'react-router-dom';
 import {
@@ -20,6 +20,7 @@ import {
 } from '../lib/inputs';
 import { formatCents, useAuth } from '../lib/auth';
 import { getCurl, JOB_ID_VAR, postCurl } from '../lib/curl';
+import { jobHandOver, studioHandOver, type HandOver } from '../lib/hand-over';
 import { isTerminal, outputItems, watchJob } from '../lib/jobs';
 import { cheapest, controlsFor, groupByProvider, loadCatalog, mediaModels, modelName, priceLabel } from '../lib/media-models';
 import { listSavedRecipes, saveRecipe, unsaveRecipe } from '../lib/saved-recipes';
@@ -58,6 +59,7 @@ import {
   type FormTemplate,
 } from '../lib/template';
 import { paramsOf, type RecipeSetup } from '../lib/user-recipes';
+import CodeFigure from '../components/CodeFigure';
 import CopyButton from '../components/CopyButton';
 import DescribeAsPrompt from '../components/DescribeAsPrompt';
 import Dialog from '../components/Dialog';
@@ -68,6 +70,7 @@ import { JobInputs, JobOutputs } from '../components/JobMedia';
 import JobStatusPill from '../components/JobStatusPill';
 import MakeVariable from '../components/MakeVariable';
 import RecipeSource from '../components/RecipeSource';
+import { RunAtScaleDisclosure } from '../components/run/RunAtScale';
 import SaveJobButton from '../components/SaveJobButton';
 import SaveRecipe from '../components/SaveRecipe';
 import SavedRecipes from '../components/SavedRecipes';
@@ -110,6 +113,8 @@ interface Current {
   job: JobView | null;
   prompt: string;      // as sent, for Copy prompt before the first reading
   gone?: boolean;      // can no longer be read
+  // The request this page sent for it, with the form as it stood then: what "Run at scale" hands over.
+  handOver?: HandOver;
 }
 
 /**
@@ -376,7 +381,13 @@ export default function StudioPage({ modality }: { modality: MediaModality }) {
         sending = requestFor(uploaded) ?? request;
       }
       const ack = await startGeneration(modality, sending);
-      setCurrent({ id: ack.job_id, status: ack.status ?? 'QUEUED', job: null, prompt: promptText ?? '' });
+      setCurrent({
+        id: ack.job_id,
+        status: ack.status ?? 'QUEUED',
+        job: null,
+        prompt: promptText ?? '',
+        handOver: studioHandOver({ modality, body: sending, title: suggestedTitle, template, own, slots: filled }),
+      });
       // In the URL, so a reload picks the run back up.
       const next = new URLSearchParams({ job: ack.job_id });
       ownSearch.current = next.toString();
@@ -393,6 +404,8 @@ export default function StudioPage({ modality }: { modality: MediaModality }) {
   };
 
   const groups = models ? groupByProvider(models) : [];
+  // What the form's contents would be called as a recipe: the gallery recipe's title, or the start of the prompt.
+  const suggestedTitle = recipe ? recipe.recipe.title.en ?? recipe.recipe.title.zh ?? '' : titleFrom(promptText ?? '');
 
   return (
     <div className="mx-auto max-w-6xl px-6 py-8">
@@ -632,7 +645,7 @@ export default function StudioPage({ modality }: { modality: MediaModality }) {
               own={own}
               setup={setup}
               modality={modality}
-              suggestedTitle={recipe ? recipe.recipe.title.en ?? recipe.recipe.title.zh ?? '' : titleFrom(promptText ?? '')}
+              suggestedTitle={suggestedTitle}
               galleryRecipe={recipe?.recipe.slug ?? null}
               onSaved={setOwn}
             />
@@ -656,8 +669,8 @@ export default function StudioPage({ modality }: { modality: MediaModality }) {
                 </p>
                 {request ? (
                   <>
-                    <CodeSnippet title="Start the job" code={postCurl(generationPath(modality, request), request)} />
-                    <CodeSnippet
+                    <CodeFigure title="Start the job" code={postCurl(generationPath(modality, request), request)} />
+                    <CodeFigure
                       title="Check on it"
                       code={getCurl(`/v1/jobs/${current?.id ?? JOB_ID_VAR}`)}
                       note={current ? undefined : 'JOB_ID is the job_id the first request answers with.'}
@@ -746,19 +759,6 @@ function SelectField({ id, label, value, options, onChange }: {
   );
 }
 
-function CodeSnippet({ title, code, note }: { title: string; code: string; note?: string }) {
-  return (
-    <figure aria-label={title}>
-      <div className="flex items-center justify-between gap-2">
-        <figcaption className="text-xs font-semibold text-fg-subtle">{title}</figcaption>
-        <CopyButton text={code} className="btn btn-ghost btn-sm" />
-      </div>
-      <pre className="code-block mt-1.5"><code>{code}</code></pre>
-      {note && <p className="mt-1.5 text-xs text-fg-faint">{note}</p>}
-    </figure>
-  );
-}
-
 function statusLine(current: Current, words: (typeof WORDS)[MediaModality]): string {
   if (current.gone) return "This generation can't be read any more.";
   switch (current.status) {
@@ -783,6 +783,9 @@ function Result({ current, modality, onJobChange, onDescribe }: {
   const job = current?.job ?? null;
   const prompt = job?.prompt ?? current?.prompt ?? '';
   const running = current !== null && !current.gone && !isTerminal(current.status);
+  // What a finished result hands over: the request this page sent, or, for a job it only opened, the job's own.
+  const sent = current?.handOver ?? null;
+  const handOver = useMemo(() => sent ?? (job ? jobHandOver(job) : null), [sent, job]);
 
   return (
     <>
@@ -829,6 +832,10 @@ function Result({ current, modality, onJobChange, onDescribe }: {
           {job && !current.gone && <SaveJobButton job={job} onChange={onJobChange} />}
           <Link to={`/history/${current.id}`} className="btn btn-ghost btn-sm">Open in History</Link>
         </div>
+      )}
+
+      {current?.status === 'DONE' && !current.gone && handOver && (
+        <RunAtScaleDisclosure source={handOver} className="mt-4 border-t border-border pt-3" />
       )}
     </>
   );

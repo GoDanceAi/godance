@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ApiError, type JobView, type UserRecipe, type UserRecipeVersion } from '../lib/api';
 import { formatCents, useAuth } from '../lib/auth';
 import { COMPARE_MAX, COMPARE_MIN, compareLink, toggleSelected } from '../lib/compare';
+import { recipeHandOver } from '../lib/hand-over';
 import { costText, listJobs, useWatchedJob } from '../lib/jobs';
 import { parseTemplate } from '../lib/template';
 import { formatAge, formatDateTime } from '../lib/time';
@@ -23,6 +24,7 @@ import JobStatusPill from '../components/JobStatusPill';
 import SaveJobButton from '../components/SaveJobButton';
 import VariableValues from '../components/VariableValues';
 import RecipeBatches from '../components/batch/RecipeBatches';
+import RunAtScale from '../components/run/RunAtScale';
 import { ROLE_LABEL } from '../lib/inputs';
 
 const PAGE_SIZE = 24;
@@ -104,6 +106,7 @@ function RecipeDetail({ initial }: { initial: UserRecipe }) {
   };
 
   const older = versions?.filter((v) => v.id !== latest.id) ?? [];
+  const handOver = useMemo(() => recipeHandOver(recipe), [recipe]);
 
   return (
     <article className="mt-4">
@@ -156,6 +159,9 @@ function RecipeDetail({ initial }: { initial: UserRecipe }) {
           <p className="mt-2 text-xs text-fg-faint">Earlier versions couldn't be loaded.</p>
         )}
       </section>
+
+      {/* The latest version, to run outside the app: its title follows a rename. */}
+      <RunAtScale handOver={handOver} />
 
       <RecipeBatches recipeId={recipe.id} />
 

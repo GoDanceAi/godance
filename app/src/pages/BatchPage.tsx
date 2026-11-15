@@ -1,14 +1,16 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { ApiError, type Batch } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { canCancel, cancelBatch, fetchBatch, isBatchId, isLive, resumeBatch, watchBatch } from '../lib/batches';
+import { loadBatchHandOver } from '../lib/hand-over';
 import { formatDateTime } from '../lib/time';
 import BatchDownloads from '../components/batch/BatchDownloads';
 import BatchPaused from '../components/batch/BatchPaused';
 import BatchProgress from '../components/batch/BatchProgress';
 import BatchRows from '../components/batch/BatchRows';
 import BatchStatusPill from '../components/batch/BatchStatusPill';
+import { RunAtScaleDisclosure } from '../components/run/RunAtScale';
 
 type Load = { batch: Batch } | { missing: true } | { failed: string };
 
@@ -121,6 +123,12 @@ function BatchDetail({ initial }: { initial: Batch }) {
 
   const running = batch.rows_running ?? 0;
   const anyFinished = batch.rows_done + batch.rows_failed > 0;
+  // The recipe version this batch ran, for "Run at scale". What it needs of the batch never changes.
+  const { recipe_id: recipeId, version_id: versionId, model } = batch;
+  const handOver = useCallback(
+    () => loadBatchHandOver({ recipe_id: recipeId, version_id: versionId, model }),
+    [recipeId, versionId, model],
+  );
 
   return (
     <article className="mt-4">
@@ -173,6 +181,8 @@ function BatchDetail({ initial }: { initial: Batch }) {
         )}
         {anyFinished && <BatchDownloads batchId={batch.id} />}
         <BatchRows batch={batch} linked={linked} />
+        {/* The recipe is read only when this is opened: a batch page asks for nothing more by itself. */}
+        {batch.recipe_id && <RunAtScaleDisclosure source={handOver} className="border-t border-border pt-4" />}
       </div>
     </article>
   );
