@@ -1049,6 +1049,111 @@ def verify(payload, header, secret):
       </li>
     </ul>
 
+    <!-- ===== Run from n8n ===== -->
+    <h2 id="n8n" class="scroll-mt-24 text-2xl font-bold mt-16 mb-4 text-fg">Run from n8n</h2>
+    <p class="text-fg-muted">
+      Two n8n templates turn the rows of a Google Sheet into Godance jobs, one row at a time, and
+      write each result back to its row. There is no code to write and no public URL to set up:
+      the workflow asks for each job until it is finished. Both are built from n8n's own nodes
+      only, and call <code class="code-chip">https://api.godance.ai/v1</code> and nothing else.
+    </p>
+    <ul class="mt-4 space-y-2 text-fg-muted">
+      <li>
+        <a href="https://github.com/GoDanceAi/godance/blob/main/integrations/n8n/godance-sheet-to-images.json" class="underline" style="color: var(--color-primary)"><code class="code-chip">godance-sheet-to-images.json</code></a>
+        — each row becomes an image job
+        (<a href="#images" class="underline" style="color: var(--color-primary)"><code class="code-chip">POST /v1/images/generations</code></a>).
+      </li>
+      <li>
+        <a href="https://github.com/GoDanceAi/godance/blob/main/integrations/n8n/godance-sheet-to-videos.json" class="underline" style="color: var(--color-primary)"><code class="code-chip">godance-sheet-to-videos.json</code></a>
+        — each row becomes a video job
+        (<a href="#videos" class="underline" style="color: var(--color-primary)"><code class="code-chip">POST /v1/videos/generations</code></a>),
+        with a column for the clip's length and an optional one for a first frame.
+      </li>
+      <li>
+        Both are in the repository under
+        <a href="https://github.com/GoDanceAi/godance/tree/main/integrations/n8n" class="underline" style="color: var(--color-primary)"><code class="code-chip">integrations/n8n</code></a>,
+        with a README that covers the limits in full.
+      </li>
+    </ul>
+
+    <h3 id="n8n-cost" class="scroll-mt-24 text-xl font-semibold mt-10 mb-4 text-fg">Every row costs credit</h3>
+    <p class="text-fg-muted">
+      A row is a paid job, so a sheet of 200 rows is 200 paid jobs started by one click. Before
+      you run a sheet:
+    </p>
+    <ul class="mt-4 space-y-2 text-fg-muted">
+      <li><strong class="text-fg">Price one row.</strong> <a href="#estimates" class="underline" style="color: var(--color-primary)"><code class="code-chip">POST /v1/estimates</code></a> answers what a request would reserve and charges nothing. Multiply by your rows.</li>
+      <li><strong class="text-fg">Give the workflow a key of its own, with a daily cap.</strong> Send <code class="code-chip">daily_cap_cents</code> when you create the key with <code class="code-chip">POST /v1/keys</code>, or later to <code class="code-chip">PATCH /v1/keys/&#123;id&#125;</code>: it is the most the key may spend in a UTC day, in whole cents. A request that would take the key past it answers <code class="code-chip">402</code>, and the rows left over fail without being charged.</li>
+      <li><strong class="text-fg">Try three rows first.</strong> Only rows with a prompt and an empty <code class="code-chip">status</code> are run.</li>
+    </ul>
+
+    <h3 id="n8n-credential" class="scroll-mt-24 text-xl font-semibold mt-10 mb-4 text-fg">Set the key as a credential</h3>
+    <ol class="space-y-3 list-decimal list-inside text-fg-muted">
+      <li>
+        In n8n, create a credential of the type <strong class="text-fg">Header Auth</strong> and name it
+        <strong class="text-fg">Godance API</strong>. Its Name is <code class="code-chip">Authorization</code>
+        and its Value is <code class="code-chip">Bearer </code> followed by your API key.
+      </li>
+      <li>
+        In a new workflow, choose <strong class="text-fg">Import from File</strong> and pick the template.
+        Its two HTTP Request nodes ask for a credential named Godance API and find yours by that name;
+        if one shows no credential, choose it there.
+      </li>
+      <li>
+        Open <strong class="text-fg">Get the rows</strong> and <strong class="text-fg">Update the row</strong>,
+        and in each choose your Google account, the spreadsheet and the sheet.
+      </li>
+      <li>Click <strong class="text-fg">Execute workflow</strong>.</li>
+    </ol>
+    <p class="mt-4 text-fg-muted">
+      The key is stored by n8n, never in the workflow: a template holds the credential's name and
+      nothing of its value, so a workflow you export or share carries no key.
+    </p>
+
+    <h3 id="n8n-sheet" class="scroll-mt-24 text-xl font-semibold mt-10 mb-4 text-fg">The sheet</h3>
+    <p class="text-fg-muted">
+      The first row holds the column names. You fill in the first group below; the workflow writes
+      the rest, and adds any of them that is missing.
+    </p>
+    <div class="mt-4 card p-0 overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead class="border-b border-border bg-bg-muted text-left text-fg-subtle">
+          <tr>
+            <th scope="col" class="px-4 py-2.5 font-semibold">Column</th>
+            <th scope="col" class="px-4 py-2.5 font-semibold">Who fills it in</th>
+            <th scope="col" class="px-4 py-2.5 font-semibold">What it holds</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-border text-fg-muted">
+          <tr><th scope="row" class="px-4 py-2.5 text-left font-mono font-normal text-fg">prompt</th><td class="px-4 py-2.5">you</td><td class="px-4 py-2.5">What to make. A row without one is skipped.</td></tr>
+          <tr><th scope="row" class="px-4 py-2.5 text-left font-mono font-normal text-fg">model</th><td class="px-4 py-2.5">you</td><td class="px-4 py-2.5">A model from <a href="#models" class="underline" style="color: var(--color-primary)">GET /v1/models</a>.</td></tr>
+          <tr><th scope="row" class="px-4 py-2.5 text-left font-mono font-normal text-fg">size</th><td class="px-4 py-2.5">you, optional</td><td class="px-4 py-2.5">Empty: the model's default.</td></tr>
+          <tr><th scope="row" class="px-4 py-2.5 text-left font-mono font-normal text-fg">seconds</th><td class="px-4 py-2.5">you, optional (videos)</td><td class="px-4 py-2.5">The clip's length. Empty: the model's standard length.</td></tr>
+          <tr><th scope="row" class="px-4 py-2.5 text-left font-mono font-normal text-fg">first_frame_file_id</th><td class="px-4 py-2.5">you, optional (videos)</td><td class="px-4 py-2.5">The id of an image uploaded with <a href="#files" class="underline" style="color: var(--color-primary)">POST /v1/files</a>, sent as <code class="code-chip">"first_frame": &#123; "file_id": … &#125;</code>. It needs <a href="#video-inputs" class="underline" style="color: var(--color-primary)">inputs</a>, which are being rolled out: until then a row that carries one fails with <code class="code-chip">inputs_disabled</code> and is not charged.</td></tr>
+          <tr><th scope="row" class="px-4 py-2.5 text-left font-mono font-normal text-fg">status</th><td class="px-4 py-2.5">the workflow</td><td class="px-4 py-2.5"><code class="code-chip">RUNNING</code>, then <code class="code-chip">DONE</code>, <code class="code-chip">FAILED</code> or <code class="code-chip">TIMEOUT</code>. Leave it empty: a row whose status is not empty is skipped. Clear it to run the row again.</td></tr>
+          <tr><th scope="row" class="px-4 py-2.5 text-left font-mono font-normal text-fg">job_id</th><td class="px-4 py-2.5">the workflow</td><td class="px-4 py-2.5">The job, written as soon as it is accepted.</td></tr>
+          <tr><th scope="row" class="px-4 py-2.5 text-left font-mono font-normal text-fg">output_url</th><td class="px-4 py-2.5">the workflow</td><td class="px-4 py-2.5">A link to the job's first file. It is signed and stops working after a while: read the <a href="#jobs" class="underline" style="color: var(--color-primary)">job</a> again for a fresh one.</td></tr>
+          <tr><th scope="row" class="px-4 py-2.5 text-left font-mono font-normal text-fg">cost_cents</th><td class="px-4 py-2.5">the workflow</td><td class="px-4 py-2.5">What the job was charged, in whole cents.</td></tr>
+          <tr><th scope="row" class="px-4 py-2.5 text-left font-mono font-normal text-fg">error_message</th><td class="px-4 py-2.5">the workflow</td><td class="px-4 py-2.5">Why a row failed.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3 id="n8n-nodes" class="scroll-mt-24 text-xl font-semibold mt-10 mb-4 text-fg">What each node does</h3>
+    <ul class="mt-4 space-y-2 text-fg-muted">
+      <li><strong class="text-fg">Get the rows</strong> reads the sheet, and <strong class="text-fg">Not run yet?</strong> keeps the rows with a prompt and an empty status. <strong class="text-fg">Loop Over Items</strong> hands them on one at a time.</li>
+      <li><strong class="text-fg">Create the image job</strong> (or <strong class="text-fg">Create the video job</strong>) sends the row. It is the node that spends credit, and it is never retried, so a row is not sent twice. For images it sends <code class="code-chip">"async": true</code>, so it gets a job back whatever the key's <a href="#image-responses" class="underline" style="color: var(--color-primary)">image response</a> setting.</li>
+      <li><strong class="text-fg">Job accepted?</strong> looks for a <code class="code-chip">job_id</code>. Without one the request was refused, and the problem's <code class="code-chip">detail</code> becomes the row's <code class="code-chip">error_message</code>.</li>
+      <li><strong class="text-fg">Update the row</strong> writes to the row, found by its row number. Every outcome goes through this one node, and then the next row is taken.</li>
+      <li><strong class="text-fg">Wait before checking</strong>, <strong class="text-fg">Get the job</strong> and the three questions after it (<strong class="text-fg">Job done?</strong>, <strong class="text-fg">Job failed?</strong>, <strong class="text-fg">Checks left?</strong>) are the polling: read <a href="#jobs" class="underline" style="color: var(--color-primary)"><code class="code-chip">GET /v1/jobs/&#123;id&#125;</code></a>, and if the job is still running wait twice as long and read it again. The first wait is 5 seconds for images and 15 for videos, the longest is 60, and there are at most 20 checks for images and 40 for videos. <strong class="text-fg">Start checking</strong> holds those numbers.</li>
+    </ul>
+    <p class="mt-4 text-fg-muted">
+      A row that fails does not stop the run: its status becomes <code class="code-chip">FAILED</code>
+      and the next row is taken. <code class="code-chip">TIMEOUT</code> means the workflow stopped
+      waiting, not that the job failed: the job carries on and is charged if it finishes, and its
+      <code class="code-chip">job_id</code> is on the row.
+    </p>
+
     <p class="mt-12 text-sm text-fg-subtle">
       Questions?
       <!--email_off--><a href="mailto:hello@godance.ai" class="underline" style="color: var(--color-primary)">Email us</a><!--/email_off-->.
