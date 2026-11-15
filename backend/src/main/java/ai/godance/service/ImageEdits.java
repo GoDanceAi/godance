@@ -100,10 +100,25 @@ public class ImageEdits {
      */
     public List<ResolvedInput> resolve(UUID userId, String modelName, Refs refs) {
         requireSupported(modelName, refs.images().size(), refs.mask() != null);
+        return inputs.resolve(userId, uses(refs));
+    }
+
+    /**
+     * {@link #resolve} without loading any image, for an edit that will run
+     * later (a row of a recipe batch): the same checks of the model, the
+     * account and each input. Writes nothing and reads nothing from storage.
+     */
+    public void check(UUID userId, String modelName, Refs refs) {
+        requireSupported(modelName, refs.images().size(), refs.mask() != null);
+        inputs.inspect(userId, uses(refs));
+    }
+
+    /** The edit's inputs in the order they are recorded: the images as given, then the mask. */
+    private static List<InputUse> uses(Refs refs) {
         List<InputUse> uses = new ArrayList<>(refs.images().size() + 1);
         for (InputRef image : refs.images()) uses.add(new InputUse(InputRole.IMAGE, image));
         if (refs.mask() != null) uses.add(new InputUse(InputRole.MASK, refs.mask()));
-        return inputs.resolve(userId, uses);
+        return uses;
     }
 
     /** The request with its input images and its mask, each with a short-lived signed address for a provider that needs one. */
