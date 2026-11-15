@@ -1,23 +1,46 @@
 ---
 /**
- * The two requests that reproduce a run: the one that starts the job and the
- * one that polls it, shown the way the docs page shows API calls.
+ * The requests that reproduce a run: the one that starts the job and the
+ * one that polls it, shown the way the docs page shows API calls. A recipe
+ * with inputs has one more before them: the upload of an image for each
+ * slot, whose id the request then names.
  */
 import { createSnippet, pollSnippet } from '../../lib/gallery-api';
 import type { Recipe, Run } from '../../lib/gallery-recipes';
+import { fileIdPlaceholder, hasInputs, inputCreateSnippet, slotsOf, uploadSnippet } from './inputs';
 
 interface Props {
   recipe: Recipe;
   run: Run;
+  mediaBase: string;
   /** Makes the element ids unique when a page shows more than one run. */
   idPrefix: string;
 }
 
-const { recipe, run, idPrefix } = Astro.props;
-const create = createSnippet(recipe, run);
+const { recipe, run, mediaBase, idPrefix } = Astro.props;
+const withInputs = hasInputs(recipe);
+const create = withInputs ? inputCreateSnippet(recipe, run) : createSnippet(recipe, run);
+const upload = withInputs ? uploadSnippet(recipe, mediaBase) : null;
+const slots = slotsOf(recipe);
 ---
 
 <div class="space-y-4">
+  {upload !== null && (
+    <Fragment>
+      <div class="gallery-snippet">
+        <button type="button" class="btn btn-sm gallery-snippet-copy" data-copy={`${idPrefix}-upload`}>Copy</button>
+        <pre class="code-block"><code id={`${idPrefix}-upload`} data-api-snippet="upload">{upload}</code></pre>
+      </div>
+      <p class="text-sm text-fg-muted" data-upload-note>
+        {slots.length === 1 ? 'The upload answers' : 'Each upload answers'} <code class="code-chip">201</code> with
+        the file's <code class="code-chip">id</code>. Put {slots.length === 1 ? 'it' : 'each one'} into the request
+        below in place of
+        {slots.map((_, i) => (
+          <Fragment>{i > 0 && (i === slots.length - 1 ? ' and ' : ', ')}<code class="code-chip">{fileIdPlaceholder(recipe, i)}</code></Fragment>
+        ))}:
+      </p>
+    </Fragment>
+  )}
   <div class="gallery-snippet">
     <button type="button" class="btn btn-sm gallery-snippet-copy" data-copy={`${idPrefix}-create`}>Copy</button>
     <pre class="code-block"><code id={`${idPrefix}-create`} data-api-snippet="create">{create}</code></pre>

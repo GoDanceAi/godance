@@ -1,0 +1,116 @@
+---
+/**
+ * A recipe's sample inputs beside what a run made from them. Each sample is
+ * labelled with its slot, its role and the slot's hint: what a visitor would
+ * put there in its place.
+ *
+ * A sample is a still image generated on Godance. It is shown at its stated
+ * shape, so the page does not jump when the file loads.
+ */
+import RunOutput from './RunOutput.astro';
+import { ROLE_LABELS, slotsOf } from './inputs';
+import { mediaUrl, type Recipe, type Run } from '../../lib/gallery-recipes';
+
+interface Props {
+  recipe: Recipe;
+  run: Run;
+  mediaBase: string;
+  /** Load the first output straight away: it is the page's main picture. */
+  eager?: boolean;
+}
+
+const { recipe, run, mediaBase, eager = false } = Astro.props;
+const slots = slotsOf(recipe);
+---
+
+<div class="gallery-io" data-recipe-inputs>
+  <section class="gallery-io-in" aria-labelledby="gallery-io-in">
+    <h2 id="gallery-io-in" class="gallery-io-label">{slots.length === 1 ? 'Sample input' : 'Sample inputs'}</h2>
+    <ul class:list={['gallery-io-slots', { 'gallery-io-slots-many': slots.length > 1 }]}>
+      {slots.map((slot) => (
+        <li data-input-slot={slot.slot}>
+          <a
+            href={mediaUrl(mediaBase, slot.sample.file)}
+            title="Open the full-size sample"
+            class="gallery-io-sample"
+            style={`aspect-ratio: ${slot.sample.width} / ${slot.sample.height}`}
+          >
+            <img
+              src={mediaUrl(mediaBase, slot.sample.file)}
+              alt={`Sample input for the slot "${slot.slot}": ${slot.hint.en}`}
+              width={slot.sample.width}
+              height={slot.sample.height}
+              loading="lazy"
+              decoding="async"
+            />
+          </a>
+          <p class="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span class="font-mono text-[13px] text-fg" data-input-name>{slot.slot}</span>
+            <span class="pill" data-input-role>{ROLE_LABELS[slot.role]}</span>
+          </p>
+          <p class="mt-1 text-sm text-fg-muted" data-input-hint>{slot.hint.en}</p>
+          {slot.hint.zh && (
+            <p class="gallery-io-zh text-sm text-fg-subtle" lang="zh-Hans" data-input-hint-zh>{slot.hint.zh}</p>
+          )}
+        </li>
+      ))}
+    </ul>
+    <p class="mt-3 text-xs text-fg-subtle" data-input-note>
+      {slots.length === 1 ? 'This sample was' : 'These samples were'} generated on Godance to stand in for
+      your own {slots.length === 1 ? 'image' : 'images'}.
+    </p>
+  </section>
+
+  <section class="gallery-io-out" aria-labelledby="gallery-io-out">
+    <h2 id="gallery-io-out" class="gallery-io-label">Output</h2>
+    <RunOutput {recipe} {run} {mediaBase} {eager} />
+  </section>
+</div>
+
+<style>
+  .gallery-io {
+    display: grid;
+    gap: 1.5rem;
+  }
+  /* Side by side where there is room: the samples in a narrow column, the output beside them. */
+  @media (min-width: 768px) {
+    .gallery-io {
+      grid-template-columns: minmax(0, 16rem) minmax(0, 1fr);
+      align-items: start;
+    }
+  }
+  .gallery-io-label {
+    margin-bottom: 0.5rem;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--color-fg-subtle);
+  }
+  .gallery-io-slots {
+    display: grid;
+    gap: 1rem;
+  }
+  /* Several samples sit two abreast on a phone, and stack in the narrow column beside the output. */
+  @media (max-width: 767px) {
+    .gallery-io-slots-many {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+  .gallery-io-sample {
+    display: block;
+    width: 100%;
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    overflow: hidden;
+    background: var(--color-bg-muted);
+  }
+  .gallery-io-sample img {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+  /* Chinese uses the system fonts; no web font is loaded for it. */
+  .gallery-io-zh {
+    font-family: system-ui, -apple-system, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei',
+      'Noto Sans CJK SC', 'Source Han Sans SC', sans-serif;
+  }
+</style>
