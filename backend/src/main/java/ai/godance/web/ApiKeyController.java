@@ -56,10 +56,15 @@ public class ApiKeyController {
     }
 
     /**
-     * Changes how image requests made with this key answer:
-     * {@code {"image_response": "sync"}} or {@code "async"}. Returns the key.
+     * Changes a key's settings, whichever the body names, and returns the
+     * key: how its image requests answer ({@code {"image_response": "sync"}}
+     * or {@code "async"}), what it may spend in a UTC day and a UTC month
+     * ({@code daily_cap_cents}, {@code monthly_cap_cents}: at least 1, or
+     * null for no cap) and when it stops working ({@code expires_at}: a
+     * date and time in the future, or null for never).
      * A signed-in session only, like every route here: {@code SecurityConfig}
-     * denies an API key by default, so a key cannot change itself.
+     * denies an API key by default, so a key cannot change itself, raise
+     * its own cap or outlive its expiry.
      */
     @PatchMapping("/{id}")
     public Mono<ApiKeySummary> update(

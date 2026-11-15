@@ -98,8 +98,8 @@ public class SpendingLimitService {
 
         Instant now = Instant.now();
         Instant holdsSince = now.minus(HOLD_TTL);
-        Instant dayStart = LocalDate.now(UTC).atStartOfDay(UTC).toInstant();
-        Instant monthStart = YearMonth.now(UTC).atDay(1).atStartOfDay(UTC).toInstant();
+        Instant dayStart = startOfUtcDay();
+        Instant monthStart = startOfUtcMonth();
         holds.deleteClosedForUser(userId, holdsSince);
 
         if (userCapped) {
@@ -112,9 +112,9 @@ public class SpendingLimitService {
         if (keyCapped) {
             long held = holds.sumOpenForApiKey(apiKeyId, holdsSince);
             reserveCheck("API-key daily spending cap", key.getDailyCreditCapCents(),
-                    () -> usage.sumCostCentsForApiKeySince(apiKeyId, dayStart), held, cents);
+                    () -> keySpentSince(apiKeyId, dayStart), held, cents);
             reserveCheck("API-key monthly spending cap", key.getMonthlyCreditCapCents(),
-                    () -> usage.sumCostCentsForApiKeySince(apiKeyId, monthStart), held, cents);
+                    () -> keySpentSince(apiKeyId, monthStart), held, cents);
         }
 
         SpendHold hold = new SpendHold();
@@ -142,8 +142,8 @@ public class SpendingLimitService {
      */
     @Transactional
     public void enforce(UUID userId, UUID apiKeyId) {
-        Instant dayStart = LocalDate.now(UTC).atStartOfDay(UTC).toInstant();
-        Instant monthStart = YearMonth.now(UTC).atDay(1).atStartOfDay(UTC).toInstant();
+        Instant dayStart = startOfUtcDay();
+        Instant monthStart = startOfUtcMonth();
 
         User user = users.findById(userId).orElse(null);
         ApiKey key = (apiKeyId != null) ? apiKeys.findById(apiKeyId).orElse(null) : null;
@@ -151,8 +151,8 @@ public class SpendingLimitService {
         // Spend is only queried for windows that actually carry a cap.
         long userDay = (hasCap(user, true)) ? usage.sumCostCentsForUserSince(userId, dayStart) : 0;
         long userMonth = (hasCap(user, false)) ? usage.sumCostCentsForUserSince(userId, monthStart) : 0;
-        long keyDay = (hasCap(key, true)) ? usage.sumCostCentsForApiKeySince(apiKeyId, dayStart) : 0;
-        long keyMonth = (hasCap(key, false)) ? usage.sumCostCentsForApiKeySince(apiKeyId, monthStart) : 0;
+        long keyDay = (hasCap(key, true)) ? keySpentSince(apiKeyId, dayStart) : 0;
+        long keyMonth = (hasCap(key, false)) ? keySpentSince(apiKeyId, monthStart) : 0;
 
         // Hard caps first — any breach blocks the request before any soft state is written.
         if (user != null) {
@@ -199,6 +199,37 @@ public class SpendingLimitService {
             }
             if (warned) apiKeys.save(key);
         }
+    }
+
+    /**
+     * What an API key has spent so far today and this month, in cents: the
+     * two figures its caps are measured against, read as {@link #enforce}
+     * and {@link #reserve} read them. Completed requests only: a request
+     * still running holds its estimate against the cap ({@link #reserve})
+     * but is not spend until its usage row exists.
+     */
+    @Transactional(readOnly = true)
+    public KeySpend spendOf(UUID apiKeyId) {
+        return new KeySpend(keySpentSince(apiKeyId, startOfUtcDay()),
+                keySpentSince(apiKeyId, startOfUtcMonth()));
+    }
+
+    /** A key's spend in the current UTC day and the current UTC month, in cents. */
+    public record KeySpend(long todayCents, long monthCents) { }
+
+    /** Where the daily window starts: midnight UTC today. The count resets as the window moves on. */
+    private static Instant startOfUtcDay() {
+        return LocalDate.now(UTC).atStartOfDay(UTC).toInstant();
+    }
+
+    /** Where the monthly window starts: midnight UTC on the first of this month. */
+    private static Instant startOfUtcMonth() {
+        return YearMonth.now(UTC).atDay(1).atStartOfDay(UTC).toInstant();
+    }
+
+    /** One key's charged cents since {@code since}: the one place a key's spend is summed. */
+    private long keySpentSince(UUID apiKeyId, Instant since) {
+        return usage.sumCostCentsForApiKeySince(apiKeyId, since);
     }
 
     private static boolean hasCap(User user, boolean daily) {
