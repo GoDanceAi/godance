@@ -1,0 +1,958 @@
+# Godance API: the complete reference for AI assistants
+
+> Everything needed to write working code against Godance, in one file: every public
+> route with a runnable curl example and a Python example, using the real field names.
+> Godance is one OpenAI-compatible API for text, image and video models from many
+> providers, with one balance. The summary is https://godance.ai/llms.txt; the machine
+> description (OpenAPI 3.1) is https://api.godance.ai/v1/openapi.yaml.
+
+Contents: Authentication · Models and capabilities · Estimates · Chat · Images · Edits ·
+Files and inputs · Video · Jobs · Recipes · Batches · Errors · Limits and retention · Regions
+
+Conventions used on every route:
+
+- Base URL: https://api.godance.ai. OpenAI SDKs take base_url="https://api.godance.ai/v1".
+- Send `Authorization: Bearer $GODANCE_API_KEY` with every request.
+- Money is integer cents of US dollars (`cost_cents`, `estimated_cost_cents`,
+  `actualCostCents`). Never a decimal.
+- Field names: a job (`GET /v1/jobs/{id}`) is camelCase. Requests, recipes, files and
+  OpenAI's own shapes are snake_case. The examples below show each exactly.
+- Fields marked "Godance extension" are additions to OpenAI's shapes.
+- A response can carry fields that are not shown here. Ignore the ones you do not use.
+- Text is synchronous. Images and video run as jobs: a request is accepted, runs, and
+  ends DONE or FAILED. A job reserves its price when accepted and returns it if it fails.
+- The Python examples use `requests` (pip install requests) or OpenAI's SDK
+  (pip install openai) and read the key from the GODANCE_API_KEY environment variable.
+
+## Authentication
+
+An API key looks like `gd_live_…`. Create one in the app (https://app.godance.ai, Settings →
+API keys); the key is shown once. A key calls the model API: chat, images, video, jobs,
+files, recipes, batches, estimates and usage. Creating and revoking keys, billing and the account
+itself need a signed-in session, so a key gets 403 on those routes.
+
+- No key, or an unknown, revoked or expired one: 401.
+- A key on a route that needs a signed-in session: 403.
+- `GET /v1/models`, `GET /v1/status`, `GET /healthz` and `GET /v1/openapi.yaml` need no key.
+
+```bash
+curl "https://api.godance.ai/v1/usage?limit=5" \
+  -H "Authorization: Bearer $GODANCE_API_KEY"
+```
+
+`GET /v1/usage` returns the most recent usage records, newest first (limit 1 to 200,
+default 50): `[{"id", "modality", "provider", "model", "inputTokens", "outputTokens",
+"costCents", "providerCostCents", "region", "cacheHit", "fallbackUsed", "requestId",
+"recordedAt"}]`. It is a cheap way to check that a key works.
+
+```python
+import os
+from openai import OpenAI
+
+# Any OpenAI SDK works: change the base URL and the key, nothing else.
+client = OpenAI(base_url="https://api.godance.ai/v1", api_key=os.environ["GODANCE_API_KEY"])
+print([model.id for model in client.models.list().data][:5])
+```
+
+Each key has one setting, `image_response`: `async` (image requests answer with a job) or
+`sync` (image requests wait and answer with the images). See Images. It is chosen when the
+key is created and can be changed in the app.
+
+## Models and capabilities
+
+`GET /v1/models` is OpenAI's model list, public. Use an entry's `id` as `model`. Each entry
+carries a `godance` object (Godance extension):
+
+- `modality`: `TEXT`, `IMAGE` or `VIDEO`. Send a model to the route for its modality.
+- `requires_async`: the model always runs as a job (every image and video model does).
+- `pricing`: the provider's list price in microcents (1/10,000 of a cent):
+  `input_microcents_per_1k` and `output_microcents_per_1k` for text, `per_image_microcents`
+  (and `per_input_image_microcents` where an input image is charged) for images,
+  `per_second_microcents` for video.
+- `markup_percent`: the platform fee added to the list price.
+- `capabilities`, on image and video models: `sizes`, `default_size`, `durations`,
+  `default_seconds`, `max_n`, and `inputs` (which images the model can be given:
+  `images: {max, mask}` for image models, `first_frame`, `last_frame` and
+  `reference_images: {max}` for video models). A missing key means not known, never
+  unlimited. A missing `max_n` means 1. An input that is not listed is not taken.
+- `display_name`, `description`: for showing the model to people.
+
+Three routing ids, `godance-fast`, `godance-auto` and `godance-quality`, are text models
+that pick a concrete model per request. They carry `godance.virtual: true` and no price:
+a routed call is billed at the model that served it.
+
+```bash
+curl https://api.godance.ai/v1/models
+```
+
+```python
+import requests
+
+models = requests.get("https://api.godance.ai/v1/models").json()["data"]
+for model in models:
+    info = model["godance"]
+    if info["modality"] == "VIDEO":
+        takes = info.get("capabilities", {}).get("inputs", {})
+        print(model["id"], info["pricing"]["per_second_microcents"], "first frame:", takes.get("first_frame", False))
+```
+
+Video models whose providers serve them today include `seedance-2.0`, `kling-3.0` and
+`minimax-hailuo-2.3`. OpenAI shut down its own video models (`sora-2` and its variants)
+and its Videos API on 2026-09-24, so name a model from this list, not `sora-2`.
+
+## Estimates
+
+`POST /v1/estimates` returns the price of an image or video request before it is sent. It
+charges nothing and creates no job. Send the fields that set the price, with the names
+the generation request uses: `model` (required), `n`, `size`, `seconds` (video), and
+`input_images` (how many input images an edit has). `estimated_cost_cents` is exactly what
+the same request would reserve.
+
+```bash
+curl https://api.godance.ai/v1/estimates \
+  -H "Authorization: Bearer $GODANCE_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "seedance-2.0", "seconds": 8}'
+```
+
+```json
+{"model": "seedance-2.0", "modality": "VIDEO", "n": 1, "seconds": 8,
+ "estimated_cost_cents": 129, "currency": "USD"}
+```
+
+```python
+import os, requests
+
+API = "https://api.godance.ai"
+HEADERS = {"Authorization": f"Bearer {os.environ['GODANCE_API_KEY']}"}
+
+estimate = requests.post(f"{API}/v1/estimates", headers=HEADERS,
+                         json={"model": "gpt-image-2", "n": 2, "size": "1024x1024"}).json()
+print(estimate["estimated_cost_cents"], "cents")
+```
+
+An unknown model answers 404. A text model, or an `n` above the model's `max_n`, answers 400.
+
+## Chat
+
+`POST /v1/chat/completions` is OpenAI's Chat Completions. Fields: `model`, `messages`
+(`role` and `content`), `max_tokens`, `temperature`, `stream`. With `"stream": true` the
+answer is `text/event-stream`: one `chat.completion.chunk` per event, then `data: [DONE]`.
+Other OpenAI parameters (`tools`, `top_p`, `response_format`, …) are ignored.
+
+```bash
+curl https://api.godance.ai/v1/chat/completions \
+  -H "Authorization: Bearer $GODANCE_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "Say hello."}]}'
+```
+
+```json
+{"id": "…", "object": "chat.completion", "created": 1794650000, "model": "gpt-4o-mini",
+ "choices": [{"index": 0, "message": {"role": "assistant", "content": "Hello!"}, "finish_reason": "stop"}],
+ "usage": {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12}}
+```
+
+```python
+import os
+from openai import OpenAI
+
+client = OpenAI(base_url="https://api.godance.ai/v1", api_key=os.environ["GODANCE_API_KEY"])
+
+answer = client.chat.completions.create(
+    model="gpt-4o-mini",
+    messages=[{"role": "user", "content": "Say hello."}],
+)
+print(answer.choices[0].message.content)
+
+# Streaming
+for chunk in client.chat.completions.create(model="gpt-4o-mini", stream=True,
+                                            messages=[{"role": "user", "content": "Count to five."}]):
+    if chunk.choices and chunk.choices[0].delta.content:
+        print(chunk.choices[0].delta.content, end="")
+```
+
+Images in chat. A user message's `content` can be OpenAI's array of parts:
+
+```json
+{"role": "user", "content": [
+  {"type": "text", "text": "What is in this photo?"},
+  {"type": "image_url", "image_url": {"url": "https://example.com/photos/mug.jpg", "detail": "auto"}}
+]}
+```
+
+- `url` is a base64 data URL, an `https` URL (fetched once, no redirects, public addresses
+  only), or `https://api.godance.ai/v1/files/{id}/content` for one of your own files.
+- At most 10 images a request, each at most 20 MB, PNG, JPEG or WebP. The request body is
+  limited to 256 KB, so send a large image as an `https` URL or a file, not a data URL.
+- Only a model with `godance.capabilities.inputs.images` takes images.
+- Image parts are part of inputs, which are being rolled out: until they are switched on, a
+  request with an image part answers 403 `inputs_disabled`. Text parts work now.
+- Refusals, before anything is charged: 400 `unsupported_content_part`, `invalid_image_url`,
+  `image_fetch_failed`, `image_type_unsupported`, `too_many_images`,
+  `model_does_not_accept_images`; 413 `image_too_large`; 404 `file_not_found`.
+
+## Images
+
+`POST /v1/images/generations` takes OpenAI's request: `model`, `prompt`, `size`, `n`,
+`style`, `quality`, `response_format` (`url` or `b64_json`). Godance extensions: `async`,
+`webhook_url`, `recipe` (see Recipes).
+
+Every image model runs as a job. What the request answers depends on the API key:
+
+- A key whose `image_response` is `async` (the default for keys made before the setting
+  existed): 202 with `{"job_id", "status", "poll_url"}`. Poll the job (see Jobs), or pass
+  `webhook_url` and receive a signed POST when it is done.
+- A key whose `image_response` is `sync`: the request waits for the job, up to about 90
+  seconds, and answers 200 in OpenAI's shape, plus `job_id` and `cost_cents`. Standard
+  OpenAI SDK code works unchanged. GPT Image models return `data[0].b64_json` and a `url`;
+  other models return a `url`; `response_format` selects one. If the job is still running
+  when the wait ends, the answer is the 202 with `Retry-After: 5`, and the job carries on.
+  If the job fails, the answer is 502 with `code: "generation_failed"` and the reservation
+  is returned. `"async": true` or a `Prefer: respond-async` header asks for the 202 at once.
+
+With either kind of key, poll the job when the answer is 202:
+
+```bash
+curl https://api.godance.ai/v1/images/generations \
+  -H "Authorization: Bearer $GODANCE_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "gpt-image-2", "prompt": "a lighthouse at dusk, watercolor", "n": 1}'
+```
+
+```json
+{"job_id": "6f1c0b9e-2d4a-4c3b-9a57-0e8d4b2f7c11", "status": "QUEUED",
+ "poll_url": "/v1/jobs/6f1c0b9e-2d4a-4c3b-9a57-0e8d4b2f7c11"}
+```
+
+```python
+import os, time, requests
+
+API = "https://api.godance.ai"
+HEADERS = {"Authorization": f"Bearer {os.environ['GODANCE_API_KEY']}"}
+
+response = requests.post(f"{API}/v1/images/generations", headers=HEADERS,
+                         json={"model": "gpt-image-2", "prompt": "a lighthouse at dusk, watercolor"})
+response.raise_for_status()
+body = response.json()
+
+if response.status_code == 200:            # a sync key: the images are here
+    urls = [image["url"] for image in body["data"]]
+else:                                      # 202: a job to poll
+    while True:
+        job = requests.get(f"{API}/v1/jobs/{body['job_id']}", headers=HEADERS).json()
+        if job["status"] in ("DONE", "FAILED"):
+            break
+        time.sleep(2)
+    if job["status"] == "FAILED":
+        raise RuntimeError(job["errorMessage"])
+    urls = [output["url"] for output in job["outputs"]]
+print(urls)
+```
+
+With a sync key, OpenAI's SDK reads the images directly:
+
+```python
+result = client.images.generate(model="gpt-image-2", prompt="a lighthouse at dusk, watercolor")
+image_url = result.data[0].url        # a signed link; it expires, so download it
+```
+
+Price: the per-image price × `n`, reserved when the job is accepted. A model that returns
+fewer images than `n` is charged for the images it returned. `n` above the model's `max_n`
+answers 400. Too little credit answers 402 `insufficient_credit`.
+
+## Edits
+
+`POST /v1/images/edits` makes an image from images. Two forms, one job path:
+
+- Multipart, OpenAI's own form, which `client.images.edit(…)` sends: `model`, `prompt`, one
+  or more `image` parts (also `image[]`), and optionally `mask`, `n`, `size`, `quality`,
+  `response_format`. Each image is checked as an upload to `POST /v1/files` is and becomes
+  one of your files.
+- JSON, naming images that are already stored: `images` (a list) and `mask`, each an input
+  reference (see Files and inputs).
+
+The answer follows the key exactly as for a generation: a job to poll, or the images with
+a sync key. Edits are part of inputs, which are being rolled out: until they are switched
+on this route answers 403 `inputs_disabled`.
+
+```bash
+curl https://api.godance.ai/v1/images/edits \
+  -H "Authorization: Bearer $GODANCE_API_KEY" \
+  -F model=gpt-image-2 \
+  -F "prompt=Put the mug on a marble counter, soft window light." \
+  -F "image=@mug.png"
+```
+
+```python
+import os
+from openai import OpenAI
+
+client = OpenAI(base_url="https://api.godance.ai/v1", api_key=os.environ["GODANCE_API_KEY"])
+
+# Needs a key whose image_response is "sync"; with an async key, post the form
+# yourself and poll the job as in Images.
+result = client.images.edit(
+    model="gpt-image-2",
+    image=open("mug.png", "rb"),
+    prompt="Put the mug on a marble counter, soft window light.",
+)
+image_b64 = result.data[0].b64_json
+```
+
+The JSON form, editing an output of one of your own jobs with no upload at all:
+
+```json
+{"model": "gpt-image-2", "prompt": "The same mug, on a marble counter.",
+ "images": [{"job_output": {"job_id": "5b0e7c1e-…", "index": 0}}],
+ "mask": {"file_id": "9a1f44c2-…"}, "n": 1, "size": "1024x1024"}
+```
+
+- Which models: those with `godance.capabilities.inputs.images`; `max` is the most images
+  one request may carry and `mask` whether a mask is taken.
+- Price: the images made, plus `per_input_image_microcents` for each input image where the
+  model has one. Send `input_images` to `POST /v1/estimates` to see it first.
+- Refusals before anything is stored or charged: 400 `input_not_supported`, and everything
+  an upload can answer.
+
+## Files and inputs
+
+An input is an image a generation works from. Upload it once with `POST /v1/files`, then
+point requests at it. Inputs are being rolled out: until they are switched on, uploading
+answers 403 `inputs_disabled`, and so does any request that names an input.
+
+```bash
+curl https://api.godance.ai/v1/files \
+  -H "Authorization: Bearer $GODANCE_API_KEY" \
+  -F purpose=generation_input \
+  -F file=@product.png
+```
+
+```json
+{"id": "0b6f6c1e-8c7d-4c58-9d0a-5f2f4f7f3a10", "object": "file", "purpose": "generation_input",
+ "bytes": 812345, "content_type": "image/png", "width": 1024, "height": 1024,
+ "contains_person": false, "created_at": 1794650000, "expires_at": 1794736400}
+```
+
+```python
+import os, requests
+
+API = "https://api.godance.ai"
+HEADERS = {"Authorization": f"Bearer {os.environ['GODANCE_API_KEY']}"}
+
+with open("product.png", "rb") as image:
+    uploaded = requests.post(f"{API}/v1/files", headers=HEADERS,
+                             data={"purpose": "generation_input"}, files={"file": image})
+uploaded.raise_for_status()
+file_id = uploaded.json()["id"]
+
+files = requests.get(f"{API}/v1/files", headers=HEADERS, params={"limit": 20}).json()
+requests.delete(f"{API}/v1/files/{file_id}", headers=HEADERS)     # 204
+```
+
+- Accepted: a PNG, JPEG or WebP still image, at most 20 MB and 40 megapixels. The type is
+  read from the file itself. Metadata (EXIF, XMP, where a photo was taken) is removed.
+- Who: an adult's account that has accepted the input terms, once, in the app. A key
+  cannot accept them.
+- `GET /v1/files` lists your files, newest first (`limit` 1 to 100, default 20; `before` is
+  a file id). `GET /v1/files/{id}` is one file. `GET /v1/files/{id}/content` answers 302 to
+  a link that works for five minutes (use `curl -L`). `DELETE /v1/files/{id}` deletes it.
+
+An input reference. Wherever a request takes an input it is exactly one of:
+
+```json
+{"file_id": "0b6f6c1e-8c7d-4c58-9d0a-5f2f4f7f3a10"}
+{"job_output": {"job_id": "6f1c0b9e-2d4a-4c3b-9a57-0e8d4b2f7c11", "index": 0}}
+```
+
+A `file_id` is one of your uploaded files. A `job_output` is an image output of one of
+your own DONE jobs whose files still exist; it needs no upload. Anything else answers 404
+`file_not_found` or `job_output_not_found`, or 400 `invalid_input_reference`.
+
+Upload refusals, in the order they are checked: 403 `inputs_disabled`, 403
+`inputs_not_allowed_for_account`, 403 `inputs_terms_required`, 413 `input_too_large`, 415
+`input_type_unsupported`, 409 `input_limit_reached`, 422 `input_person_not_allowed`, 503
+`input_check_unavailable`, and 429 for too many uploads in an hour.
+
+## Video
+
+Video always runs as a job and takes minutes. There are two shapes for the same job; use
+whichever your code already speaks. `model` is a Godance video model in both (for
+example `seedance-2.0`); there is no default model.
+
+### Godance's shape: POST /v1/videos/generations
+
+Fields: `model`, `prompt`, `size`, `seconds`, `n`, and the Godance extensions
+`webhook_url`, `recipe`, `first_frame`, `last_frame`, `reference_images`.
+Answers 202 with `{"job_id", "status", "poll_url"}`; poll `GET /v1/jobs/{id}`.
+
+```bash
+curl https://api.godance.ai/v1/videos/generations \
+  -H "Authorization: Bearer $GODANCE_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "seedance-2.0", "prompt": "A paper boat drifts down a gutter after rain.", "seconds": 8}'
+```
+
+```python
+import os, time, requests
+
+API = "https://api.godance.ai"
+HEADERS = {"Authorization": f"Bearer {os.environ['GODANCE_API_KEY']}"}
+
+accepted = requests.post(f"{API}/v1/videos/generations", headers=HEADERS, json={
+    "model": "seedance-2.0",
+    "prompt": "A paper boat drifts down a gutter after rain.",
+    "seconds": 8,
+})
+accepted.raise_for_status()
+job_id = accepted.json()["job_id"]
+
+while True:
+    job = requests.get(f"{API}/v1/jobs/{job_id}", headers=HEADERS).json()
+    if job["status"] in ("DONE", "FAILED"):
+        break
+    time.sleep(5)
+if job["status"] == "FAILED":
+    raise RuntimeError(job["errorMessage"])
+with open("out.mp4", "wb") as out:
+    out.write(requests.get(job["outputs"][0]["url"]).content)
+```
+
+- `seconds`: the clip's length. Left out, the model's `default_seconds` is used.
+- Price: the per-second price × `seconds` × `n`, reserved when the job is accepted. Every
+  video model returns one clip today (`max_n` 1).
+- Starting from images: `first_frame`, `last_frame` (only with a first frame) and
+  `reference_images` (a list) are input references. A model says which it takes under
+  `godance.capabilities.inputs`. Part of inputs: 403 `inputs_disabled` until switched on.
+  Refusals: 400 `input_not_supported`, 400 `input_aspect_mismatch` (an image's width
+  divided by its height must be between 0.4 and 2.5).
+
+### OpenAI's shape: POST /v1/videos
+
+The same jobs, as OpenAI's Videos API, so code written for OpenAI's SDK works with the
+base URL, the key and the model changed. A video's `id` is its job's id.
+
+- `POST /v1/videos` creates a video. JSON, or the multipart form OpenAI's SDK sends.
+  Fields: `model` (required), `prompt`, `seconds` (a string such as `"8"`; a number is
+  taken too), `size`, `input_reference`, and the Godance extensions `webhook_url` and
+  `recipe`. Answers 200 with the video object, `status: "queued"`.
+- `GET /v1/videos/{id}` is one video. `GET /v1/videos?limit=&after=&order=` lists yours,
+  newest first: `{"object": "list", "data": [...], "first_id", "last_id", "has_more"}`;
+  pass `last_id` as `after` for the next page (`limit` 1 to 100, default 20).
+- `GET /v1/videos/{id}/content` is the video's bytes, streamed (it does not redirect).
+  `variant=video` is the default. `variant=thumbnail` answers 404
+  `video_content_not_found`: no model stores a poster today.
+- `DELETE /v1/videos/{id}` deletes the video's files now and answers
+  `{"id", "object": "video.deleted", "deleted": true}`. Nothing is refunded. The job stays
+  at `GET /v1/jobs/{id}`, purged, with what it cost.
+
+The video object:
+
+```json
+{"id": "7f000101-a1de-1f5a-81a1-def16cd70039", "object": "video", "model": "seedance-2.0",
+ "status": "completed", "progress": 100, "created_at": 1794741865, "completed_at": 1794741867,
+ "expires_at": 1802517865, "prompt": "A paper boat drifts down a gutter after rain.",
+ "seconds": "8", "size": "1280x720", "error": null, "remixed_from_video_id": null,
+ "cost_cents": 129, "job_url": "/v1/jobs/7f000101-a1de-1f5a-81a1-def16cd70039"}
+```
+
+- `status`: `queued`, `in_progress`, `completed` or `failed`. `progress` is 0 until the
+  video is completed, then 100. When `failed`, `error` is `{"code": "generation_failed",
+  "message": "…"}` and the reservation is returned.
+- `cost_cents` and `job_url` are Godance extensions: the amount reserved while the video
+  is queued or in progress, the amount charged once completed, 0 when failed.
+- `expires_at`: when the files are deleted (90 days after creation; null while the job is
+  saved). Times are seconds since the epoch.
+
+```bash
+# Create, then poll until completed, then download.
+curl https://api.godance.ai/v1/videos \
+  -H "Authorization: Bearer $GODANCE_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "seedance-2.0", "prompt": "A paper boat drifts down a gutter after rain.", "seconds": "8"}'
+
+curl https://api.godance.ai/v1/videos/$VIDEO_ID \
+  -H "Authorization: Bearer $GODANCE_API_KEY"
+
+curl -o out.mp4 https://api.godance.ai/v1/videos/$VIDEO_ID/content \
+  -H "Authorization: Bearer $GODANCE_API_KEY"
+```
+
+```python
+import os
+from openai import OpenAI
+
+client = OpenAI(base_url="https://api.godance.ai/v1", api_key=os.environ["GODANCE_API_KEY"])
+
+video = client.videos.create_and_poll(
+    model="seedance-2.0",
+    prompt="A paper boat drifts down a gutter after rain.",
+    seconds="8",
+    size="1280x720",
+)
+if video.status == "failed":
+    raise RuntimeError(video.error.message)
+client.videos.download_content(video.id, variant="video").write_to_file("out.mp4")
+```
+
+Notes for OpenAI SDK users:
+
+- The SDK marks `client.videos.*` deprecated (OpenAI shut its own Videos API down); the
+  calls work against Godance. `create_and_poll` polls every 5 seconds.
+- `input_reference` is the image the video starts from (the job's first frame). Send a
+  file: `input_reference=open("first.png", "rb")`. To name a stored image, use
+  `extra_body={"input_reference": {"file_id": "…"}}` (in JSON: `"input_reference":
+  {"file_id": "…"}`, or the Godance extension `{"job_output": {"job_id": "…", "index": 0}}`).
+  `{"image_url": …}` answers 400 `image_url_not_supported`. Part of inputs: 403
+  `inputs_disabled` until switched on.
+- Errors on these routes carry OpenAI's `error` object as well, so the SDK's exceptions
+  read well: `openai.BadRequestError: … seconds must be a whole number of seconds …`, with
+  `e.code` and `e.param` set.
+- Not supported, each answering with a code of its own: remix (404
+  `video_remix_not_supported`), edits (404 `video_edits_not_supported`), extensions (404
+  `video_extensions_not_supported`), characters (404 `video_characters_not_supported`),
+  and `variant=spritesheet` (400 `variant_not_supported`).
+- Other codes: 404 `video_not_found` (also for another account's video), 409
+  `video_not_ready` (content of a video that is not finished), 409 `video_not_deletable`
+  (deleting one that is queued or in progress), 400 `invalid_parameter` (`param` names
+  the field).
+
+## Jobs
+
+`GET /v1/jobs/{id}` returns one job. A job id that is not yours answers 404. Field names
+are camelCase.
+
+```bash
+curl https://api.godance.ai/v1/jobs/$JOB_ID \
+  -H "Authorization: Bearer $GODANCE_API_KEY"
+```
+
+```json
+{"id": "6f1c0b9e-2d4a-4c3b-9a57-0e8d4b2f7c11", "status": "DONE", "modality": "IMAGE",
+ "provider": "OPENAI", "model": "gpt-image-2",
+ "estimatedCostCents": 12, "actualCostCents": 12,
+ "outputUrl": "https://…signed…", "errorMessage": null,
+ "createdAt": "2026-11-12T09:00:00Z", "startedAt": "2026-11-12T09:00:01Z", "completedAt": "2026-11-12T09:00:20Z",
+ "prompt": "a lighthouse at dusk, watercolor", "params": {"size": "1024x1024", "n": 2},
+ "outputs": [
+   {"index": 0, "url": "https://…signed…", "contentType": "image/png", "sizeBytes": 812345, "revisedPrompt": null},
+   {"index": 1, "url": "https://…signed…", "contentType": "image/png", "sizeBytes": 798110, "revisedPrompt": null}],
+ "purged": false, "mediaExpiresAt": "2027-02-10T09:00:00Z", "saved": false,
+ "channel": "API", "recipe": null, "inputs": [], "batch": null}
+```
+
+- `status`: `QUEUED` → `RUNNING` → `DONE` or `FAILED`. When `FAILED`, `errorMessage` says
+  why and the reservation is returned.
+- `outputs`: every file, in order. Each `url` is signed when the job is read and expires,
+  so read the job again for a fresh link, and download what you want to keep.
+- `estimatedCostCents` is what was reserved; `actualCostCents` what was charged.
+- `params`: the request's own fields (`size`, `n`, `style`, `quality` for images; `size`,
+  `seconds`, `n` for video).
+- `inputs`: the images the job was given: `[{"role", "file_id" or "job_output", "url"}]`,
+  `role` being `image`, `mask`, `first_frame`, `last_frame` or `reference_image`.
+- `recipe`: `{"id", "version", "variables"}` when the job ran one of your recipes.
+- `channel`: `API` for a job made with a key, `STUDIO` for one made in the web app,
+  `BATCH` for a row of a batch. Accept values you do not know.
+- `batch`: `{"id", "row"}` when the job is a row of one of your batches (see Batches), else
+  null.
+
+`GET /v1/jobs` lists your jobs as a bare JSON array, newest first. Parameters: `limit` (1
+to 100; without it every job is returned), `before` (a job id: older jobs only),
+`modality` (`IMAGE` or `VIDEO`), `status`, `saved` (`true` or `false`), `recipe` (a recipe
+id).
+
+```python
+import os, requests
+
+API = "https://api.godance.ai"
+HEADERS = {"Authorization": f"Bearer {os.environ['GODANCE_API_KEY']}"}
+
+page = requests.get(f"{API}/v1/jobs", headers=HEADERS,
+                    params={"limit": 50, "modality": "VIDEO", "status": "DONE"}).json()
+while page:
+    for job in page:
+        print(job["id"], job["model"], job["actualCostCents"])
+    page = requests.get(f"{API}/v1/jobs", headers=HEADERS,
+                        params={"limit": 50, "modality": "VIDEO", "status": "DONE",
+                                "before": page[-1]["id"]}).json()
+```
+
+Webhooks. A request sent with `webhook_url` gets one signed JSON POST when its job is done
+(a failed job sends none): `{"event": "image.generation.completed" or
+"video.generation.completed", "jobId", "images" or "videos": [{"url", …}], "costCents",
+"createdAt"}`. The header is `X-Godance-Signature: t=<unix>,v1=<hex>[,v1=<hex>]`; each `v1`
+is HMAC-SHA256 of `<t>.<raw body>` with the account's signing secret, which a signed-in
+session reads at `GET /v1/webhooks/secret` (an API key cannot). Verify against the raw body
+and accept if any `v1` matches. Deliveries are sent once, with a 10 second timeout, so
+poll the job if one does not arrive.
+
+## Recipes
+
+A recipe keeps a setup that works: a prompt template with variables, a model and request
+parameters. Every saved change is a new numbered version, and a version never changes.
+Run a version with different values and Godance fills the template in, records which
+version and values each job used, and totals what the attempts cost.
+
+- `POST /v1/recipes` creates a recipe with its version 1 (201). `title`, `modality`
+  (`IMAGE` or `VIDEO`), `template` and `model` are required; `variables`, `params` and
+  `inputs` are optional.
+- `GET /v1/recipes` lists yours (`limit` 1 to 100, `before` a recipe id). `GET
+  /v1/recipes/{id}` is one, with its `latest_version`. `PATCH /v1/recipes/{id}` renames it
+  (`{"title": "…"}`). `DELETE /v1/recipes/{id}` deletes it and its versions; its jobs are
+  kept.
+- `GET /v1/recipes/{id}/versions` lists every version. `POST /v1/recipes/{id}/versions`
+  takes `template`, `variables`, `model`, `params`, `inputs` and writes a new version only
+  when something differs (201), else returns the latest (200).
+
+```bash
+curl https://api.godance.ai/v1/recipes \
+  -H "Authorization: Bearer $GODANCE_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "Mug on a kitchen shelf",
+    "modality": "IMAGE",
+    "template": "A {{color}} mug on a {{surface}}, soft morning light",
+    "variables": [{"name": "color", "default": "red"}, {"name": "surface", "default": "kitchen shelf"}],
+    "model": "gpt-image-2",
+    "params": {"size": "1024x1024", "n": 1}
+  }'
+```
+
+```json
+{"id": "…", "title": "Mug on a kitchen shelf", "modality": "IMAGE",
+ "created_at": "2026-11-14T09:00:00Z", "updated_at": "2026-11-14T09:00:00Z",
+ "latest_version": {"id": "…", "number": 1,
+   "template": "A {{color}} mug on a {{surface}}, soft morning light",
+   "variables": [{"name": "color", "default": "red"}, {"name": "surface", "default": "kitchen shelf"}],
+   "model": "gpt-image-2", "params": {"size": "1024x1024", "n": 1},
+   "created_at": "2026-11-14T09:00:00Z", "inputs": []},
+ "attempts": 0, "spent_cents": 0}
+```
+
+Run a version: on `POST /v1/images/generations`, `POST /v1/images/edits`, `POST
+/v1/videos/generations` or `POST /v1/videos`, send `recipe` in place of `prompt`.
+
+```python
+import os, requests
+
+API = "https://api.godance.ai"
+HEADERS = {"Authorization": f"Bearer {os.environ['GODANCE_API_KEY']}"}
+
+recipe = requests.get(f"{API}/v1/recipes", headers=HEADERS, params={"limit": 1}).json()[0]
+version = recipe["latest_version"]
+
+accepted = requests.post(f"{API}/v1/images/generations", headers=HEADERS, json={
+    "model": version["model"],
+    "size": version["params"].get("size"),
+    "recipe": {"version_id": version["id"], "variables": {"color": "blue"}},
+})
+accepted.raise_for_status()
+print(accepted.json())          # the job; its prompt is the template with the values filled in
+
+# Every job that ran any version of the recipe
+jobs = requests.get(f"{API}/v1/jobs", headers=HEADERS, params={"recipe": recipe["id"]}).json()
+```
+
+- A variable is written `{{name}}` and declared in `variables` with a `default`. A value
+  you do not send keeps its default. A template has at most 20 variables; a value is at
+  most 2,000 characters.
+- Send `prompt` or `recipe`, never both: 400 `prompt_and_recipe`. `model` and the other
+  fields are sent as usual; the version's `model` and `params` record what worked.
+- Input slots. A version can declare up to four `inputs`, each `{"slot", "role", "hint"}`
+  with `role` `image` (image recipes) or `first_frame`, `last_frame`, `reference_image`
+  (video recipes). Run it with an input reference per slot:
+  `"recipe": {"version_id": "…", "inputs": {"product photo": {"file_id": "…"}}}`.
+- Refusals, nothing charged: 404 `recipe_not_found`; 400 `recipe_modality_mismatch`,
+  `recipe_variable_unknown`, `recipe_variable_too_long`, `recipe_input_missing`,
+  `recipe_input_unknown`, `recipe_inputs_conflict`, `invalid_recipe`; 409
+  `recipe_limit_reached`.
+- To run a version over many rows, a sheet of products or names, use a batch (next section).
+
+## Batches
+
+A batch runs one recipe version over many rows. Each row is a set of values for the
+version's variables and becomes one ordinary job, so a batch costs exactly what its jobs
+cost and charges nothing of its own. It runs on Godance's side: your script can stop and
+come back. Field names are snake_case. Another account's batch answers 404
+`batch_not_found`, as one that does not exist.
+
+- `POST /v1/recipe-batches/estimate` takes the body of a create and answers `{"rows",
+  "total_cents", "balance_cents", "enough", "limits": {"max_rows", "max_concurrency"}}`:
+  `total_cents` is the sum of what each row's job would reserve, and `enough` compares it
+  with the balance now. Nothing is charged and nothing is created.
+- `POST /v1/recipe-batches` creates the batch: 201, `status: "QUEUED"`. `version_id` and
+  `rows` (1 to 500) are required. A row is `{"variables": {"name": "value"}}`; a variable
+  left out keeps its default. For a version with input slots a row also has `inputs`, an
+  input reference per slot by slot name, as in a single run. Optional: `model` and
+  `params` (left out, the version's; a `params` you send replaces the version's whole),
+  `max_concurrency` (1 to 4, default 2) and `webhook_url`.
+- `GET /v1/recipe-batches` lists yours, newest first (`limit` 1 to 100, default 20;
+  `before` a batch id; `recipe_id`). `GET /v1/recipe-batches/{id}` is one, with its counts.
+- `GET /v1/recipe-batches/{id}/rows` lists its rows in row order (`limit` 1 to 100,
+  default 50; `after` the `index` of the last row you already have).
+- `POST /v1/recipe-batches/{id}/cancel` skips every row that has not started (`SKIPPED`);
+  running rows finish and are charged as usual. `POST /v1/recipe-batches/{id}/resume`
+  continues a `PAUSED` batch from the row where it stopped. Both answer the batch.
+- `GET /v1/recipe-batches/{id}/results.csv`: one line per row, `index`, `status`, a column
+  per variable, `job_id`, `cost_cents`, `error`, then a signed link to each output as
+  `output_1` to `output_n`. `GET /v1/recipe-batches/{id}/results.zip`: every output file,
+  named like `0-blue-1.png`.
+
+```bash
+# What it would cost. Nothing is charged and nothing starts.
+curl https://api.godance.ai/v1/recipe-batches/estimate \
+  -H "Authorization: Bearer $GODANCE_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "version_id": "0d6b2f3a-8c7d-4c58-9d0a-5f2f4f7f3a10",
+    "rows": [
+      {"variables": {"color": "blue"}},
+      {"variables": {"color": "green", "surface": "oak table"}}
+    ]
+  }'
+
+# The same body creates it; its rows start a few seconds later.
+curl https://api.godance.ai/v1/recipe-batches \
+  -H "Authorization: Bearer $GODANCE_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "version_id": "0d6b2f3a-8c7d-4c58-9d0a-5f2f4f7f3a10",
+    "rows": [
+      {"variables": {"color": "blue"}},
+      {"variables": {"color": "green", "surface": "oak table"}}
+    ],
+    "max_concurrency": 2
+  }'
+
+# Then the results, a line per row with a link to each output.
+curl -o results.csv https://api.godance.ai/v1/recipe-batches/$BATCH_ID/results.csv \
+  -H "Authorization: Bearer $GODANCE_API_KEY"
+```
+
+```json
+{"rows": 2, "total_cents": 12, "balance_cents": 1500, "enough": true,
+ "limits": {"max_rows": 500, "max_concurrency": 4}}
+
+{"id": "3c0e8a52-6f1d-4b7e-a0c4-2b9d7e5f1a63", "recipe_id": "…", "recipe_title": "Mug on a kitchen shelf",
+ "version_id": "0d6b2f3a-8c7d-4c58-9d0a-5f2f4f7f3a10", "modality": "IMAGE", "model": "gpt-image-2",
+ "params": {"size": "1024x1024", "n": 1}, "status": "QUEUED", "pause_reason": null,
+ "pause_detail": null, "max_concurrency": 2, "rows_total": 2, "rows_done": 0, "rows_failed": 0,
+ "rows_running": 0, "rows_skipped": 0, "estimated_total_cents": 12, "spent_cents": 0,
+ "created_at": "2026-11-15T09:00:00Z", "started_at": null, "completed_at": null}
+```
+
+A row from `GET /v1/recipe-batches/{id}/rows`:
+
+```json
+{"index": 0, "status": "DONE", "variables": {"color": "blue", "surface": "kitchen shelf"},
+ "job_id": "6f1c0b9e-2d4a-4c3b-9a57-0e8d4b2f7c11", "cost_cents": 6, "error": null,
+ "outputs": [{"index": 0, "url": "https://…signed…", "content_type": "image/png"}]}
+```
+
+```python
+import csv, os, time, requests
+
+API = "https://api.godance.ai"
+HEADERS = {"Authorization": f"Bearer {os.environ['GODANCE_API_KEY']}"}
+
+recipe = requests.get(f"{API}/v1/recipes", headers=HEADERS, params={"limit": 1}).json()[0]
+version = recipe["latest_version"]
+names = [variable["name"] for variable in version["variables"]]
+
+# One row per line of products.csv, whose header names the recipe's variables.
+# An empty cell keeps the variable's default.
+with open("products.csv", newline="", encoding="utf-8") as sheet:
+    rows = [{"variables": {name: line[name] for name in names if line.get(name)}}
+            for line in csv.DictReader(sheet)]
+
+body = {"version_id": version["id"], "rows": rows, "max_concurrency": 2}
+estimate = requests.post(f"{API}/v1/recipe-batches/estimate", headers=HEADERS, json=body).json()
+print(estimate["rows"], "rows for", estimate["total_cents"], "cents")
+if not estimate["enough"]:
+    raise SystemExit("Not enough credit: top up at https://app.godance.ai first.")
+
+created = requests.post(f"{API}/v1/recipe-batches", headers=HEADERS, json=body)
+if created.status_code == 400:
+    problem = created.json()                     # a refused row names its index in "row"
+    raise SystemExit(f"{problem.get('code')}: {problem['detail']}")
+created.raise_for_status()
+batch = created.json()
+
+while batch["status"] in ("QUEUED", "RUNNING"):
+    time.sleep(10)
+    batch = requests.get(f"{API}/v1/recipe-batches/{batch['id']}", headers=HEADERS).json()
+    print(batch["rows_done"], "of", batch["rows_total"], "done;", batch["spent_cents"], "cents")
+
+if batch["status"] == "PAUSED":
+    # insufficient_credit: top up; spending_cap: wait for the cap's day or month to turn over.
+    print("Paused:", batch["pause_reason"], batch["pause_detail"])
+    # then: requests.post(f"{API}/v1/recipe-batches/{batch['id']}/resume", headers=HEADERS)
+else:
+    results = requests.get(f"{API}/v1/recipe-batches/{batch['id']}/results.csv", headers=HEADERS)
+    results.raise_for_status()
+    with open("results.csv", "wb") as out:
+        out.write(results.content)
+```
+
+- Status: a batch is `QUEUED` → `RUNNING` → `DONE`, or `PAUSED` or `CANCELLED`. A row is
+  `PENDING` → `RUNNING` → `DONE` or `FAILED`, or `SKIPPED` after a cancel. `rows_done`,
+  `rows_failed`, `rows_running` and `rows_skipped` count rows; the rest of `rows_total` are
+  pending. `completed_at` is set when the last row has ended.
+- Charging: each row's job reserves its price when it starts, like any job, and appears in
+  `GET /v1/jobs` with `channel: "BATCH"` and `batch: {"id", "row"}`. A row whose job fails
+  is `FAILED` with the job's error, its reservation is returned, and the batch carries on.
+  `spent_cents` is what the finished rows' jobs were charged. A row is never submitted
+  twice.
+- Pausing: when the balance cannot cover the next row's job the batch becomes `PAUSED`
+  with `pause_reason: "insufficient_credit"`; when a spending cap of the account or of the
+  batch's API key would be passed, `pause_reason: "spending_cap"` and `pause_detail` says
+  which cap. Nothing is charged for the row that was refused. It stays paused until you
+  resume it.
+- A batch made with an API key runs its jobs against that key's spending caps. Deleting
+  the key cancels the batch, and so does deleting the recipe.
+- Webhook: jobs in a batch send no webhooks of their own. With `webhook_url` the batch
+  sends one signed POST when it ends, `{"event": "recipe_batch.completed", "batch": {…},
+  "results": {"csv", "zip"}}` (the paths of the two files), signed as job webhooks are
+  (see Jobs). It is sent once and not retried.
+- Links in the CSV and in a row's `outputs` are signed when you ask and expire. Download
+  the CSV again for fresh links rather than storing them.
+- Refusals, nothing written and nothing charged: 400 `batch_too_large` (more than 500
+  rows), `invalid_batch`, or one row's refusal with the code a single run would get
+  (`recipe_variable_unknown`, for instance; `invalid_batch_row` when it has none), the
+  row's 0-based index in `row` and a `detail` starting `row N:`; 404 `recipe_not_found`;
+  409 `batch_limit_reached` (an account can have two batches that have not finished).
+  Resuming a batch that is not paused answers 409 `batch_not_resumable`. `results.zip`
+  answers 413 `results_too_large` when the outputs total more than 500 MB; use the CSV's
+  links instead.
+
+## Errors
+
+Every error is an RFC 7807 problem document, `Content-Type: application/problem+json`:
+
+```json
+{"title": "Payment Required", "status": 402,
+ "detail": "insufficient credit; top up via /v1/billing/topup",
+ "instance": "/v1/images/generations", "code": "insufficient_credit"}
+```
+
+`status` repeats the HTTP status. `detail` is a sentence for a person. `code`, where
+present, is a stable string to branch on. On the OpenAI-shaped video routes (`/v1/videos`, not `/v1/videos/generations`) the
+document also carries OpenAI's `error` object: `{"message", "type", "param", "code"}`.
+
+| Status | Meaning |
+|---|---|
+| 400 | The request is not valid. `detail` says which field. |
+| 401 | No key, or an unknown, revoked or expired one. |
+| 402 | `insufficient_credit`: top up. Without a `code`: a spending cap was reached, and topping up does not lift it. |
+| 403 | A key on a route that needs a signed-in session, or a refusal named by `code` (`inputs_disabled`, …). |
+| 404 | No such model, job, file, recipe or video for this account. Another account's answers the same. |
+| 409 | The request cannot be carried out as things stand (`job_not_saveable`, `saved_limit_reached`, `video_not_ready`, `batch_not_resumable`, `batch_limit_reached`, …). |
+| 413, 415, 422 | An input image that is too large, of the wrong type, or not accepted. A batch's `results.zip` over 500 MB is 413 `results_too_large`. |
+| 429 | Too many requests. `Retry-After` says how many seconds to wait. |
+| 502 | `generation_failed`: the job a request waited for failed. The reservation is returned. |
+
+A request that is refused charges nothing and creates no job.
+
+```bash
+curl -i https://api.godance.ai/v1/jobs/00000000-0000-0000-0000-000000000000 \
+  -H "Authorization: Bearer $GODANCE_API_KEY"
+```
+
+```python
+import os, requests
+
+API = "https://api.godance.ai"
+HEADERS = {"Authorization": f"Bearer {os.environ['GODANCE_API_KEY']}"}
+
+response = requests.post(f"{API}/v1/videos/generations", headers=HEADERS,
+                         json={"model": "seedance-2.0", "prompt": "A kite over a beach.", "seconds": 8})
+if response.status_code >= 400:
+    problem = response.json()                       # application/problem+json
+    if problem.get("code") == "insufficient_credit":
+        print("Top up at https://app.godance.ai, then try again.")
+    elif response.status_code == 429:
+        print("Wait", response.headers["Retry-After"], "seconds.")
+    else:
+        print(problem["status"], problem.get("code"), problem["detail"])
+```
+
+With OpenAI's SDK, a non-2xx answer raises the SDK's usual exception
+(`openai.BadRequestError`, `openai.AuthenticationError`, `openai.NotFoundError`, …).
+`e.status_code` is always right. On `/v1/videos` routes the exception text carries the
+sentence and `e.code` is set; elsewhere read `e.response.json()["detail"]`.
+
+## Limits and retention
+
+- A job's files and prompt are deleted 90 days after the job was created. `mediaExpiresAt`
+  on the job (`expires_at` on a video) says when. Download what you want to keep.
+- Saving a job keeps it: `PUT /v1/jobs/{id}/saved` (204), `DELETE /v1/jobs/{id}/saved` to
+  un-save (204). Only a DONE job whose files still exist can be saved (409
+  `job_not_saveable`). An account can save up to 500 jobs (409 `saved_limit_reached`);
+  `GET /v1/jobs/saved` returns `{"count", "limit"}`.
+- Output links are signed and expire. Read the job again for a fresh link.
+- An uploaded file nothing has used is deleted 24 hours after upload (`expires_at`). Once
+  a job uses it, it is kept as long as that job. An account keeps up to 200 files.
+- `n` is at most the model's `max_n` (1 when not stated). List pages: `limit` up to 100 on
+  jobs, files, recipes and videos, up to 200 on usage.
+- An account keeps up to 500 recipes, and a recipe up to 200 versions.
+- A batch has at most 500 rows and runs 1 to 4 of them at a time (2 unless you say). An
+  account can have two batches that have not finished. A batch row's files and values
+  are kept as long as its job is; once none of a batch's jobs has files left, the batch is
+  deleted and its jobs stay in `GET /v1/jobs` with what they cost.
+- A waiting image request (a sync key) is held for about 90 seconds; a result over 25 MB
+  comes back as links, not base64.
+- A chat request body is at most 256 KB.
+- Billing records (what each request cost) are never deleted.
+
+```bash
+# Keep a job past the 90 days, then see how many you have saved.
+curl -X PUT https://api.godance.ai/v1/jobs/$JOB_ID/saved \
+  -H "Authorization: Bearer $GODANCE_API_KEY"
+
+curl https://api.godance.ai/v1/jobs/saved \
+  -H "Authorization: Bearer $GODANCE_API_KEY"
+```
+
+```python
+import os, requests
+
+API = "https://api.godance.ai"
+HEADERS = {"Authorization": f"Bearer {os.environ['GODANCE_API_KEY']}"}
+
+# Download every output of the newest finished jobs before their links expire.
+for job in requests.get(f"{API}/v1/jobs", headers=HEADERS, params={"limit": 20, "status": "DONE"}).json():
+    if job["purged"]:
+        continue
+    for output in job["outputs"]:
+        extension = output["contentType"].split("/")[-1]
+        with open(f"{job['id']}-{output['index']}.{extension}", "wb") as out:
+            out.write(requests.get(output["url"]).content)
+```
+
+## Regions
+
+Godance runs in two regions: DigitalOcean (primary) and Alibaba Cloud (secondary, for
+disaster recovery and lower latency to Chinese model providers). Which providers a region
+may call is enforced in code. The Alibaba Cloud region routes only DeepSeek, Moonshot
+(Kimi), Alibaba (Qwen), Zhipu (GLM), MiniMax, Baidu (ERNIE), Kling and Volcengine Ark
+(Doubao, Seedream, Seedance). OpenAI, Anthropic, Google, xAI, Black Forest Labs, Stability
+and Runway models are never routed through it, also not as a fallback: a request for one
+of them that reaches that region answers 503. The same API, keys and balance apply in
+both regions. `GET /healthz` says which region answered.
+
+```bash
+curl https://api.godance.ai/healthz
+```
+
+```json
+{"status": "ok", "region": "digitalocean", "version": "…", "git_sha": "…", "timestamp": "2026-11-15T09:00:00Z"}
+```
+
+```python
+import requests
+
+# Which providers are up, per model, from the latest five-minute window.
+status = requests.get("https://api.godance.ai/v1/status").json()
+for row in status["providers"]:
+    print(row["provider"], row["model"], row["state"], row["p95Ms"])
+```
