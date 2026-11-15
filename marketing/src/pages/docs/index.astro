@@ -19,6 +19,7 @@ const endpoints = [
   { id: 'jobs', label: 'GET /v1/jobs/{id}', summary: 'async job status, outputs, history and saving a job' },
   { id: 'files', label: 'POST /v1/files', summary: 'upload an image to use as an input, and point a request at it' },
   { id: 'recipes', label: 'CRUD /v1/recipes', summary: 'keep a prompt template with variables, run it, and total what its attempts cost' },
+  { id: 'batches', label: 'POST /v1/recipe-batches', summary: 'run a recipe over many rows, pause and resume it, and download the results' },
   { id: 'estimates', label: 'POST /v1/estimates', summary: 'price an image or video request before sending it' },
   { id: 'models', label: 'GET /v1/models', summary: 'catalog, prices and what each model accepts' },
   { id: 'keys', label: 'CRUD /v1/keys', summary: 'API key management' },
@@ -288,6 +289,64 @@ const recipeRunSnippet = `curl https://api.godance.ai/v1/images/generations \\
   "recipe": { "id": "…", "version": 1,
               "variables": { "color": "blue", "surface": "kitchen shelf" } },
   … }`;
+
+const batchSnippet = `# What the batch would cost. Nothing is charged and nothing starts.
+curl https://api.godance.ai/v1/recipe-batches/estimate \\
+  -H "Authorization: Bearer $GODANCE_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "version_id": "…",
+    "rows": [
+      { "variables": { "color": "blue" } },
+      { "variables": { "color": "green", "surface": "oak table" } }
+    ]
+  }'
+
+{ "rows": 2, "total_cents": 12, "balance_cents": 1500, "enough": true,
+  "limits": { "max_rows": 500, "max_concurrency": 4 } }
+
+# The same body creates it. Rows start a few seconds later.
+curl https://api.godance.ai/v1/recipe-batches \\
+  -H "Authorization: Bearer $GODANCE_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "version_id": "…",
+    "rows": [
+      { "variables": { "color": "blue" } },
+      { "variables": { "color": "green", "surface": "oak table" } }
+    ],
+    "max_concurrency": 2,
+    "webhook_url": "https://example.com/hooks/godance"
+  }'
+
+{ "id": "…", "recipe_id": "…", "recipe_title": "Mug on a kitchen shelf", "version_id": "…",
+  "modality": "IMAGE", "model": "gpt-image-2", "params": { "size": "1024x1024", "n": 1 },
+  "status": "QUEUED", "pause_reason": null, "pause_detail": null, "max_concurrency": 2,
+  "rows_total": 2, "rows_done": 0, "rows_failed": 0, "rows_running": 0, "rows_skipped": 0,
+  "estimated_total_cents": 12, "spent_cents": 0,
+  "created_at": "2026-11-15T09:00:00Z", "started_at": null, "completed_at": null }`;
+
+const batchResultsSnippet = `# Poll the batch until status is DONE, PAUSED or CANCELLED
+curl https://api.godance.ai/v1/recipe-batches/$BATCH_ID \\
+  -H "Authorization: Bearer $GODANCE_API_KEY"
+
+# Its rows, 50 at a time, in row order
+curl "https://api.godance.ai/v1/recipe-batches/$BATCH_ID/rows?limit=50" \\
+  -H "Authorization: Bearer $GODANCE_API_KEY"
+
+[ { "index": 0, "status": "DONE",
+    "variables": { "color": "blue", "surface": "kitchen shelf" },
+    "job_id": "…", "cost_cents": 6, "error": null,
+    "outputs": [ { "index": 0, "url": "https://…", "content_type": "image/png" } ] },
+  … ]
+
+# Everything in one file: a line per row, with a link to each output
+curl -o results.csv https://api.godance.ai/v1/recipe-batches/$BATCH_ID/results.csv \\
+  -H "Authorization: Bearer $GODANCE_API_KEY"
+
+index,status,color,surface,job_id,cost_cents,error,output_1
+0,DONE,blue,kitchen shelf,…,6,,https://…
+1,DONE,green,oak table,…,6,,https://…`;
 
 const estimateSnippet = `curl https://api.godance.ai/v1/estimates \\
   -H "Authorization: Bearer $GODANCE_API_KEY" \\
@@ -584,7 +643,8 @@ def verify(payload, header, secret):
       <li><code class="code-chip">outputUrl</code> — the first output's link, signed the same way. Kept for clients written before <code class="code-chip">outputs</code>.</li>
       <li><code class="code-chip">mediaExpiresAt</code> — when the files and prompt are due to be deleted: 90 days after the job was created. Copy anything you want to keep before then, or <a href="#saving-a-job" class="underline" style="color: var(--color-primary)">save the job</a>. Null means nothing is scheduled, which is the case for a saved job.</li>
       <li><code class="code-chip">saved</code> — true when you have saved the job, which keeps its files and prompt past the 90 days.</li>
-      <li><code class="code-chip">channel</code> — how the job was made: <code class="code-chip">API</code> with an API key, <code class="code-chip">STUDIO</code> from the web app. Godance sets it from the credentials the request used; no request field changes it. Null on a job made before this was recorded.</li>
+      <li><code class="code-chip">channel</code> — how the job was made: <code class="code-chip">API</code> with an API key, <code class="code-chip">STUDIO</code> from the web app, <code class="code-chip">BATCH</code> for a row of a <a href="#batches" class="underline" style="color: var(--color-primary)">recipe batch</a>. Godance sets it from the credentials the request used; no request field changes it. Null on a job made before this was recorded.</li>
+      <li><code class="code-chip">batch</code> — for a job a recipe batch made, the batch's <code class="code-chip">id</code> and the <code class="code-chip">row</code> index it ran. Null for any other job, and once the batch has been deleted.</li>
       {recipesOn && (
         <li><code class="code-chip">galleryRecipe</code> — the slug of the gallery recipe the job was a run of, or null. To set it, send <code class="code-chip">gallery_recipe</code> in the body of <code class="code-chip">POST /v1/images/generations</code> or <code class="code-chip">POST /v1/videos/generations</code>: a recipe's slug, which is lowercase letters, digits and hyphens, at most 80 characters. Any other value returns <code class="code-chip">400</code> with <code class="code-chip">code: "invalid_gallery_recipe"</code> and nothing is charged. It is optional and changes nothing about the result or its price.</li>
       )}
@@ -749,6 +809,68 @@ def verify(payload, header, secret):
       <li><code class="code-chip">model</code> and the other request fields are sent as usual. The version's <code class="code-chip">model</code> and <code class="code-chip">params</code> record what worked; they do not limit what you send.</li>
       <li>A <code class="code-chip">version_id</code> that isn't one of your recipes' returns <code class="code-chip">404</code> with <code class="code-chip">code: "recipe_not_found"</code>. An image recipe sent to the video endpoint, or the other way round, returns <code class="code-chip">400</code> with <code class="code-chip">recipe_modality_mismatch</code>; a value for a variable the version doesn't declare returns <code class="code-chip">400</code> with <code class="code-chip">recipe_variable_unknown</code>; a value over 2,000 characters returns <code class="code-chip">400</code> with <code class="code-chip">recipe_variable_too_long</code>. Nothing is charged for a request that is refused.</li>
       <li>The job's <code class="code-chip">recipe</code> then names the recipe, the version and the values used, and <code class="code-chip">GET /v1/jobs?recipe=&#123;id&#125;</code> lists every job that ran the recipe.</li>
+    </ul>
+
+    <!-- ===== Batches ===== -->
+    <h2 id="batches" class="scroll-mt-24 text-2xl font-bold mt-16 mb-4 text-fg">POST /v1/recipe-batches</h2>
+    <p class="text-fg-muted">
+      A batch runs one version of one of <a href="#recipes" class="underline" style="color: var(--color-primary)">your recipes</a>
+      over many rows: a sheet of products, names or frames. Each row is a set of values for
+      the recipe's variables and becomes one ordinary job, so a batch costs exactly what its
+      jobs cost and nothing more. It runs on Godance's side, whether or not your script or
+      browser tab stays open. Batches are private to your account: an ID that isn't yours
+      returns <code class="code-chip">404</code> with <code class="code-chip">code: "batch_not_found"</code>.
+      Works with an API key or a signed-in session. Field names are snake_case.
+    </p>
+    <pre class="code-block mt-4"><code>{batchSnippet}</code></pre>
+    <ul class="mt-4 space-y-2 text-fg-muted">
+      <li><code class="code-chip">POST /v1/recipe-batches/estimate</code> — the total the batch would reserve: the sum of what each row's job would. <code class="code-chip">enough</code> compares it with your balance now. Nothing is charged and no batch is created.</li>
+      <li><code class="code-chip">POST /v1/recipe-batches</code> — creates the batch and returns it with <code class="code-chip">201</code>, <code class="code-chip">QUEUED</code>. Creating a batch charges nothing.</li>
+      <li><code class="code-chip">GET /v1/recipe-batches</code> — your batches as a JSON array, newest first. <code class="code-chip">limit</code> is 1 to 100 per page (20 without it), <code class="code-chip">before</code> is a batch <code class="code-chip">id</code>: only batches older than it, and <code class="code-chip">recipe_id</code> keeps only one recipe's batches.</li>
+      <li><code class="code-chip">GET /v1/recipe-batches/&#123;id&#125;</code> — one batch, with its counts.</li>
+      <li><code class="code-chip">GET /v1/recipe-batches/&#123;id&#125;/rows</code> — its rows as a JSON array, in row order. <code class="code-chip">limit</code> is 1 to 100 (50 without it), and <code class="code-chip">after</code> is the <code class="code-chip">index</code> of the last row you already have.</li>
+      <li><code class="code-chip">POST /v1/recipe-batches/&#123;id&#125;/cancel</code> and <code class="code-chip">POST /v1/recipe-batches/&#123;id&#125;/resume</code> — see below. Both return the batch.</li>
+      <li><code class="code-chip">GET /v1/recipe-batches/&#123;id&#125;/results.csv</code> and <code class="code-chip">GET /v1/recipe-batches/&#123;id&#125;/results.zip</code> — the results as files.</li>
+    </ul>
+
+    <h3 id="batch-rows" class="scroll-mt-24 text-xl font-semibold mt-10 mb-4 text-fg">The request and its rows</h3>
+    <ul class="space-y-2 text-fg-muted">
+      <li><code class="code-chip">version_id</code> — required: the recipe version every row runs.</li>
+      <li><code class="code-chip">rows</code> — required, 1 to 500. Each row has <code class="code-chip">variables</code>, with a value for any of the version's variables; a variable you leave out keeps its default. For a recipe with input slots, each row also has <code class="code-chip">inputs</code>, exactly as <code class="code-chip">recipe.inputs</code> on a single run: an input for every slot, by slot name.</li>
+      <li><code class="code-chip">model</code> and <code class="code-chip">params</code> — optional. Without them the batch uses the version's model and params. A <code class="code-chip">params</code> you send replaces the version's as a whole; it takes <code class="code-chip">size</code>, <code class="code-chip">n</code>, <code class="code-chip">seconds</code>, <code class="code-chip">style</code> and <code class="code-chip">quality</code>.</li>
+      <li><code class="code-chip">max_concurrency</code> — optional: how many rows run at a time, 1 to 4. Without it, 2.</li>
+      <li><code class="code-chip">webhook_url</code> — optional: where to POST once, when the batch ends.</li>
+      <li>Every row is checked before anything is written, by the same rules as a <a href="#running-a-recipe" class="underline" style="color: var(--color-primary)">single run</a>. If one would be refused, the whole request returns <code class="code-chip">400</code> with the <code class="code-chip">code</code> that run would get (<code class="code-chip">recipe_variable_unknown</code>, for instance), the row's 0-based index in <code class="code-chip">row</code>, and a <code class="code-chip">detail</code> that starts <code class="code-chip">row N:</code>. No batch is created and nothing is charged.</li>
+      <li>More than 500 rows returns <code class="code-chip">400</code> with <code class="code-chip">code: "batch_too_large"</code>. Anything else wrong with the request as a whole returns <code class="code-chip">400</code> with <code class="code-chip">invalid_batch</code>. An account can have two batches that are not finished; a third returns <code class="code-chip">409</code> with <code class="code-chip">batch_limit_reached</code>.</li>
+    </ul>
+
+    <h3 id="batch-running" class="scroll-mt-24 text-xl font-semibold mt-10 mb-4 text-fg">How a batch runs</h3>
+    <ul class="space-y-2 text-fg-muted">
+      <li><code class="code-chip">status</code> — <code class="code-chip">QUEUED</code> → <code class="code-chip">RUNNING</code> → <code class="code-chip">DONE</code>, with <code class="code-chip">PAUSED</code> and <code class="code-chip">CANCELLED</code> as below. A row is <code class="code-chip">PENDING</code> → <code class="code-chip">RUNNING</code> → <code class="code-chip">DONE</code> or <code class="code-chip">FAILED</code>, or <code class="code-chip">SKIPPED</code>.</li>
+      <li>Rows start in order, a few seconds after the batch is created, <code class="code-chip">max_concurrency</code> at a time. Each row's job is a job like any other: its price is reserved when it starts, and it appears in <code class="code-chip">GET /v1/jobs</code> with <code class="code-chip">channel: "BATCH"</code> and <code class="code-chip">batch</code> naming the batch and the row.</li>
+      <li>A row is never submitted twice. A row whose job fails is <code class="code-chip">FAILED</code> with the job's error in <code class="code-chip">error</code>; the job's reserved credit is refunded, and the batch carries on with the next row.</li>
+      <li><code class="code-chip">spent_cents</code> is the sum of what the finished rows' jobs were charged. A batch charges nothing of its own.</li>
+      <li><code class="code-chip">rows_done</code>, <code class="code-chip">rows_failed</code>, <code class="code-chip">rows_running</code> and <code class="code-chip">rows_skipped</code> count rows by where they are; the rest of <code class="code-chip">rows_total</code> are pending. <code class="code-chip">completed_at</code> is set when the last row has ended.</li>
+      <li>A batch made with an API key runs its jobs against that key's spending caps. Deleting the key cancels the batch, and so does deleting the recipe.</li>
+      <li>Jobs in a batch send no webhooks of their own. With a <code class="code-chip">webhook_url</code>, the batch sends one <a href="#webhooks" class="underline" style="color: var(--color-primary)">signed POST</a> when it ends, with <code class="code-chip">event: "recipe_batch.completed"</code>, the batch under <code class="code-chip">batch</code> and the paths of the two results files under <code class="code-chip">results</code>. It is sent once and not retried.</li>
+    </ul>
+
+    <h3 id="batch-pausing" class="scroll-mt-24 text-xl font-semibold mt-10 mb-4 text-fg">Pausing, resuming and cancelling</h3>
+    <ul class="space-y-2 text-fg-muted">
+      <li>When your balance cannot cover the next row's job, the batch becomes <code class="code-chip">PAUSED</code> with <code class="code-chip">pause_reason: "insufficient_credit"</code>. When a spending cap of your account or of the batch's API key would be passed, it pauses with <code class="code-chip">pause_reason: "spending_cap"</code>, and <code class="code-chip">pause_detail</code> says which cap.</li>
+      <li>Nothing is charged for the row that was refused, and it goes back to <code class="code-chip">PENDING</code>. Rows that were already running finish.</li>
+      <li>A paused batch stays paused until you resume it. Top up, or wait for the cap's period to turn over, then <code class="code-chip">POST /v1/recipe-batches/&#123;id&#125;/resume</code>: it continues from the row where it stopped. Resuming a batch that is not paused returns <code class="code-chip">409</code> with <code class="code-chip">code: "batch_not_resumable"</code>.</li>
+      <li><code class="code-chip">POST /v1/recipe-batches/&#123;id&#125;/cancel</code> skips every row that has not started (<code class="code-chip">SKIPPED</code>). Rows that are running finish and are charged as usual, and the batch is <code class="code-chip">CANCELLED</code>. Cancelling a batch that has ended changes nothing.</li>
+    </ul>
+
+    <h3 id="batch-results" class="scroll-mt-24 text-xl font-semibold mt-10 mb-4 text-fg">Results</h3>
+    <pre class="code-block"><code>{batchResultsSnippet}</code></pre>
+    <ul class="mt-4 space-y-2 text-fg-muted">
+      <li><code class="code-chip">results.csv</code> — one line per row, UTF-8: <code class="code-chip">index</code>, <code class="code-chip">status</code>, a column for each of the recipe's variables, <code class="code-chip">job_id</code>, <code class="code-chip">cost_cents</code>, <code class="code-chip">error</code>, then a link to each output as <code class="code-chip">output_1</code> to <code class="code-chip">output_n</code>.</li>
+      <li>The links in the CSV, and each row's <code class="code-chip">outputs[].url</code>, are signed when you ask and expire after a while, as a job's are. Download the file again for fresh links rather than storing them.</li>
+      <li><code class="code-chip">results.zip</code> — every output file, named <code class="code-chip">&lt;index&gt;-&lt;first variable's value&gt;-&lt;n&gt;.&lt;ext&gt;</code>, such as <code class="code-chip">0-blue-1.png</code>. When the outputs total more than 500 MB it returns <code class="code-chip">413</code> with <code class="code-chip">code: "results_too_large"</code>; use the CSV's links instead.</li>
+      <li>A row's files and values are kept as long as its job is: 90 days, or longer for a <a href="#saving-a-job" class="underline" style="color: var(--color-primary)">saved job</a>. After that the row's <code class="code-chip">variables</code> is null and it has no outputs. Once none of a batch's jobs has files left, the batch itself is deleted; the jobs stay in <code class="code-chip">GET /v1/jobs</code> with what they cost.</li>
+      <li>Input files a batch's rows name are kept while the batch is waiting or running, whatever their <code class="code-chip">expires_at</code> was.</li>
     </ul>
 
     <!-- ===== Estimates ===== -->
