@@ -44,6 +44,17 @@ export interface PromptApi {
 //   [[API_BASE]]     the API's address, e.g. https://api.godance.ai
 //   [[CREATE_PATH]]  the route that runs the recipe once, e.g. /v1/images/generations
 //   [[RECIPE_JSON]]  the recipe: template, variables, input slots, model, params
+//
+// Lines between a line "[[IF ...]]" and the next line "[[END]]" are kept only
+// for the recipes they are about, and the two marker lines never show:
+//   IMAGE, VIDEO     what the recipe makes
+//   INPUTS           the recipe needs images (it has input slots)
+//   SAVED            one of the user's own recipes, run by its version_id
+//   NOT_SAVED        anything else: the script fills the template in itself
+//   GALLERY          a recipe from the public gallery
+// Several words on one line mean all of them, as in "[[IF INPUTS SAVED]]".
+// Blocks do not nest.
+//
 // {{name}} below is not a marker: it is how a recipe writes a variable, and
 // the prompt explains it to the assistant.
 // =============================================================================
@@ -63,16 +74,35 @@ The recipe, as JSON:
 How to read it:
 - "template" is the prompt. Each {{name}} in it is a variable, and "variables" lists them with the value each one has when a row gives none.
 - A column of my CSV whose header is a variable's name holds that variable's values. If my headers do not match the names, ask me which column is which.
-- "inputs" lists the images the recipe needs, one per slot. For each slot, my CSV has a column with the slot's name that holds the path of an image file. Upload each file with POST /v1/files (multipart, in a field named "file") and use the "id" it answers with. Uploading works once I have accepted the input terms in the app's settings.
 - "model" and every key of "params" go into every request as they are.
-- If the JSON has "version_id", send "recipe": {"version_id": "...", "variables": {...}, "inputs": {"<slot>": {"file_id": "..."}}} in place of "prompt", and Godance fills the template in. Leave "inputs" out when the recipe has none.
-- If the JSON has no "version_id", fill the template in yourself and send the result as "prompt". Each input then goes in the field its "role" names: "image" in "images" (a list of {"file_id": "..."}), "mask" in "mask", "first_frame" in "first_frame", "last_frame" in "last_frame", "reference_image" in "reference_images" (a list).
-- If the JSON has "gallery_recipe", send that field unchanged with every request.
+[[IF SAVED]]
+- "version_id" names this recipe on Godance. Send "recipe": {"version_id": "...", "variables": {...}} in place of "prompt", and Godance fills the template in.
+[[END]]
+[[IF NOT_SAVED]]
+- Fill the template in yourself, and send the result as "prompt".
+[[END]]
+[[IF GALLERY]]
+- Send "gallery_recipe" unchanged with every request. It only records which public recipe a run started from.
+[[END]]
+[[IF INPUTS]]
+- "inputs" lists the images the recipe needs, one for each slot. For each slot, my CSV has a column with the slot's name that holds the path of an image file. Upload each file with POST /v1/files (multipart, in a field named "file") and use the "id" it answers with. Uploading works once I have accepted the input terms in the app's settings.
+[[END]]
+[[IF INPUTS SAVED]]
+- Give each slot its file inside "recipe": "inputs": {"<slot name>": {"file_id": "..."}}.
+[[END]]
+[[IF INPUTS NOT_SAVED]]
+- Each input goes in the field its "role" names: "image" in "images" (a list of {"file_id": "..."}), "mask" in "mask", "first_frame" in "first_frame", "last_frame" in "last_frame", "reference_image" in "reference_images" (a list).
+[[END]]
 
 Rules the script must follow:
 1. Read the API key from the GODANCE_API_KEY environment variable. Never write the key into the code, into a file or into the output. Stop with a clear message if the variable is not set.
 2. Use the OpenAI Python SDK (pip install openai) with base_url set to the API base URL above. For a route the SDK has no method for, call client.post(...) and client.get(...) with cast_to=httpx.Response.
-3. An image request answers in one of two ways. With a key set to synchronous image responses it waits and answers 200 with the images under "data". Otherwise it answers 202 with a "job_id": poll GET /v1/jobs/{id} every few seconds until "status" is DONE, FAILED or CANCELLED, then read "outputs" (each has a "url") and "actualCostCents". Handle both answers. A video request always answers 202 with a "job_id".
+[[IF IMAGE]]
+3. An image request answers in one of two ways. With a key set to synchronous image responses it waits and answers 200 with the images under "data". Otherwise it answers 202 with a "job_id": poll GET /v1/jobs/{id} every few seconds until "status" is DONE, FAILED or CANCELLED, then read "outputs" (each has a "url") and "actualCostCents". Handle both answers.
+[[END]]
+[[IF VIDEO]]
+3. A video request always answers 202 with a "job_id". Poll GET /v1/jobs/{id} every few seconds until "status" is DONE, FAILED or CANCELLED, then read "outputs" (each has a "url") and "actualCostCents". A video can take several minutes.
+[[END]]
 4. Estimate the cost first. Call POST /v1/estimates with the model and the params, multiply "estimated_cost_cents" by the number of rows, show me the total, and wait for my yes before sending anything that costs money.
 5. Stop at once on HTTP 402: the balance or the key's spending cap has run out. Do not retry it. Tell me which row it stopped at, so that I can run the rest later.
 6. Never send a row twice. Create the client with max_retries=0, and when the script is run again, skip the rows that already have a result.
@@ -80,6 +110,35 @@ Rules the script must follow:
 8. Run at most 2 rows at a time. When the API answers 429, wait for as long as its Retry-After header says, then carry on.
 
 When the script is written, tell me how to run it: what to install, how to set GODANCE_API_KEY, and the command that starts it on my CSV file.`;
+
+/** What a block of the wording can be about. A block is kept when every word on its [[IF …]] line is true. */
+export const PROMPT_CONDITIONS = ['IMAGE', 'VIDEO', 'INPUTS', 'SAVED', 'NOT_SAVED', 'GALLERY'] as const;
+export type PromptCondition = (typeof PROMPT_CONDITIONS)[number];
+
+/** Which blocks of the wording are about this recipe. */
+export function promptConditions(recipe: PromptRecipe): Record<PromptCondition, boolean> {
+  const saved = Boolean(recipe.version_id);
+  return {
+    IMAGE: recipe.modality === 'IMAGE',
+    VIDEO: recipe.modality === 'VIDEO',
+    INPUTS: recipe.inputs.length > 0,
+    SAVED: saved,
+    NOT_SAVED: !saved,
+    GALLERY: Boolean(recipe.gallery_recipe),
+  };
+}
+
+/** A block: its [[IF …]] line, its lines, its [[END]] line. */
+const BLOCK = /^\[\[IF ([A-Z_ ]+)\]\]\n([\s\S]*?)^\[\[END\]\]\n/gm;
+
+/**
+ * The wording for a recipe: each block kept or dropped, and its two marker
+ * lines gone either way. A word that is not a condition keeps nothing.
+ */
+export function promptWording(conditions: Record<string, boolean>, wording: string = ASSISTANT_PROMPT): string {
+  return wording.replace(BLOCK, (_, words: string, lines: string) =>
+    (words.trim().split(/\s+/).every((word) => conditions[word] === true) ? lines : ''));
+}
 
 /**
  * The recipe as the prompt shows it: the same keys in the same order for
@@ -100,8 +159,9 @@ export function promptRecipeJson(recipe: PromptRecipe): string {
 }
 
 /**
- * The prompt for one recipe. Each marker is filled in one pass over the
- * wording, so nothing a recipe holds is ever read as a marker.
+ * The prompt for one recipe. The blocks are settled first, on the wording
+ * alone; then each marker is filled in one pass, so nothing a recipe holds
+ * is ever read as a marker or as a block.
  */
 export function assistantPrompt(recipe: PromptRecipe, api: PromptApi): string {
   const values: Record<string, string> = {
@@ -109,5 +169,6 @@ export function assistantPrompt(recipe: PromptRecipe, api: PromptApi): string {
     CREATE_PATH: api.createPath,
     RECIPE_JSON: promptRecipeJson(recipe),
   };
-  return ASSISTANT_PROMPT.replace(/\[\[(API_BASE|CREATE_PATH|RECIPE_JSON)\]\]/g, (_, name: string) => values[name]);
+  return promptWording(promptConditions(recipe))
+    .replace(/\[\[(API_BASE|CREATE_PATH|RECIPE_JSON)\]\]/g, (_, name: string) => values[name]);
 }

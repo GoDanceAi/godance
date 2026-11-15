@@ -100,7 +100,7 @@ export function n8nInputsNote(modality: 'IMAGE' | 'VIDEO', inputs: { role: strin
   if (inputs.length === 0) return null;
   if (modality === 'IMAGE') {
     return 'This recipe works from an input image, and the image template sends a prompt alone. Run it with the '
-      + 'code or as a batch instead.';
+      + 'code instead, or as a batch in the app.';
   }
   const firstFrame = inputs.some((slot) => slot.role === 'first_frame');
   const others = inputs.some((slot) => slot.role !== 'first_frame');
@@ -109,5 +109,5 @@ export function n8nInputsNote(modality: 'IMAGE' | 'VIDEO', inputs: { role: strin
   }
   return 'The video template takes a first frame only, in the first_frame_file_id column (the id of an image '
     + 'uploaded with POST /v1/files). The other images this recipe uses cannot be sent from it: run it with the '
-    + 'code or as a batch instead.';
+    + 'code instead, or as a batch in the app.';
 }

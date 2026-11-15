@@ -1,5 +1,14 @@
 import { expect, test } from '@playwright/test';
-import { ASSISTANT_PROMPT, ASSISTANT_PROMPT_VERSION, assistantPrompt, promptRecipeJson, type PromptRecipe } from '../src/lib/assistant-prompt';
+import {
+  ASSISTANT_PROMPT,
+  ASSISTANT_PROMPT_VERSION,
+  assistantPrompt,
+  PROMPT_CONDITIONS,
+  promptConditions,
+  promptRecipeJson,
+  promptWording,
+  type PromptRecipe,
+} from '../src/lib/assistant-prompt';
 import { capCents, capState, capText, dayOf, expiryOf } from '../src/lib/key-limits';
 import { n8nInputsNote, n8nRow, n8nSteps, n8nTemplate } from '../src/lib/n8n';
 import {
@@ -304,17 +313,73 @@ test.describe('the prompt for an AI assistant', () => {
   };
   const api = { base: API, createPath: '/v1/images/generations' };
 
-  test('is the one constant with its three markers filled in, and nothing else changed', () => {
+  test('is the one constant: its blocks settled for the recipe, its three markers filled in, nothing else changed', () => {
     const prompt = assistantPrompt(recipe, api);
 
-    expect(prompt).toBe(ASSISTANT_PROMPT
+    expect(prompt).toBe(promptWording(promptConditions(recipe))
       .replaceAll('[[API_BASE]]', API)
       .replace('[[CREATE_PATH]]', '/v1/images/generations')
       .replace('[[RECIPE_JSON]]', () => promptRecipeJson(recipe)));
-    expect(prompt).not.toMatch(/\[\[[A-Z_]+\]\]/);
+    expect(prompt).not.toContain('[[');
     expect(prompt).toContain(`API base URL: ${API}/v1`);
     expect(prompt).toContain(`POST ${API}/v1/images/generations`);
     expect(ASSISTANT_PROMPT_VERSION).toMatch(/^\d{4}-\d{2}-\d{2}\.\d+$/);
+  });
+
+  test('every block of the wording is closed and is about something a recipe can be', () => {
+    const opens = ASSISTANT_PROMPT.match(/^\[\[IF [^\]]*\]\]$/gm) ?? [];
+    const ends = ASSISTANT_PROMPT.match(/^\[\[END\]\]$/gm) ?? [];
+    expect(opens.length).toBeGreaterThan(0);
+    expect(ends).toHaveLength(opens.length);
+    for (const open of opens) {
+      for (const word of open.slice('[[IF '.length, -2).trim().split(/\s+/)) expect(PROMPT_CONDITIONS, open).toContain(word);
+    }
+    // With every block kept or every block dropped, the three markers are all that is left in brackets.
+    for (const kept of [true, false]) {
+      const conditions = Object.fromEntries(PROMPT_CONDITIONS.map((name) => [name, kept]));
+      const left = [...new Set(promptWording(conditions).match(/\[\[[^\]]*\]\]/g))].sort();
+      expect(left).toEqual(['[[API_BASE]]', '[[CREATE_PATH]]', '[[RECIPE_JSON]]']);
+    }
+    // A word that is no condition keeps nothing, rather than everything.
+    expect(promptWording({}, 'a\n[[IF SOMETHING_ELSE]]\nb\n[[END]]\nc')).toBe('a\nc');
+  });
+
+  test('each block is in the prompt only for the recipes it is about', () => {
+    // One of the user's own image recipes, without inputs.
+    const saved = assistantPrompt(recipe, api);
+    expect(saved).toContain('"version_id" names this recipe on Godance. Send "recipe"');
+    expect(saved).not.toContain('Fill the template in yourself');
+    expect(saved).not.toContain('gallery_recipe');
+    expect(saved).not.toContain('/v1/files');
+    expect(saved).toContain('3. An image request answers in one of two ways');
+    expect(saved).not.toContain('A video request always answers 202');
+
+    // The same recipe with an input slot: the file goes inside "recipe".
+    const slot = { slot: 'product photo', role: 'image', hint: '' };
+    const withSlot = assistantPrompt({ ...recipe, inputs: [slot] }, api);
+    expect(withSlot).toContain('Upload each file with POST /v1/files');
+    expect(withSlot).toContain('Give each slot its file inside "recipe"');
+    expect(withSlot).not.toContain('Each input goes in the field its "role" names');
+
+    // A gallery video recipe with a first frame: the script fills the template in and places the file by its role.
+    const gallery = assistantPrompt(
+      { ...recipe, modality: 'VIDEO', version_id: undefined, gallery_recipe: 'paper-boat', inputs: [{ ...slot, role: 'first_frame' }] },
+      { base: API, createPath: '/v1/videos/generations' });
+    expect(gallery).toContain('Fill the template in yourself, and send the result as "prompt".');
+    expect(gallery).toContain('Send "gallery_recipe" unchanged with every request.');
+    expect(gallery).toContain('Upload each file with POST /v1/files');
+    expect(gallery).toContain('Each input goes in the field its "role" names');
+    expect(gallery).not.toContain('inside "recipe"');
+    expect(gallery).not.toContain('"version_id" names this recipe');
+    expect(gallery).toContain('3. A video request always answers 202');
+    expect(gallery).not.toContain('An image request answers in one of two ways');
+
+    for (const prompt of [saved, withSlot, gallery]) {
+      // The rules are numbered 1 to 8 whichever blocks were kept, and no block leaves a gap behind.
+      expect(prompt.match(/^\d+\. /gm)).toEqual(['1. ', '2. ', '3. ', '4. ', '5. ', '6. ', '7. ', '8. ']);
+      expect(prompt).not.toMatch(/\n\n\n/);
+      expect(prompt).not.toContain('[[');
+    }
   });
 
   test('the wording holds what the brief asks of it', () => {
@@ -351,8 +416,11 @@ test.describe('the prompt for an AI assistant', () => {
       .not.toContain('secret');
   });
 
-  test('a recipe that holds a marker, or what a replacement would read as a pattern, is carried as written', () => {
-    const tricky = { ...recipe, template: 'Costs $5, $& and $1; [[API_BASE]] and [[RECIPE_JSON]] stay as typed' };
+  test('a recipe that holds a marker, a block, or what a replacement would read as a pattern, is carried as written', () => {
+    const tricky = {
+      ...recipe,
+      template: 'Costs $5, $& and $1; [[API_BASE]] and [[RECIPE_JSON]] stay as typed\n[[IF VIDEO]]\nnot a block\n[[END]]\n',
+    };
     const prompt = assistantPrompt(tricky, api);
 
     const json = /The recipe, as JSON:\n\n([\s\S]*?)\n\nHow to read it:/.exec(prompt)?.[1] ?? '';
