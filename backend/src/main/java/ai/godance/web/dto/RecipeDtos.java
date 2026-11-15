@@ -11,6 +11,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import ai.godance.domain.Modality;
 import ai.godance.domain.Recipe;
 import ai.godance.domain.RecipeVersion;
+import ai.godance.web.dto.InputDtos.InputRef;
 
 /** {@code /v1/recipes/**}, as the round-10 contract has them. Field names are snake_case. */
 public final class RecipeDtos {
@@ -20,6 +21,12 @@ public final class RecipeDtos {
     /** A template variable: its name and the value it has when none is given. */
     public record RecipeVariable(String name, @JsonProperty("default") String defaultValue) { }
 
+    /**
+     * An input slot of a recipe: its name, what the image is to the job, and
+     * a hint for whoever fills it. No file: running the recipe names one.
+     */
+    public record RecipeInputSlot(String slot, String role, String hint) { }
+
     /** {@code POST /v1/recipes}: a recipe and its first version. */
     public record CreateRecipeRequest(
             String title,
@@ -28,7 +35,8 @@ public final class RecipeDtos {
             List<RecipeVariable> variables,
             String model,
             Map<String, Object> params,
-            @JsonProperty("source_gallery_recipe") String sourceGalleryRecipe
+            @JsonProperty("source_gallery_recipe") String sourceGalleryRecipe,
+            List<RecipeInputSlot> inputs
     ) { }
 
     /** {@code POST /v1/recipes/{id}/versions}: what the next version holds. */
@@ -36,16 +44,22 @@ public final class RecipeDtos {
             String template,
             List<RecipeVariable> variables,
             String model,
-            Map<String, Object> params
+            Map<String, Object> params,
+            List<RecipeInputSlot> inputs
     ) { }
 
     /** {@code PATCH /v1/recipes/{id}}: the one thing about a recipe itself that can change. */
     public record RenameRecipeRequest(String title) { }
 
-    /** {@code "recipe"} on a generation request: the version to run and values for its variables. */
+    /**
+     * {@code "recipe"} on a generation request: the version to run, values
+     * for its variables, and an input for each of its slots, by slot name:
+     * {@code {"product photo": {"file_id": "…"}}}.
+     */
     public record RecipeRef(
             @JsonProperty("version_id") UUID versionId,
-            Map<String, String> variables
+            Map<String, String> variables,
+            Map<String, InputRef> inputs
     ) { }
 
     public record RecipeVersionView(
@@ -55,14 +69,18 @@ public final class RecipeDtos {
             List<RecipeVariable> variables,
             String model,
             Map<String, Object> params,
-            @JsonProperty("created_at") Instant createdAt
+            @JsonProperty("created_at") Instant createdAt,
+            List<RecipeInputSlot> inputs
     ) {
         public static RecipeVersionView from(RecipeVersion v) {
             List<RecipeVariable> variables = v.getVariables().stream()
                     .map(variable -> new RecipeVariable(variable.get("name"), variable.get("default")))
                     .toList();
+            List<RecipeInputSlot> inputs = v.getInputs().stream()
+                    .map(slot -> new RecipeInputSlot(slot.get("slot"), slot.get("role"), slot.get("hint")))
+                    .toList();
             return new RecipeVersionView(v.getId(), v.getNumber(), v.getTemplate(), variables, v.getModel(),
-                    v.getParams(), v.getCreatedAt());
+                    v.getParams(), v.getCreatedAt(), inputs);
         }
     }
 

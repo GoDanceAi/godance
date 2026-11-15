@@ -29,6 +29,7 @@ import ai.godance.service.ImageGenerationService.ImageResult;
 import ai.godance.service.ImageResponseFormat;
 import ai.godance.service.InputService.ResolvedInput;
 import ai.godance.service.JobOrigin;
+import ai.godance.service.RecipeRefusedException;
 import ai.godance.service.RecipeRunService;
 import ai.godance.service.RecipeRunService.RunPrompt;
 import ai.godance.web.dto.ImageEditDtos.ImageEditRequest;
@@ -125,7 +126,15 @@ public class ImageEditController {
                     // Everything that can refuse the request without its images does so first,
                     // so a request that cannot run leaves no stored file behind.
                     requireWellFormed(fields);
-                    return Mono.fromRunnable(() -> edits.requireSupported(fields.model(), images.size(), mask != null))
+                    return Mono.fromRunnable(() -> {
+                                // A recipe with input slots brings its own images: the form's are then one too many.
+                                if (fields.recipe() != null && recipes.resolve(userId, Modality.IMAGE, fields.prompt(),
+                                        fields.recipe()).hasInputs()) {
+                                    if (!images.isEmpty() || mask != null) throw RecipeRefusedException.inputsOutsideRecipe();
+                                    return;
+                                }
+                                edits.requireSupported(fields.model(), images.size(), mask != null);
+                            })
                             .subscribeOn(Schedulers.boundedElastic())
                             .then(storeAll(userId, ip, images))
                             .flatMap(stored -> mask == null
@@ -164,8 +173,14 @@ public class ImageEditController {
         boolean mayWait = answers.mayWait(apiKeyId, runsAsJob, fields.async(), prefer);
 
         return Mono.fromCallable(() -> {
-                    List<ResolvedInput> inputs = edits.resolve(userId, fields.model(), refs);
                     RunPrompt run = recipes.resolve(userId, Modality.IMAGE, fields.prompt(), fields.recipe());
+                    // A recipe that names its own inputs runs with those, and with no others.
+                    ImageEdits.Refs named = refs;
+                    if (run.hasInputs()) {
+                        if (!refs.images().isEmpty() || refs.mask() != null) throw RecipeRefusedException.inputsOutsideRecipe();
+                        named = new ImageEdits.Refs(run.inputsWithRole("image"), null);
+                    }
+                    List<ResolvedInput> inputs = edits.resolve(userId, fields.model(), named);
                     ImageRequest request = edits.attach(domain.withPrompt(run.prompt()), inputs);
                     JobOrigin from = run.origin(origin);
                     return asJob
