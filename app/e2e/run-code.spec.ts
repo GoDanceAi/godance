@@ -122,7 +122,7 @@ test.describe('the request as code', () => {
     expect(python).toContain('max_retries=0');
     expect(python).toContain('client.post(\n    "/images/generations",');
     expect(pythonBody(python)).toEqual(PLAIN);
-    expect(python).toContain(`job = client.get(f"/jobs/{started['job_id']}", cast_to=httpx.Response).json()`);
+    expect(python).toContain(`job = client.get(f"/jobs/{started['job_id']}", cast_to=object)`);
     expect(python).toContain('if job["status"] in ("DONE", "FAILED", "CANCELLED"):');
     expect(python).toContain('for output in job["outputs"]:');
 
@@ -294,6 +294,23 @@ test.describe('the request as code', () => {
     expect([0, 1].map((i) => fileIdPlaceholder(i, 2))).toEqual(['FILE_ID_1', 'FILE_ID_2']);
   });
 
+  test('the Python needs only `pip install openai`: it never imports httpx, and reads JSON as the SDK hands it back', () => {
+    // openai 3 depends on httpx2, not httpx, so `import httpx` fails after
+    // `pip install openai`. cast_to=object returns the JSON answer as a dict on
+    // every version of the SDK. Seen failing against a local build on 2026-11-15.
+    const requests: CodeRequest[] = [
+      image(PLAIN, 'poll'), image(PLAIN, 'wait'), image(RECIPE, 'poll'), image(RECIPE, 'wait'),
+      image(EDIT, 'poll'), image(EDIT, 'wait'), video(VIDEO),
+    ];
+    for (const request of requests) {
+      const python = codeFor('python', request).map((snippet) => snippet.code).join('\n');
+      expect(python, `${request.kind} ${request.mode}`).not.toMatch(/\bhttpx\b/);
+      expect(python, `${request.kind} ${request.mode}`).not.toContain('.json()');
+      const lowLevel = python.match(/client\.(post|get)\(/g) ?? [];
+      expect(python.match(/cast_to=object\b/g) ?? [], `${request.kind} ${request.mode}`).toHaveLength(lowLevel.length);
+    }
+  });
+
   test('a base address with a trailing slash is the same address', () => {
     expect(codeFor('curl', image(PLAIN))[0].code).toBe(codeFor('curl', { ...image(PLAIN), apiBase: `${API}/` })[0].code);
     expect(only('python', { ...image(PLAIN), apiBase: `${API}/` })).toContain(`base_url="${API}/v1"`);
@@ -389,6 +406,9 @@ test.describe('the prompt for an AI assistant', () => {
     expect(ASSISTANT_PROMPT).toContain('https://godance.ai/docs');
     expect(ASSISTANT_PROMPT).toContain('Read the API key from the GODANCE_API_KEY environment variable. Never write the key into the code');
     expect(ASSISTANT_PROMPT).toContain('Use the OpenAI Python SDK (pip install openai) with base_url');
+    // What it tells the assistant to write runs after `pip install openai` alone (openai 3 brings httpx2, not httpx).
+    expect(ASSISTANT_PROMPT).toContain('cast_to=object');
+    expect(ASSISTANT_PROMPT).not.toContain('cast_to=httpx');
     expect(ASSISTANT_PROMPT).toContain('synchronous image responses');
     expect(ASSISTANT_PROMPT).toContain('poll GET /v1/jobs/{id}');
     expect(ASSISTANT_PROMPT).toContain('Estimate the cost first. Call POST /v1/estimates');

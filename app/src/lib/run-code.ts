@@ -214,12 +214,15 @@ function pythonCode(request: CodeRequest): CodeSnippet[] {
   if (isPlainImage(request, body)) return [{ title, code: pythonPlainImage(request, body), note: WAIT_NOTE }];
 
   const path = underV1(createPath(request.kind, request.body));
+  // cast_to=object hands back the answer's JSON as a dict. Not httpx.Response: the
+  // SDK's own HTTP library changed (openai 3 depends on httpx2), so an `import httpx`
+  // fails after `pip install openai`, and object works on every version.
   const post = [
     'client.post(',
     `    ${JSON.stringify(path)},`,
     `    body=${pythonLiteral(body, 1)},`,
-    '    cast_to=httpx.Response,',
-    ').json()',
+    '    cast_to=object,  # the answer\'s JSON, as a dict',
+    ')',
   ].join('\n');
 
   if (answerMode(request) === 'wait') {
@@ -229,7 +232,6 @@ function pythonCode(request: CodeRequest): CodeSnippet[] {
       code: [
         'import os',
         '',
-        'import httpx',
         'from openai import OpenAI',
         '',
         pythonClient(request.apiBase),
@@ -252,7 +254,6 @@ function pythonCode(request: CodeRequest): CodeSnippet[] {
       'import os',
       'import time',
       '',
-      'import httpx',
       'from openai import OpenAI',
       '',
       pythonClient(request.apiBase),
@@ -262,7 +263,7 @@ function pythonCode(request: CodeRequest): CodeSnippet[] {
       '',
       '# Read the job every few seconds until it ends.',
       'while True:',
-      `    job = client.get(f"${underV1(JOBS_PATH)}/{started['${idField}']}", cast_to=httpx.Response).json()`,
+      `    job = client.get(f"${underV1(JOBS_PATH)}/{started['${idField}']}", cast_to=object)`,
       '    if job["status"] in ("DONE", "FAILED", "CANCELLED"):',
       '        break',
       '    time.sleep(3)',

@@ -175,7 +175,7 @@ test.describe('Run at scale, on a recipe', () => {
     expect(python).toContain('client.post(\n    "/images/generations",');
     expect(python).toContain(`"version_id": "${versionId(1, 3)}"`);
     expect(python).toContain('"async": True');
-    expect(python).toContain(`client.get(f"/jobs/{started['job_id']}", cast_to=httpx.Response)`);
+    expect(python).toContain(`client.get(f"/jobs/{started['job_id']}", cast_to=object)`);
     await expect(panel(page).getByText('pip install openai')).toBeVisible();
 
     // Java: Spring's WebClient, the same body, the same polling.

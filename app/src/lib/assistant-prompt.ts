@@ -58,7 +58,7 @@ export interface PromptApi {
 // {{name}} below is not a marker: it is how a recipe writes a variable, and
 // the prompt explains it to the assistant.
 // =============================================================================
-export const ASSISTANT_PROMPT_VERSION = '2026-11-15.1';
+export const ASSISTANT_PROMPT_VERSION = '2026-11-15.2';
 
 export const ASSISTANT_PROMPT = `I want to run a Godance recipe at scale. Write me a Python script that runs the recipe below once for every row of a CSV file I give it, and writes the results to a new CSV file.
 
@@ -96,7 +96,7 @@ How to read it:
 
 Rules the script must follow:
 1. Read the API key from the GODANCE_API_KEY environment variable. Never write the key into the code, into a file or into the output. Stop with a clear message if the variable is not set.
-2. Use the OpenAI Python SDK (pip install openai) with base_url set to the API base URL above. For a route the SDK has no method for, call client.post(...) and client.get(...) with cast_to=httpx.Response.
+2. Use the OpenAI Python SDK (pip install openai) with base_url set to the API base URL above. For a route the SDK has no method for, call client.post(...) and client.get(...) with cast_to=object, which returns the JSON answer as a dict. Do not import httpx: recent versions of the SDK do not install it.
 [[IF IMAGE]]
 3. An image request answers in one of two ways. With a key set to synchronous image responses it waits and answers 200 with the images under "data". Otherwise it answers 202 with a "job_id": poll GET /v1/jobs/{id} every few seconds until "status" is DONE, FAILED or CANCELLED, then read "outputs" (each has a "url") and "actualCostCents". Handle both answers.
 [[END]]
