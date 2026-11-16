@@ -105,7 +105,7 @@ class OpenAiVideoRequestsTest {
                 + "{\"version_id\": \"" + VERSION + "\", \"variable\": {\"subject\": \"Koi\"}}}");
         assertThat(param(recipe)).isEqualTo("recipe.variable");
         assertThat(recipe.getReason())
-                .isEqualTo("POST /v1/videos does not take recipe.variable: recipe has version_id, variables and inputs.");
+                .isEqualTo("POST /v1/videos does not take recipe.variable: recipe has version_id, variables, inputs and published_id.");
 
         OpenAiVideoRefusedException slot = refusedJson("{\"model\": \"seedance-2.0\", \"recipe\": {\"version_id\": \""
                 + VERSION + "\", \"inputs\": {\"product photo\": {\"url\": \"https://example.test/a.png\"}}}}");
@@ -195,7 +195,7 @@ class OpenAiVideoRequestsTest {
                 "recipe[version_id]", VERSION.toString(), "recipe[variable][subject]", "Koi");
         assertThat(param(refused)).isEqualTo("recipe[variable]");
         assertThat(refused.getReason())
-                .isEqualTo("POST /v1/videos does not take recipe[variable]: recipe has version_id, variables and inputs.");
+                .isEqualTo("POST /v1/videos does not take recipe[variable]: recipe has version_id, variables, inputs and published_id.");
 
         assertThat(param(refusedForm("model", "seedance-2.0", "recipe[version_id]", VERSION.toString(),
                 "recipe[inputs][opening][url]", "https://example.test/a.png"))).isEqualTo("recipe[inputs][opening][url]");
