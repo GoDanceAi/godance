@@ -314,7 +314,9 @@ function entryOf(recipe, settings, lang) {
     : [`**${link(words.viewRecipe, links.recipe)}**`, `**${link(words.getKey, links.get_api_key)}**`];
   const tags = recipe.tags.map((tag) => code(tag)).join(' · ');
   return [
-    `### <a id="${recipe.slug}"></a>${text(titleOf(recipe, lang))}`,
+    // The slug as the entry's anchor, the same in both languages, in the
+    // form GitHub documents for a custom anchor: <a name="…"></a>.
+    `### <a name="${recipe.slug}"></a>${text(titleOf(recipe, lang))}`,
     ...pictureOf(recipe, settings, lang),
     ...(tags ? [`${lang === 'zh' ? '标签：' : 'Tags: '}${tags}`] : []),
     ...promptOf(recipe, lang),

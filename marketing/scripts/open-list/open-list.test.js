@@ -101,11 +101,11 @@ function linksIn(markdown) {
 
 /** One entry of a README: from its anchor to the next entry's anchor, or to the next section. */
 function entryOf(readme, slug) {
-  const anchor = `<a id="${slug}"></a>`;
+  const anchor = `<a name="${slug}"></a>`;
   const start = readme.indexOf(anchor);
   assert.notEqual(start, -1, `the README has an entry for ${slug}, starting ${anchor}`);
   const rest = readme.slice(start + anchor.length);
-  const end = rest.search(/<a id="[a-z0-9-]+"><\/a>|^## /m);
+  const end = rest.search(/<a name="[a-z0-9-]+"><\/a>|^## /m);
   return end === -1 ? readme.slice(start) : readme.slice(start, start + anchor.length + end);
 }
 
@@ -176,13 +176,13 @@ describe('README sections', () => {
     }
 
     // One entry per listed recipe, each under its type, newest first.
-    const anchors = [...readme.matchAll(/<a id="([a-z0-9-]+)"><\/a>/g)].map((match) => match[1]);
+    const anchors = [...readme.matchAll(/<a name="([a-z0-9-]+)"><\/a>/g)].map((match) => match[1]);
     assert.deepEqual(anchors, [...images, ...videos].map((recipe) => recipe.slug));
-    for (const recipe of images) assert.ok(sectionOf(readme, 'Image').includes(`<a id="${recipe.slug}">`), recipe.slug);
-    for (const recipe of videos) assert.ok(sectionOf(readme, 'Video').includes(`<a id="${recipe.slug}">`), recipe.slug);
+    for (const recipe of images) assert.ok(sectionOf(readme, 'Image').includes(`<a name="${recipe.slug}">`), recipe.slug);
+    for (const recipe of videos) assert.ok(sectionOf(readme, 'Video').includes(`<a name="${recipe.slug}">`), recipe.slug);
     for (const recipe of listed) {
-      assert.match(entryOf(readme, recipe.slug), /^<a id="[a-z0-9-]+"><\/a>.+\n/, `${recipe.slug}: a heading`);
-      assert.ok(unescape(readme).includes(`### <a id="${recipe.slug}"></a>${recipe.title.en}\n`), `${recipe.slug}: its title`);
+      assert.match(entryOf(readme, recipe.slug), /^<a name="[a-z0-9-]+"><\/a>.+\n/, `${recipe.slug}: a heading`);
+      assert.ok(unescape(readme).includes(`### <a name="${recipe.slug}"></a>${recipe.title.en}\n`), `${recipe.slug}: its title`);
     }
 
     const statistics = unescape(sectionOf(readme, 'Statistics'));
@@ -213,7 +213,7 @@ describe('README sections', () => {
     assert.deepEqual(headings, ['目录', '图片', '视频', '统计', '许可', '移除']);
     assert.ok(linksIn(sectionOf(chinese, '目录')).some((link) => link.href === '#图片'));
 
-    const anchors = (readme) => [...readme.matchAll(/<a id="([a-z0-9-]+)"><\/a>/g)].map((match) => match[1]);
+    const anchors = (readme) => [...readme.matchAll(/<a name="([a-z0-9-]+)"><\/a>/g)].map((match) => match[1]);
     assert.deepEqual(anchors(chinese), anchors(english));
     for (const recipe of listed) {
       const entry = entryOf(chinese, recipe.slug);
@@ -612,7 +612,7 @@ describe('removal list', () => {
     const empty = path.join(dir, 'empty.json');
     await writeFile(empty, JSON.stringify({ removed: [] }));
     const before = await generate(t, { removalList: empty });
-    assert.ok((await before.read('README.md')).includes(`<a id="${REMOVED}"></a>`), 'listed while it is not removed');
+    assert.ok((await before.read('README.md')).includes(`<a name="${REMOVED}"></a>`), 'listed while it is not removed');
     assert.ok((await before.read('README.md')).includes(`last updated ${bySlug[REMOVED].published_on}`));
     const after = await generate(t);
     assert.ok(!(await after.read('README.md')).includes(REMOVED), 'gone once it is');

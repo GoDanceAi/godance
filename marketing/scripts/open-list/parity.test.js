@@ -84,11 +84,11 @@ function linksIn(markdown) {
 }
 
 function entryOf(readme, slug) {
-  const anchor = `<a id="${slug}"></a>`;
+  const anchor = `<a name="${slug}"></a>`;
   const start = readme.indexOf(anchor);
   assert.notEqual(start, -1, `an entry for ${slug}`);
   const rest = readme.slice(start + anchor.length);
-  const end = rest.search(/<a id="[a-z0-9-]+"><\/a>|^## /m);
+  const end = rest.search(/<a name="[a-z0-9-]+"><\/a>|^## /m);
   return end === -1 ? readme.slice(start) : readme.slice(start, start + anchor.length + end);
 }
 
