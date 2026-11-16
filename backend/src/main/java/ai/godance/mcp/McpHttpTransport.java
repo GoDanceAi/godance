@@ -2,6 +2,7 @@ package ai.godance.mcp;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -29,7 +30,6 @@ import io.modelcontextprotocol.spec.McpSchema.ErrorCodes;
 import io.modelcontextprotocol.spec.McpSchema.JSONRPCNotification;
 import io.modelcontextprotocol.spec.McpSchema.JSONRPCRequest;
 import io.modelcontextprotocol.spec.McpSchema.JSONRPCResponse;
-import io.modelcontextprotocol.spec.McpSchema.JSONRPCResponse.JSONRPCError;
 import io.modelcontextprotocol.spec.McpStatelessServerTransport;
 
 import ai.godance.config.RateLimitProperties.Limit;
@@ -212,9 +212,9 @@ public final class McpHttpTransport implements McpStatelessServerTransport {
         return ServerResponse.status(HttpStatus.TOO_MANY_REQUESTS)
                 .header(HttpHeaders.RETRY_AFTER, Long.toString(e.getRetryAfterSeconds()))
                 .contentType(MediaType.APPLICATION_JSON)
-                .bodyValue(write(new JSONRPCResponse(McpSchema.JSONRPC_VERSION, null, null,
-                        new JSONRPCError(ErrorCodes.INTERNAL_ERROR, "Too many requests for this API key: " + e.getReason(),
-                                Map.of("status", 429, "retry_after_seconds", e.getRetryAfterSeconds())))));
+                .bodyValue(write(errorBody(null, ErrorCodes.INTERNAL_ERROR,
+                        "Too many requests for this API key: " + e.getReason(),
+                        Map.of("status", 429, "retry_after_seconds", e.getRetryAfterSeconds()))));
     }
 
     private Mono<ServerResponse> tooLarge() {
@@ -233,8 +233,25 @@ public final class McpHttpTransport implements McpStatelessServerTransport {
     private Mono<ServerResponse> respond(HttpStatus status, Object id, int code, String message, Object data) {
         return ServerResponse.status(status)
                 .contentType(MediaType.APPLICATION_JSON)
-                .bodyValue(write(new JSONRPCResponse(McpSchema.JSONRPC_VERSION, id, null,
-                        new JSONRPCError(code, message, data))));
+                .bodyValue(write(errorBody(id, code, message, data)));
+    }
+
+    /**
+     * A JSON-RPC error response. Written by hand rather than as the SDK's
+     * {@link JSONRPCResponse}, which refuses a null id: a message refused
+     * before it is read has none, and JSON-RPC 2.0 answers those with
+     * {@code "id": null}.
+     */
+    private static Map<String, Object> errorBody(Object id, int code, String message, Object data) {
+        Map<String, Object> error = new LinkedHashMap<>();
+        error.put("code", code);
+        error.put("message", message);
+        if (data != null) error.put("data", data);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("jsonrpc", McpSchema.JSONRPC_VERSION);
+        body.put("id", id);
+        body.put("error", error);
+        return body;
     }
 
     private String write(Object value) {
