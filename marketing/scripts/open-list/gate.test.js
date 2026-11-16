@@ -225,6 +225,11 @@ describe('the workflow', () => {
     assert.match(publish, /\['push', '--quiet', 'origin', `HEAD:refs\/heads\/\$\{branch\}`\]/);
   });
 
+  test('gets a Node that can load gallery-config.ts: the latest 22, not whatever 22 the runner has cached', () => {
+    assert.match(steps[1], /uses: actions\/setup-node@v4\n {8}with:\n {10}node-version: '22'\n {10}check-latest: true\n/);
+    assert.ok(process.features.typescript, 'the Node running these tests strips types too');
+  });
+
   test('runs the generator\'s tests before it publishes, and one run at a time', () => {
     assert.match(stepNamed('Test the generator'), /run: node --test --test-concurrency=1 "scripts\/open-list\/\*\.test\.js"$/);
     assert.match(WORKFLOW, /\nconcurrency:\n {2}group: open-list\n {2}cancel-in-progress: false\n/);
