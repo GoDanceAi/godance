@@ -1,0 +1,3 @@
+# Local files of a running stack: never commit them. (.env is ignored by the
+# repository's own .gitignore.)
+backups/

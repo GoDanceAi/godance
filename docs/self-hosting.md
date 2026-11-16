@@ -801,12 +801,13 @@ lost, and Redis holds nothing that matters.
 
 ```bash
 cd godance/deploy/self-host
+mkdir -p backups                        # ignored by git; copy its files off the server
 # The database: a consistent dump while running.
 docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d godance --no-owner --no-acl' \
-  | gzip > "godance-$(date -u +%F).sql.gz"
+  | gzip > "backups/godance-$(date -u +%F).sql.gz"
 # The bundled MinIO's files: stop it for a consistent copy (image requests fail meanwhile).
 docker compose stop minio
-docker run --rm -v godance_minio_data:/data:ro -v "$PWD":/backup alpine:3.22 \
+docker run --rm -v godance_minio_data:/data:ro -v "$PWD/backups":/backup alpine:3.22 \
   tar czf "/backup/godance-files-$(date -u +%F).tgz" -C /data .
 docker compose start minio
 ```
@@ -821,11 +822,11 @@ has ever started:
 ```bash
 cd godance/deploy/self-host
 docker compose up -d --wait postgres
-gunzip -c godance-<date>.sql.gz \
+gunzip -c backups/godance-<date>.sql.gz \
   | docker compose exec -T postgres sh -c 'psql -q -U "$POSTGRES_USER" -d godance'
 # The bundled MinIO's files, into its new volume before MinIO first starts:
 docker compose up --no-start minio
-docker run --rm -v godance_minio_data:/data -v "$PWD":/backup alpine:3.22 \
+docker run --rm -v godance_minio_data:/data -v "$PWD/backups":/backup alpine:3.22 \
   tar xzf "/backup/godance-files-<date>.tgz" -C /data
 docker compose up -d
 ```
