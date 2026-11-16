@@ -1,6 +1,8 @@
 ---
 import Layout from '../../layouts/Layout.astro';
 import { loadGallery } from '../../lib/gallery-recipes';
+import { appUrlFrom } from '../../lib/community';
+const app = appUrlFrom();
 
 // What the API says about recipes is shown only while the gallery is switched
 // on: with it off, nothing on the site mentions it.
@@ -496,16 +498,31 @@ def verify(payload, header, secret):
     <p class="mt-4 text-fg-muted">
       Godance is an OpenAI-compatible REST API. If you've shipped against the OpenAI SDK,
       you already know the request shape of every endpoint below, and chat is drop-in: same
-      JSON, same streaming format. Image and video generation run as async jobs, and errors
-      come back as RFC 7807 problem details; see
+      JSON, same streaming format. Images can return jobs or the OpenAI response shape with a sync-configured key; video uses jobs.
+      Audio and embeddings have no live endpoints. Errors use problem details, with the OpenAI error object on compatibility routes; see
       <a href="#openai-compat" class="underline" style="color: var(--color-primary)">OpenAI SDK compatibility</a>.
     </p>
+
+    <nav aria-label="Documentation contents" style="margin-top:2rem;">
+      <h2 class="text-2xl font-bold mt-12 mb-4 text-fg">Contents</h2>
+      <ul class="space-y-2 text-fg-muted">
+        <li><a href="#studio-workflow" class="underline">Studio, History, recipes and batches</a></li>
+        <li><a href="#ai-assistants" class="underline">Code and AI assistants</a> · <a href="#mcp" class="underline">MCP</a> · <a href="#n8n" class="underline">n8n</a></li>
+        <li><a href="#openai-compat" class="underline">SDK compatibility</a> · <a href="#files" class="underline">Conditional image inputs</a></li>
+        <li><a href="#byok" class="underline">Conditional provider keys</a> · <a href="#community-workflow" class="underline">Community publishing and follows</a></li>
+        <li><a href="#routing-policies" class="underline">User routing API</a> · <a href="#self-hosting" class="underline">Self-hosting</a></li>
+      </ul>
+    </nav>
+    <h2 id="studio-workflow" class="scroll-mt-24 text-2xl font-bold mt-12 mb-4 text-fg">Studio, History, recipes and batches</h2>
+    <p class="text-fg-muted">Use <a href={`${app}/create/image`} class="underline">Image Studio</a> or <a href={`${app}/create/video`} class="underline">Video Studio</a> to choose an available model and review an estimate before running. <a href={`${app}/history`} class="underline">History</a> holds generated jobs: select compatible jobs there to compare them. Save a completed output to retain its files beyond the ordinary retention period, subject to account limits.</p>
+    <p class="mt-4 text-fg-muted">A <a href={`${app}/recipes`} class="underline">versioned recipe</a> keeps a reusable prompt template, model and settings. It is separate from a saved output or a bookmarked example. Choose a recipe version to prepare a <a href={`${app}/batches`} class="underline">batch</a>, or open the existing Run at scale panel for code, assistant prompts and n8n options. Each submitted row is a paid job. Opening these pages never starts a generation.</p>
+    <p class="mt-4 text-fg-muted">Sign in or finish onboarding when prompted; existing account, age, terms, balance and model gates still apply. Image inputs require operator enablement, an eligible adult account, accepted input terms and a capable model. The documentation describes contracts, not an activation or provider-health guarantee.</p>
 
     <h2 class="text-2xl font-bold mt-12 mb-4 text-fg">Get to first call in three steps</h2>
     <ol class="space-y-3 list-decimal list-inside text-fg-muted">
       <li>
-        <a href="https://app.godance.ai/signup" class="underline" style="color: var(--color-primary)">Create an account</a>
-        and mint an API key in Settings → API Keys (returned in plaintext once — save it).
+        <a href={`${app}/signup`} class="underline" style="color: var(--color-primary)">Create an account</a>
+        and mint an API key on the API keys page (returned in plaintext once — save it).
       </li>
       <li>Top up with card, ACH, or SEPA (Stripe), or USDT (NOWPayments). Same balance, same API.</li>
       <li>
@@ -1231,6 +1248,18 @@ def verify(payload, header, secret):
     </ul>
 
     <!-- ===== Billing ===== -->
+    <h2 id="community-workflow" class="scroll-mt-24 text-2xl font-bold mt-16 mb-4 text-fg">Community publishing and follows</h2>
+    <p class="text-fg-muted">Community is conditional on backend enablement and account permission. The signed-in GET /v1/profile describes the caller's permitted profile and publishing controls; eligible verified adults can use PUT /v1/profile. In the app, reuse Profile, Publish on a recipe, and Following. Nothing becomes public until moderator approval.</p>
+    <p class="mt-4 text-fg-muted">POST /v1/recipes/&#123;id&#125;/publish submits a recipe version, selected completed jobs and a supported licence for review (202); GET reads submission status and DELETE unpublishes it. GET /v1/follows lists followed handles; POST /v1/follows/&#123;handle&#125; follows and DELETE unfollows. GET /v1/follows/feed lists their approved public recipes. These management routes use a signed-in session, not an API key.</p>
+    <p class="mt-4 text-fg-muted">Public reads are GET /v1/public/recipes, GET /v1/public/recipes/&#123;public_id&#125; and GET /v1/public/profiles/&#123;handle&#125;. Marketing Community links require readable approved content at build time; backend configuration alone does not create a public page.</p>
+
+    <h2 id="routing-policies" class="scroll-mt-24 text-2xl font-bold mt-16 mb-4 text-fg">User routing API</h2>
+    <p class="text-fg-muted">User policies require operator enablement and any configured account allowlist. GET /v1/routing/policies lists built-in and caller policies; GET /v1/routing/policies/&#123;id&#125; reads one. PUT /v1/routing/policies/&#123;id&#125; creates or replaces a caller policy; DELETE removes it. Use a permitted policy id as the chat request's model. Built-in presets cannot be edited. These routes accept a session or API key and return routing_policies_disabled while disabled.</p>
+    <p class="mt-4 text-fg-muted">There is no app routing-policy editor. See the <a href="https://api.godance.ai/v1/openapi.yaml" class="underline">OpenAPI schema</a> before authoring a policy. Regional provider restrictions remain authoritative. Existing batch-fallback API options do not imply new creation controls in the app.</p>
+
+    <h2 id="self-hosting" class="scroll-mt-24 text-2xl font-bold mt-16 mb-4 text-fg">Self-hosting the repository</h2>
+    <p class="text-fg-muted">The <a href="https://github.com/GoDanceAi/godance/blob/main/docs/self-hosting.md" class="underline">self-hosting guide</a> covers packaging, backing services, configuration, provider credentials and operational checks. Review the generated configuration reference and the guide's support and trademark terms. Deploying a copy does not enable optional capabilities or grant access to a provider; configure and verify them separately.</p>
+
     <h2 id="billing" class="scroll-mt-24 text-2xl font-bold mt-16 mb-4 text-fg">POST /v1/billing/topup</h2>
     <p class="text-fg-muted">
       Usage is paid from a prepaid credit balance. A top-up returns a hosted checkout URL;

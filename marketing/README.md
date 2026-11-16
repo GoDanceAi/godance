@@ -85,3 +85,74 @@ frontend-marketing/
 - **Canonical URL** on every page via `<link rel="canonical">`.
 - **Open Graph + Twitter Card** — social previews on link shares.
 - **No client-side hydration** by default — everything pre-rendered, no JS needed to read content.
+
+## Opt-in discovery build (Round 15)
+
+`PUBLIC_SITE_DISCOVERY_ENABLED` is a marketing build flag, default false. Empty,
+`false`, or an unset value preserves the legacy shell/home/pricing and emits neither
+`/create` nor `/integrations`. `true` opts in; other values fail with the variable
+name and accepted values. This does not change backend configuration or permissions.
+
+The discovery shell uses native disclosure navigation on desktop and mobile. Gallery
+links still depend on `loadGallery().on`, comparisons require actual emitted pairs
+at the existing shared-run threshold, and Community requires
+`loadCommunity().on`. Run this remains independently gated. The two new product
+pages explain existing workflows, with no fabricated results or activation claims.
+Documentation updates are independent of the rollout flag.
+
+Required local checks (CI currently does not run the marketing Node suite):
+
+```bash
+npm ci
+npm run lint
+npm run build
+npm test
+PUBLIC_SITE_DISCOVERY_ENABLED=true npm run lint
+PUBLIC_SITE_DISCOVERY_ENABLED=true npm run build
+PUBLIC_SITE_DISCOVERY_ENABLED=true npm test
+```
+
+The deployment workflow builds before Wrangler uploads. Set public **GitHub repository
+variables**, not just Cloudflare dashboard values, when an operator later approves
+activation:
+
+| Variable | Meaning / empty default |
+| --- | --- |
+| `PUBLIC_SITE_DISCOVERY_ENABLED` | `true` opts in; empty stays off |
+| `PUBLIC_APP_URL` | Existing app deployment; empty uses `https://app.godance.ai` |
+| `GALLERY_MEDIA_BASE_URL` | Public uploaded approved media base; empty keeps gallery off |
+| `GALLERY_REMOVAL_CONTACT` | Public removal contact; empty keeps gallery off |
+| `GALLERY_OUTPUT_LICENCE` | Approved public output licence statement |
+| `GALLERY_RUN_THIS` | Independent Run this gate; empty stays off |
+| `GALLERY_COMPARE_MIN` | Shared approved recipe count; empty keeps default 8 |
+| `COMMUNITY_ENABLED` | Read approved public API content at build time; empty stays off |
+
+`SITE_URL=https://godance.ai` and `PUBLIC_API_BASE=https://api.godance.ai` retain the
+workflow's existing values. `GALLERY_CONTENT_DIR` remains local/test-only and is not
+mapped into deployment. No secret, admin credential or private path is a build input.
+
+### Operator activation checklist
+
+1. Approve real content, media rights, output licence/NOTICE and the public removal
+   contact. Upload the approved media; never publish test fixtures.
+2. Confirm backend/account capabilities separately. Decide community moderation and
+   verify readable approved public recipes/profiles. Configuration alone is not
+   eligibility, public content or provider health.
+3. Configure the public repository build variables above. Keep Run this off until
+   its signed-in and signed-out app handoffs have been verified independently.
+4. After operator merge/deploy, verify desktop/mobile navigation and light/dark
+   themes, keyboard focus, every emitted internal link, configured app deep links,
+   sign-in return destinations, and pending-consent behavior. Opening a link must
+   not start generation, accept terms or initiate payment.
+5. Enable the discovery build only after those reviews. The implementation session
+   changes no production variable, backend flag, moderation state or deployment.
+
+### Deterministic default-output check
+
+Use the same Node 22/npm lockfile, locale/timezone/year and model-catalog response
+for B0 and candidate. Unset all optional `PUBLIC_*`, `GALLERY_*`, `COMMUNITY_*` and
+`SITE_URL` inputs. Force the same offline catalog fallback or use one deterministic
+local response. Compare the complete sorted path sets and SHA-256 of every file,
+including hashed CSS/JS/assets, headers, redirects and sitemap files. Only
+`docs/index.html`, `llms.txt` and `llms-full.txt` may differ; there are no new-doc
+route or sitemap exceptions. See the reviewed evidence in `docs/round-15-evidence/04/`.

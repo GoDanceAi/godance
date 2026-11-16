@@ -8,6 +8,16 @@
 
 An MCP client (Claude Code, Cursor, …) can call this API as tools at https://api.godance.ai/mcp, with the same key, caps and max_cost_cents on every tool that spends: https://godance.ai/docs/#mcp.
 
+
+Workflow and conditional capabilities:
+- Studio: open /create/image or /create/video in the app; select compatible jobs in /history to compare. Keep a setup in /recipes and run a version over rows in /batches. Run at scale provides code, assistant prompts and n8n options. These page visits start no paid job.
+- Image inputs require operator enablement, adult eligibility, accepted input terms and a capable model. Audio and embeddings are not implemented. Video BYOK and unsupported video remix/edit/extension operations are not live.
+- Provider keys are conditional on configured support and account/provider status, not an enterprise tier: use Settings → Provider keys or the existing provider-credentials API. Regional restrictions still apply; an existing unsupported credential remains manageable.
+- Community requires backend/account permission and moderated approved content: profiles, recipe publishing and follows use signed-in session routes, not API keys. Public read routes expose only approved content. See https://godance.ai/docs/#community-workflow.
+- User routing policies are API-only and conditional on operator enablement/account allowlisting. See https://godance.ai/docs/#routing-policies and the OpenAPI schema; there is no app policy editor.
+- MCP setup is under API keys → Use with MCP, authenticated with an API key. A setup link does not assert backend or provider health. See https://godance.ai/docs/#mcp and https://godance.ai/docs/#n8n.
+- Self-hosting instructions and configuration reference: https://github.com/GoDanceAi/godance/blob/main/docs/self-hosting.md. Deployment and optional capability activation are separate operator decisions.
+
 Contents: Authentication · Models and capabilities · Estimates · Chat · Images · Edits ·
 Files and inputs · Video · Jobs · Recipes · Batches · Errors · Limits and retention · Regions
 
@@ -21,7 +31,7 @@ Conventions used on every route:
   OpenAI's own shapes are snake_case. The examples below show each exactly.
 - Fields marked "Godance extension" are additions to OpenAI's shapes.
 - A response can carry fields that are not shown here. Ignore the ones you do not use.
-- Text is synchronous. Images and video run as jobs: a request is accepted, runs, and
+- Text supports streaming and non-streaming. Images can return jobs or sync-key OpenAI responses; video uses jobs. A job is accepted, runs, and
   ends DONE or FAILED. A job reserves its price when accepted and returns it if it fails.
 - The Python examples use `requests` (pip install requests) or OpenAI's SDK
   (pip install openai) and read the key from the GODANCE_API_KEY environment variable.
