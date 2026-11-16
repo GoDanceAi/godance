@@ -18,7 +18,7 @@ Record the staging build before running: `GET $API/healthz` shows the API commit
 | A4 | Second adult with credit | Ownership checks (another user's job, file, recipe) |
 | Staff | One account each with SUPPORT, FINANCE and ADMIN roles, 2FA on | Admin funnel, moderation, margin view |
 
-API keys on A1: `$KEY_ASYNC` (image response async), `$KEY_SYNC` (sync), `$KEY_CAP` (daily cap 100 cents).
+API keys on A1: `$KEY_ASYNC` (image response async), `$KEY_SYNC` (explicitly set `image_response: "sync"`), `$KEY_CAP` (daily cap 100 cents).
 
 ### Switches to set on staging
 
@@ -28,7 +28,7 @@ Feature switches default off or empty; limits and response settings have the def
 | --- | --- | --- |
 | `PROMO_REFERRAL_REFERRER_REWARD_CENTS`, `PROMO_REFERRAL_REFEREE_REWARD_CENTS` | 0 | 100 each (round 9) |
 | `RETENTION_SAVED_LIMIT` | 500 | 2 for the limit case only |
-| `IMAGES_NEW_KEY_RESPONSE`, `IMAGES_SYNC_WAIT` | async, 90s | sync; 5s for the timeout case only |
+| `IMAGES_NEW_KEY_RESPONSE`, `IMAGES_SYNC_WAIT` | async, 90s | keep async; 90s except 5s for R10-IMG-05, then restore 90s |
 | `INPUTS_ENABLED`, `INPUTS_ALLOW_PEOPLE`, `INPUTS_CHECK_MODEL` | false, false, empty | true, false, a vision model the region allows (round 11 on) |
 | `BATCHES_MAX_ROWS`, `BATCHES_MAX_UNFINISHED` | 500, 2 | defaults |
 | Gallery: `GALLERY_MEDIA_BASE_URL`, `GALLERY_REMOVAL_CONTACT`, `GALLERY_OUTPUT_LICENCE`, `GALLERY_RUN_THIS` | empty, empty, empty, false | staging media base, removal contact and output licence; Run this true |
@@ -96,8 +96,8 @@ Jobs and sign-ups record where they came from, gallery recipes keep their variab
 | R10-ORG-02 | P1 | Gallery recipe from the Studio | Open `/create/image?example=<slug>`, submit; then edit the prompt and submit again | First job has `galleryRecipe: <slug>`; the edited one has none | Not run |  |
 | R10-ORG-03 | P1 | Bad gallery\_recipe | API request with `"gallery_recipe": "Bad Slug!"` | 400 `invalid_gallery_recipe`, no ledger row | Not run |  |
 | R10-ORG-04 | P1 | Pasted recipe example | Run the curl from a gallery recipe page | Job records that slug | Not run |  |
-| R10-ORG-05 | P1 | First touch | Open `$APP/?utm_source=x&utm_campaign=t1` signed out, sign up A2 | One `POST /v1/attribution/first-touch`; stored value cleared; funnel counts A2 under `utm:x` | Not run |  |
-| R10-ORG-06 | P1 | First touch is write-once | Visit again with `utm_source=y` and sign in | Source stays `x` | Not run |  |
+| R10-ORG-05 | P1 | First touch | Open `$APP/?utm_source=x&utm_campaign=t1` signed out; sign up fresh A2 and at least four other fresh accounts through that URL. Select a reporting range covering these sign-ups, with x among its top 10 campaign sources; keep A2 for R10-ORG-06 | One `POST /v1/attribution/first-touch` per account; stored values cleared; funnel shows at least 5 sign-ups under `utm:x`, including A2 | Not run |  |
+| R10-ORG-06 | P1 | First touch is write-once | Visit again with `utm_source=y` and sign in as A2 | Source stays `x` | Not run |  |
 | R10-ORG-07 | P1 | First touch after social sign-in | Repeat R10-ORG-05 with Google sign-up | Claimed after the OAuth round trip | Not run |  |
 | R10-ORG-08 | P1 | Admin funnel | Staff opens Admin, Overview, funnel, picks a range | Cohort table by ISO week, source table, top recipes, percentages beside counts | Not run |  |
 | R10-ORG-09 | P0 | Funnel privacy | Inspect `GET $API/v1/admin/funnel` | Counts only; no user id, email or name; buckets under 5 users left out | Not run |  |
@@ -123,7 +123,7 @@ Jobs and sign-ups record where they came from, gallery recipes keep their variab
 | R10-IMG-02 | P0 | OpenAI SDK with a sync key | `client.images.generate(model="gpt-image-2", prompt=...)` with `base_url=$API/v1` and `$KEY_SYNC`; read `data[0]` | 200 with OpenAI's body (`url` or `b64_json`) plus `job_id`, `cost_cents` | Not run |  |
 | R10-IMG-03 | P1 | b64\_json | Same with `response_format="b64_json"` | Base64 image decodes; above 25 MB falls back to URLs | Not run |  |
 | R10-IMG-04 | P1 | Overrides | Sync key with `async: true`; then with header `Prefer: respond-async` | 202 both | Not run |  |
-| R10-IMG-05 | P1 | Wait times out | Set `IMAGES_SYNC_WAIT=5s`; request a slow model | 202 with `Retry-After: 5`; job finishes and is pollable | Not run |  |
+| R10-IMG-05 | P1 | Wait times out | Set `IMAGES_SYNC_WAIT=5s`; request a slow model with `$KEY_SYNC`; restore `IMAGES_SYNC_WAIT=90s` after the case | 202 with `Retry-After: 5`; job finishes and is pollable | Not run |  |
 | R10-IMG-06 | P0 | Failure refunds | Sync request that the provider fails (bad size, or a test model that fails) | 502 `generation_failed`; full refund in the ledger | Not run |  |
 | R10-IMG-07 | P1 | Per-key setting | API keys page: change a key's image response; `PATCH /v1/keys/{id}` with an API key | Setting saved and shown; PATCH with an API key is 403 | Not run |  |
 
@@ -201,7 +201,7 @@ A recipe runs over many rows as ordinary jobs, from the API or the app, and user
 | R12-BUI-06 | P1 | Paused and cancelled in the app | Trigger a credit pause and a cap pause; cancel another | Each says why with the right link and Resume; cancel asks first | Not run |  |
 | R12-BUI-07 | P2 | Large paste | Paste 500 rows | Page stays responsive; preview and upload work | Not run |  |
 | R12-HND-01 | P0 | Key with a daily cap | Create a key with daily cap 100 cents; spend 100 cents with it | Next request 402; keys page shows spent today against the cap | Not run |  |
-| R12-HND-02 | P1 | Edit caps and expiry | PATCH caps, set one to null; set an expiry in the past; use an expired key | Caps saved, null clears; past expiry refused; expired key 401 `api_key_expired` | Not run |  |
+| R12-HND-02 | P1 | Edit caps and expiry | PATCH caps, set one to null; try an expiry in the past; create a short-lived key with a future `expires_at`, wait until it expires, then use it | Caps saved, null clears; past expiry refused; expired key 401 with `detail: "API key has expired"` | Not run |  |
 | R12-HND-03 | P0 | Key routes are session only | Create or patch a key with an API key | 403 | Not run |  |
 | R12-HND-04 | P1 | Run at scale panel | Open it on a recipe page, a Studio result and a batch | Four tabs: assistant prompt, code, n8n, batch; prompt holds the recipe JSON, API base and doc links; no key anywhere | Not run |  |
 | R12-HND-05 | P0 | Generated code runs | Copy the curl and Python for sync image, async image, video, a recipe and an edit; set `GODANCE_API_KEY`; run | Each runs as shown and returns a result | Not run |  |
@@ -242,7 +242,7 @@ Godance's API is available as MCP tools behind an API key, the gallery is publis
 | R13-CMP-01 | P1 | Comparison pages | Open `$SITE/gallery/compare` and a pair page | Pairs with at least `GALLERY_COMPARE_MIN` shared recipes; side-by-side outputs with costs; summary table; no winner claimed | Not run |  |
 | R13-CMP-02 | P1 | Below the threshold | A pair with fewer shared recipes | No page and no link | Not run |  |
 | R13-CMP-03 | P1 | Run this picks a usable run | Recipe whose first run's model is not in `/v1/models` but the second's is; then one with none | Studio uses the second run's model; otherwise the default, with a note | Not run |  |
-| R13-CMP-04 | P1 | Rerun is a dry run | `rerun --models <id> --slugs <slug>` without `--max-spend-cents` | Plan printed with estimated cost; nothing spent; a real run needs the cap | Not run |  |
+| R13-CMP-04 | P1 | Rerun is a dry run | `rerun --models <id> --slugs <slug> --max-spend-cents 100` without `--apply`; repeat without `--max-spend-cents` | With cap: plan printed with estimated cost, nothing spent. Without cap: exit code 2, cap required, nothing spent | Not run |  |
 
 ## Round 14: consumers and experts
 
