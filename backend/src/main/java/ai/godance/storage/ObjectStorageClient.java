@@ -35,6 +35,15 @@ public interface ObjectStorageClient {
      */
     String presignedUrl(String key, java.time.Duration ttl);
 
+    /**
+     * Copies the object under {@code sourceKey} to {@code targetKey} within
+     * the bucket, on the storage side: nothing passes through this server,
+     * so it suits video as well as images. The copy is independent of its
+     * source; deleting either leaves the other. A failure throws, a missing
+     * source included. Returns {@code targetKey}.
+     */
+    String copy(String sourceKey, String targetKey);
+
     /** Delete an object. Idempotent — no error if the key doesn't exist. */
     void delete(String key);
 

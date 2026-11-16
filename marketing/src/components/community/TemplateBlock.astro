@@ -1,0 +1,48 @@
+---
+/**
+ * A recipe's template: the prompt with each variable shown as a marked chip,
+ * and a "Copy template" button that copies the template as written. The
+ * button is wired up by CopyScript on the page.
+ */
+import { parseTemplate } from '../../lib/gallery-template.js';
+
+interface Props {
+  /** Unique on the page; the Copy button points at it. */
+  id: string;
+  template: string;
+}
+
+const { id, template } = Astro.props;
+const { parts } = parseTemplate(template);
+---
+
+<section class="card p-0 overflow-hidden" data-community-template>
+  <header class="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-border bg-bg-muted">
+    <h3 class="text-sm font-semibold text-fg">Template</h3>
+    <button type="button" class="btn btn-secondary btn-sm" data-copy={id}>Copy template</button>
+  </header>
+  {/* One line, so no whitespace is added between the parts: the text is the template. */}
+  <p id={id} class="community-template px-4 py-3.5 text-fg">{parts.map((part) => ('name' in part ? <mark class="community-variable" data-variable={part.name}>{`{{${part.name}}}`}</mark> : part.text))}</p>
+</section>
+
+<style>
+  .community-template {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-size: 15px;
+    line-height: 1.9;
+  }
+  /* A variable: marked, in the monospace of code. */
+  .community-variable {
+    display: inline-block;
+    max-width: 100%;
+    line-height: 1.4;
+    font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+    font-size: 0.86em;
+    padding: 0.15em 0.45em;
+    border-radius: 0.4em;
+    color: var(--color-primary);
+    background: color-mix(in srgb, var(--color-primary) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--color-primary) 35%, transparent);
+  }
+</style>

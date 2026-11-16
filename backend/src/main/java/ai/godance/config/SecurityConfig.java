@@ -220,6 +220,10 @@ public class SecurityConfig {
                         // The API's own description, for tools and AI assistants. It says
                         // nothing that the public documentation does not.
                         .pathMatchers(HttpMethod.GET, "/v1/openapi.yaml").permitAll()
+                        // Published recipes and profiles (round 14): readable by anyone,
+                        // and only what a moderator approved. GET only, and nothing else
+                        // under /v1/public.
+                        .pathMatchers(HttpMethod.GET, "/v1/public/**").permitAll()
                         // Stripe (and any future) provider webhooks — authenticated by
                         // signature, not by JWT. Handler MUST reject bad signatures.
                         .pathMatchers(HttpMethod.POST, "/v1/billing/webhooks/**").permitAll()
@@ -267,6 +271,10 @@ public class SecurityConfig {
                                 .hasAnyAuthority(sessionOr(ApiKeyAuthFilter.API_KEY_AUTHORITY))
                         // Price of an image or video request before it is sent; charges nothing.
                         .pathMatchers(HttpMethod.POST, "/v1/estimates")
+                                .hasAnyAuthority(sessionOr(ApiKeyAuthFilter.API_KEY_AUTHORITY))
+                        // A user's own routing policies (round 14): the owner, with a session or
+                        // an API key, as recipes are. Answers 404 while they are switched off.
+                        .pathMatchers("/v1/routing/policies", "/v1/routing/policies/*")
                                 .hasAnyAuthority(sessionOr(ApiKeyAuthFilter.API_KEY_AUTHORITY))
                         // The MCP server (round 13): the API above as tools for an agent's MCP client.
                         // An API key only: never public, and a browser session cannot call it.

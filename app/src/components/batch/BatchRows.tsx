@@ -47,6 +47,8 @@ function OutputThumb({ output, alt }: { output: BatchRowOutput; alt: string }) {
  */
 export default function BatchRows({ batch, linked }: { batch: Batch; linked: number | null }) {
   const startPage = linked !== null && linked < batch.rows_total ? Math.floor(linked / ROWS_PAGE) : 0;
+  // A batch with fallbacks (round 14) says which model each row's job ran on; any other keeps its table as it was.
+  const fallbacks = batch.fallbacks === true;
   // The pages held, by page number: page 0 is rows 0–49.
   const [pages, setPages] = useState<ReadonlyMap<number, BatchRow[]>>(new Map());
   const [range, setRange] = useState({ first: startPage, last: startPage });
@@ -177,6 +179,7 @@ export default function BatchRows({ batch, linked }: { batch: Batch; linked: num
                 <th scope="col" className="px-3 py-2 font-semibold">Row</th>
                 <th scope="col" className="px-3 py-2 font-semibold">Values</th>
                 <th scope="col" className="px-3 py-2 font-semibold">Status</th>
+                {fallbacks && <th scope="col" className="px-3 py-2 font-semibold">Model</th>}
                 <th scope="col" className="px-3 py-2 font-semibold">Output</th>
                 <th scope="col" className="px-3 py-2 text-right font-semibold">Cost</th>
                 <th scope="col" className="px-3 py-2 font-semibold">Error</th>
@@ -184,7 +187,7 @@ export default function BatchRows({ batch, linked }: { batch: Batch; linked: num
             </thead>
             <tbody className="divide-y divide-border">
               {rows.length === 0 && (
-                <tr><td colSpan={6} className="px-3 py-5 text-center text-fg-faint">This batch has no rows.</td></tr>
+                <tr><td colSpan={fallbacks ? 7 : 6} className="px-3 py-5 text-center text-fg-faint">This batch has no rows.</td></tr>
               )}
               {rows.map((row) => {
                 const isLinked = linked === row.index;
@@ -218,6 +221,26 @@ export default function BatchRows({ batch, linked }: { batch: Batch; linked: num
                       )}
                     </td>
                     <td className="px-3 py-2 align-top"><RowStatusPill status={row.status} /></td>
+                    {fallbacks && (
+                      <td className="whitespace-nowrap px-3 py-2 align-top">
+                        {row.job_id === null ? (
+                          <span className="text-fg-faint">—</span>
+                        ) : (
+                          <>
+                            <span className="font-mono text-xs text-fg">{row.model ?? batch.model}</span>
+                            {row.retried_job_id && (
+                              <span className="block text-[11px] text-fg-subtle">
+                                after{' '}
+                                <Link to={`/history/${row.retried_job_id}`} className="text-brand-600 hover:underline"
+                                      aria-label={`Row ${rowNumber(row.index)}: open the generation that failed on ${batch.model}`}>
+                                  {batch.model} failed
+                                </Link>
+                              </span>
+                            )}
+                          </>
+                        )}
+                      </td>
+                    )}
                     <td className="px-3 py-2 align-top">
                       {first && row.job_id ? (
                         <Link to={`/history/${row.job_id}`} className="block w-12 overflow-hidden rounded-md"

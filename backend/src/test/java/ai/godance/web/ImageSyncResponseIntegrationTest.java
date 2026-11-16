@@ -4,14 +4,19 @@ import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import static com.github.tomakehurst.wiremock.client.WireMock.post;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 
+import java.time.Duration;
 import java.util.Base64;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -69,6 +74,9 @@ class ImageSyncResponseIntegrationTest {
     static final byte[] TINY_PNG = Base64.getDecoder().decode(
             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACklEQVR4nGMAAQAABQABDQottAAAAABJRU5ErkJggg==");
 
+    /** A job in one of these has ended, as {@link ImageSyncService} reads it. */
+    static final Set<JobStatus> ENDED = EnumSet.of(JobStatus.DONE, JobStatus.FAILED, JobStatus.CANCELLED);
+
     @Container
     @ServiceConnection
     static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16");
@@ -118,6 +126,30 @@ class ImageSyncResponseIntegrationTest {
     void reset() {
         openAiMock.resetAll();
         volcMock.resetAll();
+    }
+
+    /**
+     * A test ends only when every job it started has ended. A 202 answers
+     * while its job is still on its way to the provider, and the reset above
+     * does not stop a job left running: its call reaches the mocks during the
+     * next test, as that test's request (and, its stub gone, a 404). That is
+     * how a job from {@code generate_givenAKeySetToAsync_expects202} failed
+     * the empty journal of
+     * {@code generate_givenAnUnknownResponseFormat_expects400AndNoLedgerRow}.
+     *
+     * <p>A job ends after its provider has answered, and WireMock journals a
+     * request before it answers, so once no job is open nothing more of this
+     * test reaches the mocks. The database is this class's own: every job in
+     * it was started here, and earlier tests' jobs have all ended.
+     */
+    @AfterEach
+    void awaitJobsEnded() {
+        await().pollDelay(Duration.ZERO).pollInterval(Duration.ofMillis(50)).atMost(Duration.ofSeconds(15))
+                .untilAsserted(() -> assertThat(jobs.findAll().stream()
+                                .filter(job -> !ENDED.contains(job.getStatus()))
+                                .map(job -> job.getId() + " " + job.getStatus()))
+                        .as("jobs still open when the test ended")
+                        .isEmpty());
     }
 
     // ===== A sync key: done ===========================================
@@ -217,7 +249,8 @@ class ImageSyncResponseIntegrationTest {
                 .willReturn(aResponse().withStatus(500)
                         .withHeader("content-type", "application/json")
                         .withBody("{\"error\":{\"message\":\"upstream boom\"}}")));
-        double before = waits("failed");
+        double failedBefore = waits("failed");
+        double cancelledBefore = waits("cancelled");
 
         Map<?, ?> problem = postImage(key, Map.of("model", "gpt-image-2", "prompt", "A doomed render"))
                 .expectStatus().isEqualTo(502)
@@ -232,7 +265,9 @@ class ImageSyncResponseIntegrationTest {
         // The settlement's refund, unchanged: pre-debit and refund, back to the full seed.
         assertThat(ledger.authoritativeBalance(u.id())).isEqualTo(100_00L);
         assertThat(ledgerRowCount(u.id())).isEqualTo(3);
-        assertThat(waits("failed")).isEqualTo(before + 1);
+        // Counted once, as failed: answering the 502 is not also the caller going away.
+        assertThat(waits("failed")).isEqualTo(failedBefore + 1);
+        assertThat(waits("cancelled")).isEqualTo(cancelledBefore);
     }
 
     // ===== What does not change =======================================

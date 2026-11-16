@@ -749,7 +749,7 @@ class OpenAiVideoIntegrationTest {
         typo.part("recipe[variable][subject]", "The paper boat");
         JsonNode problem = refusedForm(me, typo, 400, "invalid_parameter");
         assertThat(problem.get("error").get("param").asString()).isEqualTo("recipe[variable]");
-        assertThat(problem.get("error").get("message").asString()).contains("recipe has version_id, variables and inputs");
+        assertThat(problem.get("error").get("message").asString()).contains("recipe has version_id, variables, inputs and published_id");
     }
 
     @Test

@@ -81,6 +81,7 @@ public class DataRetentionService {
     private final InputService inputs;
     private final RecipeBatchRepository batches;
     private final RecipeBatchRowRepository batchRows;
+    private final PublishedExamples communityExamples;
     private final TransactionTemplate tx;
 
     public DataRetentionService(GenerationJobRepository jobs, ConversationRepository conversations,
@@ -88,7 +89,8 @@ public class DataRetentionService {
                                 UnapprovedChildRepository unapprovedChildren,
                                 GenerationJobOutputRepository outputs, InputService inputs,
                                 RecipeBatchRepository batches, RecipeBatchRowRepository batchRows,
-                                PlatformTransactionManager txManager) {
+                                PublishedExamples communityExamples, PlatformTransactionManager txManager) {
+        this.communityExamples = communityExamples;
         this.batches = batches;
         this.batchRows = batchRows;
         this.jobs = jobs;
@@ -211,6 +213,18 @@ public class DataRetentionService {
         for (String prefix : MEDIA_PREFIXES) {
             storage.deletePrefix(prefix + jobId + "/");
         }
+    }
+
+    /**
+     * Deletes the example copies of published recipes that are no longer
+     * public (round 14): what an unpublish, a rejection or a removal could
+     * not delete at the time. The purge above never touches a public
+     * recipe's copies; they live under {@code community/}, not with the job.
+     *
+     * @return how many submissions were cleared
+     */
+    public int deleteClosedCommunityCopies() {
+        return communityExamples.sweepClosed(JOB_BATCH);
     }
 
     /**

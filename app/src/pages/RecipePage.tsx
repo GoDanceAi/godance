@@ -25,6 +25,7 @@ import SaveJobButton from '../components/SaveJobButton';
 import VariableValues from '../components/VariableValues';
 import RecipeBatches from '../components/batch/RecipeBatches';
 import RunAtScale from '../components/run/RunAtScale';
+import PublishPanel from '../components/community/PublishPanel';
 import { ROLE_LABEL } from '../lib/inputs';
 
 const PAGE_SIZE = 24;
@@ -130,6 +131,9 @@ function RecipeDetail({ initial }: { initial: UserRecipe }) {
         </button>
       </div>
       {deleteFailed && <p role="alert" className="mt-2 text-sm text-danger">Couldn't delete this recipe. Try again.</p>}
+
+      {/* Shown only while the community is open. */}
+      <PublishPanel recipe={recipe} />
 
       <section aria-labelledby="recipe-latest" className="mt-8">
         <h2 id="recipe-latest" className="text-sm font-semibold text-fg">Version {latest.number}, the latest</h2>

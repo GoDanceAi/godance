@@ -73,7 +73,7 @@ public class RecipeBatchViews {
                     b.getRowsTotal(), rowsIn(of, BatchRowStatus.DONE), rowsIn(of, BatchRowStatus.FAILED),
                     rowsIn(of, BatchRowStatus.RUNNING), rowsIn(of, BatchRowStatus.SKIPPED),
                     b.getEstimatedTotalCents(), done == null ? 0 : done.getCostCents(),
-                    b.getCreatedAt(), b.getStartedAt(), b.getCompletedAt()));
+                    b.getCreatedAt(), b.getStartedAt(), b.getCompletedAt(), b.isFallbacks() ? Boolean.TRUE : null));
         }
         return views;
     }
@@ -93,7 +93,7 @@ public class RecipeBatchViews {
                             o.getContentType()))
                     .toList();
             views.add(new BatchRowView(row.getRowIndex(), row.getStatus().name(), row.getVariables(),
-                    row.getJobId(), row.getCostCents(), row.getError(), shown));
+                    row.getJobId(), row.getCostCents(), row.getError(), shown, row.getModel(), row.getRetriedJobId()));
         }
         return views;
     }

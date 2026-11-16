@@ -1,0 +1,45 @@
+---
+/**
+ * Wires up the page's Copy buttons: each names the element whose text it
+ * copies with data-copy. With no clipboard, or a refused write, the text is
+ * selected for the reader instead, and the button says so.
+ */
+---
+
+<script is:inline>
+  (function () {
+    function answer(button, word) {
+      var label = button.getAttribute('data-label');
+      if (label === null) {
+        label = button.textContent;
+        button.setAttribute('data-label', label);
+      }
+      button.textContent = word;
+      setTimeout(function () { button.textContent = label; }, 1600);
+    }
+
+    function selectForReader(button, target) {
+      var range = document.createRange();
+      range.selectNodeContents(target);
+      var selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      answer(button, 'Selected');
+    }
+
+    [].forEach.call(document.querySelectorAll('[data-copy]'), function (button) {
+      button.addEventListener('click', function () {
+        var target = document.getElementById(button.getAttribute('data-copy'));
+        if (!target) return;
+        if (!navigator.clipboard || !navigator.clipboard.writeText) {
+          selectForReader(button, target);
+          return;
+        }
+        navigator.clipboard.writeText(target.textContent || '').then(
+          function () { answer(button, 'Copied'); },
+          function () { selectForReader(button, target); }
+        );
+      });
+    });
+  })();
+</script>

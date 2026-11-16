@@ -19,6 +19,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
+import ai.godance.gateway.CallerKey;
 import ai.godance.config.AnthropicProperties;
 import ai.godance.domain.Provider;
 import ai.godance.gateway.ChatDtos.ChatChoice;
@@ -61,9 +62,10 @@ public class AnthropicProvider implements ProviderAdapter {
     public AnthropicProvider(AnthropicProperties props, ObjectMapper json) {
         this.props = props;
         this.json = json;
+        // The key goes on each request (round 14): the caller's own, when the
+        // call carries one, else the platform's.
         this.client = WebClient.builder()
                 .baseUrl(props.apiBase())
-                .defaultHeader("x-api-key", props.apiKey())
                 .defaultHeader("anthropic-version", props.apiVersion())
                 .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
                 .build();
@@ -75,13 +77,23 @@ public class AnthropicProvider implements ProviderAdapter {
     }
 
     @Override
+    public boolean takesCallerKeys() {
+        return true;
+    }
+
+    private String apiKey(reactor.util.context.ContextView context) {
+        return CallerKey.or(context, Provider.ANTHROPIC, props.apiKey());
+    }
+
+    @Override
     public Mono<ChatResponse> chat(ChatRequest request) {
         AnthropicRequest body = buildBody(request, false);
-        return client.post()
-                .uri("/v1/messages")
-                .bodyValue(body)
-                .retrieve()
-                .bodyToMono(AnthropicResponse.class)
+        return Mono.deferContextual(context -> client.post()
+                        .uri("/v1/messages")
+                        .header("x-api-key", apiKey(context))
+                        .bodyValue(body)
+                        .retrieve()
+                        .bodyToMono(AnthropicResponse.class))
                 .map(r -> toDomain(r, request.model()))
                 .timeout(props.timeout());
     }
@@ -94,12 +106,13 @@ public class AnthropicProvider implements ProviderAdapter {
         AtomicInteger outputTokens = new AtomicInteger(0);
         AtomicReference<String> stopReason = new AtomicReference<>();
 
-        return client.post()
-                .uri("/v1/messages")
-                .accept(MediaType.TEXT_EVENT_STREAM)
-                .bodyValue(body)
-                .retrieve()
-                .bodyToFlux(new ParameterizedTypeReference<ServerSentEvent<String>>() {})
+        return Flux.deferContextual(context -> client.post()
+                        .uri("/v1/messages")
+                        .header("x-api-key", apiKey(context))
+                        .accept(MediaType.TEXT_EVENT_STREAM)
+                        .bodyValue(body)
+                        .retrieve()
+                        .bodyToFlux(new ParameterizedTypeReference<ServerSentEvent<String>>() {}))
                 .flatMap(event -> parseStreamEvent(event, request.model(),
                         messageId, inputTokens, outputTokens, stopReason))
                 .timeout(props.timeout());

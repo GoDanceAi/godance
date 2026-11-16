@@ -4,7 +4,9 @@ import { apiFetch, ApiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { Icon } from '../components/Brand';
 import ResendEmailButton from '../components/ResendEmailButton';
+import ProfileSection from '../components/community/ProfileSection';
 import TwoFactorSection from '../components/TwoFactorSection';
+import ProviderKeysSection from '../components/ProviderKeysSection';
 import { AcceptInputTerms, InputTermsText } from '../components/InputTerms';
 import { INPUT_TERMS } from '../lib/input-terms';
 import { formatDateTime } from '../lib/time';
@@ -63,7 +65,11 @@ export default function SettingsPage() {
 
       <TwoFactorSection />
 
+      <ProviderKeysSection />
+
       <InputsSection />
+
+      <ProfileSection />
 
       <section className="mt-8 card">
         <h2 className="font-semibold text-fg">Webhook signing secret</h2>

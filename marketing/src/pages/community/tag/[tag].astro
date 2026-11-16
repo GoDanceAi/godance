@@ -1,0 +1,54 @@
+---
+/**
+ * /community/tag/<tag>: the community recipes with one tag, newest first.
+ * One page for each tag in use, and none while the community is off.
+ */
+import type { GetStaticPaths } from 'astro';
+import Layout from '../../../layouts/Layout.astro';
+import RecipeList from '../../../components/community/RecipeList.astro';
+import {
+  COMMUNITY_PATH,
+  collectionJsonLd,
+  communityTags,
+  loadCommunity,
+  scriptJson,
+  tagPath,
+} from '../../../lib/community';
+
+export const getStaticPaths = (async () => {
+  const community = await loadCommunity();
+  if (!community.on) return [];
+  return communityTags(community.recipes).map(({ tag }) => ({ params: { tag }, props: { tag } }));
+}) satisfies GetStaticPaths;
+
+interface Props {
+  tag: string;
+}
+
+const { tag } = Astro.props;
+const { recipes } = await loadCommunity();
+const tagged = recipes.filter((recipe) => recipe.tags.includes(tag));
+
+const title = `Community recipes tagged “${tag}” | Godance`;
+const description =
+  `${tagged.length} image and video ${tagged.length === 1 ? 'recipe' : 'recipes'} tagged “${tag}”, published by ` +
+  'Godance users and approved by a moderator.';
+const jsonLd = collectionJsonLd(`Godance community recipes tagged ${tag}`, description, tagPath(tag), tagged, Astro.site ?? Astro.url);
+---
+
+<Layout {title} {description} canonicalPath={tagPath(tag)}>
+  <section class="mx-auto max-w-6xl px-6 pt-16 pb-20" data-community-tag={tag}>
+    <p class="text-sm text-fg-subtle">
+      <a href={COMMUNITY_PATH} class="underline hover:text-fg">Community</a>
+      <span aria-hidden="true"> / </span>Tag
+    </p>
+    <h1 class="mt-2 text-4xl font-bold tracking-tight text-fg">Recipes tagged “{tag}”</h1>
+    <p class="mt-4 max-w-2xl text-fg-muted">
+      Community recipes with this tag, newest first. A moderator approves each one before it appears here.
+    </p>
+    <div class="mt-10">
+      <RecipeList recipes={tagged} all={recipes} activeTag={tag} />
+    </div>
+  </section>
+  <script type="application/ld+json" set:html={scriptJson(jsonLd)} />
+</Layout>
