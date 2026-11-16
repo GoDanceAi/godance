@@ -36,6 +36,7 @@ import CatalogPage from './pages/admin/CatalogPage';
 import UsersPage from './pages/admin/UsersPage';
 import OverviewPage from './pages/admin/OverviewPage';
 import CommunityPage from './pages/admin/CommunityPage';
+import FeaturesPage from './pages/admin/FeaturesPage';
 
 export default function App() {
   return (
@@ -93,6 +94,7 @@ export default function App() {
             <Route path="users"     element={<UsersPage />} />
             <Route path="overview"  element={<OverviewPage />} />
             <Route path="community" element={<CommunityPage />} />
+            <Route path="features" element={<FeaturesPage />} />
           </Route>
 
           {/* Fallback */}
