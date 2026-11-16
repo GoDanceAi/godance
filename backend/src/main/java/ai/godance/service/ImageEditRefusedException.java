@@ -6,7 +6,10 @@ import org.springframework.web.server.ResponseStatusException;
 /**
  * A refused image edit ({@code POST /v1/images/edits}): problem+json whose
  * {@code code} says which kind, answered before anything is stored or
- * charged.
+ * charged. The {@code code}, and {@code param} where there is one, also
+ * appear in OpenAI's {@code error} object on that route
+ * ({@link ai.godance.security.OpenAiError}), which is what its SDKs read;
+ * {@code field} does not.
  */
 public final class ImageEditRefusedException extends ResponseStatusException {
 

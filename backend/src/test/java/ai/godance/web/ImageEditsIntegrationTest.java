@@ -623,6 +623,109 @@ class ImageEditsIntegrationTest {
         assertThat(files.findByUserId(me.id())).isEmpty();
     }
 
+    // ===== Errors: the problem, with OpenAI's error object beside it ===
+
+    @Test
+    void errors_givenAFieldTheRouteDoesNotRead_expectOpenAisErrorObjectBesideEveryProblemMember() {
+        Account me = account(100_00L);
+        byte[] photo = InputFixtures.image("plain.png");
+
+        // output_format as OpenAI's SDK sends it: a field of the form.
+        JsonNode problem = refused(me, () -> multipart(me.bearer(), form("gpt-image-2", "x")
+                .image("image", photo, "a.png").field("output_format", "webp")), 400, "invalid_parameter");
+
+        // Still the problem document it was…
+        assertThat(problem.get("title").asString()).isEqualTo("Bad Request");
+        assertThat(problem.get("status").asInt()).isEqualTo(400);
+        assertThat(problem.get("instance").asString()).isEqualTo("/v1/images/edits");
+        assertThat(problem.get("detail").asString()).startsWith("POST /v1/images/edits does not take output_format.");
+        assertThat(problem.get("param").asString()).isEqualTo("output_format");
+        // …and OpenAI's error object, which is where its SDK reads the message, the code and the field.
+        JsonNode error = problem.get("error");
+        assertThat(error.get("message").asString()).isEqualTo(problem.get("detail").asString());
+        assertThat(error.get("type").asString()).isEqualTo("invalid_request_error");
+        assertThat(error.get("param").asString()).isEqualTo("output_format");
+        assertThat(error.get("code").asString()).isEqualTo("invalid_parameter");
+        assertThat(error.propertyNames()).containsExactly("message", "type", "param", "code");
+
+        // In JSON a field at any depth: param is its path, in both places.
+        UUID file = upload(me, photo, "a.png");
+        JsonNode deep = refused(me, () -> jsonEdit(me.bearer(), Map.of("model", "gpt-image-2", "prompt", "x",
+                "images", List.of(Map.of("file_id", file.toString()), Map.of("url", "https://example.test/b.png")))),
+                400, "invalid_parameter");
+        assertThat(deep.get("param").asString()).isEqualTo("images[1].url");
+        assertThat(deep.get("error").get("param").asString()).isEqualTo("images[1].url");
+        assertThat(deep.get("error").get("message").asString()).isEqualTo(deep.get("detail").asString());
+    }
+
+    @Test
+    void errors_givenRefusalsOfOtherKinds_expectOpenAisErrorObjectWithTheirTypeAndCode() {
+        Account me = account(100_00L);
+        Account other = account(0L);
+        UUID theirs = upload(other, InputFixtures.image("plain.png"), "theirs.png");
+        byte[] photo = InputFixtures.image("plain.png");
+
+        // 404 with a code: another account's file.
+        JsonNode notFound = refused(me, () -> jsonEdit(me.bearer(), Map.of("model", "gpt-image-2", "prompt", "Theirs.",
+                "images", List.of(Map.of("file_id", theirs.toString())))), 404, "file_not_found");
+        assertThat(notFound.get("error").get("message").asString()).isEqualTo("file not found");
+        assertThat(notFound.get("error").get("type").asString()).isEqualTo("not_found_error");
+        assertThat(notFound.get("error").get("code").asString()).isEqualTo("file_not_found");
+        assertThat(notFound.get("error").get("param").isNull()).isTrue();
+
+        // 404 without a code: an unknown model. The object's code is null, as the problem has none.
+        JsonNode unknownModel = json.readTree(refusedPlain(me, () -> multipart(me.bearer(),
+                form("no-such-model", "x").image("image", photo, "a.png")), 404)
+                .returnResult().getResponseBody());
+        assertThat(unknownModel.has("code")).isFalse();
+        assertThat(unknownModel.get("error").get("message").asString()).isEqualTo("unknown model: no-such-model");
+        assertThat(unknownModel.get("error").get("type").asString()).isEqualTo("not_found_error");
+        assertThat(unknownModel.get("error").get("code").isNull()).isTrue();
+
+        // input_not_supported names the input in field, which is the problem's own member, not OpenAI's param.
+        JsonNode mask = refused(me, () -> multipart(me.bearer(), form("seedream-5.0", "Only here.")
+                .image("image", photo, "a.png").image("mask", InputFixtures.image("alpha.webp"), "mask.webp")),
+                400, "input_not_supported");
+        assertThat(mask.get("field").asString()).isEqualTo("mask");
+        assertThat(mask.get("error").get("code").asString()).isEqualTo("input_not_supported");
+        assertThat(mask.get("error").get("param").isNull()).isTrue();
+
+        // A part refused as an upload is: 415, which OpenAI has no type of its own for.
+        JsonNode notAnImage = refused(me, () -> multipart(me.bearer(), form("gpt-image-2", "Edit this.")
+                .image("image", InputFixtures.image("picture.gif"), "photo.png")), 415, "input_type_unsupported");
+        assertThat(notAnImage.get("error").get("type").asString()).isEqualTo("invalid_request_error");
+        assertThat(notAnImage.get("error").get("code").asString()).isEqualTo("input_type_unsupported");
+
+        // The same refusal from POST /v1/files, the route beside it, is as it was: no error object.
+        JsonNode upload = json.readTree(InputFixtures.upload(http, me.bearer(), InputFixtures.image("picture.gif"),
+                        "photo.png", MediaType.IMAGE_PNG)
+                .expectStatus().isEqualTo(415)
+                .expectBody(String.class).returnResult().getResponseBody());
+        assertThat(upload.get("code").asString()).isEqualTo("input_type_unsupported");
+        assertThat(upload.has("error")).as("POST /v1/files carries no OpenAI error object").isFalse();
+    }
+
+    @Test
+    void errors_givenAnInvalidApiKey_expectOpenAisErrorObjectFromTheFilterThatRefusesIt() {
+        String badKey = "Bearer gd_live_this_key_does_not_exist_0000000000";
+
+        // Refused by the API key filter, before the route reads anything: on both forms.
+        for (WebTestClient.ResponseSpec response : List.of(
+                multipart(badKey, form("gpt-image-2", "x").image("image", InputFixtures.image("plain.png"), "a.png")),
+                jsonEdit(badKey, Map.of("model", "gpt-image-2", "prompt", "x")))) {
+            JsonNode problem = json.readTree(response
+                    .expectStatus().isUnauthorized()
+                    .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON)
+                    .expectBody(String.class).returnResult().getResponseBody());
+            assertThat(problem.get("status").asInt()).isEqualTo(401);
+            assertThat(problem.get("detail").asString()).isEqualTo("invalid API key");
+            assertThat(problem.get("error").get("message").asString()).isEqualTo("invalid API key");
+            assertThat(problem.get("error").get("type").asString()).isEqualTo("authentication_error");
+            assertThat(problem.get("error").get("code").isNull()).isTrue();
+            assertThat(problem.get("error").get("param").isNull()).isTrue();
+        }
+    }
+
     // ===== The key's answer: sync and async ===========================
 
     @Test

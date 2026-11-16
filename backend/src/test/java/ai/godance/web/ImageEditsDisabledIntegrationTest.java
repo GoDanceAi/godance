@@ -108,7 +108,7 @@ class ImageEditsDisabledIntegrationTest {
                 form.part("model", model);
                 form.part("prompt", "Put the mug on a marble counter.");
                 form.part("image", InputFixtures.named(InputFixtures.image("plain.png"), "mug.png")).contentType(MediaType.IMAGE_PNG);
-                expectDisabled(http.post().uri("/v1/images/edits")
+                expectDisabledWithOpenAisError(http.post().uri("/v1/images/edits")
                         .header(HttpHeaders.AUTHORIZATION, bearer)
                         .contentType(MediaType.MULTIPART_FORM_DATA)
                         .body(BodyInserters.fromMultipartData(form.build()))
@@ -121,7 +121,7 @@ class ImageEditsDisabledIntegrationTest {
                             "images", List.of(Map.of("job_output", Map.of("job_id", UUID.randomUUID().toString(), "index", 0))),
                             "mask", Map.of("file_id", UUID.randomUUID().toString())),
                     Map.of())) {
-                expectDisabled(http.post().uri("/v1/images/edits")
+                expectDisabledWithOpenAisError(http.post().uri("/v1/images/edits")
                         .header(HttpHeaders.AUTHORIZATION, bearer)
                         .contentType(MediaType.APPLICATION_JSON)
                         .bodyValue(body)
@@ -158,12 +158,15 @@ class ImageEditsDisabledIntegrationTest {
                     .exchange().expectStatus().isCreated().expectBody(Map.class).returnResult().getResponseBody();
             String versionId = (String) ((Map<?, ?>) recipe.get("latest_version")).get("id");
 
-            expectDisabled(http.post().uri((String) each.get("route"))
+            WebTestClient.ResponseSpec response = http.post().uri((String) each.get("route"))
                     .header(HttpHeaders.AUTHORIZATION, session)
                     .contentType(MediaType.APPLICATION_JSON)
                     .bodyValue(Map.of("model", each.get("model"),
                             "recipe", Map.of("version_id", versionId, "inputs", Map.of(each.get("slot"), aFile))))
-                    .exchange());
+                    .exchange();
+            // OpenAI's image routes say it in OpenAI's error object too; Godance's video route does not.
+            if (((String) each.get("route")).startsWith("/v1/images/")) expectDisabledWithOpenAisError(response);
+            else expectDisabled(response).jsonPath("$.error").doesNotExist();
         }
 
         assertThat(users.findById(userId).orElseThrow().getCreditBalanceCents()).isEqualTo(100_00L);
@@ -180,11 +183,24 @@ class ImageEditsDisabledIntegrationTest {
                 .expectStatus().isUnauthorized();
     }
 
-    private static void expectDisabled(WebTestClient.ResponseSpec response) {
-        response.expectStatus().isForbidden()
+    private static WebTestClient.BodyContentSpec expectDisabled(WebTestClient.ResponseSpec response) {
+        return response.expectStatus().isForbidden()
                 .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON)
                 .expectBody()
                 .jsonPath("$.code").isEqualTo("inputs_disabled")
                 .jsonPath("$.detail").isEqualTo("Image inputs are not available.");
+    }
+
+    /**
+     * {@link #expectDisabled} on one of OpenAI's image routes, where the problem
+     * also carries OpenAI's error object: its SDK's exception then reads
+     * "Error code: 403 - Image inputs are not available." rather than only the status.
+     */
+    private static void expectDisabledWithOpenAisError(WebTestClient.ResponseSpec response) {
+        expectDisabled(response)
+                .jsonPath("$.error.message").isEqualTo("Image inputs are not available.")
+                .jsonPath("$.error.type").isEqualTo("permission_error")
+                .jsonPath("$.error.code").isEqualTo("inputs_disabled")
+                .jsonPath("$.error.param").isEmpty();
     }
 }

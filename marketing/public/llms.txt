@@ -102,7 +102,9 @@ poll_url} and Retry-After: 5, so check for it and poll GET /v1/jobs/{id}. A fail
 answers 502 problem JSON with code "generation_failed" and the charge is refunded. With
 an "async" key (the default for keys made before this setting) the answer is always the
 202; "async": true in the body or a Prefer: respond-async header asks for that on one
-request. Video is always a job.
+request. Video is always a job. Errors on POST /v1/images/generations and
+POST /v1/images/edits are problem JSON that also carries OpenAI's error object, so the
+SDK's exceptions carry the message, e.code and e.param.
 
 ## Video with the OpenAI SDK
 
