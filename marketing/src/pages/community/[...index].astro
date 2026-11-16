@@ -1,0 +1,41 @@
+---
+/**
+ * /community: every public community recipe, newest first, with a filter by
+ * tag (one page per tag, /community/tag/<tag>).
+ *
+ * A rest parameter instead of index.astro, so that the page has no path, and
+ * so is not built, while the community is off.
+ */
+import type { GetStaticPaths } from 'astro';
+import Layout from '../../layouts/Layout.astro';
+import RecipeList from '../../components/community/RecipeList.astro';
+import { COMMUNITY_PATH, collectionJsonLd, loadCommunity, scriptJson } from '../../lib/community';
+
+export const getStaticPaths = (async () => {
+  const community = await loadCommunity();
+  return community.on ? [{ params: { index: undefined } }] : [];
+}) satisfies GetStaticPaths;
+
+const { recipes } = await loadCommunity();
+
+const title = 'Community recipes — prompts Godance users published | Godance';
+const description =
+  'Image and video recipes published by Godance users, each approved by a moderator: the template and its ' +
+  'variables, the model and settings, example outputs, the licence, and how often others have run it.';
+const jsonLd = collectionJsonLd('Godance community recipes', description, COMMUNITY_PATH, recipes, Astro.site ?? Astro.url);
+---
+
+<Layout {title} {description} canonicalPath={COMMUNITY_PATH}>
+  <section class="mx-auto max-w-6xl px-6 pt-16 pb-20" data-community-index>
+    <h1 class="text-4xl font-bold tracking-tight text-fg">Community recipes</h1>
+    <p class="mt-4 max-w-2xl text-fg-muted">
+      Recipes Godance users published. A moderator approves each one before it appears here. Open one to see
+      its template and variables, the model and settings, example outputs and the licence, then run it with
+      your own values.
+    </p>
+    <div class="mt-10">
+      <RecipeList {recipes} all={recipes} />
+    </div>
+  </section>
+  <script type="application/ld+json" set:html={scriptJson(jsonLd)} />
+</Layout>

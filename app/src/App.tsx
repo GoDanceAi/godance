@@ -3,6 +3,7 @@ import Layout from './components/Layout';
 import ProtectedRoute from './components/ProtectedRoute';
 import { AuthProvider } from './lib/auth';
 import { AdminProvider } from './lib/admin';
+import { CommunityProvider } from './lib/community-context';
 import { useFirstTouch } from './lib/first-touch';
 import { ReferralProvider } from './lib/referral';
 import LoginPage from './pages/LoginPage';
@@ -27,11 +28,14 @@ import ApiKeysPage from './pages/ApiKeysPage';
 import BillingPage from './pages/BillingPage';
 import SettingsPage from './pages/SettingsPage';
 import ReferralPage from './pages/ReferralPage';
+import FollowingPage from './pages/FollowingPage';
+import ReportPage from './pages/ReportPage';
 import AdminLayout from './pages/admin/AdminLayout';
 import ProposalsPage from './pages/admin/ProposalsPage';
 import CatalogPage from './pages/admin/CatalogPage';
 import UsersPage from './pages/admin/UsersPage';
 import OverviewPage from './pages/admin/OverviewPage';
+import CommunityPage from './pages/admin/CommunityPage';
 
 export default function App() {
   return (
@@ -39,6 +43,7 @@ export default function App() {
       <FirstTouch />
       <AdminProvider>
       <ReferralProvider>
+      <CommunityProvider>
       <Layout>
         <Routes>
           {/* Public */}
@@ -75,6 +80,9 @@ export default function App() {
           <Route path="/settings"  element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
           {/* Only while referrals are on; otherwise it leads back to the dashboard. */}
           <Route path="/referral"  element={<ProtectedRoute><ReferralPage /></ProtectedRoute>} />
+          {/* The community (round 14): only while the API has it open; otherwise they lead back to the dashboard. */}
+          <Route path="/following" element={<ProtectedRoute><FollowingPage /></ProtectedRoute>} />
+          <Route path="/report"    element={<ProtectedRoute><ReportPage /></ProtectedRoute>} />
 
           {/* Admin console — nav + routes render only after /v1/admin/me
               returns 200; the server-side role gate stays the real one. */}
@@ -84,12 +92,14 @@ export default function App() {
             <Route path="catalog"   element={<CatalogPage />} />
             <Route path="users"     element={<UsersPage />} />
             <Route path="overview"  element={<OverviewPage />} />
+            <Route path="community" element={<CommunityPage />} />
           </Route>
 
           {/* Fallback */}
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
       </Layout>
+      </CommunityProvider>
       </ReferralProvider>
       </AdminProvider>
     </AuthProvider>

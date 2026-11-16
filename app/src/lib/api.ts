@@ -495,6 +495,7 @@ export interface JobView {
   recipe?: JobRecipe | null;           // the user's recipe it ran; null for a plain prompt, or once that recipe is deleted
   inputs?: JobInput[];                 // the images it was given (round 11); empty for none, and once purged
   batch?: JobBatch | null;             // the batch it is a row of (round 12); null or absent for any other job
+  publishedRecipe?: string;            // the published recipe it ran, by public id (round 14); absent for any other job
 }
 
 /** The batch a job belongs to, and which of its rows the job is (0-based). */
