@@ -117,6 +117,59 @@ standard.
    asks for it to be taken down, is removed and kept from being imported
    again. See the notice in `marketing/src/content/gallery/NOTICE.md`.
 
+## Community recipes
+
+Signed-in users can publish their own recipes to the community, where
+anyone can see and run them. The community is switched off until the
+operator turns it on (`godance.community.enabled`). A community recipe is
+held to this same standard, and it is pre-moderated: nothing an account
+makes is public until a moderator (an account with the `SUPPORT` or `ADMIN`
+role) has checked it against this document and approved it.
+
+- **The same rules.** Rules 1 to 8 apply to a community recipe's title, its
+  template, each variable's default, its tags and every example output,
+  exactly as they apply to a gallery recipe. "The output counts too" applies
+  to each example.
+- **No real people in examples.** An example shows no real person, named or
+  recognisable, and no look-alike of one. Only an adult account with a
+  verified email can publish, and the examples are its own finished runs of
+  the recipe: a run that used an uploaded or earlier image cannot be an
+  example, so an example never shows anyone's upload.
+- **Variables must not invite a real person's name or likeness.** As in
+  "Templates and their variables": a variable named "celebrity", "your
+  face" or "my ex" is rejected under rule 1, and one named "brand logo" or
+  "favourite character" under rule 2, whatever its default is.
+- **Input slots.** While uploads may not show people
+  (`godance.inputs.allow-people` is false), a recipe with input slots cannot
+  be submitted at all. Once they may, a slot's hint follows "Recipes with
+  inputs, and their samples".
+- **The profile is reviewed with the recipe.** A handle, display name or link
+  that imitates a real person, a brand or Godance itself, or a link to
+  anything that fails this standard, fails the recipe. A change to the
+  display name or link after approval waits for a moderator before it is
+  shown, and the handle cannot change once approved.
+
+**A recipe is rejected** when any part of it fails a rule above; when an
+example could not have come from the recipe as published, or shows
+something the template does not ask for; when its title, tags or template
+advertise, carry a link, or ask for contact details; or when the moderator
+is unsure. The author sees the reason.
+
+**A public recipe is removed** when a report, or a moderator's own look,
+shows that it fails a rule above. A report alone removes nothing: the
+recipe stays public, back in the moderation queue, until a moderator
+decides. The author sees the reason. An author can also unpublish a recipe
+at any time, and closing an account or deleting the recipe unpublishes it.
+Removing or unpublishing deletes the public copies of the examples at once;
+the record of what was published, and why it came down, is kept.
+
+**The moderator sees** the template with each variable and its default, the
+examples, the author's profile, and the earlier decisions on that author's
+submissions.
+
+What a visitor types into a variable, or uploads into a slot, when they run
+a community recipe is not community content, as for the gallery.
+
 ## Changing this standard
 
 Any change to the rules raises the version number at the top. Recipes
