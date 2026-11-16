@@ -605,6 +605,7 @@ export interface Batch {
   rows_running?: number;           // right in every status: a paused or cancelled batch can have rows finishing
   rows_skipped?: number;
   started_at?: string | null;
+  fallbacks?: boolean;             // true for a batch created with "fallbacks": true (round 14); absent otherwise
 }
 
 /** One file a finished row produced. The link is signed when the row is read. */
@@ -623,6 +624,8 @@ export interface BatchRow {
   cost_cents: number | null;
   error: string | null;
   outputs?: BatchRowOutput[];      // empty unless the row is DONE and its files are still kept
+  model?: string;                  // a row retried on a fallback (round 14): the model its job ran on
+  retried_job_id?: string;         // ...and the failed job that fallback replaced
 }
 
 /** POST /v1/recipe-batches/estimate: what the whole batch would cost, against the balance. */
@@ -811,4 +814,25 @@ export interface AdminFunnel {
   cohorts: AdminFunnelCohort[];
   by_source: AdminFunnelSource[];
   gallery_recipes: AdminFunnelRecipe[];
+}
+
+/** GET /v1/admin/routing/margins (round 14): per routing policy and rule, what callers paid and the models cost. */
+export interface AdminRoutingMarginTotals {
+  requests: number;
+  failed_attempts: number;
+  paid_cents: number;
+  cost_cents: number;
+  spread_cents: number;
+}
+
+export interface AdminRoutingMarginRow extends AdminRoutingMarginTotals {
+  policy: string;                  // a preset's id, or a user's policy as usr_<user id>:<name>
+  rule: string;
+}
+
+export interface AdminRoutingMargins {
+  from: string;
+  to: string;
+  rows: AdminRoutingMarginRow[];
+  total: AdminRoutingMarginTotals;
 }

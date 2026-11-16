@@ -80,28 +80,26 @@ public class VideoInputs {
     }
 
     /**
-     * Refuses a first frame the model cannot take, knowing only the model's
-     * name. A multipart form ({@code POST /v1/videos} with an
+     * Refuses inputs the model cannot take, knowing only the model's name
+     * and which inputs the request has; what each one points to is not
+     * looked at. A multipart form ({@code POST /v1/videos} with an
      * {@code input_reference} file) calls this before it stores the image,
-     * so a request that cannot run leaves no file. {@link #resolve} makes the
-     * same check again, with every other one, when the job is submitted.
+     * so a request that cannot run leaves no file. {@link #resolve} makes
+     * the same checks again, with every other one, when the job is
+     * submitted.
      *
      * @throws ResponseStatusException 403 {@code inputs_disabled}; 404 for an unknown model; 400 for a model
-     *                                 that is not a video model, and {@code input_not_supported} for one that
-     *                                 takes no first frame
+     *                                 that is not a video model, and {@code input_not_supported} for inputs it
+     *                                 does not take
      */
-    public void requireTakesFirstFrame(String modelName) {
+    public void requireTakes(String modelName, Refs refs) {
         inputs.requireEnabled();
         ModelInfo model = catalog.find(modelName).orElseThrow(() ->
                 new ResponseStatusException(HttpStatus.NOT_FOUND, "unknown model: " + modelName));
         if (model.modality() != Modality.VIDEO) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "model " + modelName + " is not a video model");
         }
-        // An adapter that sends no images takes none, whatever the catalog row says.
-        boolean adapterSendsImages = !gateway.inputRules(model).contentTypes().isEmpty();
-        if (!(adapterSendsImages && catalog.metadata(modelName).capabilities().inputs().firstFrame())) {
-            throw VideoInputRefusedException.fieldNotSupported(modelName, "first_frame");
-        }
+        named(model, refs);
     }
 
     /** {@link InputService#requireMayUse}: switched on, an adult's account, the current terms accepted. */

@@ -31,6 +31,7 @@ import ai.godance.repository.ReportRepository;
 import ai.godance.repository.SavedRecipeRepository;
 import ai.godance.repository.UserRepository;
 import ai.godance.repository.UserTwoFactorRepository;
+import ai.godance.routing.RoutingPolicyRepository;
 
 /**
  * Closes an account on its owner's request. Operator-run, from
@@ -85,12 +86,15 @@ public class AccountClosureService {
     private final OAuthIdentityRepository identities;
     private final ConversationRepository conversations;
     private final SavedRecipeRepository savedRecipes;
+    private final RoutingPolicyRepository routingPolicies;
     private final RecipeRepository recipes;
     private final RecipeBatchRepository batches;
     private final GenerationJobRepository jobs;
     private final GenerationJobSettlement settlement;
     private final DataRetentionService retention;
     private final InputService inputs;
+    /** The account's own provider keys (round 14). */
+    private final ProviderCredentialService providerKeys;
     private final AuditLogService audit;
     private final PublishService publishing;
     private final ProfileRepository profiles;
@@ -98,10 +102,11 @@ public class AccountClosureService {
     private final ReportRepository reports;
     private final TransactionTemplate tx;
 
-    public AccountClosureService(UserRepository users, UserTwoFactorRepository twoFactors,
+    public AccountClosureService(ProviderCredentialService providerKeys,
+                                 UserRepository users, UserTwoFactorRepository twoFactors,
                                  ApiKeyRepository apiKeys,
                                  OAuthIdentityRepository identities, ConversationRepository conversations,
-                                 SavedRecipeRepository savedRecipes,
+                                 SavedRecipeRepository savedRecipes, RoutingPolicyRepository routingPolicies,
                                  RecipeRepository recipes, RecipeBatchRepository batches,
                                  GenerationJobRepository jobs, GenerationJobSettlement settlement,
                                  DataRetentionService retention, InputService inputs, AuditLogService audit,
@@ -112,11 +117,13 @@ public class AccountClosureService {
         this.follows = follows;
         this.reports = reports;
         this.users = users;
+        this.providerKeys = providerKeys;
         this.twoFactors = twoFactors;
         this.apiKeys = apiKeys;
         this.identities = identities;
         this.conversations = conversations;
         this.savedRecipes = savedRecipes;
+        this.routingPolicies = routingPolicies;
         this.recipes = recipes;
         this.batches = batches;
         this.jobs = jobs;
@@ -231,6 +238,8 @@ public class AccountClosureService {
         int links = identities.deleteByUserId(userId);
         int convs = conversations.deleteByUserId(userId);
         savedRecipes.deleteByUserId(userId);
+        // The owner's own provider keys (round 14): nobody holds this account now.
+        int keysDeleted = providerKeys.deleteAllOf(userId);
         // Recipe batches go first, with their rows and the files they hold, so the
         // runner has nothing of this account left to start. A row's job that is
         // already running is ended below with every other open job.
@@ -246,6 +255,8 @@ public class AccountClosureService {
         reports.resolveForProfile(userId, actorId, java.time.Instant.now());
         // The owner's own recipes go, with their versions. Their jobs are purged below.
         recipes.deleteByUserId(userId);
+        // The owner's routing policies (round 14), presets untouched.
+        routingPolicies.deleteByUserId(userId);
 
         Map<String, Object> detail = new LinkedHashMap<>();
         detail.put("actorUserId", actorId == null ? null : actorId.toString());
@@ -254,6 +265,7 @@ public class AccountClosureService {
         detail.put("apiKeysDeleted", keys);
         detail.put("oauthIdentitiesDeleted", links);
         detail.put("conversationsDeleted", convs);
+        detail.put("providerKeysDeleted", keysDeleted);
         detail.put("batchesDeleted", batchesDeleted);
         detail.put("publishedRecipesUnpublished", unpublished);
         detail.put("followsDeleted", followsDeleted);

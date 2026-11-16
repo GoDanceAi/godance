@@ -32,12 +32,14 @@ import org.yaml.snakeyaml.Yaml;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+import ai.godance.routing.RoutingPolicyDocuments;
 import ai.godance.service.ParentalNotice;
 import ai.godance.web.dto.ApiKeyDtos;
 import ai.godance.web.dto.AttributionDtos;
 import ai.godance.web.dto.AuthDtos;
 import ai.godance.web.dto.BatchDtos;
 import ai.godance.web.dto.BillingDtos;
+import ai.godance.web.dto.ByokDtos;
 import ai.godance.web.dto.ChatCompletionDtos;
 import ai.godance.web.dto.CommunityDtos;
 import ai.godance.web.dto.ConversationDtos;
@@ -104,6 +106,14 @@ class OpenApiDriftTest {
         m.put("ChatCompletionChunk", ChatCompletionDtos.ChatCompletionChunk.class);
         m.put("ChatChunkChoice", ChatCompletionDtos.ChunkChoice.class);
         m.put("ChatChunkDelta", ChatCompletionDtos.ChunkDeltaBlock.class);
+        m.put("RoutingPolicyRequest", RoutingPolicyDocuments.PolicyBody.class);
+        m.put("RoutingRule", RoutingPolicyDocuments.RuleBody.class);
+        m.put("RoutingCondition", RoutingPolicyDocuments.ConditionBody.class);
+        m.put("RoutingLimits", RoutingPolicyDocuments.LimitsBody.class);
+        m.put("MediaFallback", RoutingPolicyDocuments.FallbackBody.class);
+        m.put("MediaFallbackAlternative", RoutingPolicyDocuments.AlternativeBody.class);
+        m.put("RoutingPolicy", RoutingPolicyDocuments.PolicyView.class);
+        m.put("RoutingPolicyList", RoutingPolicyDocuments.PolicyList.class);
         m.put("ImageGenerationRequest", ImageDtos.ImageGenerationRequest.class);
         m.put("ImageResponse", ImageDtos.ImageGenerationResponse.class);
         m.put("ImageData", ImageDtos.ImageData.class);
@@ -153,6 +163,8 @@ class OpenApiDriftTest {
         m.put("BatchRowOutput", BatchDtos.BatchRowOutput.class);
         m.put("EstimateRequest", EstimateDtos.EstimateRequest.class);
         m.put("Estimate", EstimateDtos.EstimateResponse.class);
+        m.put("ProviderCredentialRequest", ByokDtos.CredentialRequest.class);
+        m.put("ProviderCredential", ByokDtos.CredentialView.class);
         m.put("UsageRecord", UsageController.UsageView.class);
         m.put("ApiKeyCreateRequest", ApiKeyDtos.CreateApiKeyRequest.class);
         m.put("ApiKeyUpdateRequest", ApiKeyDtos.UpdateApiKeyRequest.class);

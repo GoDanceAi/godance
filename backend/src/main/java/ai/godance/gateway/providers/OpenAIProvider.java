@@ -13,6 +13,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import tools.jackson.databind.ObjectMapper;
 
+import ai.godance.gateway.CallerKey;
 import ai.godance.config.OpenAIProperties;
 import ai.godance.domain.Provider;
 import ai.godance.gateway.ChatDtos.ChatChoice;
@@ -39,9 +40,10 @@ public class OpenAIProvider implements ProviderAdapter {
     public OpenAIProvider(OpenAIProperties props, ObjectMapper json) {
         this.props = props;
         this.json = json;
+        // The key goes on each request (round 14): the caller's own, when the
+        // call carries one, else the platform's.
         this.client = WebClient.builder()
                 .baseUrl(props.apiBase())
-                .defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + props.apiKey())
                 .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
                 .build();
     }
@@ -52,13 +54,23 @@ public class OpenAIProvider implements ProviderAdapter {
     }
 
     @Override
+    public boolean takesCallerKeys() {
+        return true;
+    }
+
+    private String bearer(reactor.util.context.ContextView context) {
+        return "Bearer " + CallerKey.or(context, Provider.OPENAI, props.apiKey());
+    }
+
+    @Override
     public Mono<ChatResponse> chat(ChatRequest request) {
         OpenAIChatRequest body = buildBody(request, false);
-        return client.post()
-                .uri("/v1/chat/completions")
-                .bodyValue(body)
-                .retrieve()
-                .bodyToMono(OpenAIChatResponse.class)
+        return Mono.deferContextual(context -> client.post()
+                        .uri("/v1/chat/completions")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(context))
+                        .bodyValue(body)
+                        .retrieve()
+                        .bodyToMono(OpenAIChatResponse.class))
                 .map(OpenAIProvider::toDomain)
                 .timeout(props.timeout());
     }
@@ -66,12 +78,13 @@ public class OpenAIProvider implements ProviderAdapter {
     @Override
     public Flux<ChatChunk> chatStream(ChatRequest request) {
         OpenAIChatRequest body = buildBody(request, true);
-        return client.post()
-                .uri("/v1/chat/completions")
-                .accept(MediaType.TEXT_EVENT_STREAM)
-                .bodyValue(body)
-                .retrieve()
-                .bodyToFlux(new ParameterizedTypeReference<ServerSentEvent<String>>() {})
+        return Flux.deferContextual(context -> client.post()
+                        .uri("/v1/chat/completions")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(context))
+                        .accept(MediaType.TEXT_EVENT_STREAM)
+                        .bodyValue(body)
+                        .retrieve()
+                        .bodyToFlux(new ParameterizedTypeReference<ServerSentEvent<String>>() {}))
                 .mapNotNull(ServerSentEvent::data)
                 .takeWhile(s -> !DONE_SENTINEL.equals(s.trim()))
                 .flatMap(this::parseChunk)

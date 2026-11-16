@@ -31,6 +31,8 @@ import ai.godance.repository.RecipeBatchRowRepository;
 import ai.godance.repository.RecipeRepository;
 import ai.godance.repository.RecipeVersionRepository;
 import ai.godance.repository.UserRepository;
+import ai.godance.routing.RoutingPolicyRefusedException;
+import ai.godance.routing.UserRoutingPolicyService;
 import ai.godance.service.GenerationQuotes.Quote;
 import ai.godance.service.RecipeRunService.RunPrompt;
 import ai.godance.service.RecipeRunService.SlotInput;
@@ -89,6 +91,7 @@ public class RecipeBatchService {
     private final AuditLogService audit;
     private final RecipeBatchViews views;
     private final RecipeBatchRunner runner;
+    private final UserRoutingPolicyService routingPolicies;
     private final TransactionTemplate tx;
 
     public RecipeBatchService(BatchesProperties props, RecipeBatchRepository batches, RecipeBatchRowRepository rows,
@@ -96,7 +99,7 @@ public class RecipeBatchService {
                               GenerationQuotes quotes, RecipeRuns runs, InputService inputs,
                               WebhookDestinations webhookDestinations, AuditLogService audit,
                               RecipeBatchViews views, RecipeBatchRunner runner,
-                              PlatformTransactionManager txManager) {
+                              UserRoutingPolicyService routingPolicies, PlatformTransactionManager txManager) {
         this.props = props;
         this.batches = batches;
         this.rows = rows;
@@ -110,6 +113,7 @@ public class RecipeBatchService {
         this.audit = audit;
         this.views = views;
         this.runner = runner;
+        this.routingPolicies = routingPolicies;
         this.tx = new TransactionTemplate(txManager);
     }
 
@@ -249,6 +253,8 @@ public class RecipeBatchService {
     public BatchView create(UUID userId, UUID apiKeyId, BatchRequest req, String ip, Long maxCostCents) {
         Plan plan = plan(userId, req);
         MaxCostExceededException.requireWithin(plan.totalCents(), maxCostCents);
+        boolean fallbacks = Boolean.TRUE.equals(req.fallbacks());
+        if (fallbacks) requireFallbacks(userId, plan.model());
 
         // Counted and written one request at a time, so two cannot both take the last place.
         batches.lockBatchesOf(BATCHES_LOCK_SPACE, userId.hashCode());
@@ -271,6 +277,7 @@ public class RecipeBatchService {
         batch.setRowsTotal(plan.rows().size());
         batch.setEstimatedTotalCents(plan.totalCents());
         batch.setMaxCostCents(maxCostCents);
+        batch.setFallbacks(fallbacks);
         batches.save(batch);
         UUID batchId = batch.getId();
 
@@ -290,9 +297,27 @@ public class RecipeBatchService {
         detail.put("rows", plan.rows().size());
         detail.put("estimatedTotalCents", plan.totalCents());
         if (maxCostCents != null) detail.put("maxCostCents", maxCostCents);
+        if (fallbacks) detail.put("fallbacks", true);
         detail.put("channel", batch.getCreatedByChannel().name());
         audit.record(AuditLogService.EVT_BATCH_CREATED, AuditOutcome.SUCCESS, userId, ip, detail);
         return views.view(requireOwned(userId, batchId));
+    }
+
+    /**
+     * A batch that asks for fallbacks (round 14) needs routing policies open
+     * to the account and one of its policies with fallbacks for the batch's
+     * model: otherwise 400 {@code fallbacks_unavailable}, before anything is
+     * written, rather than a batch whose fallbacks could never happen.
+     */
+    private void requireFallbacks(UUID userId, String model) {
+        if (!routingPolicies.usable(userId)) {
+            throw RoutingPolicyRefusedException.fallbacksUnavailable(
+                    "fallbacks follow your routing policies, which are not available to this account");
+        }
+        if (routingPolicies.fallbackFor(userId, model).isEmpty()) {
+            throw RoutingPolicyRefusedException.fallbacksUnavailable(
+                    "none of your routing policies has fallbacks for " + model);
+        }
     }
 
     // ===== Read =======================================================
