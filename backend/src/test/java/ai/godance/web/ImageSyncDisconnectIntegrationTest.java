@@ -17,6 +17,7 @@ import java.util.function.BooleanSupplier;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
@@ -35,6 +36,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
 
+import ai.godance.OpenJobsGuard;
 import ai.godance.domain.CreditSource;
 import ai.godance.domain.GenerationJob;
 import ai.godance.domain.JobStatus;
@@ -56,6 +58,7 @@ import io.micrometer.core.instrument.MeterRegistry;
         "godance.images.sync-poll-interval=50ms"})
 @AutoConfigureWebTestClient(timeout = "30s")
 @Testcontainers
+@ExtendWith(OpenJobsGuard.class)
 class ImageSyncDisconnectIntegrationTest {
 
     @Container

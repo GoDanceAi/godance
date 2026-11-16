@@ -74,6 +74,10 @@ scaffold and entity-porting plan.
 - Test naming: `methodUnderTest_givenCondition_expectsResult`
 - Unit tests in JUnit 5 + Mockito; integration tests against real Postgres +
   Redis via Testcontainers
+- An integration class whose tests start generation jobs carries
+  `@ExtendWith(OpenJobsGuard.class)` (`src/test/java/ai/godance`): each test
+  ends only once its jobs have, so no job calls a WireMock stub during the
+  next test
 - Provider integration tests use WireMock with recorded cassettes; do NOT
   mock the `Provider` interface itself in those tests — that's the bug
   surface we want to catch

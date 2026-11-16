@@ -14,6 +14,7 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
@@ -33,6 +34,7 @@ import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
 
 import io.modelcontextprotocol.client.McpSyncClient;
 
+import ai.godance.OpenJobsGuard;
 import ai.godance.mcp.McpFixture.Account;
 import ai.godance.mcp.McpFixture.Key;
 import ai.godance.repository.UserRepository;
@@ -47,6 +49,7 @@ import ai.godance.service.CreditLedgerService;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureWebTestClient(timeout = "30s")
 @Testcontainers
+@ExtendWith(OpenJobsGuard.class)
 class McpRegionIntegrationTest {
 
     @Container

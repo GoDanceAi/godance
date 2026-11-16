@@ -14,6 +14,7 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -32,6 +33,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
 
+import ai.godance.OpenJobsGuard;
 import ai.godance.domain.CreditSource;
 import ai.godance.domain.JobStatus;
 import ai.godance.gateway.CostCalculator;
@@ -59,6 +61,7 @@ import ai.godance.web.dto.ImageDtos.JobView;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.MOCK)
 @AutoConfigureWebTestClient
 @Testcontainers
+@ExtendWith(OpenJobsGuard.class)
 class ImageGenerationIntegrationTest {
 
     /** A 1×1 transparent PNG — what every upstream stub returns. */

@@ -23,6 +23,7 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
@@ -42,6 +43,7 @@ import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
 import com.github.tomakehurst.wiremock.http.Request;
 import com.github.tomakehurst.wiremock.verification.LoggedRequest;
 
+import ai.godance.OpenJobsGuard;
 import ai.godance.domain.AgeStatus;
 import ai.godance.domain.CreditSource;
 import ai.godance.domain.GenerationJob;
@@ -70,6 +72,7 @@ import tools.jackson.databind.ObjectMapper;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.MOCK)
 @AutoConfigureWebTestClient(timeout = "30s")
 @Testcontainers
+@ExtendWith(OpenJobsGuard.class)
 class RecipeInputSlotsIntegrationTest {
 
     static final byte[] TINY_PNG = Base64.getDecoder().decode(
