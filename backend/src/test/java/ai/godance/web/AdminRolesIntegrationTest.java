@@ -117,6 +117,7 @@ class AdminRolesIntegrationTest {
             new Route(HttpMethod.POST, "/v1/admin/users/{id}/2fa/reset", ADMIN),
             new Route(HttpMethod.GET, "/v1/admin/usage/summary", STAFF),
             new Route(HttpMethod.GET, "/v1/admin/funnel", STAFF),
+            new Route(HttpMethod.GET, "/v1/admin/routing/margins", MONEY),
             new Route(HttpMethod.GET, "/v1/admin/pricing/proposals", STAFF),
             new Route(HttpMethod.POST, "/v1/admin/pricing/proposals/{id}/approve", ADMIN),
             new Route(HttpMethod.POST, "/v1/admin/pricing/proposals/{id}/reject", ADMIN),

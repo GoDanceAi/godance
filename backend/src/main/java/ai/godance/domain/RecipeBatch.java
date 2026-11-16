@@ -109,6 +109,10 @@ public class RecipeBatch {
     @Column(name = "max_cost_cents", updatable = false)
     private Long maxCostCents;
 
+    /** The batch asked for fallbacks (V41): a row whose job fails on a covered failure is retried once. */
+    @Column(name = "fallbacks", nullable = false, updatable = false)
+    private boolean fallbacks;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -175,6 +179,9 @@ public class RecipeBatch {
 
     public Long getMaxCostCents() { return maxCostCents; }
     public void setMaxCostCents(Long maxCostCents) { this.maxCostCents = maxCostCents; }
+
+    public boolean isFallbacks() { return fallbacks; }
+    public void setFallbacks(boolean fallbacks) { this.fallbacks = fallbacks; }
 
     public long getEstimatedTotalCents() { return estimatedTotalCents; }
     public void setEstimatedTotalCents(long estimatedTotalCents) { this.estimatedTotalCents = estimatedTotalCents; }

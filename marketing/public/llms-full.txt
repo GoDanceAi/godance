@@ -200,6 +200,28 @@ Images in chat. A user message's `content` can be OpenAI's array of parts:
   `image_fetch_failed`, `image_type_unsupported`, `too_many_images`,
   `model_does_not_accept_images`; 413 `image_too_large`; 404 `file_not_found`.
 
+Routing. `model` can be a virtual model that picks a real one per request: `godance-fast`,
+`godance-auto` and `godance-quality` are built in, and `GET /v1/models` lists them with
+`"virtual": true`. The answer's `model` is the model that served.
+
+Your own routing policies are being rolled out: until the operator turns them on,
+`GET /v1/routing/policies`, `GET /v1/routing/policies/{id}`, `PUT /v1/routing/policies/{id}`
+and `DELETE /v1/routing/policies/{id}` answer 404 `routing_policies_disabled`. Once they
+are on, a policy you PUT is called by its id as the `model`. Its rules pick models by task,
+size or hint; `limits.excluded_providers` keeps a provider out of every attempt; and a header
+`X-Godance-Route: <hint>` (or a `route_hint` field) picks the rule whose `when.hint_equals`
+names it. A policy that breaks a rule answers 400 `routing_policy_invalid`, listing every
+problem in `errors`.
+
+```bash
+curl -X PUT https://api.godance.ai/v1/routing/policies/my-coder \
+  -H "Authorization: Bearer $GODANCE_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"default_model": "deepseek-v4-flash",
+       "rules": [{"name": "code", "when": {"task_in": ["CODE"]}, "targets": ["gpt-4o", "deepseek-v4-pro"]}],
+       "limits": {"excluded_providers": ["ZHIPU"]}}'
+```
+
 ## Images
 
 `POST /v1/images/generations` takes OpenAI's request: `model`, `prompt`, `size`, `n`,

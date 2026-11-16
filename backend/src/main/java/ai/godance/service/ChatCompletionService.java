@@ -95,14 +95,24 @@ public class ChatCompletionService {
     }
 
     public ChatResponse execute(UUID userId, UUID apiKeyId, ChatRequest request) {
+        return execute(userId, apiKeyId, request, null);
+    }
+
+    /**
+     * {@code routeHint} is the caller's {@code X-Godance-Route} header or
+     * {@code route_hint} field (round 4's Phase 3), or null: the rules of a
+     * routing policy may match on it. A direct model call ignores it.
+     */
+    public ChatResponse execute(UUID userId, UUID apiKeyId, ChatRequest request, String routeHint) {
         String requestId = "req_" + UUID.randomUUID().toString().replace("-", "").substring(0, 24);
 
         int estimatedInputTokens = estimateInputTokens(request.messages());
 
-        // Resolve routing first: a virtual id (godance-auto/...) becomes an
-        // ordered list of concrete candidates; a direct model call is an
-        // unchanged passthrough of [model] + fallbacksFor(model).
-        ResolvedRoute route = routeResolver.resolve(request, estimatedInputTokens, gateway.region());
+        // Resolve routing first: a virtual id (godance-auto/..., or the caller's
+        // own policy) becomes an ordered list of concrete candidates; a direct
+        // model call is an unchanged passthrough of [model] + fallbacksFor(model).
+        ResolvedRoute route = routeResolver.resolve(userId, request, routeHint, estimatedInputTokens,
+                gateway.region());
         List<String> attemptModels = new ArrayList<>(route.orderedCandidates());
         logRoutingDecision(requestId, route, attemptModels);
 
@@ -173,7 +183,7 @@ public class ChatCompletionService {
                 CallOutcome outcome = classifyOutcome(upstreamErr);
                 log.warn("Attempt {} ({}) failed for request {} [{}, {}ms]: {}",
                         i, modelName, hold.id(), outcome, latencyMs, upstreamErr.getMessage());
-                recordFailure(userId, apiKeyId, model, hold.id(), isFallback, latencyMs, outcome, onCallerKey);
+                recordFailure(userId, apiKeyId, model, hold.id(), isFallback, latencyMs, outcome, onCallerKey, route);
                 if (!onCallerKey || !isKeyRefused(upstreamErr)) {
                     lastError = upstreamErr;
                     continue;
@@ -195,7 +205,7 @@ public class ChatCompletionService {
                     CallOutcome retryOutcome = classifyOutcome(retryErr);
                     log.warn("Attempt {} ({}) on the platform's key failed for request {} [{}, {}ms]: {}",
                             i, modelName, hold.id(), retryOutcome, retryMs, retryErr.getMessage());
-                    recordFailure(userId, apiKeyId, model, hold.id(), isFallback, retryMs, retryOutcome, false);
+                    recordFailure(userId, apiKeyId, model, hold.id(), isFallback, retryMs, retryOutcome, false, route);
                     lastError = retryErr;
                     continue;
                 }
@@ -212,7 +222,7 @@ public class ChatCompletionService {
                         response.usage().completionTokens(), onCallerKey);
                 long billedCents = ledger.settle(userId, hold.cents(), actualMicrocents, hold.id());
                 usage.save(buildUsageRecord(userId, apiKeyId, model, response, billedCents,
-                        actualMicrocents, hold.id(), isFallback, latencyMs, CallOutcome.OK, onCallerKey));
+                        actualMicrocents, hold.id(), isFallback, latencyMs, CallOutcome.OK, onCallerKey, route));
             } catch (RuntimeException settlementErr) {
                 log.error("Settlement failed for request {} after a successful upstream call to {}; "
                         + "not retrying upstream: {}", hold.id(), modelName, settlementErr.getMessage(),
@@ -402,7 +412,8 @@ public class ChatCompletionService {
                                          ChatResponse response, long billedCents,
                                          long costMicrocents, String requestId,
                                          boolean fallbackUsed, int latencyMs,
-                                         CallOutcome outcome, boolean onCallerKey) {
+                                         CallOutcome outcome, boolean onCallerKey,
+                                         ResolvedRoute route) {
         // On the caller's own key the provider bills them, not Godance: Godance's cost is nothing.
         long providerCostMicrocents = onCallerKey ? 0L
               : model.inputMicrocentsPer1k()  * response.usage().promptTokens()     / 1000
@@ -428,11 +439,22 @@ public class ChatCompletionService {
         r.setLatencyMs(latencyMs);
         r.setOutcome(outcome);
         r.setByok(onCallerKey);
+        attributeRoute(r, route);
         return r;
     }
 
     private static Region asDomainRegion(Region r) {
         return r == null ? Region.LOCAL : r;
+    }
+
+    /**
+     * Round 4's Phase 2 (V41): every usage record of a request made to a
+     * virtual id names the policy and the rule that routed it, so the margin
+     * view can sum them. Both stay null for a direct model call.
+     */
+    private static void attributeRoute(UsageRecord r, ResolvedRoute route) {
+        r.setRoutedPolicy(route.policyId());
+        r.setRoutedRule(route.matchedRule());
     }
 
     // ===== Observability =============================================
@@ -442,8 +464,10 @@ public class ChatCompletionService {
      * {@code requestId} so it joins to the {@link UsageRecord} written for
      * whichever concrete model actually served — that join yields the
      * spread between what the caller paid for the virtual id and the served
-     * model's {@code providerCostCents} (Phase 1 exit gate; the dedicated
-     * routed_policy/routed_rule columns are Phase 2). No-op for direct calls.
+     * model's {@code providerCostCents} (Phase 1 exit gate). Phase 2 records
+     * the policy and rule on the usage records themselves (V41,
+     * {@link #attributeRoute}); this line stays because it also gives the
+     * ordered candidates, which the records do not. No-op for direct calls.
      */
     private void logRoutingDecision(String requestId, ResolvedRoute route, List<String> attemptModels) {
         if (route.fromVirtual()) {
@@ -476,13 +500,15 @@ public class ChatCompletionService {
 
     /** Write a zero-cost {@link UsageRecord} for a failed upstream attempt. */
     private void recordFailure(UUID userId, UUID apiKeyId, ModelInfo model, String requestId,
-                               boolean fallbackUsed, int latencyMs, CallOutcome outcome) {
-        recordFailure(userId, apiKeyId, model, requestId, fallbackUsed, latencyMs, outcome, false);
+                               boolean fallbackUsed, int latencyMs, CallOutcome outcome,
+                               ResolvedRoute route) {
+        recordFailure(userId, apiKeyId, model, requestId, fallbackUsed, latencyMs, outcome, false, route);
     }
 
     /** {@code onCallerKey}: the failed attempt went out on the caller's own key (round 14). */
     private void recordFailure(UUID userId, UUID apiKeyId, ModelInfo model, String requestId,
-                               boolean fallbackUsed, int latencyMs, CallOutcome outcome, boolean onCallerKey) {
+                               boolean fallbackUsed, int latencyMs, CallOutcome outcome, boolean onCallerKey,
+                               ResolvedRoute route) {
         try {
             UsageRecord r = new UsageRecord();
             r.setUserId(userId);
@@ -501,6 +527,7 @@ public class ChatCompletionService {
             r.setRequestId(requestId);
             r.setLatencyMs(latencyMs);
             r.setOutcome(outcome);
+            attributeRoute(r, route);
             usage.save(r);
         } catch (RuntimeException e) {
             // Health bookkeeping must never mask the real upstream failure.
@@ -543,12 +570,18 @@ public class ChatCompletionService {
      * error ends the stream rather than splicing in a second model's output.
      */
     public Flux<ChatChunk> executeStreaming(UUID userId, UUID apiKeyId, ChatRequest request) {
+        return executeStreaming(userId, apiKeyId, request, null);
+    }
+
+    /** {@link #executeStreaming(UUID, UUID, ChatRequest)} with the caller's route hint, as {@link #execute} takes it. */
+    public Flux<ChatChunk> executeStreaming(UUID userId, UUID apiKeyId, ChatRequest request, String routeHint) {
         String requestId = "req_" + UUID.randomUUID().toString().replace("-", "").substring(0, 24);
 
         int estimatedInputTokens = estimateInputTokens(request.messages());
 
         // Resolve routing first (same as execute()).
-        ResolvedRoute route = routeResolver.resolve(request, estimatedInputTokens, gateway.region());
+        ResolvedRoute route = routeResolver.resolve(userId, request, routeHint, estimatedInputTokens,
+                gateway.region());
         List<String> attemptModels = new ArrayList<>(route.orderedCandidates());
         logRoutingDecision(requestId, route, attemptModels);
 
@@ -578,7 +611,7 @@ public class ChatCompletionService {
         reorderByHealth(attemptModels);
 
         StreamState state = new StreamState(userId, apiKeyId, request, requestId,
-                estimateCents, attemptModels, firstChoice, estimatedInputTokens, images);
+                estimateCents, attemptModels, firstChoice, estimatedInputTokens, images, route);
         return streamAttempt(state, 0, null, false)
                 .doFinally(signal -> dispatchPostStream(signal, state));
     }
@@ -604,6 +637,8 @@ public class ChatCompletionService {
          * refuses the caller's own key and the caller allows the platform's.
          */
         final AtomicReference<Hold> hold = new AtomicReference<>();
+        /** The route resolved for the request; its policy and rule go on each usage record. */
+        final ResolvedRoute route;
         /** The attempt in flight, or the last one to run. Null until an upstream call starts. */
         final AtomicReference<StreamAttempt> current = new AtomicReference<>();
         /** Set on the first chunk relayed to the client; from then on there is no fall-through. */
@@ -611,7 +646,8 @@ public class ChatCompletionService {
         final AtomicReference<Usage> usage = new AtomicReference<>();
 
         StreamState(UUID userId, UUID apiKeyId, ChatRequest request, String requestId,
-                    long estimateCents, List<String> attempts, String firstChoice, int inputTokens, int images) {
+                    long estimateCents, List<String> attempts, String firstChoice, int inputTokens, int images,
+                    ResolvedRoute route) {
             this.userId = userId;
             this.apiKeyId = apiKeyId;
             this.request = request;
@@ -620,6 +656,7 @@ public class ChatCompletionService {
             this.firstChoice = firstChoice;
             this.inputTokens = inputTokens;
             this.images = images;
+            this.route = route;
         }
 
         String requestId() {
@@ -693,7 +730,7 @@ public class ChatCompletionService {
                     String failedHold = s.requestId();
                     // recordFailure blocks on JPA, so keep it off the stream thread.
                     Mono<Void> recorded = Mono.<Void>fromRunnable(() -> recordFailure(s.userId, s.apiKeyId, model,
-                                    failedHold, isFallback, latencyMs, outcome, onCallerKey))
+                                    failedHold, isFallback, latencyMs, outcome, onCallerKey, s.route))
                             .subscribeOn(Schedulers.boundedElastic());
                     if (!onCallerKey || !isKeyRefused(err)) {
                         return recorded.thenMany(Flux.defer(() -> streamAttempt(s, i + 1, failure, false)));
@@ -735,7 +772,7 @@ public class ChatCompletionService {
                     this.usage.save(buildStreamedUsageRecord(
                             s.userId, s.apiKeyId, served.model(), usage, billedCents, actualMicrocents,
                             hold.id(), served.fallbackUsed(), elapsedMs(served.startNanos()), CallOutcome.OK,
-                            served.onCallerKey()));
+                            served.onCallerKey(), s.route));
                 } else if (signal == SignalType.ON_COMPLETE) {
                     // Stream completed but provider never emitted a usage block.
                     // Keep the pre-debit as the recorded cost; write a UsageRecord
@@ -745,7 +782,7 @@ public class ChatCompletionService {
                             s.userId, s.apiKeyId, served.model(), new Usage(0, 0, 0), hold.cents(),
                             hold.cents() * CreditLedgerService.MICROCENTS_PER_CENT,
                             hold.id(), served.fallbackUsed(), elapsedMs(served.startNanos()),
-                            CallOutcome.OK, served.onCallerKey()));
+                            CallOutcome.OK, served.onCallerKey(), s.route));
                 } else if (signal == SignalType.ON_ERROR && s.relayed.get()) {
                     // Upstream failed mid-stream — full refund, plus a failure
                     // UsageRecord so the outage shows up in provider health.
@@ -753,7 +790,7 @@ public class ChatCompletionService {
                             "stream signal " + signal);
                     recordFailure(s.userId, s.apiKeyId, served.model(), hold.id(),
                             served.fallbackUsed(), elapsedMs(served.startNanos()), CallOutcome.ERROR,
-                            served.onCallerKey());
+                            served.onCallerKey(), s.route);
                 } else if (signal == SignalType.ON_ERROR) {
                     // Every attempt failed before its first chunk; each upstream
                     // failure already wrote its own UsageRecord.
@@ -775,7 +812,8 @@ public class ChatCompletionService {
     private UsageRecord buildStreamedUsageRecord(UUID userId, UUID apiKeyId, ModelInfo model, Usage u,
                                                  long billedCents, long costMicrocents,
                                                  String requestId, boolean fallbackUsed,
-                                                 int latencyMs, CallOutcome outcome, boolean onCallerKey) {
+                                                 int latencyMs, CallOutcome outcome, boolean onCallerKey,
+                                                 ResolvedRoute route) {
         // On the caller's own key the provider bills them, not Godance.
         long providerCostMicrocents = onCallerKey ? 0L
               : model.inputMicrocentsPer1k()  * u.promptTokens()     / 1000
@@ -801,6 +839,7 @@ public class ChatCompletionService {
         r.setLatencyMs(latencyMs);
         r.setOutcome(outcome);
         r.setByok(onCallerKey);
+        attributeRoute(r, route);
         return r;
     }
 }
