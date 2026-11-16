@@ -1,0 +1,297 @@
+---
+/**
+ * /community/<public_id>: one recipe a Godance user published and a
+ * moderator approved. Its examples, its template with the variables and their
+ * defaults, the model and params, the licence, its author, what it was made
+ * from, how often others ran it, "Run this" into the app, the API call, and
+ * a link to report it.
+ *
+ * Everything shown comes from GET /v1/public/recipes and the author's public
+ * profile (lib/community.ts), so nothing private can reach the page.
+ */
+import type { GetStaticPaths } from 'astro';
+import Layout from '../../layouts/Layout.astro';
+import CopyScript from '../../components/community/CopyScript.astro';
+import Example from '../../components/community/Example.astro';
+import RecipeCard from '../../components/community/RecipeCard.astro';
+import TemplateBlock from '../../components/community/TemplateBlock.astro';
+import { loadGallery, recipePath as galleryRecipePath } from '../../lib/gallery-recipes';
+import {
+  API_ORIGIN,
+  COMMUNITY_PATH,
+  LICENCE_TERMS,
+  LICENCE_URLS,
+  authorName,
+  createSnippet,
+  excerpt,
+  firstImage,
+  followersText,
+  formatDate,
+  formatParam,
+  isoDay,
+  loadCommunity,
+  profilePath,
+  promptWithDefaults,
+  recipeJsonLd,
+  recipePath,
+  reportUrl,
+  runThisUrl,
+  runsText,
+  scriptJson,
+  tagPath,
+  type PublicRecipe,
+} from '../../lib/community';
+
+export const getStaticPaths = (async () => {
+  const community = await loadCommunity();
+  return community.recipes.map((recipe) => ({ params: { id: recipe.public_id }, props: { recipe } }));
+}) satisfies GetStaticPaths;
+
+interface Props {
+  recipe: PublicRecipe;
+}
+
+const { recipe } = Astro.props;
+const { recipes, profiles, appUrl } = await loadCommunity();
+const site = Astro.site ?? Astro.url;
+const handle = recipe.author.handle;
+const profile = profiles.find((each) => each.handle === handle);
+const isVideo = recipe.modality === 'video';
+const kind = isVideo ? 'video' : 'image';
+
+// What it was made from links to that page when this build has it.
+const gallery = await loadGallery();
+const from = recipe.made_from;
+const source = from?.kind === 'published' ? recipes.find((each) => each.public_id === from.id) : undefined;
+const madeFrom = from === null
+  ? null
+  : from.kind === 'gallery'
+    ? {
+        what: 'the gallery recipe',
+        name: from.id,
+        href: gallery.on && gallery.recipes.some((each) => each.slug === from.id) ? galleryRecipePath(from.id) : null,
+      }
+    : { what: 'the community recipe', name: source?.title ?? from.id, href: source ? recipePath(from.id) : null };
+const madeFromUrl = madeFrom?.href ? new URL(madeFrom.href, site).toString() : null;
+
+const others = recipes.filter((each) => each.author.handle === handle && each.public_id !== recipe.public_id).slice(0, 6);
+
+const title = `${recipe.title} — community ${kind} recipe by @${handle} | Godance`;
+const description = excerpt(promptWithDefaults(recipe));
+const ogImage = firstImage(recipe)?.url;
+const licenceUrl = LICENCE_URLS[recipe.licence];
+const jsonLd = recipeJsonLd(recipe, profile, site, madeFromUrl);
+const shown = (value: string) => (value === '' ? '(empty)' : value);
+
+const link = 'underline';
+const linkStyle = 'color: var(--color-primary)';
+---
+
+<Layout {title} {description} canonicalPath={recipePath(recipe.public_id)} {...(ogImage ? { ogImage } : {})}>
+  <article class="mx-auto max-w-5xl px-6 pt-12 pb-20" data-community-page={recipe.public_id}>
+    <p class="text-sm text-fg-subtle">
+      <a href={COMMUNITY_PATH} class="underline hover:text-fg">Community</a>
+      <span aria-hidden="true"> / </span>{isVideo ? 'Video' : 'Image'}
+    </p>
+
+    <h1 class="mt-2 text-3xl md:text-4xl font-bold tracking-tight text-fg">{recipe.title}</h1>
+    <p class="mt-2 text-fg-muted" data-byline>
+      By
+      {profile
+        ? <a href={profilePath(handle)} class={link} style={linkStyle} rel="author" data-author-link>{authorName(handle, profile)}</a>
+        : <span class="font-medium text-fg">@{handle}</span>}
+      {profile?.display_name && <span class="text-fg-subtle">@{handle}</span>}
+      <span aria-hidden="true"> · </span><span data-author-followers>{followersText(recipe.author.followers)}</span>
+      <span aria-hidden="true"> · </span>published <time datetime={isoDay(recipe.published_at)}>{formatDate(recipe.published_at)}</time>
+    </p>
+    {recipe.tags.length > 0 && (
+      <ul class="mt-4 flex flex-wrap gap-1.5" aria-label="Tags">
+        {recipe.tags.map((tag) => (
+          <li><a href={tagPath(tag)} class="pill">{tag}</a></li>
+        ))}
+      </ul>
+    )}
+
+    <!-- ===== Examples ===== -->
+    {recipe.examples.length > 0 && (
+      <section class="mt-8" aria-label="Examples" data-examples>
+        <div class:list={['grid gap-4', { 'sm:grid-cols-2': recipe.examples.length > 1 }]}>
+          {recipe.examples.map((example, i) => (
+            <Example {example} title={recipe.title} position={i + 1} eager={i === 0} />
+          ))}
+        </div>
+        <p class="mt-2 text-sm text-fg-subtle">
+          Made on Godance by its author with this recipe, as {recipe.examples.length === 1 ? 'an example' : 'examples'} of what it gives.
+        </p>
+      </section>
+    )}
+
+    <div class="mt-10 grid gap-10 lg:grid-cols-[minmax(0,1fr)_20rem]">
+      <!-- ===== Template ===== -->
+      <div class="min-w-0">
+        <h2 class="text-2xl font-bold text-fg">The recipe</h2>
+        <div class="mt-4">
+          <TemplateBlock id="template" template={recipe.template} />
+        </div>
+        {recipe.variables.length > 0 ? (
+          <section class="mt-6" data-variables>
+            <h3 class="text-lg font-semibold text-fg">Variables</h3>
+            <p class="mt-1 text-sm text-fg-muted">
+              Each marked blank is a variable. Run it as it is and each takes its default; in the Studio each one
+              gets a field of its own.
+            </p>
+            <div class="mt-3 card p-0 overflow-x-auto">
+              <table class="w-full text-sm">
+                <thead class="border-b border-border bg-bg-muted text-left text-fg-subtle">
+                  <tr>
+                    <th scope="col" class="px-4 py-2.5 font-semibold">Variable</th>
+                    <th scope="col" class="px-4 py-2.5 font-semibold">Default</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-border">
+                  {recipe.variables.map((variable) => (
+                    <tr data-variable-row={variable.name}>
+                      <th scope="row" class="px-4 py-2.5 text-left font-mono font-normal text-fg-subtle">{variable.name}</th>
+                      <td class="px-4 py-2.5 text-fg">{shown(variable.default)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        ) : (
+          <p class="mt-3 text-sm text-fg-muted">This recipe has no variables: it runs exactly as written.</p>
+        )}
+        {recipe.inputs.length > 0 && (
+          <section class="mt-6" data-inputs>
+            <h3 class="text-lg font-semibold text-fg">Input images</h3>
+            <p class="mt-1 text-sm text-fg-muted">
+              It takes an image of yours for each of these. The author's own images are never published.
+            </p>
+            <ul class="mt-3 card p-0 divide-y divide-border text-sm">
+              {recipe.inputs.map((slot) => (
+                <li class="px-4 py-2.5" data-input-slot={slot.slot}>
+                  <span class="font-mono text-fg">{slot.slot}</span>
+                  <span class="text-fg-subtle"> · {slot.role.replace(/_/g, ' ')}</span>
+                  {slot.hint && <span class="block text-fg-muted">{slot.hint}</span>}
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+      </div>
+
+      <!-- ===== How it runs ===== -->
+      <aside>
+        <h2 class="text-2xl font-bold text-fg">How it runs</h2>
+        <dl class="mt-4 card p-0 divide-y divide-border text-sm" data-run-facts>
+          <div class="community-fact">
+            <dt>Model</dt>
+            <dd class="font-mono" data-model>{recipe.model}</dd>
+          </div>
+          {Object.entries(recipe.params).map(([key, value]) => (
+            <div class="community-fact" data-param={key}>
+              <dt class="font-mono">{key}</dt>
+              <dd class="font-mono">{formatParam(value)}</dd>
+            </div>
+          ))}
+          <div class="community-fact">
+            <dt>Licence</dt>
+            <dd data-licence>
+              {licenceUrl
+                ? <a href={licenceUrl} class={link} style={linkStyle} rel="license noopener">{recipe.licence}</a>
+                : recipe.licence}
+            </dd>
+          </div>
+          <div class="community-fact">
+            <dt>Runs</dt>
+            <dd data-runs>{runsText(recipe)}</dd>
+          </div>
+          {madeFrom && (
+            <div class="community-fact">
+              <dt>Made from</dt>
+              <dd data-made-from={recipe.made_from?.kind}>
+                {madeFrom.what}{' '}
+                {madeFrom.href
+                  ? <a href={madeFrom.href} class={link} style={linkStyle}>{madeFrom.name}</a>
+                  : <span class="font-mono">{madeFrom.name}</span>}
+              </dd>
+            </div>
+          )}
+        </dl>
+        {LICENCE_TERMS[recipe.licence] && (
+          <p class="mt-3 text-sm text-fg-subtle" data-licence-terms>{LICENCE_TERMS[recipe.licence]}</p>
+        )}
+
+        <div class="mt-6" data-cta>
+          <a href={runThisUrl(appUrl, recipe)} class="btn btn-primary btn-lg w-full" rel="nofollow" data-run-this>Run this</a>
+          <p class="mt-2 text-sm text-fg-muted">
+            It opens in the Godance Studio with the recipe loaded. Nothing runs until you choose Generate.
+          </p>
+        </div>
+      </aside>
+    </div>
+
+    <!-- ===== The API call ===== -->
+    <section class="mt-14" data-api-call>
+      <h2 class="text-2xl font-bold text-fg">Run it through the API</h2>
+      <p class="mt-2 mb-4 text-fg-muted">
+        Set <code class="code-chip">GODANCE_API_KEY</code> and paste this into a shell.
+        <code class="code-chip">recipe.published_id</code> runs the version its author published; change a
+        value in <code class="code-chip">variables</code> to fill a blank your own way.
+        {recipe.inputs.length > 0 && <Fragment> Upload each input image first and put its id in place of <code class="code-chip">FILE_ID</code>.</Fragment>}
+        More in the <a href="/docs" class={link} style={linkStyle}>docs</a>.
+      </p>
+      <figure class="card p-0 overflow-hidden">
+        <header class="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-border bg-bg-muted">
+          <figcaption class="text-sm font-semibold text-fg">Start the job</figcaption>
+          <button type="button" class="btn btn-secondary btn-sm" data-copy="api-create">Copy</button>
+        </header>
+        <pre class="code-block rounded-none"><code id="api-create" data-api-snippet="create">{createSnippet(recipe)}</code></pre>
+      </figure>
+      <figure class="mt-4 card p-0 overflow-hidden">
+        <header class="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-border bg-bg-muted">
+          <figcaption class="text-sm font-semibold text-fg">Check on it</figcaption>
+          <button type="button" class="btn btn-secondary btn-sm" data-copy="api-poll">Copy</button>
+        </header>
+        <pre class="code-block rounded-none"><code id="api-poll" data-api-snippet="poll">{`# job_id comes from the 202 response above\ncurl ${API_ORIGIN}/v1/jobs/$JOB_ID \\\n  -H "Authorization: Bearer $GODANCE_API_KEY"`}</code></pre>
+      </figure>
+    </section>
+
+    <!-- ===== More by the author ===== -->
+    {others.length > 0 && (
+      <section class="mt-14" data-more-by-author>
+        <h2 class="text-2xl font-bold text-fg">More by {authorName(handle, profile)}</h2>
+        <div class="mt-6 columns-2 md:columns-3 gap-4 [&>a]:mb-4">
+          {others.map((other) => <RecipeCard recipe={other} />)}
+        </div>
+      </section>
+    )}
+
+    <p class="mt-14 text-sm text-fg-subtle" data-report>
+      Something here that should not be?
+      <a href={reportUrl(appUrl, 'published_recipe', recipe.public_id)} class={link} style={linkStyle} rel="nofollow" data-report-link>Report this recipe</a>
+      and a moderator will look at it.
+    </p>
+  </article>
+
+  <script type="application/ld+json" set:html={scriptJson(jsonLd)} />
+  <CopyScript />
+</Layout>
+
+<style>
+  .community-fact {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.625rem 1rem;
+  }
+  .community-fact dt {
+    color: var(--color-fg-subtle);
+  }
+  .community-fact dd {
+    color: var(--color-fg);
+    text-align: right;
+    overflow-wrap: anywhere;
+  }
+</style>
