@@ -389,7 +389,7 @@ class ByokRequestsIntegrationTest {
     }
 
     @Test
-    void image_givenRefusedKeyWithoutFallback_expectsTheJobFailedAndRefunded() {
+    void image_givenRefusedKeyWithoutFallback_expectsTheJobFailedAndRefunded(CapturedOutput output) {
         Account a = fx.account(10_00L);
         String key = ByokFixture.userKey("sk");
         fx.saveOpenAiKey(openAiMock, a, key, false);
@@ -398,8 +398,9 @@ class ByokRequestsIntegrationTest {
         UUID jobId = fx.submitImage(a.bearer(), "gpt-image-2");
         JobView job = fx.awaitJob(jobId, a.bearer(), JobStatus.FAILED);
 
-        assertThat(job.errorMessage()).contains("refused the caller's key");
+        assertThat(job.errorMessage()).contains("refused the caller's key").doesNotContain(key);
         assertThat(ledger.authoritativeBalance(a.id())).isEqualTo(10_00L);
+        assertThat(output.getAll()).doesNotContain(key);
         openAiMock.verify(0, postRequestedFor(urlEqualTo("/v1/images/generations"))
                 .withHeader("Authorization", equalTo("Bearer " + ByokFixture.PLATFORM_OPENAI_KEY)));
     }

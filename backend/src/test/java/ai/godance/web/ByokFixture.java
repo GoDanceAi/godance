@@ -161,13 +161,16 @@ final class ByokFixture {
                                 + "\"usage\":{\"prompt_tokens\":1000,\"completion_tokens\":500,\"total_tokens\":1500}}")));
     }
 
-    /** OpenAI refusing {@code key}, as it does a revoked one. */
+    /**
+     * OpenAI refusing {@code key}, as it does a revoked one. The answer repeats
+     * the key, as a provider's error may: none of it may reach a log or a job.
+     */
     static void stubOpenAiRefuses(WireMockServer openAi, String path, String key) {
         openAi.stubFor(post(urlEqualTo(path))
                 .withHeader("Authorization", equalTo("Bearer " + key))
                 .willReturn(aResponse().withStatus(401).withHeader("content-type", "application/json")
-                        .withBody("{\"error\":{\"message\":\"Incorrect API key provided.\",\"type\":\"invalid_request_error\","
-                                + "\"code\":\"invalid_api_key\"}}")));
+                        .withBody("{\"error\":{\"message\":\"Incorrect API key provided: " + key
+                                + "\",\"type\":\"invalid_request_error\",\"code\":\"invalid_api_key\"}}")));
     }
 
     static void stubOpenAiImage(WireMockServer openAi, String key) {
