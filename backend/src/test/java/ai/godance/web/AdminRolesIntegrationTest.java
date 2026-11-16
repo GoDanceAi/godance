@@ -108,6 +108,7 @@ class AdminRolesIntegrationTest {
 
     private static final List<Route> ROUTES = List.of(
             new Route(HttpMethod.GET, "/v1/admin/me", STAFF),
+            new Route(HttpMethod.GET, "/v1/admin/features", ADMIN),
             new Route(HttpMethod.GET, "/v1/admin/users", STAFF),
             new Route(HttpMethod.GET, "/v1/admin/users/{id}/ledger", STAFF),
             new Route(HttpMethod.POST, "/v1/admin/users/{id}/credit-adjust",

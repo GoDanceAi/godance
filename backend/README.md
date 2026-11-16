@@ -58,6 +58,34 @@ upstream provider is WireMock-stubbed, so no real API keys are needed.
 
 CI runs the same thing. See [CI](#ci) below.
 
+### Admin feature configuration reference
+
+`GET /v1/admin/features` is read-only and requires an active, email-verified
+ADMIN account, an interactive session and two-factor sign-in. Unauthenticated
+requests return 401; other roles and API keys return 403. An ADMIN without
+2FA receives the existing `two_factor_required` problem code. No write
+method is supported. `/admin/features` in the app shows the same fixed
+configuration-only response:
+
+```json
+{
+  "inputs": { "enabled": false, "allow_people": false },
+  "community": { "enabled": false },
+  "byok": { "enabled": false },
+  "routing_policies": { "enabled": false, "allow_list_restricted": false },
+  "referrals": { "enabled": false },
+  "mcp": { "enabled": true }
+}
+```
+
+These are the unset configuration defaults. BYOK means at least one provider
+is configured; referrals means at least one reward is positive. Routing's
+restriction reports only whether an allowlist exists. No identities,
+credentials, provider details or operational values are returned. This does
+not report customer eligibility, provider health, approved public content or
+marketing build availability. Changes still use the existing deployment and
+restart process. Admin routes remain outside the public OpenAPI document.
+
 ### MinIO (built from source)
 
 MinIO withdrew its public images from Docker Hub and Quay in 2025:
