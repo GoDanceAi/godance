@@ -684,6 +684,7 @@ def verify(payload, header, secret):
       <li><strong class="text-fg">Still running at the limit.</strong> The request answers <code class="code-chip">202 Accepted</code> with the job body above and a <code class="code-chip">Retry-After: 5</code> header. The job carries on; read it at <code class="code-chip">poll_url</code>. Code that only reads <code class="code-chip">data</code> should check for the 202.</li>
       <li><strong class="text-fg">Failed.</strong> A job that fails answers <code class="code-chip">502</code> as problem JSON with <code class="code-chip">code: "generation_failed"</code>, the job's error in <code class="code-chip">detail</code> and its <code class="code-chip">job_id</code>. The reserved credit is refunded, as for any failed job.</li>
       <li><strong class="text-fg">Errors</strong> are problem responses, as everywhere, and on <code class="code-chip">POST /v1/images/generations</code> and <code class="code-chip">POST /v1/images/edits</code> also carry OpenAI's <code class="code-chip">error</code> object, so the SDK's exception shows the sentence, <code class="code-chip">Error code: 402 - insufficient credit; top up via /v1/billing/topup</code>, and has <code class="code-chip">code</code> set.</li>
+      <li><strong class="text-fg">Variations</strong> are not supported. <code class="code-chip">client.images.create_variation</code> (<code class="code-chip">POST /v1/images/variations</code>) answers <code class="code-chip">404 image_variations_not_supported</code>, with OpenAI's <code class="code-chip">error</code> object, and charges nothing. To work from an image, send it to <a href="#image-edits" class="underline" style="color: var(--color-primary)">edits</a> with a prompt.</li>
       <li><strong class="text-fg"><code class="code-chip">response_format</code>.</strong> <code class="code-chip">"url"</code> returns a link per image and <code class="code-chip">"b64_json"</code> returns each image base64-encoded. Without it, GPT Image models return <code class="code-chip">b64_json</code>, as OpenAI's API does, and a <code class="code-chip">url</code> as well; every other model returns a <code class="code-chip">url</code>. A result larger than 25 MB is returned as links only. Links are signed and expire after a while: read the job again for a fresh one.</li>
       <li><strong class="text-fg">One request as a job.</strong> With a sync key, send <code class="code-chip">"async": true</code> in the body or a <code class="code-chip">Prefer: respond-async</code> header to get the 202 at once.</li>
       <li>Video is not affected: <code class="code-chip">POST /v1/videos/generations</code> always answers with a job.</li>
@@ -1164,9 +1165,10 @@ def verify(payload, header, secret):
       </li>
     </ul>
     <p class="mt-4 text-fg-muted">
-      An unknown, inactive or expired key returns <code class="code-chip">401</code>. A key
-      restricted to an IP allowlist returns <code class="code-chip">403</code> from any other
-      address.
+      An unknown, inactive or expired key returns <code class="code-chip">401</code>, and so
+      does a bearer token that is not a Godance key at all, such as an OpenAI key; the
+      problem's <code class="code-chip">detail</code> says which. A key restricted to an IP
+      allowlist returns <code class="code-chip">403</code> from any other address.
     </p>
 
     <!-- ===== Billing ===== -->
@@ -1275,15 +1277,16 @@ def verify(payload, header, secret):
         <strong class="text-fg">Errors:</strong> non-2xx responses use RFC 7807
         <code class="code-chip">application/problem+json</code> bodies
         (<code class="code-chip">title</code>, <code class="code-chip">status</code>,
-        <code class="code-chip">detail</code>). Status codes
+        <code class="code-chip">detail</code>), a <code class="code-chip">401</code> included. Status codes
         keep their usual meaning — <code class="code-chip">400</code> invalid request,
         <code class="code-chip">401</code> bad key, <code class="code-chip">402</code> insufficient
         credit or spending cap reached, <code class="code-chip">404</code> unknown model or job —
-        so SDKs still raise their usual status errors. On the image routes,
-        <a href="#images" class="underline" style="color: var(--color-primary)">generations</a> and
-        <a href="#image-edits" class="underline" style="color: var(--color-primary)">edits</a>,
-        and the
-        <a href="#videos-openai" class="underline" style="color: var(--color-primary)">OpenAI-shaped video routes</a>
+        so SDKs still raise their usual status errors. On the image routes
+        (<a href="#images" class="underline" style="color: var(--color-primary)">generations</a>,
+        <a href="#image-edits" class="underline" style="color: var(--color-primary)">edits</a>, and
+        <a href="#image-responses" class="underline" style="color: var(--color-primary)">variations</a>,
+        which Godance does not offer) and the
+        <a href="#videos-openai" class="underline" style="color: var(--color-primary)">OpenAI-shaped video routes</a>,
         the body also carries OpenAI's <code class="code-chip">error</code> object, so the
         SDK's exception shows the message. Elsewhere, chat completions included, the exception
         shows only the status, and the sentence is in
