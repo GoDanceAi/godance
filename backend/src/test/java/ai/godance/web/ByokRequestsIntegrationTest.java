@@ -39,6 +39,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
 
+import ai.godance.OpenJobsGuard;
 import ai.godance.domain.JobStatus;
 import ai.godance.domain.Modality;
 import ai.godance.domain.Provider;
@@ -66,6 +67,7 @@ import ai.godance.web.dto.ImageDtos.JobView;
 @AutoConfigureWebTestClient
 @Testcontainers
 @ExtendWith(OutputCaptureExtension.class)
+@ExtendWith(OpenJobsGuard.class)
 class ByokRequestsIntegrationTest {
 
     static final int FEE_BP = 500;

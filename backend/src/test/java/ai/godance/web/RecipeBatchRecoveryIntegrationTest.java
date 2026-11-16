@@ -31,6 +31,7 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.config.AutowireCapableBeanFactory;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -50,6 +51,7 @@ import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
 import com.github.tomakehurst.wiremock.verification.LoggedRequest;
 
+import ai.godance.OpenJobsGuard;
 import ai.godance.domain.CreditLedger;
 import ai.godance.domain.GenerationJob;
 import ai.godance.domain.JobChannel;
@@ -76,6 +78,7 @@ import ai.godance.web.RecipeBatchFixture.Signed;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.MOCK)
 @AutoConfigureWebTestClient
 @Testcontainers
+@ExtendWith(OpenJobsGuard.class)
 class RecipeBatchRecoveryIntegrationTest {
 
     @Container
