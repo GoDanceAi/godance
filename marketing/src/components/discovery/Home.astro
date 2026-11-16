@@ -1,6 +1,7 @@
 ---
 import Layout from '../../layouts/Layout.astro';
 import Surface from './Surface.astro';
+import GalleryStrip from '../gallery/HomeStrip.astro';
 import { appUrlFrom } from '../../lib/community';
 import { loadGallery } from '../../lib/gallery-recipes';
 const app = appUrlFrom();
@@ -15,6 +16,7 @@ const description = 'Create images and videos in Studio, compare in History, sav
     <p style="font-size:1.2rem;">Try image and video models in Studio. Compare your attempts, keep a recipe, then run it over a sheet—or take the same setup into code or your AI assistant.</p>
     <div class="gd-discovery-actions"><a href={`${app}/create/image`}>Open Image Studio →</a><a href="/integrations">Build with the API</a></div>
     <div class="gd-discovery-flow" aria-label="Workflow"><ol><li>Explore a model</li><li>Create in Studio</li><li>Compare in History</li><li>Save a recipe</li><li>Batch or Run at scale</li></ol></div>
+    <GalleryStrip />
     <section>
       <h2>Start with the way you work.</h2>
       <div class="gd-discovery-grid">
