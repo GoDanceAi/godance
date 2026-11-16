@@ -70,6 +70,10 @@ import tools.jackson.databind.ObjectMapper;
  *
  * <p>While inputs are switched off the route answers {@code inputs_disabled}
  * before it reads a part or looks anything up, and writes nothing.
+ *
+ * <p>Errors are problem+json, as everywhere, and on this route also carry
+ * OpenAI's {@code error} object, which is where its SDKs read an error's
+ * message, {@code code} and {@code param} ({@link ai.godance.security.OpenAiError}).
  */
 @RestController
 @RequestMapping("/v1")

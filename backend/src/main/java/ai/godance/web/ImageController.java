@@ -35,6 +35,10 @@ import reactor.core.scheduler.Schedulers;
  * 200 in OpenAI's shape, unless it sets {@code "async": true} or sends
  * {@code Prefer: respond-async}. A signed-in session never waits. That rule
  * lives in {@link ImageJobAnswers}, which the edits route uses too.
+ *
+ * <p>Errors are problem+json, as everywhere, and on this route also carry
+ * OpenAI's {@code error} object, which is where its SDKs read an error's
+ * message ({@link ai.godance.security.OpenAiError}).
  */
 @RestController
 @RequestMapping("/v1")

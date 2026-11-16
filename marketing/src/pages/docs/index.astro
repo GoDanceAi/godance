@@ -115,6 +115,20 @@ result = client.images.edit(
     extra_body={"recipe": {"version_id": version_id, "inputs": {"product": {"file_id": file_id}}}},
 )`;
 
+const editErrorSnippet = `import openai
+
+try:
+    client.images.edit(
+        model="gpt-image-2",
+        image=open("mug.png", "rb"),
+        prompt="Put the mug on a marble counter, soft window light.",
+        output_format="webp",
+    )
+except openai.BadRequestError as e:
+    print(e)        # Error code: 400 - POST /v1/images/edits does not take output_format. It takes …
+    print(e.code)   # invalid_parameter
+    print(e.param)  # output_format`;
+
 const editCurlSnippet =`# The same request with curl. Repeat -F "image[]=@..." to send several images.
 curl https://api.godance.ai/v1/images/edits \\
   -H "Authorization: Bearer $GODANCE_API_KEY" \\
@@ -669,6 +683,7 @@ def verify(payload, header, secret):
       <li><strong class="text-fg">The wait.</strong> The request is held for up to about 90 seconds. It is the same job either way: the same price, reserved when the job is accepted, and the same <code class="code-chip">webhook_url</code> delivery. The response adds <code class="code-chip">job_id</code> and <code class="code-chip">cost_cents</code> to OpenAI's <code class="code-chip">created</code> and <code class="code-chip">data</code>.</li>
       <li><strong class="text-fg">Still running at the limit.</strong> The request answers <code class="code-chip">202 Accepted</code> with the job body above and a <code class="code-chip">Retry-After: 5</code> header. The job carries on; read it at <code class="code-chip">poll_url</code>. Code that only reads <code class="code-chip">data</code> should check for the 202.</li>
       <li><strong class="text-fg">Failed.</strong> A job that fails answers <code class="code-chip">502</code> as problem JSON with <code class="code-chip">code: "generation_failed"</code>, the job's error in <code class="code-chip">detail</code> and its <code class="code-chip">job_id</code>. The reserved credit is refunded, as for any failed job.</li>
+      <li><strong class="text-fg">Errors</strong> are problem responses, as everywhere, and on <code class="code-chip">POST /v1/images/generations</code> and <code class="code-chip">POST /v1/images/edits</code> also carry OpenAI's <code class="code-chip">error</code> object, so the SDK's exception shows the sentence, <code class="code-chip">Error code: 402 - insufficient credit; top up via /v1/billing/topup</code>, and has <code class="code-chip">code</code> set.</li>
       <li><strong class="text-fg"><code class="code-chip">response_format</code>.</strong> <code class="code-chip">"url"</code> returns a link per image and <code class="code-chip">"b64_json"</code> returns each image base64-encoded. Without it, GPT Image models return <code class="code-chip">b64_json</code>, as OpenAI's API does, and a <code class="code-chip">url</code> as well; every other model returns a <code class="code-chip">url</code>. A result larger than 25 MB is returned as links only. Links are signed and expire after a while: read the job again for a fresh one.</li>
       <li><strong class="text-fg">One request as a job.</strong> With a sync key, send <code class="code-chip">"async": true</code> in the body or a <code class="code-chip">Prefer: respond-async</code> header to get the 202 at once.</li>
       <li>Video is not affected: <code class="code-chip">POST /v1/videos/generations</code> always answers with a job.</li>
@@ -697,9 +712,10 @@ def verify(payload, header, secret):
       <li><strong class="text-fg">The answer</strong> follows the key, as for a generation: a job to poll, or with a key set to <a href="#image-responses" class="underline" style="color: var(--color-primary)"><code class="code-chip">sync</code></a> the images in OpenAI's shape. The SDK example above needs a sync key.</li>
       <li><strong class="text-fg">The same job as a generation.</strong> The price is reserved when the job is accepted and returned in full if it fails; <code class="code-chip">webhook_url</code>, <code class="code-chip">async</code>{recipesOn && <Fragment>, <code class="code-chip">gallery_recipe</code></Fragment>} and <code class="code-chip">recipe</code> work as they do there. The job lists what it worked from under <a href="#job-inputs" class="underline" style="color: var(--color-primary)"><code class="code-chip">inputs</code></a>.</li>
       <li><strong class="text-fg">Godance's fields from OpenAI's SDK</strong> go in <code class="code-chip">extra_body</code>. The SDK always sends a form, and writes a nested value into it as bracketed fields: <code class="code-chip">recipe[version_id]</code>, <code class="code-chip">recipe[variables][surface]</code>, <code class="code-chip">recipe[inputs][product][file_id]</code>. Godance reads them back into the recipe; <code class="code-chip">recipe</code> may be JSON text too, <code class="code-chip">extra_body=&#123;"recipe": json.dumps(&#123;...&#125;)&#125;</code>. A form has at most 24 parts, counting each image and each bracketed field: past that it answers <code class="code-chip">400</code> with <code class="code-chip">code: "invalid_parameter"</code>, and the recipe fits as JSON text. In the form the images are file parts; to edit images that are already stored, send the JSON form below.</li>
-      <li><strong class="text-fg">Errors</strong> are problem responses, as everywhere, without OpenAI's <code class="code-chip">error</code> object: the SDK's exception reads <code class="code-chip">Error code: 400</code>, with <code class="code-chip">code</code> and <code class="code-chip">param</code> set, and the sentence is in <code class="code-chip">e.response.json()["detail"]</code>.</li>
+      <li><strong class="text-fg">Errors</strong> are problem responses, as everywhere, and on this route also carry OpenAI's <code class="code-chip">error</code> object, so the SDK's exception shows the sentence, with <code class="code-chip">e.code</code> and <code class="code-chip">e.param</code> set, as below. <code class="code-chip">input_not_supported</code> names the input in the problem's <code class="code-chip">field</code>, not in <code class="code-chip">param</code>: read it from <code class="code-chip">e.response.json()["field"]</code>.</li>
     </ul>
     <pre class="code-block mt-4"><code>{editRecipeSnippet}</code></pre>
+    <pre class="code-block mt-4"><code>{editErrorSnippet}</code></pre>
     <p class="mt-6 text-fg-muted">
       <strong class="text-fg">The JSON form</strong> names images that are already stored, in either
       <a href="#input-references" class="underline" style="color: var(--color-primary)">form of input</a>:
@@ -1318,14 +1334,19 @@ def verify(payload, header, secret):
         <strong class="text-fg">Errors:</strong> non-2xx responses use RFC 7807
         <code class="code-chip">application/problem+json</code> bodies
         (<code class="code-chip">title</code>, <code class="code-chip">status</code>,
-        <code class="code-chip">detail</code>) rather than OpenAI's error object. Status codes
+        <code class="code-chip">detail</code>). Status codes
         keep their usual meaning — <code class="code-chip">400</code> invalid request,
         <code class="code-chip">401</code> bad key, <code class="code-chip">402</code> insufficient
         credit or spending cap reached, <code class="code-chip">404</code> unknown model or job —
-        so SDKs still raise their usual status errors. On the
+        so SDKs still raise their usual status errors. On the image routes,
+        <a href="#images" class="underline" style="color: var(--color-primary)">generations</a> and
+        <a href="#image-edits" class="underline" style="color: var(--color-primary)">edits</a>,
+        and the
         <a href="#videos-openai" class="underline" style="color: var(--color-primary)">OpenAI-shaped video routes</a>
         the body also carries OpenAI's <code class="code-chip">error</code> object, so the
-        SDK's exception shows the message.
+        SDK's exception shows the message. Elsewhere, chat completions included, the exception
+        shows only the status, and the sentence is in
+        <code class="code-chip">e.response.json()["detail"]</code>.
       </li>
     </ul>
 

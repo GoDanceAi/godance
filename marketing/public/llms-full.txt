@@ -287,6 +287,10 @@ result = client.images.generate(model="gpt-image-2", prompt="a lighthouse at dus
 image_url = result.data[0].url        # a signed link; it expires, so download it
 ```
 
+Errors on this route carry OpenAI's `error` object as well (see Errors), so the SDK's
+exception says what is wrong: `openai.APIStatusError: Error code: 402 - insufficient
+credit; top up via /v1/billing/topup`, with `e.code` set to `insufficient_credit`.
+
 Price: the per-image price × `n`, reserved when the job is accepted. A model that returns
 fewer images than `n` is charged for the images it returned. `n` above the model's `max_n`
 answers 400. Too little credit answers 402 `insufficient_credit`.
@@ -370,9 +374,11 @@ Notes for OpenAI SDK users:
   `recipe` as JSON text, or upload the images with `POST /v1/files` and send JSON.
 - In the form the images are file parts. To edit images that are already stored, send
   JSON with `images`; `extra_body={"images": [...]}` answers 400 in a form.
-- Errors on this route are problem documents without OpenAI's `error` object, so the
-  SDK's exception reads `Error code: 400`; `e.code` and `e.param` are set, and the sentence
-  is in `e.response.json()["detail"]`.
+- Errors on this route carry OpenAI's `error` object as well, so the SDK's exception
+  carries the sentence: `openai.BadRequestError: Error code: 400 - POST /v1/images/edits
+  does not take output_format. …`, with `e.code` (`invalid_parameter`) and `e.param`
+  (`output_format`) set. `input_not_supported` names the input in the problem's `field`,
+  not in `param`: read it from `e.response.json()["field"]`.
 
 The JSON form, editing an output of one of your own jobs with no upload at all:
 
@@ -948,12 +954,29 @@ Every error is an RFC 7807 problem document, `Content-Type: application/problem+
 ```json
 {"title": "Payment Required", "status": 402,
  "detail": "insufficient credit; top up via /v1/billing/topup",
- "instance": "/v1/images/generations", "code": "insufficient_credit"}
+ "instance": "/v1/videos/generations", "code": "insufficient_credit"}
 ```
 
 `status` repeats the HTTP status. `detail` is a sentence for a person. `code`, where
-present, is a stable string to branch on. On the OpenAI-shaped video routes (`/v1/videos`, not `/v1/videos/generations`) the
-document also carries OpenAI's `error` object: `{"message", "type", "param", "code"}`.
+present, is a stable string to branch on.
+
+On the routes that follow OpenAI's own API, `POST /v1/images/generations`,
+`POST /v1/images/edits` and the `/v1/videos` routes (not `/v1/videos/generations`), the
+document also carries OpenAI's `error` object, which OpenAI's SDKs build their exceptions
+from. Every other member is still there:
+
+```json
+{"title": "Payment Required", "status": 402,
+ "detail": "insufficient credit; top up via /v1/billing/topup",
+ "instance": "/v1/images/generations", "code": "insufficient_credit",
+ "error": {"message": "insufficient credit; top up via /v1/billing/topup",
+           "type": "invalid_request_error", "param": null, "code": "insufficient_credit"}}
+```
+
+`message` is the `detail`. `code` and `param` are the problem's own, or null where it has
+none. `type` follows the status: `authentication_error` (401), `permission_error` (403),
+`not_found_error` (404), `rate_limit_error` (429), `server_error` (5xx), and
+`invalid_request_error` for every other 4xx.
 
 | Status | Meaning |
 |---|---|
@@ -994,8 +1017,24 @@ if response.status_code >= 400:
 
 With OpenAI's SDK, a non-2xx answer raises the SDK's usual exception
 (`openai.BadRequestError`, `openai.AuthenticationError`, `openai.NotFoundError`, …).
-`e.status_code` is always right. On `/v1/videos` routes the exception text carries the
-sentence and `e.code` is set; elsewhere read `e.response.json()["detail"]`.
+`e.status_code` is always right. On the routes that carry the `error` object, the
+exception's text carries the sentence (`Error code: 402 - insufficient credit; top up via
+/v1/billing/topup`), and `e.code`, `e.param` and `e.type` come from the object, which is
+also `e.body`; the whole problem is `e.response.json()`. On every other route the text
+is only `Error code: 402`, and the sentence is `e.response.json()["detail"]`.
+
+```python
+import os
+import openai
+
+client = openai.OpenAI(base_url="https://api.godance.ai/v1", api_key=os.environ["GODANCE_API_KEY"])
+try:
+    client.images.generate(model="gpt-image-2", prompt="a lighthouse at dusk, watercolor")
+except openai.APIStatusError as e:
+    print(e)                               # Error code: 402 - insufficient credit; top up via /v1/billing/topup
+    print(e.status_code, e.code, e.param)  # 402 insufficient_credit None
+    print(e.response.json()["instance"])   # /v1/images/generations
+```
 
 ## Limits and retention
 
