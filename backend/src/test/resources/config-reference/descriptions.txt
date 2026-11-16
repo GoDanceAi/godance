@@ -36,6 +36,18 @@ godance.billing.video-markup-percent: Platform fee on video models, in percent, 
 
 godance.binancepay.enabled: The Binance Pay rail, which is scaffolded and not live. Leave it false.
 
+godance.byok.providers: Providers whose customers may use their own API key instead of the platform's (bring your own key), as provider names such as `OPENAI,ANTHROPIC`. Empty offers none: no key can be stored and every request uses the platform's key. Only a provider with a key check may be listed; startup stops otherwise.
+godance.byok.fee-basis-points: Godance's fee on a request sent with a customer's own key, in basis points of the request's list price (the catalog price before markup): 500 is 5%. It is billed instead of the platform price.
+godance.byok.check-timeout: How long saving a key waits for the provider's key check before answering 502 `byok_check_failed`; nothing is stored then.
+
+godance.community.enabled: Whether accounts may keep a profile, publish recipes for review, follow and report, and whether `/v1/public/**` serves what moderators approved. Off, those routes answer 404 `community_disabled`. Nothing is public until a moderator approves it.
+godance.community.licences: The licences a recipe may be published under, as SPDX ids.
+godance.community.max-pending-per-day: Recipes one account may submit for review per day; past it, 429.
+godance.community.max-published-per-user: Pending and public recipes one account may have at once; past it, 409.
+godance.community.media-base-url: Where public example files are served from, when a CDN serves the bucket's `community/` prefix. Empty: through the API's own example links, which redirect to a signed link.
+godance.community.public-cache-ttl: How long browsers and caches may keep a public community response (`Cache-Control: public, max-age`).
+godance.community.report-limit-per-hour: Reports one account may send per hour; past it, 429.
+
 godance.gateway.fallback-chains.*: For a model, the models tried in order when it answers 5xx or 429 or times out. Each one passes the regional allowlist again. Set in `application.yml`.
 
 godance.images.new-key-response: What a new API key gets when its creation names nothing: `async` (a job to poll) or `sync` (image requests wait and answer like OpenAI's API). Existing keys never change.
@@ -150,6 +162,10 @@ godance.recipes.max-per-account: The most recipes one account can have; past it 
 godance.recipes.max-versions: The most versions one recipe can have.
 
 godance.retention.saved-limit: The most generations one account can save. Saved generations are kept past the 90-day deletion for as long as the account exists; 0 means nothing can be saved.
+
+godance.routing.user-policies.enabled: Whether accounts may write their own routing policies (`/v1/routing/policies`), call one by its id as a chat model, and give recipe batches fallbacks. Off, those routes answer 404 `routing_policies_disabled`. The built-in policies (`godance-fast`, `godance-auto`, `godance-quality`) work either way.
+godance.routing.user-policies.allow-list: Addresses of the accounts that may use routing policies once they are on; empty means every account. Any other gets 403 `routing_policies_not_allowed`.
+godance.routing.user-policies.max-per-user: Routing policies one account may keep; past it, 409 `routing_policy_limit_reached`.
 
 godance.scheduling.auto-recharge-cron: When the auto-recharge sweep runs (Quartz cron, UTC). It charges saved cards of accounts below their threshold that the per-request check missed; it needs Stripe.
 godance.scheduling.data-retention-cron: When the retention job runs (Quartz cron, UTC). It deletes generated media and job prompts 90 days after the job, except saved generations.

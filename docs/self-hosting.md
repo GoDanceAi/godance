@@ -268,7 +268,7 @@ payment success and cancel URLs and, with the bundled MinIO, the
 
 <!-- BEGIN GENERATED CONFIGURATION REFERENCE: do not edit by hand. Edit backend/src/test/resources/config-reference/descriptions.txt, then run backend/scripts/config-reference.sh -->
 
-Generated from the code by `backend/scripts/config-reference.sh`: every `@ConfigurationProperties` field, every `${…}` placeholder in `application.yml` and `application-prod.yml`, and every `@Value` key, 194 settings in all. The default is what the `prod` profile gives. **required** means the API does not start without the variable (an empty value counts as set). `*` stands for any map key, `[*]` for any list item: those are set in `application.yml`, not the environment.
+Generated from the code by `backend/scripts/config-reference.sh`: every `@ConfigurationProperties` field, every `${…}` placeholder in `application.yml` and `application-prod.yml`, and every `@Value` key, 207 settings in all. The default is what the `prod` profile gives. **required** means the API does not start without the variable (an empty value counts as set). `*` stands for any map key, `[*]` for any list item: those are set in `application.yml`, not the environment.
 
 #### godance.admin
 
@@ -310,6 +310,26 @@ Generated from the code by `backend/scripts/config-reference.sh`: every `@Config
 | Setting | Environment variable | Default | What it does |
 |---|---|---|---|
 | `godance.binancepay.enabled` | `BINANCE_PAY_ENABLED` | `false` | The Binance Pay rail, which is scaffolded and not live. Leave it false. |
+
+#### godance.byok
+
+| Setting | Environment variable | Default | What it does |
+|---|---|---|---|
+| `godance.byok.check-timeout` | `BYOK_CHECK_TIMEOUT` | `10s` | How long saving a key waits for the provider's key check before answering 502 `byok_check_failed`; nothing is stored then. |
+| `godance.byok.fee-basis-points` | `BYOK_FEE_BASIS_POINTS` | `500` | Godance's fee on a request sent with a customer's own key, in basis points of the request's list price (the catalog price before markup): 500 is 5%. It is billed instead of the platform price. |
+| `godance.byok.providers` | `BYOK_PROVIDERS` | empty | Providers whose customers may use their own API key instead of the platform's (bring your own key), as provider names such as `OPENAI,ANTHROPIC`. Empty offers none: no key can be stored and every request uses the platform's key. Only a provider with a key check may be listed; startup stops otherwise. |
+
+#### godance.community
+
+| Setting | Environment variable | Default | What it does |
+|---|---|---|---|
+| `godance.community.enabled` | `COMMUNITY_ENABLED` | `false` | Whether accounts may keep a profile, publish recipes for review, follow and report, and whether `/v1/public/**` serves what moderators approved. Off, those routes answer 404 `community_disabled`. Nothing is public until a moderator approves it. |
+| `godance.community.licences` | `COMMUNITY_LICENCES` | `CC-BY-4.0,CC0-1.0` | The licences a recipe may be published under, as SPDX ids. |
+| `godance.community.max-pending-per-day` | `COMMUNITY_MAX_PENDING_PER_DAY` | `5` | Recipes one account may submit for review per day; past it, 429. |
+| `godance.community.max-published-per-user` | `COMMUNITY_MAX_PUBLISHED_PER_USER` | `50` | Pending and public recipes one account may have at once; past it, 409. |
+| `godance.community.media-base-url` | `COMMUNITY_MEDIA_BASE_URL` | empty | Where public example files are served from, when a CDN serves the bucket's `community/` prefix. Empty: through the API's own example links, which redirect to a signed link. |
+| `godance.community.public-cache-ttl` | `COMMUNITY_PUBLIC_CACHE_TTL` | `5m` | How long browsers and caches may keep a public community response (`Cache-Control: public, max-age`). |
+| `godance.community.report-limit-per-hour` | `COMMUNITY_REPORT_LIMIT_PER_HOUR` | `10` | Reports one account may send per hour; past it, 429. |
 
 #### godance.gateway
 
@@ -550,6 +570,14 @@ Generated from the code by `backend/scripts/config-reference.sh`: every `@Config
 | Setting | Environment variable | Default | What it does |
 |---|---|---|---|
 | `godance.retention.saved-limit` | `RETENTION_SAVED_LIMIT` | `500` | The most generations one account can save. Saved generations are kept past the 90-day deletion for as long as the account exists; 0 means nothing can be saved. |
+
+#### godance.routing
+
+| Setting | Environment variable | Default | What it does |
+|---|---|---|---|
+| `godance.routing.user-policies.allow-list` | `ROUTING_USER_POLICIES_ALLOW_LIST` | empty | Addresses of the accounts that may use routing policies once they are on; empty means every account. Any other gets 403 `routing_policies_not_allowed`. |
+| `godance.routing.user-policies.enabled` | `ROUTING_USER_POLICIES_ENABLED` | `false` | Whether accounts may write their own routing policies (`/v1/routing/policies`), call one by its id as a chat model, and give recipe batches fallbacks. Off, those routes answer 404 `routing_policies_disabled`. The built-in policies (`godance-fast`, `godance-auto`, `godance-quality`) work either way. |
+| `godance.routing.user-policies.max-per-user` | `ROUTING_USER_POLICIES_MAX_PER_USER` | `20` | Routing policies one account may keep; past it, 409 `routing_policy_limit_reached`. |
 
 #### godance.scheduling
 
@@ -899,8 +927,24 @@ checks stop the start if a required one is missing.
 - **Social sign-in.** Google, Apple and X sign-in work only with their
   credentials set (`godance.oauth.*`); their buttons show either way. Register
   `GODANCE_URL/login/oauth2/code/google` (or `apple`, `x`) as the redirect URI.
-- **The community** (published recipes, profiles and follows) is not in this
-  version; round 14 of the roadmap adds it.
+- **The community** (published recipes, profiles, follows and reports) is
+  off (`COMMUNITY_ENABLED=false`). On, accounts may submit recipes for
+  review, and nothing is public until someone with the SUPPORT or ADMIN role
+  approves it in the admin console's Community tab; `/v1/public/**` serves
+  only what was approved. Its public pages are part of the marketing site,
+  built with `COMMUNITY_ENABLED=true`. See `godance.community.*`.
+- **Bring your own key.** No provider is offered (`BYOK_PROVIDERS` is
+  empty), so every request uses your keys. Listing one (OpenAI and Anthropic
+  have the key check it needs) lets customers save their own key for it in
+  Settings; their requests to it then go out on their key, and you bill only
+  `BYOK_FEE_BASIS_POINTS` of the list price. The regional allowlist still
+  decides first. See `godance.byok.*`.
+- **Routing policies.** The built-in virtual models `godance-fast`,
+  `godance-auto` and `godance-quality` are always there. Users' own policies
+  (`/v1/routing/policies`, called by id as a chat model) and fallbacks for
+  batches are off (`ROUTING_USER_POLICIES_ENABLED=false`);
+  `ROUTING_USER_POLICIES_ALLOW_LIST` keeps them to the accounts it names once
+  on. See `godance.routing.user-policies.*`.
 
 **What reaches outside your server.** People's browsers load the app's fonts
 from Google Fonts and, in the Studio, the gallery list (as above), so they
