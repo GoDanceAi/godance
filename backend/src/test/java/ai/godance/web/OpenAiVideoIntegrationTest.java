@@ -570,6 +570,272 @@ class OpenAiVideoIntegrationTest {
         refusedJson(me, body, 400, "prompt_and_recipe");
     }
 
+    // ===== Godance's extensions, and fields the route does not read ===
+
+    @Test
+    void create_givenLastFrameInJson_expectsBothFramesOnTheJobAndSentToTheProvider() throws Exception {
+        Account me = account(100_00L);
+        stubArkRun("task_last_frame");
+        UUID first = upload(me, InputFixtures.image("plain.jpg"), "first.jpg");
+        UUID last = upload(me, InputFixtures.image("plain.webp"), "last.webp");
+        Map<String, Object> body = body("seedance-2.0", "The tide goes out.", "seconds", "5",
+                "input_reference", Map.of("file_id", first.toString()), "last_frame", Map.of("file_id", last.toString()));
+        // A field set to null carries nothing, as a typed client sends every field it knows: it passes.
+        body.put("n", null);
+
+        GenerationJob job = awaitEnd(idOf(createJson(me, body)));
+
+        assertThat(job.getStatus()).isEqualTo(JobStatus.DONE);
+        JsonNode jobInputs = getJson(me.bearer(), "/v1/jobs/" + job.getId()).get("inputs");
+        assertThat(jobInputs).extracting(input -> input.get("role").asString()).containsExactly("first_frame", "last_frame");
+        assertThat(jobInputs.get(1).get("file_id").asString()).isEqualTo(last.toString());
+        // The provider got both frames in the roles Ark names, exactly as from /v1/videos/generations.
+        JsonNode content = onlyPost(ark, ARK_TASKS).get("content");
+        assertThat(content).hasSize(3);
+        assertThat(content.get(1).get("role").asString()).isEqualTo("first_frame");
+        assertThat(content.get(1).get("image_url").get("url").asString()).isEqualTo(dataUrl("image/jpeg", stored(me, first)));
+        assertThat(content.get(2).get("role").asString()).isEqualTo("last_frame");
+        assertThat(content.get(2).get("image_url").get("url").asString()).isEqualTo(dataUrl("image/webp", stored(me, last)));
+    }
+
+    @Test
+    void create_givenReferenceImagesInJson_expectsThemSentInTheOrderGiven() throws Exception {
+        Account me = account(100_00L);
+        stubArkRun("task_references");
+        byte[] generated = InputFixtures.image("progressive.jpg");
+        GenerationJob source = doneImageJob(me.id(), InputFixtures.image("plain.png"), generated);
+        UUID a = upload(me, InputFixtures.image("plain.png"), "a.png");
+        UUID b = upload(me, InputFixtures.image("plain.webp"), "b.webp");
+
+        GenerationJob job = awaitEnd(idOf(createJson(me, body("seedance-2.0",
+                "Image 1 walks through the place in Image 2, in the style of Image 3.",
+                "reference_images", List.of(Map.of("file_id", b.toString()),
+                        Map.of("job_output", Map.of("job_id", source.getId().toString(), "index", 1)),
+                        Map.of("file_id", a.toString()))))));
+
+        assertThat(job.getStatus()).isEqualTo(JobStatus.DONE);
+        // "Image n" in the prompt is the nth image sent: the request's order is the order sent.
+        assertThat(referenceImagesSent()).containsExactly(dataUrl("image/webp", stored(me, b)),
+                dataUrl("image/jpeg", generated), dataUrl("image/png", stored(me, a)));
+        assertThat(getJson(me.bearer(), "/v1/jobs/" + job.getId()).get("inputs"))
+                .extracting(input -> input.get("role").asString())
+                .containsExactly("reference_image", "reference_image", "reference_image");
+    }
+
+    @Test
+    void create_givenTheSdksFormWithAFirstFrameFileAndALastFrame_expectsBothFramesAndOneFileStored() throws Exception {
+        // client.videos.create(..., input_reference=open("first.png", "rb"), extra_body={"last_frame": {"file_id": …}})
+        Account me = account(100_00L);
+        stubArkRun("task_form_last_frame");
+        UUID last = upload(me, InputFixtures.image("plain.webp"), "last.webp");
+        MultipartBodyBuilder form = new MultipartBodyBuilder();
+        form.part("model", "seedance-2.0");
+        form.part("prompt", "The boat drifts away from the bank.");
+        form.part("input_reference", InputFixtures.named(InputFixtures.image("plain.png"), "first.png"))
+                .contentType(MediaType.IMAGE_PNG);
+        form.part("last_frame[file_id]", last.toString());
+
+        GenerationJob job = awaitEnd(idOf(json.readTree(createForm(me.bearer(), form)
+                .expectStatus().isOk()
+                .expectBody(String.class).returnResult().getResponseBody())));
+
+        assertThat(job.getStatus()).isEqualTo(JobStatus.DONE);
+        // The file part is one more of the caller's files; the last frame was one already.
+        assertThat(inputs.list(me.id(), null, null)).hasSize(2);
+        JsonNode jobInputs = getJson(me.bearer(), "/v1/jobs/" + job.getId()).get("inputs");
+        assertThat(jobInputs).extracting(input -> input.get("role").asString()).containsExactly("first_frame", "last_frame");
+        assertThat(jobInputs.get(1).get("file_id").asString()).isEqualTo(last.toString());
+        JsonNode content = onlyPost(ark, ARK_TASKS).get("content");
+        assertThat(content).hasSize(3);
+        assertThat(content.get(2).get("image_url").get("url").asString()).isEqualTo(dataUrl("image/webp", stored(me, last)));
+    }
+
+    @Test
+    void create_givenTheSdksFormWithReferenceImages_expectsThemSentInTheOrderOfTheFields() throws Exception {
+        // extra_body={"reference_images": [{"job_output": …}, {"job_output": …}]}: one field per image per key.
+        Account me = account(100_00L);
+        stubArkRun("task_form_references");
+        byte[] second = InputFixtures.image("progressive.jpg");
+        GenerationJob source = doneImageJob(me.id(), InputFixtures.image("plain.png"), second);
+        MultipartBodyBuilder form = new MultipartBodyBuilder();
+        form.part("model", "seedance-2.0");
+        form.part("prompt", "Image 1 beside Image 2.");
+        form.part("reference_images[][job_output][job_id]", source.getId().toString());
+        form.part("reference_images[][job_output][index]", "1");
+        form.part("reference_images[][job_output][job_id]", source.getId().toString());
+        form.part("reference_images[][job_output][index]", "0");
+
+        GenerationJob job = awaitEnd(idOf(json.readTree(createForm(me.bearer(), form)
+                .expectStatus().isOk()
+                .expectBody(String.class).returnResult().getResponseBody())));
+
+        assertThat(job.getStatus()).isEqualTo(JobStatus.DONE);
+        assertThat(referenceImagesSent()).containsExactly(dataUrl("image/jpeg", second),
+                dataUrl("image/png", InputFixtures.image("plain.png")));
+        JsonNode jobInputs = getJson(me.bearer(), "/v1/jobs/" + job.getId()).get("inputs");
+        assertThat(jobInputs).extracting(input -> input.get("job_output").get("index").asInt()).containsExactly(1, 0);
+    }
+
+    @Test
+    void create_givenAFormWhoseReferenceImagesMixFilesAndJobOutputs_expects400AndTheListAsJsonTextInItsOrder()
+            throws Exception {
+        Account me = account(100_00L);
+        GenerationJob source = doneImageJob(me.id(), InputFixtures.image("plain.png"));
+        UUID a = upload(me, InputFixtures.image("plain.webp"), "a.webp");
+        // What the SDK sends for [{"file_id": a}, {"job_output": …}]: the fields grouped by name, the order lost.
+        MultipartBodyBuilder mixed = new MultipartBodyBuilder();
+        mixed.part("model", "seedance-2.0");
+        mixed.part("prompt", "Image 1 beside Image 2.");
+        mixed.part("reference_images[][file_id]", a.toString());
+        mixed.part("reference_images[][job_output][job_id]", source.getId().toString());
+        mixed.part("reference_images[][job_output][index]", "0");
+
+        JsonNode problem = refusedForm(me, mixed, 400, "invalid_parameter");
+        assertThat(problem.get("error").get("param").asString()).isEqualTo("reference_images");
+        assertThat(problem.get("error").get("message").asString()).contains("as JSON text");
+
+        // The same list as JSON text keeps the order written.
+        stubArkRun("task_form_references_text");
+        MultipartBodyBuilder text = new MultipartBodyBuilder();
+        text.part("model", "seedance-2.0");
+        text.part("prompt", "Image 1 beside Image 2.");
+        text.part("reference_images", "[{\"job_output\": {\"job_id\": \"" + source.getId() + "\", \"index\": 0}}, "
+                + "{\"file_id\": \"" + a + "\"}]");
+        GenerationJob job = awaitEnd(idOf(json.readTree(createForm(me.bearer(), text)
+                .expectStatus().isOk()
+                .expectBody(String.class).returnResult().getResponseBody())));
+
+        assertThat(job.getStatus()).isEqualTo(JobStatus.DONE);
+        assertThat(referenceImagesSent()).containsExactly(dataUrl("image/png", InputFixtures.image("plain.png")),
+                dataUrl("image/webp", stored(me, a)));
+    }
+
+    @Test
+    void create_givenTheSdksBracketedRecipe_expectsTheRenderedPromptTheRecipeAndItsSlotsImage() throws Exception {
+        // client.videos.create(model=…, prompt="", extra_body={"recipe": {"version_id": …, "variables": {…}, "inputs": {…}}})
+        Account me = account(100_00L);
+        stubArkRun("task_form_recipe");
+        UUID opening = upload(me, InputFixtures.image("plain.jpg"), "opening.jpg");
+        String versionId = videoRecipeVersion(me, "{{subject}} drifts away.", "subject",
+                List.of(Map.of("slot", "opening", "role", "first_frame", "hint", "The still it starts from")));
+        MultipartBodyBuilder form = new MultipartBodyBuilder();
+        form.part("model", "seedance-2.0");
+        form.part("prompt", "");
+        form.part("seconds", "5");
+        form.part("recipe[version_id]", versionId);
+        form.part("recipe[variables][subject]", "The paper boat");
+        form.part("recipe[inputs][opening][file_id]", opening.toString());
+
+        JsonNode video = json.readTree(createForm(me.bearer(), form)
+                .expectStatus().isOk()
+                .expectBody(String.class).returnResult().getResponseBody());
+
+        assertThat(video.get("prompt").asString()).isEqualTo("The paper boat drifts away.");
+        GenerationJob job = awaitEnd(idOf(video));
+        assertThat(job.getStatus()).isEqualTo(JobStatus.DONE);
+        JsonNode jobView = getJson(me.bearer(), "/v1/jobs/" + job.getId());
+        assertThat(jobView.get("recipe").get("variables").get("subject").asString()).isEqualTo("The paper boat");
+        assertThat(jobView.get("inputs")).hasSize(1);
+        assertThat(jobView.get("inputs").get(0).get("role").asString()).isEqualTo("first_frame");
+        assertThat(jobView.get("inputs").get(0).get("file_id").asString()).isEqualTo(opening.toString());
+        assertThat(onlyPost(ark, ARK_TASKS).get("content").get(0).get("text").asString())
+                .isEqualTo("The paper boat drifts away.");
+
+        // A field the recipe does not have is named as the form wrote it, and nothing runs.
+        MultipartBodyBuilder typo = new MultipartBodyBuilder();
+        typo.part("model", "seedance-2.0");
+        typo.part("prompt", "");
+        typo.part("recipe[version_id]", versionId);
+        typo.part("recipe[variable][subject]", "The paper boat");
+        JsonNode problem = refusedForm(me, typo, 400, "invalid_parameter");
+        assertThat(problem.get("error").get("param").asString()).isEqualTo("recipe[variable]");
+        assertThat(problem.get("error").get("message").asString()).contains("recipe has version_id, variables and inputs");
+    }
+
+    @Test
+    void create_givenFieldsTheRouteDoesNotRead_expects400NamingEachBeforeAnythingRuns() {
+        Account me = account(100_00L);
+
+        // n: a request makes one video. The refusal says where several are made.
+        JsonNode n = refusedJson(me, body("seedance-2.0", "A kite over a beach.", "n", 2), 400, "invalid_parameter");
+        assertThat(n.get("param").asString()).isEqualTo("n");
+        assertThat(n.get("error").get("param").asString()).isEqualTo("n");
+        assertThat(n.get("error").get("message").asString()).contains("POST /v1/videos/generations");
+
+        // A field no API has, and one inside a value, named by its path.
+        assertThat(refusedJson(me, body("seedance-2.0", "A kite over a beach.", "colour", "red"), 400, "invalid_parameter")
+                .get("error").get("param").asString()).isEqualTo("colour");
+        assertThat(refusedJson(me, body("seedance-2.0", "A kite over a beach.", "input_reference",
+                Map.of("file_id", UUID.randomUUID().toString(), "fit", "crop")), 400, "invalid_parameter")
+                .get("error").get("param").asString()).isEqualTo("input_reference.fit");
+        // A value of the wrong kind is named by its path too.
+        JsonNode mistyped = refusedJson(me, body("seedance-2.0", "A kite over a beach.", "last_frame",
+                Map.of("file_id", "last.png")), 400, "invalid_parameter");
+        assertThat(mistyped.get("error").get("param").asString()).isEqualTo("last_frame.file_id");
+        assertThat(mistyped.get("error").get("message").asString()).isEqualTo("last_frame.file_id must be an id.");
+
+        // The same in the form OpenAI's SDK sends: extra_body={"n": 2}, {"colour": …}, {"first_frame": {…}}.
+        for (String field : List.of("n", "colour", "first_frame[file_id]")) {
+            MultipartBodyBuilder form = new MultipartBodyBuilder();
+            form.part("model", "seedance-2.0");
+            form.part("prompt", "A kite over a beach.");
+            form.part(field, "2");
+            assertThat(refusedForm(me, form, 400, "invalid_parameter").get("error").get("param").asString())
+                    .isEqualTo(field);
+        }
+    }
+
+    @Test
+    void create_givenInputsTheModelDoesNotTake_expectsTheGenerationsRefusalAndNoStoredFile() {
+        Account me = account(100_00L);
+        UUID image = upload(me, InputFixtures.image("plain.png"), "image.png");
+
+        // Hailuo takes a first frame and nothing more.
+        JsonNode lastFrame = refusedJson(me, body("minimax-hailuo-2.3", "Ends here.",
+                "input_reference", Map.of("file_id", image.toString()),
+                "last_frame", Map.of("file_id", image.toString())), 400, "input_not_supported");
+        assertThat(lastFrame.get("field").asString()).isEqualTo("last_frame");
+
+        // In a form whose first frame is a file, the refusal comes before the file is stored.
+        MultipartBodyBuilder hailuo = new MultipartBodyBuilder();
+        hailuo.part("model", "minimax-hailuo-2.3");
+        hailuo.part("prompt", "Ends here.");
+        hailuo.part("input_reference", InputFixtures.named(InputFixtures.image("plain.png"), "first.png"))
+                .contentType(MediaType.IMAGE_PNG);
+        hailuo.part("last_frame[file_id]", image.toString());
+        refusedForm(me, hailuo, 400, "input_not_supported");
+
+        // Seedance takes reference images, but not beside a first frame.
+        MultipartBodyBuilder seedance = new MultipartBodyBuilder();
+        seedance.part("model", "seedance-2.0");
+        seedance.part("prompt", "Image 1 walks.");
+        seedance.part("input_reference", InputFixtures.named(InputFixtures.image("plain.png"), "first.png"))
+                .contentType(MediaType.IMAGE_PNG);
+        seedance.part("reference_images[][file_id]", image.toString());
+        assertThat(refusedForm(me, seedance, 400, "input_not_supported").get("detail").asString())
+                .contains("but not both in one request");
+
+        assertThat(inputs.list(me.id(), null, null)).as("only the upload made above").hasSize(1);
+    }
+
+    @Test
+    void create_givenAFormOfMoreFieldsThanItMayHave_expects400SayingHowToSendFewer() {
+        // A recipe of many variables, as the SDK writes it: one field per value, past the form's 24.
+        Account me = account(100_00L);
+        MultipartBodyBuilder form = new MultipartBodyBuilder();
+        form.part("model", "seedance-2.0");
+        form.part("prompt", "");
+        form.part("recipe[version_id]", UUID.randomUUID().toString());
+        for (int i = 0; i < 22; i++) form.part("recipe[variables][v" + i + "]", "a value");
+
+        JsonNode problem = refusedForm(me, form, 400, "invalid_parameter");
+
+        // Spring's own words say which limit; the rest says what to do instead.
+        assertThat(problem.get("error").get("message").asString())
+                .startsWith("The form could not be read (Too many parts")
+                .endsWith("Send recipe or reference_images as JSON text, one field each, or send the request as JSON.");
+    }
+
     // ===== The video object, by job status ============================
 
     @Test
@@ -1332,6 +1598,37 @@ class OpenAiVideoIntegrationTest {
                 .expectStatus().isCreated()
                 .expectBody(String.class).returnResult().getResponseBody();
         return UUID.fromString(json.readTree(body).get("id").asString());
+    }
+
+    /** The file as it is stored, which is what a provider is sent: the upload with its metadata stripped. */
+    private byte[] stored(Account account, UUID fileId) {
+        return inputs.content(account.id(), fileId).bytes();
+    }
+
+    /** The images Ark was sent as reference images, as the data URLs it got, in order. */
+    private List<String> referenceImagesSent() {
+        JsonNode content = onlyPost(ark, ARK_TASKS).get("content");
+        List<String> sent = new ArrayList<>();
+        for (JsonNode item : content) {
+            if (!item.get("type").asString().equals("image_url")) continue;
+            assertThat(item.get("role").asString()).isEqualTo("reference_image");
+            sent.add(item.get("image_url").get("url").asString());
+        }
+        return sent;
+    }
+
+    /** A video recipe of seedance-2.0 with one variable and these input slots; returns its version's id. */
+    private String videoRecipeVersion(Account account, String template, String variable, List<Map<String, String>> slots) {
+        Map<?, ?> recipe = http.post().uri("/v1/recipes")
+                .header(HttpHeaders.AUTHORIZATION, account.bearer())
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("title", "Drifting", "modality", "VIDEO", "template", template,
+                        "variables", List.of(Map.of("name", variable, "default", "A leaf")),
+                        "model", "seedance-2.0", "inputs", slots))
+                .exchange()
+                .expectStatus().isCreated()
+                .expectBody(Map.class).returnResult().getResponseBody();
+        return (String) ((Map<?, ?>) recipe.get("latest_version")).get("id");
     }
 
     private void seedUsage(UUID userId, long costCents) {
