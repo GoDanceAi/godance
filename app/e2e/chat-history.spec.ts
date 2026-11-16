@@ -56,6 +56,9 @@ async function setup(page: Page, api: Parameters<typeof serveChatHistory>[0]) {
 async function ask(page: Page, text = 'Synthetic question') {
   await page.getByPlaceholder('Ask anything').fill(text);
   await page.getByRole('button', { name: 'Send', exact: true }).click();
+  // Saved chats first check metadata. Wait until that preflight has actually
+  // submitted the turn before treating the returning Send button as completion.
+  await expect(page.getByPlaceholder('Ask anything')).toHaveValue('');
   await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeVisible();
 }
 async function capture(page: Page, info: TestInfo, state: string) {
@@ -376,4 +379,27 @@ test('late save callbacks after logout cannot attach content to another account'
   await expect(page.getByText(/Ephemeral chat/)).toBeVisible();
   await expect(page.getByText('Synthetic completed answer.', { exact: true })).toHaveCount(0);
   expect(api.callsTo('POST', `/v1/conversations/${CONVERSATION}/messages`)).toHaveLength(1);
+});
+
+test('saved-chat controls work with keyboard focus and announce persistence state', async ({ page, api }) => {
+  const history = serveChatHistory(api);
+  await setup(page, api);
+  await ask(page);
+  const save = page.getByRole('button', { name: 'Save this chat', exact: true });
+  await save.focus();
+  await expect(save).toBeFocused();
+  expect(api.callsTo('POST', '/v1/conversations')).toHaveLength(0);
+  await page.keyboard.press('Space');
+  await expect.poll(() => history.messages.length).toBe(2);
+  await expect(page.locator('[aria-live="polite"]')).toContainText('Saving is on');
+  const list = page.getByRole('button', { name: 'Saved chats', exact: true });
+  await list.focus();
+  await expect(list).toBeFocused();
+  await page.keyboard.press('Enter');
+  const item = page.getByRole('button', { name: 'Synthetic question', exact: true });
+  await item.focus();
+  await expect(item).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(page.getByText('Synthetic completed answer.', { exact: true })).toBeVisible();
+  expect(api.callsTo('POST', '/v1/chat/completions')).toHaveLength(1);
 });

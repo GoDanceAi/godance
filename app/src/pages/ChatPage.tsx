@@ -249,7 +249,7 @@ function AccountChat({ adult }: { adult: boolean }) {
             {history.selected && <button type="button" className="btn btn-ghost btn-sm" onClick={() => void history.archive()}
               disabled={streaming || history.busy || history.readOnly}>Archive chat</button>}
           </div>
-          <p className="text-xs text-fg-muted">
+          <p aria-live="polite" className="text-xs text-fg-muted">
             {history.selected ? history.archiveUncertain ? 'Archival is unconfirmed. This chat is read-only until its status is checked.'
               : history.readOnly ? 'Archived chat · Read-only. It leaves the active list and is removed for good after 30 days.'
               : history.problem ? `Saving paused for “${history.selected.title}”. Your current messages remain visible here.`
