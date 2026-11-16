@@ -351,8 +351,24 @@ paths:
           `{"file_id"}` or, as a Godance extension, `{"job_output"}`.
           `image_url` answers 400 `image_url_not_supported`. Inputs are
           switched off by default: 403 `inputs_disabled`.
+        - `last_frame` and `reference_images` are Godance extensions: input
+          references, as on `POST /v1/videos/generations`, checked against
+          the model the same way.
         - `webhook_url`, `gallery_recipe` and `recipe` are Godance
           extensions, as on `POST /v1/videos/generations`.
+        - A field the route does not read is refused, not ignored: 400
+          `invalid_parameter`, with `param` naming it, at any depth (`n`,
+          `recipe.variable`). In JSON, a field set to null passes. There is
+          no `n`: a request makes one video.
+
+        In a form, OpenAI's SDK writes a nested value as bracketed fields,
+        and they are read back into it: `extra_body={"recipe": {…}}` arrives
+        as `recipe[version_id]` and `recipe[variables][subject]`, and a list
+        as one `reference_images[][file_id]` field per image. `recipe`,
+        `last_frame` and `reference_images` may also be sent as JSON text.
+        The SDK groups a list's fields by name, so `reference_images` that
+        mixes `file_id` and `job_output` is refused in brackets; send it as
+        JSON text.
 
         Problem codes: `invalid_parameter` (400, `param` names the field),
         `image_url_not_supported` (400), and everything
@@ -368,6 +384,7 @@ paths:
             schema:
               type: object
               required: [model]
+              additionalProperties: false
               properties:
                 model: { type: string }
                 prompt: { type: string }
@@ -377,9 +394,33 @@ paths:
                 "input_reference[file_id]": { type: string, format: uuid }
                 "input_reference[job_output][job_id]": { type: string, format: uuid }
                 "input_reference[job_output][index]": { type: integer }
+                last_frame: { type: string, description: "The `last_frame` input reference of the JSON form, as JSON text." }
+                "last_frame[file_id]": { type: string, format: uuid }
+                "last_frame[job_output][job_id]": { type: string, format: uuid }
+                "last_frame[job_output][index]": { type: integer }
+                reference_images: { type: string, description: "The `reference_images` list of the JSON form, as JSON text. Any mix, in order." }
+                "reference_images[][file_id]":
+                  type: array
+                  description: One field per image, in order. Not together with job outputs.
+                  items: { type: string, format: uuid }
+                "reference_images[][job_output][job_id]":
+                  type: array
+                  description: One field per image, in order, each with an index field beside it.
+                  items: { type: string, format: uuid }
+                "reference_images[][job_output][index]":
+                  type: array
+                  items: { type: integer }
                 webhook_url: { type: string }
                 gallery_recipe: { type: string }
                 recipe: { type: string, description: "The `recipe` object of the JSON form, as JSON text." }
+                "recipe[version_id]": { type: string, format: uuid }
+              patternProperties:
+                "^recipe\\[variables\\]\\[[^\\]]+\\]$":
+                  type: string
+                  description: "`recipe[variables][subject]`: one variable's value. An empty value is a value."
+                "^recipe\\[inputs\\]\\[[^\\]]+\\](\\[file_id\\]|\\[job_output\\]\\[(job_id|index)\\])$":
+                  type: string
+                  description: "`recipe[inputs][product photo][file_id]`: an input reference for one of the version's slots."
       responses:
         "200":
           description: The video, `queued`.
@@ -2553,8 +2594,9 @@ components:
         reference_images: { type: array, items: { $ref: "#/components/schemas/InputRef" } }
     VideoCreateRequest:
       type: object
-      description: The JSON form of `POST /v1/videos`.
+      description: The JSON form of `POST /v1/videos`. A field not listed here is refused unless it is null.
       required: [model]
+      additionalProperties: { type: "null" }
       properties:
         model: { type: string, description: A Godance video model. Required; there is no default. }
         prompt: { type: string, description: Required unless `recipe` is sent. }
@@ -2565,6 +2607,13 @@ components:
             - { type: integer, minimum: 1 }
         size: { type: string, examples: ["1280x720"] }
         input_reference: { $ref: "#/components/schemas/VideoInputReference" }
+        last_frame:
+          description: Godance extension. The image the video ends on, together with `input_reference`.
+          allOf: [{ $ref: "#/components/schemas/InputRef" }]
+        reference_images:
+          type: array
+          description: Godance extension. Images the video follows, in the order the prompt counts them.
+          items: { $ref: "#/components/schemas/InputRef" }
         webhook_url: { type: string, format: uri, description: Godance extension. }
         gallery_recipe: { type: string, description: Godance extension. }
         recipe: { $ref: "#/components/schemas/RecipeRef" }
