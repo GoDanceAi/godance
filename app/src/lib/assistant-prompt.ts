@@ -52,13 +52,17 @@ export interface PromptApi {
 //   SAVED            one of the user's own recipes, run by its version_id
 //   NOT_SAVED        anything else: the script fills the template in itself
 //   GALLERY          a recipe from the public gallery
+//   OPENAI_VIDEO     a video the script sends to OpenAI's route, POST /v1/videos
+//   NOT_OPENAI_VIDEO anything else: an image, or a video with what POST /v1/videos
+//                    has no field for (a last frame, reference images), which goes
+//                    to POST /v1/videos/generations
 // Several words on one line mean all of them, as in "[[IF INPUTS SAVED]]".
 // Blocks do not nest.
 //
 // {{name}} below is not a marker: it is how a recipe writes a variable, and
 // the prompt explains it to the assistant.
 // =============================================================================
-export const ASSISTANT_PROMPT_VERSION = '2026-11-15.2';
+export const ASSISTANT_PROMPT_VERSION = '2026-11-15.3';
 
 export const ASSISTANT_PROMPT = `I want to run a Godance recipe at scale. Write me a Python script that runs the recipe below once for every row of a CSV file I give it, and writes the results to a new CSV file.
 
@@ -78,6 +82,9 @@ How to read it:
 [[IF SAVED]]
 - "version_id" names this recipe on Godance. Send "recipe": {"version_id": "...", "variables": {...}} in place of "prompt", and Godance fills the template in.
 [[END]]
+[[IF SAVED OPENAI_VIDEO]]
+- client.videos.create_and_poll sends a form, in which "recipe" is JSON text: pass prompt="" and extra_body={"recipe": json.dumps({...})}.
+[[END]]
 [[IF NOT_SAVED]]
 - Fill the template in yourself, and send the result as "prompt".
 [[END]]
@@ -90,8 +97,11 @@ How to read it:
 [[IF INPUTS SAVED]]
 - Give each slot its file inside "recipe": "inputs": {"<slot name>": {"file_id": "..."}}.
 [[END]]
-[[IF INPUTS NOT_SAVED]]
+[[IF INPUTS NOT_SAVED NOT_OPENAI_VIDEO]]
 - Each input goes in the field its "role" names: "image" in "images" (a list of {"file_id": "..."}), "mask" in "mask", "first_frame" in "first_frame", "last_frame" in "last_frame", "reference_image" in "reference_images" (a list).
+[[END]]
+[[IF INPUTS NOT_SAVED OPENAI_VIDEO]]
+- The input is the video's first frame: send it as "input_reference": {"file_id": "..."}, which client.videos.create_and_poll takes in extra_body.
 [[END]]
 
 Rules the script must follow:
@@ -100,8 +110,11 @@ Rules the script must follow:
 [[IF IMAGE]]
 3. An image request answers in one of two ways. With a key set to synchronous image responses it waits and answers 200 with the images under "data". Otherwise it answers 202 with a "job_id": poll GET /v1/jobs/{id} every few seconds until "status" is DONE, FAILED or CANCELLED, then read "outputs" (each has a "url") and "actualCostCents". Handle both answers.
 [[END]]
-[[IF VIDEO]]
+[[IF VIDEO NOT_OPENAI_VIDEO]]
 3. A video request always answers 202 with a "job_id". Poll GET /v1/jobs/{id} every few seconds until "status" is DONE, FAILED or CANCELLED, then read "outputs" (each has a "url") and "actualCostCents". A video can take several minutes.
+[[END]]
+[[IF OPENAI_VIDEO]]
+3. A video request answers 200 with the video: its "id", which is the job's id, and "status": "queued". client.videos.create_and_poll(...) sends it and reads GET /v1/videos/{id} every few seconds until "status" is completed or failed. Save the file with client.videos.download_content(id, variant="video"). "cost_cents" is what it cost, and "job_url" is the same video as a job, whose "outputs" each have a "url". A video can take several minutes.
 [[END]]
 4. Estimate the cost first. Call POST /v1/estimates with the model and the params, multiply "estimated_cost_cents" by the number of rows, show me the total, and wait for my yes before sending anything that costs money.
 5. Stop at once on HTTP 402: the balance or the key's spending cap has run out. Do not retry it. Tell me which row it stopped at, so that I can run the rest later.
@@ -112,12 +125,18 @@ Rules the script must follow:
 When the script is written, tell me how to run it: what to install, how to set GODANCE_API_KEY, and the command that starts it on my CSV file.`;
 
 /** What a block of the wording can be about. A block is kept when every word on its [[IF …]] line is true. */
-export const PROMPT_CONDITIONS = ['IMAGE', 'VIDEO', 'INPUTS', 'SAVED', 'NOT_SAVED', 'GALLERY'] as const;
+export const PROMPT_CONDITIONS = [
+  'IMAGE', 'VIDEO', 'INPUTS', 'SAVED', 'NOT_SAVED', 'GALLERY', 'OPENAI_VIDEO', 'NOT_OPENAI_VIDEO',
+] as const;
 export type PromptCondition = (typeof PROMPT_CONDITIONS)[number];
 
-/** Which blocks of the wording are about this recipe. */
-export function promptConditions(recipe: PromptRecipe): Record<PromptCondition, boolean> {
+/** OpenAI's video route. A video sent there answers as a video, read at GET /v1/videos/{id}, not as a job. */
+export const OPENAI_VIDEO_PATH = '/v1/videos';
+
+/** Which blocks of the wording are about this recipe, run by a request to this route. */
+export function promptConditions(recipe: PromptRecipe, api: Pick<PromptApi, 'createPath'>): Record<PromptCondition, boolean> {
   const saved = Boolean(recipe.version_id);
+  const openAiVideo = recipe.modality === 'VIDEO' && api.createPath === OPENAI_VIDEO_PATH;
   return {
     IMAGE: recipe.modality === 'IMAGE',
     VIDEO: recipe.modality === 'VIDEO',
@@ -125,6 +144,8 @@ export function promptConditions(recipe: PromptRecipe): Record<PromptCondition, 
     SAVED: saved,
     NOT_SAVED: !saved,
     GALLERY: Boolean(recipe.gallery_recipe),
+    OPENAI_VIDEO: openAiVideo,
+    NOT_OPENAI_VIDEO: !openAiVideo,
   };
 }
 
@@ -169,6 +190,6 @@ export function assistantPrompt(recipe: PromptRecipe, api: PromptApi): string {
     CREATE_PATH: api.createPath,
     RECIPE_JSON: promptRecipeJson(recipe),
   };
-  return promptWording(promptConditions(recipe))
+  return promptWording(promptConditions(recipe, api))
     .replace(/\[\[(API_BASE|CREATE_PATH|RECIPE_JSON)\]\]/g, (_, name: string) => values[name]);
 }
