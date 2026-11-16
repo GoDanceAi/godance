@@ -5,6 +5,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.slf4j.Logger;
@@ -20,6 +21,7 @@ import tools.jackson.databind.ObjectMapper;
 import ai.godance.domain.GenerationJob;
 import ai.godance.domain.Region;
 import ai.godance.domain.UsageRecord;
+import ai.godance.gateway.CallerKey;
 import ai.godance.gateway.ImageDtos.GeneratedImage;
 import ai.godance.gateway.ImageDtos.ImageRequest;
 import ai.godance.gateway.ImageProviderAdapter;
@@ -29,6 +31,7 @@ import ai.godance.gateway.ModelCatalog.ModelInfo;
 import ai.godance.security.WebhookSigner;
 import ai.godance.service.GenerationJobSettlement.StoredOutput;
 import ai.godance.service.GenerationQuotes.Quote;
+import ai.godance.service.ProviderCredentialService.UsableKey;
 import ai.godance.storage.ObjectStorageClient;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
@@ -74,12 +77,15 @@ public class ImageGenerationService {
     private final WebhookSigner webhookSigner;
     private final WebhookDestinations webhookDestinations;
     private final WebClient webhookClient;
+    private final ProviderCredentialService byok;
 
     public ImageGenerationService(ModelCatalog catalog, GenerationQuotes quotes,
                                   ImageProviderGateway gateway, GenerationJobSettlement settlement,
                                   ObjectStorageClient storage, ObjectMapper json,
                                   WebhookSigner webhookSigner,
-                                  WebhookDestinations webhookDestinations) {
+                                  WebhookDestinations webhookDestinations,
+                                  ProviderCredentialService byok) {
+        this.byok = byok;
         this.catalog = catalog;
         this.quotes = quotes;
         this.gateway = gateway;
@@ -166,15 +172,16 @@ public class ImageGenerationService {
     public UUID executeAsync(UUID userId, UUID apiKeyId, ImageRequest request, String webhookUrl,
                              JobOrigin origin, List<InputService.ResolvedInput> inputs, Long maxCostCents) {
         webhookDestinations.requireAllowed(webhookUrl);   // before any charge (spec risk R-02)
-        // 404 / 400 before any charge. An edit's input images are part of the price.
-        Quote quote = quotes.image(request.model(), request.n(), request.images().size());
+        // 404 / 400 before any charge. An edit's input images are part of the price,
+        // and on the caller's own key (round 14) the price is Godance's fee.
+        Quote quote = quotes.image(userId, request.model(), request.n(), request.images().size());
         ModelInfo model = quote.model();
         GenerationJob job = acceptJob(userId, apiKeyId, quote, request, webhookUrl, origin, inputs, maxCostCents);
 
         // Kick off async processing. The pre-debit and the job row are already
         // committed together; if this worker dies, GenerationJobSweepJob fails
         // and refunds the job once its lease runs out.
-        Mono.fromRunnable(() -> runJob(job, userId, apiKeyId, model, request, webhookUrl))
+        Mono.fromRunnable(() -> runJob(job, userId, apiKeyId, model, request, webhookUrl, quote.byok()))
                 .subscribeOn(Schedulers.boundedElastic())
                 .subscribe();
 
@@ -184,9 +191,9 @@ public class ImageGenerationService {
     private ImageResult executeInternal(UUID userId, UUID apiKeyId, ImageRequest request, String webhookUrl,
                                         JobOrigin origin, List<InputService.ResolvedInput> inputs,
                                         Long maxCostCents) {
-        Quote quote = quotes.image(request.model(), request.n(), request.images().size());   // 404 / 400 before any charge
+        Quote quote = quotes.image(userId, request.model(), request.n(), request.images().size());   // 404 / 400 before any charge
         GenerationJob job = acceptJob(userId, apiKeyId, quote, request, webhookUrl, origin, inputs, maxCostCents);
-        return runJob(job, userId, apiKeyId, quote.model(), request, webhookUrl);
+        return runJob(job, userId, apiKeyId, quote.model(), request, webhookUrl, quote.byok());
     }
 
     /**
@@ -207,8 +214,13 @@ public class ImageGenerationService {
         return job;
     }
 
+    /**
+     * {@code pricedOnCallerKey}: the job was priced at Godance's fee, to go
+     * out on the caller's own key (round 14); the key itself is chosen only
+     * after {@link ImageProviderGateway#dispatch} has passed the region check.
+     */
     private ImageResult runJob(GenerationJob job, UUID userId, UUID apiKeyId, ModelInfo model,
-                               ImageRequest request, String webhookUrl) {
+                               ImageRequest request, String webhookUrl, boolean pricedOnCallerKey) {
         ImageProviderAdapter adapter;
         try {
             adapter = gateway.dispatch(model);
@@ -222,19 +234,41 @@ public class ImageGenerationService {
                     "image job expired before it started");
         }
 
+        // Bring your own key (round 14): chosen now, after the region check passed.
+        Optional<UsableKey> key = pricedOnCallerKey ? byok.keyFor(userId, model) : Optional.empty();
+        if (pricedOnCallerKey && key.isEmpty()) {
+            // Priced at the fee, but the key was removed or refused since: the
+            // platform's key stands in only with the caller's leave.
+            platformInstead(job, userId, apiKeyId, model, request, byok.fallsBackToPlatform(userId, model.provider()));
+        }
+
         List<GeneratedImage> upstream;
         try {
-            upstream = adapter.generate(request).block(UPSTREAM_BLOCK_TIMEOUT);
-            if (upstream == null || upstream.isEmpty()) {
-                throw new IllegalStateException("upstream returned no images");
-            }
+            upstream = generate(adapter, request, key.orElse(null));
         } catch (RuntimeException e) {
             log.warn("Image upstream {} failed for job {}: {}",
                     model.provider(), job.getId(), e.getMessage());
-            settlement.fail(job, "upstream: " + e.getMessage(), "image upstream failed");
-            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
-                    "image provider error: " + e.getMessage());
+            if (key.isEmpty() || !ChatCompletionService.isKeyRefused(e)) {
+                settlement.fail(job, "upstream: " + e.getMessage(), "image upstream failed");
+                throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
+                        "image provider error: " + e.getMessage());
+            }
+            // The provider refused the caller's key: invalid from now on. Tried once
+            // more on the platform's key, at the platform price, with the caller's leave.
+            byok.rejected(key.get(), null);
+            platformInstead(job, userId, apiKeyId, model, request, key.get().fallbackToPlatform());
+            key = Optional.empty();
+            try {
+                upstream = generate(adapter, request, null);
+            } catch (RuntimeException retry) {
+                log.warn("Image upstream {} failed on the platform's key for job {}: {}",
+                        model.provider(), job.getId(), retry.getMessage());
+                settlement.fail(job, "upstream: " + retry.getMessage(), "image upstream failed");
+                throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
+                        "image provider error: " + retry.getMessage());
+            }
         }
+        boolean onCallerKey = key.isPresent();
 
         // The provider has delivered. Storing the result and ending the job DONE
         // share one guard: a failure here ends the job FAILED and refunded, never
@@ -245,15 +279,24 @@ public class ImageGenerationService {
         // for: a provider that returns one image for n = 2 is paid for one,
         // and settlement returns the rest of the hold.
         int requested = request.n() == null ? 1 : request.n();
-        long cost = chargeFor(job, model, Math.min(upstream.size(), requested), request.images().size());
+        int delivered = Math.min(upstream.size(), requested);
+        long cost = onCallerKey ? 0L : chargeFor(job, model, delivered, request.images().size());
         List<UploadedImage> uploaded;
         boolean completed;
         try {
             Uploads uploads = uploadAll(job.getId(), upstream);
             uploaded = uploads.images();
-            completed = settlement.complete(job, uploaded.isEmpty() ? null : uploaded.get(0).url(),
-                    uploads.stored(), cost,
-                    buildUsageRecord(userId, apiKeyId, model, request, cost, job.getRequestId(), upstream.size()));
+            String first = uploaded.isEmpty() ? null : uploaded.get(0).url();
+            UsageRecord record = buildUsageRecord(userId, apiKeyId, model, request, cost, job.getRequestId(),
+                    upstream.size(), onCallerKey);
+            if (onCallerKey) {
+                // Godance's fee on the list price, settled in microcents; the hold covers it.
+                completed = settlement.completeSettling(job, first, uploads.stored(),
+                        quotes.imageFeeMicrocents(model, delivered, request.images().size()), record);
+                cost = job.getActualCostCents() == null ? 0L : job.getActualCostCents();
+            } else {
+                completed = settlement.complete(job, first, uploads.stored(), cost, record);
+            }
         } catch (RuntimeException e) {
             log.warn("Image job {} could not be finalised: {}", job.getId(), e.getMessage());
             settlement.fail(job, "finalize: " + e.getMessage(), "image result could not be stored");
@@ -358,10 +401,12 @@ public class ImageGenerationService {
         return job;
     }
 
+    /** {@code onCallerKey}: the request went out on the caller's own key (round 14); the provider bills them. */
     private UsageRecord buildUsageRecord(UUID userId, UUID apiKeyId, ModelInfo model, ImageRequest request,
-                                         long actualCents, String requestId, int imageCount) {
-        // What the provider bills: each image it returned, and each input image it was given.
-        long providerCostMicrocents = model.perImageMicrocents() * imageCount
+                                         long actualCents, String requestId, int imageCount, boolean onCallerKey) {
+        // What the provider bills Godance: each image it returned, and each input image
+        // it was given; nothing on the caller's own key.
+        long providerCostMicrocents = onCallerKey ? 0L : model.perImageMicrocents() * imageCount
                 + model.perInputImageMicrocents() * request.images().size();
         long providerCostCents = (providerCostMicrocents + 5_000) / 10_000;
 
@@ -381,7 +426,40 @@ public class ImageGenerationService {
         r.setCacheHit(false);
         r.setFallbackUsed(false);
         r.setRequestId(requestId);
+        r.setByok(onCallerKey);
         return r;
+    }
+
+    /** One upstream call, on the caller's own key when {@code key} is set, else on the platform's. */
+    private static List<GeneratedImage> generate(ImageProviderAdapter adapter, ImageRequest request, UsableKey key) {
+        Mono<List<GeneratedImage>> call = adapter.generate(request);
+        if (key != null) call = call.contextWrite(context -> CallerKey.in(context, key.key()));
+        List<GeneratedImage> images = call.block(UPSTREAM_BLOCK_TIMEOUT);
+        if (images == null || images.isEmpty()) {
+            throw new IllegalStateException("upstream returned no images");
+        }
+        return images;
+    }
+
+    /**
+     * A job priced at the fee cannot go out on the caller's key: with the
+     * caller's leave ({@code fallback_to_platform}) it moves to the platform
+     * price, held now, before the platform's key is used; without it the job
+     * fails, refunded, with 402 {@code byok_credential_rejected}.
+     */
+    private void platformInstead(GenerationJob job, UUID userId, UUID apiKeyId, ModelInfo model,
+                                 ImageRequest request, boolean allowed) {
+        if (!allowed) {
+            settlement.fail(job, "byok: the provider refused the caller's key", "the provider refused the caller's key");
+            throw ByokRefusedException.credentialRejected(model.provider());
+        }
+        int n = request.n() == null ? 1 : request.n();
+        long platform = quotes.imagePriceCents(model, n, request.images().size());
+        if (!settlement.reprice(job, apiKeyId, platform, newRequestId(),
+                "the provider refused the caller's key; the platform's key stands in")) {
+            settlement.fail(job, "byok: the platform price is not covered", "the platform price is not covered");
+            throw new InsufficientCreditException();
+        }
     }
 
     private static String newRequestId() {

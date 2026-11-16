@@ -168,6 +168,21 @@ public interface GenerationJobRepository extends JpaRepository<GenerationJob, UU
          + "AND j.status IN (ai.godance.domain.JobStatus.QUEUED, ai.godance.domain.JobStatus.RUNNING)")
     int failIfOpen(@Param("id") UUID id, @Param("error") String error, @Param("now") Instant now);
 
+    /** The charge of a job just completed, once the ledger has billed it (round 14, a fee settled in microcents). */
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("UPDATE GenerationJob j SET j.actualCostCents = :cents WHERE j.id = :id")
+    int setActualCost(@Param("id") UUID id, @Param("cents") long cents);
+
+    /**
+     * A running job's new hold and the request id it is kept under (round
+     * 14: the platform price, when the provider refused the caller's key).
+     * 0 when the job is no longer running.
+     */
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("UPDATE GenerationJob j SET j.estimatedCostCents = :cents, j.requestId = :requestId "
+         + "WHERE j.id = :id AND j.status = ai.godance.domain.JobStatus.RUNNING")
+    int repriceIfRunning(@Param("id") UUID id, @Param("cents") long cents, @Param("requestId") String requestId);
+
     // ===== Data retention (V20) ==========================================
     // A job is purged once it has ended: its media objects are deleted, then
     // this redacts the row. Cost columns stay; they are billing records.

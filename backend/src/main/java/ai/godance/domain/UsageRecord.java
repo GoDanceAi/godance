@@ -67,6 +67,13 @@ public class UsageRecord {
     @Column(name = "cache_hit", nullable = false)
     private boolean cacheHit;
 
+    /**
+     * The request went out on the caller's own provider key (V40, round 14):
+     * {@code costCents} is then Godance's fee alone.
+     */
+    @Column(name = "byok", nullable = false)
+    private boolean byok;
+
     @Column(name = "fallback_used", nullable = false)
     private boolean fallbackUsed;
 
@@ -131,6 +138,9 @@ public class UsageRecord {
 
     public boolean isCacheHit() { return cacheHit; }
     public void setCacheHit(boolean cacheHit) { this.cacheHit = cacheHit; }
+
+    public boolean isByok() { return byok; }
+    public void setByok(boolean byok) { this.byok = byok; }
 
     public boolean isFallbackUsed() { return fallbackUsed; }
     public void setFallbackUsed(boolean fallbackUsed) { this.fallbackUsed = fallbackUsed; }

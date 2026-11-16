@@ -89,6 +89,7 @@ public class AccountClosureService {
     private final DataRetentionService retention;
     private final InputService inputs;
     private final AuditLogService audit;
+    private final ProviderCredentialService providerKeys;
     private final TransactionTemplate tx;
 
     public AccountClosureService(UserRepository users, UserTwoFactorRepository twoFactors,
@@ -98,7 +99,8 @@ public class AccountClosureService {
                                  RecipeRepository recipes, RecipeBatchRepository batches,
                                  GenerationJobRepository jobs, GenerationJobSettlement settlement,
                                  DataRetentionService retention, InputService inputs, AuditLogService audit,
-                                 PlatformTransactionManager txManager) {
+                                 ProviderCredentialService providerKeys, PlatformTransactionManager txManager) {
+        this.providerKeys = providerKeys;
         this.users = users;
         this.twoFactors = twoFactors;
         this.apiKeys = apiKeys;
@@ -223,6 +225,8 @@ public class AccountClosureService {
         // runner has nothing of this account left to start. A row's job that is
         // already running is ended below with every other open job.
         int batchesDeleted = batches.deleteByUserId(userId);
+        // The owner's own provider keys (round 14): nobody holds this account now.
+        int keysDeleted = providerKeys.deleteAllOf(userId);
         // The owner's own recipes go, with their versions. Their jobs are purged below.
         recipes.deleteByUserId(userId);
 
@@ -234,6 +238,7 @@ public class AccountClosureService {
         detail.put("oauthIdentitiesDeleted", links);
         detail.put("conversationsDeleted", convs);
         detail.put("batchesDeleted", batchesDeleted);
+        detail.put("providerKeysDeleted", keysDeleted);
         audit.record(AuditLogService.EVT_ADMIN_ACCOUNT_CLOSED, AuditOutcome.SUCCESS, userId, ip, detail);
         return new AccountStep(alreadyClosed, keys, links, convs);
     }
