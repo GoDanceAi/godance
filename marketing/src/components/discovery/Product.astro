@@ -1,0 +1,31 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import Surface from './Surface.astro';
+import { appUrlFrom } from '../../lib/community';
+interface Props { page: 'create' | 'integrations' }
+const { page } = Astro.props;
+const create = page === 'create';
+const app = appUrlFrom();
+const title = create ? 'Create, compare and repeat — Godance' : 'Code, assistants and workflows — Godance integrations';
+const description = create ? 'Use Studio, compare your attempts in History, save versioned recipes, and run a batch.' : 'Take an existing setup into the Godance API, generated code, AI-assistant prompts, n8n or MCP.';
+---
+<Layout {title} {description} canonicalPath={`/${page}`}>
+  <Surface>
+    <p class="gd-discovery-kicker">{create ? 'The creator workflow' : 'The developer workflow'}</p>
+    <h1>{create ? 'From a prompt to a process.' : 'Keep the setup. Choose your tools.'}</h1>
+    <p style="font-size:1.2rem;">{description}</p>
+    {create ? <>
+      <div class="gd-discovery-actions"><a href={`${app}/create/image`}>Open Image Studio</a><a href={`${app}/create/video`}>Open Video Studio</a><a href={`${app}/chat`}>Open Chat</a></div>
+      <div class="gd-discovery-flow" aria-label="Creator workflow"><ol><li>Prompt + model + settings</li><li>Review estimate → Run</li><li>History → select compatible jobs</li><li>Compare → save recipe</li><li>Recipe version → batch rows</li></ol></div>
+      <section><h2>Try a model in Studio</h2><p>Start with a prompt, choose an available image or video model, and adjust the controls that model supports. Review the estimate before choosing Run. Opening Studio or a recipe does not create a job.</p><p>Studio follows the account, terms, balance and selected-model rules already in the app. Sign in or finish onboarding when prompted; the existing app preserves your destination.</p></section>
+      <section><h2>Keep outputs and reusable setups separate</h2><div class="gd-discovery-grid"><article class="gd-discovery-panel"><h3>History and comparison</h3><p>History holds generated jobs and their outputs. Select compatible jobs there to compare them. Saving a completed output keeps it beyond the ordinary media-retention period, subject to account limits.</p><div class="gd-discovery-actions"><a href={`${app}/history`}>Open History</a></div></article><article class="gd-discovery-panel"><h3>Versioned recipes</h3><p>A recipe keeps a prompt or variable template, model and settings. It can have multiple versions, so an experiment does not overwrite the setup you want to reuse. Recipes are distinct from saved outputs and example bookmarks.</p><div class="gd-discovery-actions"><a href={`${app}/recipes`}>Open Recipes</a></div></article></div></section>
+      <section><h2>Run the recipe over rows</h2><p>Choose a recipe version and prepare rows for a batch. Estimate the batch before submitting it, then follow progress and download results. Each row is an ordinary paid job; existing balance and key caps still apply.</p><p>For code, an assistant prompt or n8n, use Run at scale in the existing workflow. You do not need a second editor.</p><div class="gd-discovery-actions"><a href={`${app}/batches`}>Open Batches</a><a href="/integrations">Use code or an assistant</a></div></section>
+    </> : <>
+      <div class="gd-discovery-actions"><a href={`${app}/keys`}>API keys and MCP setup</a><a href="/docs">Read the API reference</a></div>
+      <div class="gd-discovery-flow" aria-label="Integration choices"><ol><li>Working Studio setup</li><li>Run at scale panel</li><li>Code · assistant prompt · n8n</li><li>Same API, keys and limits</li></ol></div>
+      <section><h2>Use the API directly</h2><p>Point an OpenAI-compatible client at the Godance base URL with a Godance API key. Chat supports streaming and non-streaming responses. Images can return jobs or the OpenAI image response shape with a sync-configured key. Video uses jobs and OpenAI-compatible video routes.</p><p>Read the compatibility details before moving a client: unsupported video operations, audio and embeddings are not live. A setup link is not a claim that any provider is available.</p><div class="gd-discovery-actions"><a href="/docs#openai-compat">SDK compatibility</a><a href="/docs#keys">Key scopes and spending caps</a></div></section>
+      <section><h2>Reuse the existing Run at scale panel</h2><div class="gd-discovery-grid"><article class="gd-discovery-panel"><h3>Code and assistant prompts</h3><p>Copy a request based on the setup you already tried, or give its assistant prompt to your coding tool. Keep credentials in environment variables, and review generated code before running it.</p><div class="gd-discovery-actions"><a href="/docs#ai-assistants">Assistant reference</a></div></article><article class="gd-discovery-panel"><h3>n8n templates</h3><p>The repository includes image and video workflows for rows in a Google Sheet. Import a template, set an API-key credential and use estimates and a spending cap before paid runs.</p><div class="gd-discovery-actions"><a href="/docs#n8n">n8n setup</a></div></article></div></section>
+      <section><h2>Use MCP from your assistant</h2><p>API keys → Use with MCP provides client configuration. The Streamable HTTP endpoint uses an API key, not your signed-in browser session. Tools can discover recipes, estimate and follow jobs; every tool that spends takes <code>max_cost_cents</code>.</p><p>Godance runs no assistant of its own. Existing account, regional and spending rules apply. MCP availability is deployment configuration; setup does not probe provider health.</p><div class="gd-discovery-actions"><a href="/docs#mcp">MCP contract and setup</a><a href="/docs#self-hosting">Repository self-hosting guide</a></div></section>
+    </>}
+  </Surface>
+</Layout>

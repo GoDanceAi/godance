@@ -1,0 +1,9 @@
+---
+import type { GetStaticPaths } from 'astro';
+import { discoveryEnabled } from '../lib/site-discovery';
+import Product from '../components/discovery/Product.astro';
+export const getStaticPaths: GetStaticPaths = () => discoveryEnabled()
+  ? ['create', 'integrations'].map(page => ({ params: { discovery: page } })) : [];
+const page = Astro.params.discovery as 'create' | 'integrations';
+---
+<Product {page} />

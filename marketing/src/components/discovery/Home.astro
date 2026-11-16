@@ -1,0 +1,28 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import Surface from './Surface.astro';
+import { appUrlFrom } from '../../lib/community';
+import { loadGallery } from '../../lib/gallery-recipes';
+const app = appUrlFrom();
+const gallery = await loadGallery();
+const title = 'Godance — from a first idea to a repeatable workflow';
+const description = 'Create images and videos in Studio, compare in History, save recipes, and use batches, code or an assistant with one API and credit balance.';
+---
+<Layout {title} {description} canonicalPath="/">
+  <Surface>
+    <p class="gd-discovery-kicker">Create once. Find what works. Repeat.</p>
+    <h1>Your next idea.<br />A workflow you can keep.</h1>
+    <p style="font-size:1.2rem;">Try image and video models in Studio. Compare your attempts, keep a recipe, then run it over a sheet—or take the same setup into code or your AI assistant.</p>
+    <div class="gd-discovery-actions"><a href={`${app}/create/image`}>Open Image Studio →</a><a href="/integrations">Build with the API</a></div>
+    <div class="gd-discovery-flow" aria-label="Workflow"><ol><li>Explore a model</li><li>Create in Studio</li><li>Compare in History</li><li>Save a recipe</li><li>Batch or Run at scale</li></ol></div>
+    <section>
+      <h2>Start with the way you work.</h2>
+      <div class="gd-discovery-grid">
+        <article class="gd-discovery-panel"><h3>Make something in Studio</h3><p>Choose an image or video model, review an estimate, and explicitly run your prompt. Your outputs stay accessible in History.</p><div class="gd-discovery-actions"><a href="/create">Explore the workflow</a></div></article>
+        <article class="gd-discovery-panel"><h3>Bring a working setup into code</h3><p>The existing Run at scale panel offers code, assistant prompts and n8n options. API keys and MCP setup live in the app.</p><div class="gd-discovery-actions"><a href="/integrations">See integrations</a></div></article>
+      </div>
+    </section>
+    <section><h2>Compare your own evidence.</h2><p>In History, select compatible jobs to open the comparison view. Keep the prompt and settings that work as a versioned recipe, then run that recipe over rows in a batch.</p><div class="gd-discovery-actions"><a href={`${app}/history`}>Open History</a><a href={`${app}/recipes`}>Your recipes</a>{gallery.on && <a href="/gallery">Explore the Gallery</a>}</div></section>
+    <section><h2>One API. Clear contracts.</h2><p>Chat supports streaming and non-streaming responses. Images support asynchronous jobs or the OpenAI response shape with a sync-configured key; a long wait can still return a job to poll. Video runs as jobs. Audio and embeddings are not currently implemented.</p><p>Use a Godance API key and the configured base URL. Model and account availability still apply. Top up with card, ACH, SEPA, or USDT; a click here starts no paid generation.</p><div class="gd-discovery-actions"><a href="/docs#openai-compat">Check SDK compatibility</a><a href="/models">Browse models and rates</a></div></section>
+  </Surface>
+</Layout>
