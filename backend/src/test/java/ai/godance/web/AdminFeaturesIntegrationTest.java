@@ -71,6 +71,13 @@ class AdminFeaturesIntegrationTest {
                 .exchange().expectStatus().isForbidden();
     }
 
+    @Test
+    void features_givenInactiveAdmin_returns401() {
+        String bearer = account(UserRole.ADMIN, true, true, false);
+        http.get().uri("/v1/admin/features").header("Authorization", bearer)
+                .exchange().expectStatus().isUnauthorized();
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"POST", "PUT", "PATCH", "DELETE"})
     void features_givenWriteMethod_neverSucceeds(String method) {
@@ -81,6 +88,10 @@ class AdminFeaturesIntegrationTest {
     }
 
     private String account(UserRole role, boolean verified, boolean twoFactor) {
+        return account(role, verified, twoFactor, true);
+    }
+
+    private String account(UserRole role, boolean verified, boolean twoFactor, boolean active) {
         String email = "features-" + UUID.randomUUID() + "@example.test";
         AuthResponse response = http.post().uri("/v1/auth/signup").contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(Map.of("email", email, "password", "correct-horse-battery-staple", "fullName", "Synthetic Admin"))
@@ -88,6 +99,7 @@ class AdminFeaturesIntegrationTest {
         User user = users.findByEmail(email).orElseThrow();
         user.setRole(role);
         user.setEmailVerified(verified);
+        user.setActive(active);
         users.save(user);
         if (twoFactor) TwoFactorFixture.turnOn(twoFactors, user.getId());
         return "Bearer " + response.accessToken();
