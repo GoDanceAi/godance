@@ -234,8 +234,25 @@ paths:
         caller's files. JSON names images that are already stored. The answer
         follows the key, as for a generation.
 
+        A field the route does not read is refused, not ignored: 400
+        `invalid_parameter`, with `param` naming it, at any depth
+        (`output_format`, `recipe.variable`, `images[1].url`). That includes
+        OpenAI's own fields that Godance does not act on, such as
+        `background`, `output_format`, `input_fidelity`, `stream` and
+        `user`, and `style`, which only a generation takes. In JSON, a field
+        set to null passes. A form field sent twice is refused, except
+        `image`.
+
+        In a form, OpenAI's SDK writes a nested value as bracketed fields,
+        and they are read back into it: `extra_body={"recipe": {…}}` arrives
+        as `recipe[version_id]`, `recipe[variables][subject]` and
+        `recipe[inputs][slot][file_id]`. `recipe` may also be sent as JSON
+        text. A form of more parts than 24 (each image and each bracketed
+        field is one) answers 400 `invalid_parameter`.
+
         Part of inputs: answers 403 `inputs_disabled` until they are switched
-        on. Further problem codes: `input_not_supported` (400), everything an
+        on. Further problem codes: `input_not_supported` (400),
+        `invalid_parameter` (400, `param` names the field), everything an
         upload can answer, and everything a generation can.
       security: [{ apiKey: [] }, { session: [] }]
       parameters:
@@ -249,10 +266,12 @@ paths:
             schema:
               type: object
               required: [model]
+              additionalProperties: false
               properties:
                 model: { type: string }
                 prompt: { type: string }
                 image: { type: string, format: binary, description: "Repeat the part, or use `image[]`, to send several." }
+                "image[]": { type: string, format: binary, description: "How OpenAI's SDK names the parts of a list of images." }
                 mask: { type: string, format: binary }
                 n: { type: integer, minimum: 1 }
                 size: { type: string }
@@ -262,6 +281,14 @@ paths:
                 webhook_url: { type: string }
                 gallery_recipe: { type: string }
                 recipe: { type: string, description: "The `recipe` object of the JSON form, as JSON text." }
+                "recipe[version_id]": { type: string, format: uuid }
+              patternProperties:
+                "^recipe\\[variables\\]\\[[^\\]]+\\]$":
+                  type: string
+                  description: "`recipe[variables][subject]`: one variable's value. An empty value is a value."
+                "^recipe\\[inputs\\]\\[[^\\]]+\\](\\[file_id\\]|\\[job_output\\]\\[(job_id|index)\\])$":
+                  type: string
+                  description: "`recipe[inputs][product photo][file_id]`: an input reference for one of the version's slots."
       responses:
         "200":
           description: The images, for a request that waited.
@@ -656,6 +683,9 @@ paths:
         `input_too_large` (413), `input_type_unsupported` (415),
         `input_limit_reached` (409), `input_person_not_allowed` (422),
         `input_check_unavailable` (503); and 429 for too many uploads in an hour.
+        A form with no `file` part, another `purpose`, or a form that cannot
+        be read at all, such as one of more than 24 parts, answers 400; the
+        last with `invalid_parameter`.
       security: [{ apiKey: [] }, { session: [] }]
       requestBody:
         required: true
@@ -673,6 +703,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/File" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "409": { $ref: "#/components/responses/Conflict" }
@@ -2229,8 +2260,9 @@ components:
         poll_url: { type: string, description: "`/v1/jobs/{job_id}`" }
     ImageEditRequest:
       type: object
-      description: The JSON form of an edit.
+      description: The JSON form of an edit. A field not listed here is refused unless it is null.
       required: [model]
+      additionalProperties: { type: "null" }
       properties:
         model: { type: string }
         prompt: { type: string }
