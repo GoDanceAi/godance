@@ -248,7 +248,7 @@ class SpendingTools implements McpToolProvider {
         List<ai.godance.web.dto.BatchDtos.BatchRowRequest> rows =
                 args.listOf("rows", ai.godance.web.dto.BatchDtos.BatchRowRequest.class, json);
         return new BatchRequest(versionId, args.text("model"), params, rows, args.integer("max_concurrency"), null,
-                null);
+                args.bool("fallbacks"));
     }
 
     // ===== The shared image path ======================================
@@ -456,6 +456,7 @@ class SpendingTools implements McpToolProvider {
                "model": {"type": "string", "description": "The version's model when left out."},
                "params": {"type": "object", "description": "size, n, seconds, style, quality; replaces the version's as a whole."},
                "max_concurrency": {"type": "integer", "minimum": 1},
+               "fallbacks": {"type": "boolean", "description": "Retry a row once on another model when its job fails on a provider error or a timeout, as the caller's routing policies' fallbacks for the model say. Needs routing policies."},
                "max_cost_cents": %2$s
              },
              "required": ["version_id", "rows"],
