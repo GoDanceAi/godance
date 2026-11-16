@@ -99,7 +99,23 @@ result = client.images.edit(
 )
 image_b64 = result.data[0].b64_json`;
 
-const editCurlSnippet = `# The same request with curl. Repeat -F "image[]=@..." to send several images.
+const editRecipeSnippet = `# A recipe in place of the prompt. The SDK requires prompt, so it is empty.
+result = client.images.edit(
+    model="gpt-image-2",
+    image=open("mug.png", "rb"),
+    prompt="",
+    extra_body={"recipe": {"version_id": version_id, "variables": {"surface": "marble counter"}}},
+)
+
+# A recipe whose slots name its own images takes image=[], which sends no image part.
+result = client.images.edit(
+    model="gpt-image-2",
+    image=[],
+    prompt="",
+    extra_body={"recipe": {"version_id": version_id, "inputs": {"product": {"file_id": file_id}}}},
+)`;
+
+const editCurlSnippet =`# The same request with curl. Repeat -F "image[]=@..." to send several images.
 curl https://api.godance.ai/v1/images/edits \\
   -H "Authorization: Bearer $GODANCE_API_KEY" \\
   -F model=gpt-image-2 \\
@@ -676,10 +692,14 @@ def verify(payload, header, secret):
     <pre class="code-block mt-4"><code>{editCurlSnippet}</code></pre>
     <ul class="mt-4 space-y-2 text-fg-muted">
       <li><strong class="text-fg">The multipart form.</strong> <code class="code-chip">model</code> and <code class="code-chip">prompt</code>, one or more <code class="code-chip">image</code> parts (also accepted as <code class="code-chip">image[]</code>), and optionally <code class="code-chip">mask</code>, <code class="code-chip">n</code>, <code class="code-chip">size</code>, <code class="code-chip">quality</code> and <code class="code-chip">response_format</code>.</li>
+      <li><strong class="text-fg">Nothing is ignored.</strong> A field the route does not read answers <code class="code-chip">400</code> with <code class="code-chip">code: "invalid_parameter"</code> and <code class="code-chip">param</code> naming it, at any depth: <code class="code-chip">output_format</code>, <code class="code-chip">recipe.variable</code>, <code class="code-chip">images[1].url</code>. That includes OpenAI's own fields that Godance does not act on, such as <code class="code-chip">background</code>, <code class="code-chip">input_fidelity</code>, <code class="code-chip">stream</code> and <code class="code-chip">user</code>, and <code class="code-chip">style</code>, which only a generation takes. In JSON a field set to <code class="code-chip">null</code> passes. A form field sent twice is refused too, except <code class="code-chip">image</code>.</li>
       <li><strong class="text-fg">What happens to the images you send.</strong> Each one is checked exactly as an upload to <a href="#files" class="underline" style="color: var(--color-primary)"><code class="code-chip">POST /v1/files</code></a> is, with the same limits and the same refusals, and becomes one of your files. It is kept for as long as the job is.</li>
       <li><strong class="text-fg">The answer</strong> follows the key, as for a generation: a job to poll, or with a key set to <a href="#image-responses" class="underline" style="color: var(--color-primary)"><code class="code-chip">sync</code></a> the images in OpenAI's shape. The SDK example above needs a sync key.</li>
       <li><strong class="text-fg">The same job as a generation.</strong> The price is reserved when the job is accepted and returned in full if it fails; <code class="code-chip">webhook_url</code>, <code class="code-chip">async</code>{recipesOn && <Fragment>, <code class="code-chip">gallery_recipe</code></Fragment>} and <code class="code-chip">recipe</code> work as they do there. The job lists what it worked from under <a href="#job-inputs" class="underline" style="color: var(--color-primary)"><code class="code-chip">inputs</code></a>.</li>
+      <li><strong class="text-fg">Godance's fields from OpenAI's SDK</strong> go in <code class="code-chip">extra_body</code>. The SDK always sends a form, and writes a nested value into it as bracketed fields: <code class="code-chip">recipe[version_id]</code>, <code class="code-chip">recipe[variables][surface]</code>, <code class="code-chip">recipe[inputs][product][file_id]</code>. Godance reads them back into the recipe; <code class="code-chip">recipe</code> may be JSON text too, <code class="code-chip">extra_body=&#123;"recipe": json.dumps(&#123;...&#125;)&#125;</code>. A form has at most 24 parts, counting each image and each bracketed field: past that it answers <code class="code-chip">400</code> with <code class="code-chip">code: "invalid_parameter"</code>, and the recipe fits as JSON text. In the form the images are file parts; to edit images that are already stored, send the JSON form below.</li>
+      <li><strong class="text-fg">Errors</strong> are problem responses, as everywhere, without OpenAI's <code class="code-chip">error</code> object: the SDK's exception reads <code class="code-chip">Error code: 400</code>, with <code class="code-chip">code</code> and <code class="code-chip">param</code> set, and the sentence is in <code class="code-chip">e.response.json()["detail"]</code>.</li>
     </ul>
+    <pre class="code-block mt-4"><code>{editRecipeSnippet}</code></pre>
     <p class="mt-6 text-fg-muted">
       <strong class="text-fg">The JSON form</strong> names images that are already stored, in either
       <a href="#input-references" class="underline" style="color: var(--color-primary)">form of input</a>:
@@ -698,6 +718,8 @@ def verify(payload, header, secret):
       <strong class="text-fg">Refusals,</strong> each before anything is stored or charged:
       <code class="code-chip">400</code> with <code class="code-chip">code: "input_not_supported"</code>
       when the model takes no input images, takes fewer than were sent, or takes no mask;
+      <code class="code-chip">400</code> with <code class="code-chip">code: "invalid_parameter"</code>
+      for a field the route does not read, or a form it cannot read;
       <code class="code-chip">400</code> when there is no image at all; and everything under
       <a href="#input-refusals" class="underline" style="color: var(--color-primary)">what is refused, and why</a>.
     </p>
@@ -929,6 +951,7 @@ def verify(payload, header, secret):
       <li><code class="code-chip">403 inputs_disabled</code> — inputs are not switched on.</li>
       <li><code class="code-chip">403 inputs_not_allowed_for_account</code> — the account is not an adult's.</li>
       <li><code class="code-chip">403 inputs_terms_required</code> — the account has not accepted the current input terms. <code class="code-chip">terms_version</code> in the response is the version to accept.</li>
+      <li><code class="code-chip">400 invalid_parameter</code> — the form could not be read: one of more than 24 parts, for one.</li>
       <li><code class="code-chip">413 input_too_large</code> — more than 20&nbsp;MB, or more than 40 megapixels.</li>
       <li><code class="code-chip">415 input_type_unsupported</code> — not a PNG, JPEG or WebP still image: another format, an animation, or a file that is cut short.</li>
       <li><code class="code-chip">409 input_limit_reached</code> — the account already keeps 200 files. Delete one to upload another.</li>
