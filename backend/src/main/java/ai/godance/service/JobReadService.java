@@ -16,12 +16,14 @@ import org.springframework.web.server.ResponseStatusException;
 
 import ai.godance.domain.GenerationJob;
 import ai.godance.domain.GenerationJobOutput;
+import ai.godance.domain.PublishedRecipe;
 import ai.godance.domain.JobStatus;
 import ai.godance.domain.Modality;
 import ai.godance.domain.RecipeBatchRow;
 import ai.godance.domain.RecipeVersion;
 import ai.godance.repository.GenerationJobOutputRepository;
 import ai.godance.repository.GenerationJobRepository;
+import ai.godance.repository.PublishedRecipeRepository;
 import ai.godance.repository.RecipeBatchRowRepository;
 import ai.godance.repository.RecipeVersionRepository;
 import ai.godance.storage.ObjectStorageClient;
@@ -59,16 +61,19 @@ public class JobReadService {
     private final RecipeVersionRepository recipeVersions;
     private final InputService inputs;
     private final RecipeBatchRowRepository batchRows;
+    private final PublishedRecipeRepository publishedRecipes;
 
     public JobReadService(GenerationJobRepository jobs, GenerationJobOutputRepository outputs,
                           ObjectStorageClient storage, RecipeVersionRepository recipeVersions,
-                          InputService inputs, RecipeBatchRowRepository batchRows) {
+                          InputService inputs, RecipeBatchRowRepository batchRows,
+                          PublishedRecipeRepository publishedRecipes) {
         this.jobs = jobs;
         this.outputs = outputs;
         this.storage = storage;
         this.recipeVersions = recipeVersions;
         this.inputs = inputs;
         this.batchRows = batchRows;
+        this.publishedRecipes = publishedRecipes;
     }
 
     /** One of the caller's jobs; 404 for an unknown id or another user's job. */
@@ -81,7 +86,17 @@ public class JobReadService {
         RecipeVersion version = job.getRecipeVersionId() == null ? null
                 : recipeVersions.findById(job.getRecipeVersionId()).orElse(null);
         return view(job, outputs.findByJobIdOrderByOutputIndexAsc(job.getId()), version,
-                inputs.viewsFor(job.getId()), batchRowsOf(List.of(job)).get(job.getBatchRowId()));
+                inputs.viewsFor(job.getId()), batchRowsOf(List.of(job)).get(job.getBatchRowId()),
+                publicIdsOf(List.of(job)).get(job.getPublishedRecipeId()));
+    }
+
+    /** The public ids of the published recipes these jobs ran, by row id, in one read (round 14). */
+    private Map<UUID, String> publicIdsOf(List<GenerationJob> page) {
+        List<UUID> ids = page.stream().map(GenerationJob::getPublishedRecipeId).filter(Objects::nonNull).distinct().toList();
+        Map<UUID, String> byId = new HashMap<>();
+        if (ids.isEmpty()) return byId;
+        for (PublishedRecipe r : publishedRecipes.findByIdIn(ids)) byId.put(r.getId(), r.getPublicId());
+        return byId;
     }
 
     /** The batch rows these jobs were made for, by row id, in one read. Empty when none is a batch's job. */
@@ -147,14 +162,17 @@ public class JobReadService {
         Map<UUID, List<JobInputView>> inputsByJob = inputs.viewsFor(page.stream().map(GenerationJob::getId).toList());
         // The batch rows these jobs were made for, in one read.
         Map<UUID, JobBatchView> batchRowsById = batchRowsOf(page);
+        // The published recipes these jobs ran, in one read.
+        Map<UUID, String> publishedById = publicIdsOf(page);
         return page.stream()
                 .map(j -> view(j, byJob.getOrDefault(j.getId(), List.of()), versions.get(j.getRecipeVersionId()),
-                        inputsByJob.getOrDefault(j.getId(), List.of()), batchRowsById.get(j.getBatchRowId())))
+                        inputsByJob.getOrDefault(j.getId(), List.of()), batchRowsById.get(j.getBatchRowId()),
+                        publishedById.get(j.getPublishedRecipeId())))
                 .toList();
     }
 
     private JobView view(GenerationJob job, List<GenerationJobOutput> recorded, RecipeVersion recipeVersion,
-                         List<JobInputView> jobInputs, JobBatchView batch) {
+                         List<JobInputView> jobInputs, JobBatchView batch, String publishedRecipe) {
         List<GenerationJobOutput> rows = recorded;
         if (rows.isEmpty() && needsBackfill(job)) {
             rows = backfill(job);
@@ -163,7 +181,8 @@ public class JobReadService {
                 .map(o -> new JobOutputView(o.getOutputIndex(), storage.presignedUrl(o.getStorageKey()),
                         o.getContentType(), o.getSizeBytes(), o.getRevisedPrompt()))
                 .toList();
-        return JobView.from(job, shown, DataRetentionService.mediaExpiresAt(job), recipeVersion, jobInputs, batch);
+        return JobView.from(job, shown, DataRetentionService.mediaExpiresAt(job), recipeVersion, jobInputs, batch,
+                publishedRecipe);
     }
 
     /** A DONE, unpurged job with no rows finished before V23: every DONE job stored at least one file. */

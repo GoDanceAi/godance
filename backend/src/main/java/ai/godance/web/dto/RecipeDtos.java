@@ -36,8 +36,16 @@ public final class RecipeDtos {
             String model,
             Map<String, Object> params,
             @JsonProperty("source_gallery_recipe") String sourceGalleryRecipe,
-            List<RecipeInputSlot> inputs
-    ) { }
+            List<RecipeInputSlot> inputs,
+            @JsonProperty("source_published_recipe") String sourcePublishedRecipe
+    ) {
+        /** A recipe started from nothing published. */
+        public CreateRecipeRequest(String title, String modality, String template, List<RecipeVariable> variables,
+                                   String model, Map<String, Object> params, String sourceGalleryRecipe,
+                                   List<RecipeInputSlot> inputs) {
+            this(title, modality, template, variables, model, params, sourceGalleryRecipe, inputs, null);
+        }
+    }
 
     /** {@code POST /v1/recipes/{id}/versions}: what the next version holds. */
     public record NewVersionRequest(
@@ -55,12 +63,22 @@ public final class RecipeDtos {
      * {@code "recipe"} on a generation request: the version to run, values
      * for its variables, and an input for each of its slots, by slot name:
      * {@code {"product photo": {"file_id": "…"}}}.
+     *
+     * <p>In place of {@code version_id}, {@code published_id} names a
+     * published recipe (round 14) by its public id: anyone may run one that
+     * is public, and the server renders the version its author published.
      */
     public record RecipeRef(
             @JsonProperty("version_id") UUID versionId,
             Map<String, String> variables,
-            Map<String, InputRef> inputs
-    ) { }
+            Map<String, InputRef> inputs,
+            @JsonProperty("published_id") String publishedId
+    ) {
+        /** A run of one of the caller's own recipe versions. */
+        public RecipeRef(UUID versionId, Map<String, String> variables, Map<String, InputRef> inputs) {
+            this(versionId, variables, inputs, null);
+        }
+    }
 
     public record RecipeVersionView(
             UUID id,
