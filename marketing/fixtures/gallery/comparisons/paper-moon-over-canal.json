@@ -1,0 +1,72 @@
+{
+  "slug": "paper-moon-over-canal",
+  "title": {
+    "en": "Paper moon over a canal",
+    "zh": "运河上的纸月亮"
+  },
+  "modality": "IMAGE",
+  "tags": [
+    "paper-art",
+    "night"
+  ],
+  "prompt": {
+    "en": "A paper cut-out moon hanging over a quiet canal at night, reflections in the water, layered paper art.",
+    "zh": "夜晚宁静的运河上空挂着一轮剪纸月亮，水中倒影，层叠纸艺。",
+    "zh_origin": "list"
+  },
+  "runs": [
+    {
+      "model": "gpt-image-2",
+      "prompt_lang": "en",
+      "params": {
+        "size": "1024x1024",
+        "n": 1
+      },
+      "cost_cents": 6,
+      "generated_on": "2026-11-15",
+      "outputs": [
+        {
+          "file": "paper-moon-over-canal/gpt-image-2-0.webp",
+          "thumb": "paper-moon-over-canal/gpt-image-2-0-480.webp",
+          "content_type": "image/webp",
+          "width": 1024,
+          "height": 1024
+        }
+      ]
+    },
+    {
+      "model": "seedream-5.0",
+      "prompt_lang": "en",
+      "params": {
+        "size": "1024x1024",
+        "n": 1
+      },
+      "cost_cents": 4,
+      "generated_on": "2026-11-22",
+      "approved_on": "2026-11-23",
+      "outputs": [
+        {
+          "file": "paper-moon-over-canal/seedream-5.0-0.webp",
+          "thumb": "paper-moon-over-canal/seedream-5.0-0-480.webp",
+          "content_type": "image/webp",
+          "width": 1024,
+          "height": 1024
+        }
+      ]
+    }
+  ],
+  "source": {
+    "list": "example-org/invented-image-prompts",
+    "list_commit": "0000000000000000000000000000000000000000",
+    "licence": "CC-BY-4.0",
+    "author": "fixture_paper",
+    "author_url": "https://example.com/@fixture_paper",
+    "original_url": "https://example.com/@fixture_paper/posts/12006",
+    "changes": []
+  },
+  "review": {
+    "approved_on": "2026-11-16",
+    "standard_version": 2
+  },
+  "published_on": "2026-11-16"
+}

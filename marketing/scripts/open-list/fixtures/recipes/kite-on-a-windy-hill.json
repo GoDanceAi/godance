@@ -1,0 +1,82 @@
+{
+  "slug": "kite-on-a-windy-hill",
+  "title": {
+    "en": "Kite on a windy hill",
+    "zh": "风中山坡上的风筝"
+  },
+  "modality": "VIDEO",
+  "tags": [
+    "landscape",
+    "toys"
+  ],
+  "prompt": {
+    "en": "Starting from the uploaded still, the red kite lifts off the grassy hill and climbs into a cloudy sky, handheld camera follows, late afternoon light.",
+    "zh": "从上传的静帧开始，红色风筝从草坡上升起，飞入多云的天空，手持镜头跟随，傍晚的光线。",
+    "zh_origin": "machine"
+  },
+  "inputs": [
+    {
+      "slot": "first frame",
+      "role": "first_frame",
+      "hint": {
+        "en": "The still the clip starts from: one object on open ground, no people",
+        "zh": "视频开始的静帧：空地上的一个物体，没有人物"
+      },
+      "sample": {
+        "file": "kite-on-a-windy-hill/input-0 (kite's frame).webp",
+        "content_type": "image/webp",
+        "width": 1536,
+        "height": 1024,
+        "generated_from": {
+          "model": "gpt-image-2",
+          "prompt": "A red diamond kite lying on a grassy hilltop, cloudy sky, no people, no text.",
+          "params": {
+            "size": "1536x1024",
+            "n": 1
+          },
+          "cost_cents": 6,
+          "generated_on": "2026-11-11"
+        }
+      }
+    }
+  ],
+  "runs": [
+    {
+      "model": "seedance-2.0",
+      "prompt_lang": "en",
+      "params": {
+        "seconds": 5,
+        "size": "1280x720"
+      },
+      "inputs": {
+        "first frame": "kite-on-a-windy-hill/input-0 (kite's frame).webp"
+      },
+      "cost_cents": 84,
+      "generated_on": "2026-11-12",
+      "outputs": [
+        {
+          "file": "kite-on-a-windy-hill/seedance-2.0-0.webm",
+          "poster": "kite-on-a-windy-hill/seedance-2.0-0-poster.webp",
+          "content_type": "video/webm",
+          "duration_seconds": 5,
+          "width": 1280,
+          "height": 720
+        }
+      ]
+    }
+  ],
+  "source": {
+    "list": "example-org/invented-video-prompts",
+    "list_commit": "release-2026-11",
+    "licence": "Apache-2.0",
+    "author": "fixture_ola",
+    "author_url": "https://example.com/@fixture_ola",
+    "original_url": "https://example.com/@fixture_ola/posts/21006",
+    "changes": []
+  },
+  "review": {
+    "approved_on": "2026-11-13",
+    "standard_version": 2
+  },
+  "published_on": "2026-11-13"
+}

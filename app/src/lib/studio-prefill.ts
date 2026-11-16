@@ -3,7 +3,7 @@ import { loadRecipe } from './gallery';
 import { slotKey, type Slot } from './inputs';
 import { fetchJob, isJobId, mediaModality, outputItems } from './jobs';
 import { cheapest, controlsFor, modelName } from './media-models';
-import { defaultsIn, isRecipeSlug, type GalleryRecipe, type RecipeLang } from './recipe';
+import { defaultsIn, isRecipeSlug, type GalleryRecipe, type RecipeLang, type RecipeRun } from './recipe';
 import { PROMPT_MAX_LENGTH, type StudioValues } from './studio';
 import { formTemplate, renderForm, type FormTemplate } from './template';
 import { fetchRecipe, fetchVersions, isRecipeId } from './user-recipes';
@@ -286,6 +286,34 @@ async function recipeOfJob(job: JobView, modality: MediaModality): Promise<Pick<
   } catch {
     return null;
   }
+}
+
+const sameRun = (a: RecipeRun, b: RecipeRun) =>
+  a.model === b.model && a.promptLang === b.promptLang && JSON.stringify(a.params) === JSON.stringify(b.params);
+
+/**
+ * A gallery recipe opens on the first of its runs whose model the catalog
+ * lists (round 13). The catalog is GET /v1/models as the API serving this
+ * Studio answers it, so a run on a model it does not offer is passed over.
+ * The recipe comes back with that run as its `run`, and the form's values and
+ * template follow it, in the language that run sent. Everything else loaded
+ * stays as it was.
+ *
+ * When no run's model is listed, the prefill is returned as it is: fitValues
+ * then gives way to the Studio's default and says so, as in round 8.
+ */
+export function onAvailableRun(prefill: Prefill, models: ModelEntry[]): Prefill {
+  const recipe = prefill.recipe;
+  if (!recipe) return prefill;
+  const run = recipe.runs.find((each) => models.some((model) => model.id === each.model));
+  if (!run || sameRun(run, recipe.run)) return prefill;
+  const chosen: GalleryRecipe = { ...recipe, run };
+  return {
+    ...prefill,
+    recipe: chosen,
+    values: valuesFromRecipe(chosen, run.promptLang),
+    template: templateFromRecipe(chosen, run.promptLang) ?? undefined,
+  };
 }
 
 /**

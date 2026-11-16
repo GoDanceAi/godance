@@ -1,0 +1,55 @@
+{
+  "slug": "lantern-boats-at-dusk",
+  "title": {
+    "en": "Lantern boats at dusk",
+    "zh": "黄昏河灯"
+  },
+  "modality": "IMAGE",
+  "tags": [
+    "festival",
+    "water"
+  ],
+  "prompt": {
+    "en": "Paper lantern boats drifting down a calm river at dusk, warm glow reflected on the water, wide shot, soft film grain.",
+    "zh": "黄昏时分，纸做的河灯顺着平静的河水漂流，暖光倒映在水面上，广角镜头，柔和的胶片颗粒。",
+    "zh_origin": "machine"
+  },
+  "runs": [
+    {
+      "model": "gpt-image-2",
+      "prompt_lang": "en",
+      "params": {
+        "size": "1536x1024",
+        "n": 1
+      },
+      "cost_cents": 9,
+      "generated_on": "2026-11-12",
+      "outputs": [
+        {
+          "file": "lantern-boats-at-dusk/gpt-image-2-0.webp",
+          "thumb": "lantern-boats-at-dusk/gpt-image-2-0-480.webp",
+          "content_type": "image/webp",
+          "width": 1536,
+          "height": 1024
+        }
+      ]
+    }
+  ],
+  "source": {
+    "list": "example-org/invented-image-prompts",
+    "list_commit": "4f0c2a9e8b7d6c5f4e3d2c1b0a9f8e7d6c5b4a39",
+    "licence": "CC-BY-4.0",
+    "author": "fixture_lin",
+    "author_url": "https://example.com/@fixture_lin",
+    "original_url": "https://example.com/@fixture_lin/posts/21001",
+    "changes": [
+      "shortened",
+      "translated to Chinese"
+    ]
+  },
+  "review": {
+    "approved_on": "2026-11-13",
+    "standard_version": 1
+  },
+  "published_on": "2026-11-14"
+}

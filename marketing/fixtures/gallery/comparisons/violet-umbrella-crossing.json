@@ -1,0 +1,72 @@
+{
+  "slug": "violet-umbrella-crossing",
+  "title": {
+    "en": "Violet umbrella crossing",
+    "zh": "紫伞过街"
+  },
+  "modality": "IMAGE",
+  "tags": [
+    "street",
+    "minimal"
+  ],
+  "prompt": {
+    "en": "A single violet umbrella crossing a grey zebra crossing in the rain, seen from above, minimal.",
+    "zh": "雨中，一把紫色的伞穿过灰色的斑马线，俯拍，极简。",
+    "zh_origin": "list"
+  },
+  "runs": [
+    {
+      "model": "gpt-image-2",
+      "prompt_lang": "en",
+      "params": {
+        "size": "1024x1024",
+        "n": 1
+      },
+      "cost_cents": 6,
+      "generated_on": "2026-11-19",
+      "outputs": [
+        {
+          "file": "violet-umbrella-crossing/gpt-image-2-0.webp",
+          "thumb": "violet-umbrella-crossing/gpt-image-2-0-480.webp",
+          "content_type": "image/webp",
+          "width": 1024,
+          "height": 1024
+        }
+      ]
+    },
+    {
+      "model": "seedream-5.0",
+      "prompt_lang": "en",
+      "params": {
+        "size": "1024x1024",
+        "n": 1
+      },
+      "cost_cents": 4,
+      "generated_on": "2026-11-22",
+      "approved_on": "2026-11-23",
+      "outputs": [
+        {
+          "file": "violet-umbrella-crossing/seedream-5.0-0.webp",
+          "thumb": "violet-umbrella-crossing/seedream-5.0-0-480.webp",
+          "content_type": "image/webp",
+          "width": 1024,
+          "height": 1024
+        }
+      ]
+    }
+  ],
+  "source": {
+    "list": "example-org/invented-image-prompts",
+    "list_commit": "0000000000000000000000000000000000000000",
+    "licence": "CC0-1.0",
+    "author": "fixture_violet",
+    "author_url": "https://example.com/@fixture_violet",
+    "original_url": "https://example.com/@fixture_violet/posts/12010",
+    "changes": []
+  },
+  "review": {
+    "approved_on": "2026-11-20",
+    "standard_version": 2
+  },
+  "published_on": "2026-11-20"
+}

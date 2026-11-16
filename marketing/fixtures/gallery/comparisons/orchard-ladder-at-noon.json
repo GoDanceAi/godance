@@ -1,0 +1,70 @@
+{
+  "slug": "orchard-ladder-at-noon",
+  "title": {
+    "en": "Orchard ladder at noon",
+    "zh": "正午果园里的梯子"
+  },
+  "modality": "IMAGE",
+  "tags": [
+    "rural"
+  ],
+  "prompt": {
+    "en": "A wooden ladder leaning on an apple tree at noon, baskets of red apples, dappled light, film photograph.",
+    "zh": "正午时分，一架木梯靠在苹果树上，装满红苹果的篮子，斑驳的光影，胶片摄影。",
+    "zh_origin": "list"
+  },
+  "runs": [
+    {
+      "model": "gpt-image-2",
+      "prompt_lang": "en",
+      "params": {
+        "size": "1536x1024",
+        "n": 1
+      },
+      "cost_cents": 7,
+      "generated_on": "2026-11-14",
+      "outputs": [
+        {
+          "file": "orchard-ladder-at-noon/gpt-image-2-0.webp",
+          "thumb": "orchard-ladder-at-noon/gpt-image-2-0-480.webp",
+          "content_type": "image/webp",
+          "width": 1536,
+          "height": 1024
+        }
+      ]
+    },
+    {
+      "model": "seedream-5.0",
+      "prompt_lang": "en",
+      "params": {
+        "n": 1
+      },
+      "cost_cents": 4,
+      "generated_on": "2026-11-22",
+      "approved_on": "2026-11-23",
+      "outputs": [
+        {
+          "file": "orchard-ladder-at-noon/seedream-5.0-0.webp",
+          "thumb": "orchard-ladder-at-noon/seedream-5.0-0-480.webp",
+          "content_type": "image/webp",
+          "width": 1024,
+          "height": 1024
+        }
+      ]
+    }
+  ],
+  "source": {
+    "list": "example-org/invented-image-prompts",
+    "list_commit": "0000000000000000000000000000000000000000",
+    "licence": "CC0-1.0",
+    "author": "fixture_orchard",
+    "author_url": "https://example.com/@fixture_orchard",
+    "original_url": "https://example.com/@fixture_orchard/posts/12005",
+    "changes": []
+  },
+  "review": {
+    "approved_on": "2026-11-15",
+    "standard_version": 2
+  },
+  "published_on": "2026-11-15"
+}

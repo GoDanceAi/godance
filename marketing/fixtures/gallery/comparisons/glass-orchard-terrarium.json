@@ -1,0 +1,71 @@
+{
+  "slug": "glass-orchard-terrarium",
+  "title": {
+    "en": "Glass orchard terrarium",
+    "zh": "玻璃果园微景观"
+  },
+  "modality": "IMAGE",
+  "tags": [
+    "macro"
+  ],
+  "prompt": {
+    "en": "A tiny orchard of moss trees inside a glass terrarium on a windowsill, macro photograph.",
+    "zh": "窗台上的玻璃微景观中有一片苔藓小树组成的果园，微距摄影。",
+    "zh_origin": "list"
+  },
+  "runs": [
+    {
+      "model": "gpt-image-2",
+      "prompt_lang": "en",
+      "params": {
+        "size": "1024x1024",
+        "n": 1
+      },
+      "cost_cents": 6,
+      "generated_on": "2026-11-21",
+      "outputs": [
+        {
+          "file": "glass-orchard-terrarium/gpt-image-2-0.webp",
+          "thumb": "glass-orchard-terrarium/gpt-image-2-0-480.webp",
+          "content_type": "image/webp",
+          "width": 1024,
+          "height": 1024
+        }
+      ]
+    },
+    {
+      "model": "flux-2-pro",
+      "prompt_lang": "en",
+      "params": {
+        "size": "1024x1024",
+        "n": 1
+      },
+      "cost_cents": 4,
+      "generated_on": "2026-11-22",
+      "approved_on": "2026-11-23",
+      "outputs": [
+        {
+          "file": "glass-orchard-terrarium/flux-2-pro-0.webp",
+          "thumb": "glass-orchard-terrarium/flux-2-pro-0-480.webp",
+          "content_type": "image/webp",
+          "width": 1024,
+          "height": 1024
+        }
+      ]
+    }
+  ],
+  "source": {
+    "list": "example-org/invented-image-prompts",
+    "list_commit": "0000000000000000000000000000000000000000",
+    "licence": "CC-BY-4.0",
+    "author": "fixture_glass",
+    "author_url": "https://example.com/@fixture_glass",
+    "original_url": "https://example.com/@fixture_glass/posts/12012",
+    "changes": []
+  },
+  "review": {
+    "approved_on": "2026-11-21",
+    "standard_version": 2
+  },
+  "published_on": "2026-11-21"
+}

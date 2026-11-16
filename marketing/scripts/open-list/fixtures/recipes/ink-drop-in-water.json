@@ -1,0 +1,60 @@
+{
+  "slug": "ink-drop-in-water",
+  "title": {
+    "en": "Ink drop in water"
+  },
+  "modality": "VIDEO",
+  "tags": [
+    "macro",
+    "water"
+  ],
+  "prompt": {
+    "en": "A single drop of indigo ink falling into a glass of clear water, slow motion, blooming clouds, black background.",
+    "zh": "一滴靛蓝色墨水落入一杯清水中，慢动作，墨云绽开，黑色背景。",
+    "zh_origin": "list",
+    "variables": [
+      {
+        "name": "ink colour",
+        "default": "indigo"
+      }
+    ]
+  },
+  "runs": [
+    {
+      "model": "seedance-2.0",
+      "prompt_lang": "en",
+      "params": {
+        "seconds": 4,
+        "size": "720x1280"
+      },
+      "cost_cents": 64,
+      "generated_on": "2026-11-06",
+      "outputs": [
+        {
+          "file": "ink-drop-in-water/seedance-2.0-0.webm",
+          "content_type": "video/webm",
+          "duration_seconds": 4,
+          "width": 720,
+          "height": 1280
+        }
+      ]
+    }
+  ],
+  "source": {
+    "list": "Invented video prompts (community collection)",
+    "list_commit": "unversioned",
+    "licence": "CC0-1.0",
+    "author": "fixture_pia",
+    "author_url": "https://example.com/@fixture_pia",
+    "original_url": "https://example.com/@fixture_pia/posts/21004",
+    "changes": [
+      "placeholders resolved",
+      "title translated to English"
+    ]
+  },
+  "review": {
+    "approved_on": "2026-11-07",
+    "standard_version": 1
+  },
+  "published_on": "2026-11-07"
+}

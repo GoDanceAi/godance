@@ -845,6 +845,8 @@ describe('gallery on, against the fixtures', { timeout: 300_000 }, () => {
           ...(recipe.prompt.template ? { template: recipe.prompt.template, variables: recipe.prompt.variables } : {}),
         },
         run: { model: run.model, prompt_lang: run.prompt_lang, params: run.params },
+        // Round 13: every run, in order; the first is `run`, with its cost.
+        runs: recipe.runs.map((each) => ({ model: each.model, prompt_lang: each.prompt_lang, params: each.params, cost_cents: each.cost_cents })),
         ...(recipe.inputs
           ? { inputs: recipe.inputs.map((slot) => ({ slot: slot.slot, role: slot.role, hint: slot.hint.en, sample_url: mediaUrl(slot.sample.file) })) }
           : {}),

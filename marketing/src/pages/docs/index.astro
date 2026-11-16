@@ -497,6 +497,42 @@ def verify(payload, header, secret):
       (<code class="code-chip">GODANCE_API_KEY</code>), not by pasting it into the conversation.
     </p>
 
+    <h2 id="mcp" class="scroll-mt-24 text-2xl font-bold mt-12 mb-4 text-fg">Use from an AI assistant (MCP)</h2>
+    <p class="text-fg-muted">
+      An assistant that speaks the Model Context Protocol (Claude Code, Cursor and other MCP clients)
+      can use Godance as a set of tools: find a recipe, see what it costs, run it and follow the job.
+      Godance runs no assistant of its own: each tool call is a request made with your key.
+    </p>
+    <ul class="mt-4 space-y-2 text-fg-muted">
+      <li><strong class="text-fg">Endpoint.</strong> <code class="code-chip">https://api.godance.ai/mcp</code>, over Streamable HTTP.</li>
+      <li><strong class="text-fg">Auth.</strong> <code class="code-chip">Authorization: Bearer $GODANCE_API_KEY</code>: an API key, as for the REST API. A signed-in browser session cannot use it. The key's caps and its image response setting apply as on any request.</li>
+      <li><strong class="text-fg">Setup.</strong> Under each key, the API keys page in the app has "Use with MCP": the configuration for Claude Code, Cursor and any other client, reading the key from <code class="code-chip">GODANCE_API_KEY</code>. For Claude Code:</li>
+    </ul>
+    <pre class="code-block mt-3"><code>claude mcp add --transport http godance https://api.godance.ai/mcp \
+  --header "Authorization: Bearer $GODANCE_API_KEY"</code></pre>
+    <h3 class="text-xl font-semibold mt-8 mb-3 text-fg">The tools</h3>
+    <ul class="space-y-1.5 text-fg-muted">
+      <li><code class="code-chip">search_recipes</code> — search the recipes Godance publishes, and your own</li>
+      <li><code class="code-chip">get_recipe</code> — one recipe: its prompt or template, variables, input slots, runs and what they cost</li>
+      <li><code class="code-chip">list_models</code> — the models of a modality, with their capabilities and prices</li>
+      <li><code class="code-chip">estimate_cost</code> — the exact price of a request, a recipe run or a batch, charging nothing</li>
+      <li><code class="code-chip">generate_image</code> — text to image, or an edit of input images</li>
+      <li><code class="code-chip">generate_video</code> — text to video, or from a first frame and reference images</li>
+      <li><code class="code-chip">run_recipe</code> — run one of your recipes with values and inputs</li>
+      <li><code class="code-chip">start_batch</code> — start a recipe batch from rows</li>
+      <li><code class="code-chip">get_job</code> — a job's status, outputs and cost</li>
+      <li><code class="code-chip">get_batch</code> — a batch's status and counts</li>
+      <li><code class="code-chip">upload_input</code> — store an image (base64) as an input file</li>
+    </ul>
+    <h3 class="text-xl font-semibold mt-8 mb-3 text-fg">What keeps an assistant within bounds</h3>
+    <ul class="space-y-2 text-fg-muted">
+      <li><strong class="text-fg">The same rules as the REST API.</strong> Every tool runs as your key, through the same checks: your balance, the key's daily and monthly <a href="#keys" class="underline" style="color: var(--color-primary)">caps</a> (a capped key is refused, and a batch pauses, as on REST), the input terms and the regional provider rules. Requests are limited per key.</li>
+      <li><strong class="text-fg"><code class="code-chip">max_cost_cents</code>.</strong> Every tool that spends (<code class="code-chip">generate_image</code>, <code class="code-chip">generate_video</code>, <code class="code-chip">run_recipe</code>, <code class="code-chip">start_batch</code>) takes it. When the price is above it, the tool refuses with <code class="code-chip">code: "max_cost_exceeded"</code> and the price in <code class="code-chip">estimated_cost_cents</code>, and nothing is charged. A job is never charged more than it reserved, and a batch never more than its <code class="code-chip">max_cost_cents</code>, even if a price changes while it runs. Get the price from <code class="code-chip">estimate_cost</code> first.</li>
+      <li><strong class="text-fg">Nothing about your account.</strong> No tool makes or revokes keys, touches billing or changes the account.</li>
+      <li><strong class="text-fg">Errors</strong> come back as tool errors carrying the REST problem's <code class="code-chip">status</code>, <code class="code-chip">code</code> and <code class="code-chip">detail</code>, so the assistant can act on them: <code class="code-chip">insufficient_credit</code>, <code class="code-chip">max_cost_exceeded</code>, or <code class="code-chip">inputs_terms_required</code>, which means you must accept the input terms in the app.</li>
+      <li><strong class="text-fg">Results</strong> carry signed links, never file bytes. The links expire; <code class="code-chip">get_job</code> gives fresh ones.</li>
+    </ul>
+
     <h2 class="text-2xl font-bold mt-12 mb-4 text-fg">Endpoint reference</h2>
     <ul class="space-y-2 text-fg-muted">
       {endpoints.map(({ id, label, summary }) => (

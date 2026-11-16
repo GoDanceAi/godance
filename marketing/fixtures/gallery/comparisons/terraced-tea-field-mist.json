@@ -1,0 +1,70 @@
+{
+  "slug": "terraced-tea-field-mist",
+  "title": {
+    "en": "Terraced tea field in mist",
+    "zh": "云雾中的梯田茶园"
+  },
+  "modality": "IMAGE",
+  "tags": [
+    "landscape"
+  ],
+  "prompt": {
+    "en": "Terraced tea fields on a hillside in morning mist, pickers in straw hats far away, soft green tones.",
+    "zh": "晨雾中山坡上的梯田茶园，远处戴草帽的采茶人，柔和的绿色调。",
+    "zh_origin": "list"
+  },
+  "runs": [
+    {
+      "model": "gpt-image-2",
+      "prompt_lang": "zh",
+      "params": {
+        "size": "1536x1024",
+        "n": 1
+      },
+      "cost_cents": 6,
+      "generated_on": "2026-11-18",
+      "outputs": [
+        {
+          "file": "terraced-tea-field-mist/gpt-image-2-0.webp",
+          "thumb": "terraced-tea-field-mist/gpt-image-2-0-480.webp",
+          "content_type": "image/webp",
+          "width": 1536,
+          "height": 1024
+        }
+      ]
+    },
+    {
+      "model": "seedream-5.0",
+      "prompt_lang": "zh",
+      "params": {
+        "n": 1
+      },
+      "cost_cents": 4,
+      "generated_on": "2026-11-22",
+      "approved_on": "2026-11-23",
+      "outputs": [
+        {
+          "file": "terraced-tea-field-mist/seedream-5.0-0.webp",
+          "thumb": "terraced-tea-field-mist/seedream-5.0-0-480.webp",
+          "content_type": "image/webp",
+          "width": 1024,
+          "height": 1024
+        }
+      ]
+    }
+  ],
+  "source": {
+    "list": "example-org/invented-image-prompts",
+    "list_commit": "0000000000000000000000000000000000000000",
+    "licence": "CC-BY-4.0",
+    "author": "fixture_terraced",
+    "author_url": "https://example.com/@fixture_terraced",
+    "original_url": "https://example.com/@fixture_terraced/posts/12009",
+    "changes": []
+  },
+  "review": {
+    "approved_on": "2026-11-19",
+    "standard_version": 2
+  },
+  "published_on": "2026-11-19"
+}

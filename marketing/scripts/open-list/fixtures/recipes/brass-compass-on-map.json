@@ -1,0 +1,51 @@
+{
+  "slug": "brass-compass-on-map",
+  "title": {
+    "en": "Brass compass on an old map",
+    "zh": "旧地图上的黄铜罗盘"
+  },
+  "modality": "IMAGE",
+  "tags": [
+    "still-life"
+  ],
+  "prompt": {
+    "en": "A brass pocket compass resting on a faded hand-drawn sea map, raking afternoon light, macro still life.",
+    "zh": "一只黄铜怀表式罗盘放在褪色的手绘海图上，午后侧光，微距静物。",
+    "zh_origin": "list"
+  },
+  "runs": [
+    {
+      "model": "gpt-image-2",
+      "prompt_lang": "en",
+      "params": {
+        "size": "1024x1024",
+        "n": 1
+      },
+      "cost_cents": 6,
+      "generated_on": "2026-11-10",
+      "outputs": [
+        {
+          "file": "brass-compass-on-map/gpt-image-2-0.webp",
+          "thumb": "brass-compass-on-map/gpt-image-2-0-480.webp",
+          "content_type": "image/webp",
+          "width": 1024,
+          "height": 1024
+        }
+      ]
+    }
+  ],
+  "source": {
+    "list": "example-org/invented-image-prompts",
+    "list_commit": "4f0c2a9e8b7d6c5f4e3d2c1b0a9f8e7d6c5b4a39",
+    "licence": "CC0-1.0",
+    "author": "fixture_mo",
+    "author_url": "https://example.com/@fixture_mo",
+    "original_url": "https://example.com/@fixture_mo/posts/21002",
+    "changes": []
+  },
+  "review": {
+    "approved_on": "2026-11-11",
+    "standard_version": 1
+  },
+  "published_on": "2026-11-12"
+}

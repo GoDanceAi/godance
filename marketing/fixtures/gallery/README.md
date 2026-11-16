@@ -6,6 +6,13 @@ and links are made up, and the media is abstract shapes drawn for the purpose.
 
 - `recipes/` — ten recipes in the gallery format. Point the collection at
   it with `GALLERY_CONTENT_DIR=fixtures/gallery/recipes`.
+- `comparisons/` — thirteen image recipes with runs on two or three models,
+  for the comparison pages (round 13). Eleven have runs on `gpt-image-2` and
+  `seedream-5.0`, above the default threshold of eight, so that pair gets a
+  page; two on `gpt-image-2` and `flux-2-pro`, and one with a third run on
+  `qwen-image-2.0`, stay below it. Each later run carries the day it was
+  approved, as `rerun` and `publish` write it. Point the collection at it
+  with `GALLERY_CONTENT_DIR=fixtures/gallery/comparisons`.
 - `media/` — stand-in media, laid out as the recipes name it. The images,
   sample inputs among them, are drawn by `make-media.mjs`; the `.webm` clips
   are a second of canvas animation each. All of it is far smaller than the
@@ -25,6 +32,14 @@ and links are made up, and the media is abstract shapes drawn for the purpose.
 | `handwritten-receipt-note` | a prompt with quotes, `$`, a backtick, newlines and `</script>`; two outputs |
 | `enamel-teapot-on-marble` | an image recipe with one input slot, role `image`; a hint in both languages |
 | `paper-boat-sets-off` | a video recipe with a `first_frame` slot and a `reference_image` slot; a hint in English only; a sample whose path has a space, brackets and an apostrophe |
+
+| Comparison recipe | Covers |
+|---|---|
+| `amber-tram-in-snow`, `copper-kettle-still-life`, `lighthouse-in-ink-wash`, `paper-moon-over-canal`, `violet-umbrella-crossing` | a square first run, so the new run keeps its size |
+| `fern-shadow-on-linen`, `quiet-library-stairwell`, `orchard-ladder-at-noon`, `salt-marsh-heron` | a tall or wide first run: the new run left the size out and got its model's default |
+| `terraced-tea-field-mist` | both runs sent the Chinese prompt |
+| `windmill-at-blue-hour` | three runs: `gpt-image-2`, `seedream-5.0` and `qwen-image-2.0` |
+| `glass-orchard-terrarium`, `rust-red-desert-road` | a pair with too few recipes for a page: `gpt-image-2` and `flux-2-pro` |
 
 | Invalid recipe | Refused because |
 |---|---|

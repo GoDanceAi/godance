@@ -104,7 +104,7 @@ export async function checkInputsAccount(api, { bytes, contentType }) {
 }
 
 /** The file ids a job's request names, by role, for the slots of an input recipe. */
-function inputFields(modality, slots, fileIds) {
+export function inputFields(modality, slots, fileIds) {
   const ref = (index) => ({ file_id: fileIds[index] });
   if (modality !== 'VIDEO') return { images: slots.map((_, index) => ref(index)) };
   const fields = {};
@@ -125,7 +125,7 @@ export const heldByRuns = (runs) =>
     .reduce((total, run) => total + (run.hold_cents ?? 0), 0);
 
 /** Wait for a job to finish. Returns the job, or null when the wait ran out. */
-async function waitForJob(api, jobId, { intervalMs, timeoutMs, sleep, now }) {
+export async function waitForJob(api, jobId, { intervalMs, timeoutMs, sleep, now }) {
   const deadline = now().getTime() + timeoutMs;
   for (;;) {
     let job = null;

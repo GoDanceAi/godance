@@ -1,5 +1,6 @@
 import type { Page } from '@playwright/test';
 import type { ApiKeySummary } from '../src/lib/api';
+import { API_ORIGIN } from './api-origin';
 import { expect, FAKE_KEY, makeKey, problem, serveKeys, test, type MockApi } from './mock-api';
 
 // Not a real key: the format only has to look like what the API returns.
@@ -443,5 +444,39 @@ test.describe("a key's caps and spend", () => {
     // What it always showed is still there.
     await expect(page.getByLabel('Image responses for production backend')).toHaveValue('async');
     await expect(older.getByRole('button', { name: 'Revoke' })).toBeVisible();
+  });
+});
+
+test.describe('using a key with MCP', () => {
+  test('"Use with MCP" opens the setup for Claude Code, Cursor and any client, with the key only as $GODANCE_API_KEY', async ({ page, api }) => {
+    await api.signIn();
+    api.on('GET', '/v1/keys', { json: [makeKey({ name: 'my agent' })] });
+
+    await page.goto('/keys');
+    await page.getByRole('row', { name: /my agent/ }).getByRole('button', { name: 'Use my agent with MCP' }).click();
+
+    const dialog = page.getByRole('dialog', { name: 'Use “my agent” with MCP' });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole('figure', { name: 'Claude Code' })).toContainText(
+      `claude mcp add --transport http godance ${API_ORIGIN}/mcp --header "Authorization: Bearer $GODANCE_API_KEY"`);
+    const cursor = dialog.getByRole('figure', { name: 'Cursor' });
+    await expect(cursor).toContainText(`"url": "${API_ORIGIN}/mcp"`);
+    await expect(cursor).toContainText('"Authorization": "Bearer ${env:GODANCE_API_KEY}"');
+    const generic = dialog.getByRole('figure', { name: 'Another MCP client' });
+    await expect(generic).toContainText(`URL: ${API_ORIGIN}/mcp`);
+    await expect(generic).toContainText('Transport: Streamable HTTP');
+    await expect(generic).toContainText('Header: Authorization: Bearer $GODANCE_API_KEY');
+    // No snippet holds a key: the page never has one to put there.
+    for (const figure of await dialog.getByRole('figure').all()) {
+      await expect(figure).not.toContainText('gd_live_');
+      await expect(figure).not.toContainText(FAKE_KEY);
+    }
+    await expect(dialog.getByRole('link', { name: /Use from an AI assistant/ }))
+      .toHaveAttribute('href', 'https://godance.ai/docs/#mcp');
+
+    // Nothing was asked of the API to show it, and Escape closes it.
+    expect(api.callsTo('POST', /^\/v1\//)).toHaveLength(0);
+    await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
   });
 });
