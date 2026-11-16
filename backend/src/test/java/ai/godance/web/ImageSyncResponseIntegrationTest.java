@@ -217,7 +217,8 @@ class ImageSyncResponseIntegrationTest {
                 .willReturn(aResponse().withStatus(500)
                         .withHeader("content-type", "application/json")
                         .withBody("{\"error\":{\"message\":\"upstream boom\"}}")));
-        double before = waits("failed");
+        double failedBefore = waits("failed");
+        double cancelledBefore = waits("cancelled");
 
         Map<?, ?> problem = postImage(key, Map.of("model", "gpt-image-2", "prompt", "A doomed render"))
                 .expectStatus().isEqualTo(502)
@@ -232,7 +233,9 @@ class ImageSyncResponseIntegrationTest {
         // The settlement's refund, unchanged: pre-debit and refund, back to the full seed.
         assertThat(ledger.authoritativeBalance(u.id())).isEqualTo(100_00L);
         assertThat(ledgerRowCount(u.id())).isEqualTo(3);
-        assertThat(waits("failed")).isEqualTo(before + 1);
+        // Counted once, as failed: answering the 502 is not also the caller going away.
+        assertThat(waits("failed")).isEqualTo(failedBefore + 1);
+        assertThat(waits("cancelled")).isEqualTo(cancelledBefore);
     }
 
     // ===== What does not change =======================================

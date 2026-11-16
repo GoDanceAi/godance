@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -52,7 +53,7 @@ public class ImageSyncService {
     /** The {@code code} of the 502 a failed job answers. */
     public static final String CODE_GENERATION_FAILED = "generation_failed";
 
-    /** Counts waits by how they ended: {@code outcome} is done, failed, timeout or cancelled. */
+    /** Counts waits by how they ended, each once: {@code outcome} is done, failed, timeout or cancelled. */
     public static final String WAITS_METER = "godance.images.sync.waits";
 
     private final GenerationJobRepository jobs;
@@ -91,18 +92,33 @@ public class ImageSyncService {
      * still open. Cancelling the subscription stops the reads.
      */
     public Mono<Waited> await(UUID jobId) {
-        long started = System.nanoTime();
-        GenerationJob[] lastRead = new GenerationJob[1];
-        return Mono.defer(() -> read(jobId))
-                .doOnNext(job -> lastRead[0] = job)
-                .filter(job -> ended(job.getStatus()))
-                // Not ended yet: read again after the interval. No thread waits in between.
-                .repeatWhenEmpty(Integer.MAX_VALUE, polls -> polls.delayElements(props.syncPollInterval()))
-                .map(job -> new Waited(job.getStatus() == JobStatus.DONE ? Outcome.DONE : Outcome.FAILED, job))
-                .timeout(props.syncWait(), Mono.fromSupplier(() -> new Waited(Outcome.TIMEOUT, lastRead[0])))
-                .doOnNext(waited -> record(jobId, waited.outcome().name().toLowerCase(), started))
-                // Downstream of the timeout, so only the caller going away counts.
-                .doOnCancel(() -> record(jobId, "cancelled", started));
+        return Mono.defer(() -> {
+            long started = System.nanoTime();
+            GenerationJob[] lastRead = new GenerationJob[1];
+            // A wait is counted once, by whichever comes first: its outcome or the caller going away.
+            AtomicBoolean counted = new AtomicBoolean();
+            return Mono.defer(() -> read(jobId))
+                    .doOnNext(job -> lastRead[0] = job)
+                    .filter(job -> ended(job.getStatus()))
+                    // Not ended yet: read again after the interval. No thread waits in between.
+                    .repeatWhenEmpty(Integer.MAX_VALUE, polls -> polls.delayElements(props.syncPollInterval()))
+                    .map(job -> new Waited(job.getStatus() == JobStatus.DONE ? Outcome.DONE : Outcome.FAILED, job))
+                    .timeout(props.syncWait(), Mono.fromSupplier(() -> new Waited(Outcome.TIMEOUT, lastRead[0])))
+                    .doOnNext(waited -> {
+                        if (counted.compareAndSet(false, true)) {
+                            record(jobId, waited.outcome().name().toLowerCase(), started);
+                        }
+                    })
+                    // Downstream of the timeout, so only the caller going away counts, and only
+                    // before the outcome: a cancel after it is no second count. A flatMap to
+                    // Mono.error cancels its source (how a failed job becomes its 502), as does
+                    // a caller that leaves while its answer is built.
+                    .doOnCancel(() -> {
+                        if (counted.compareAndSet(false, true)) {
+                            record(jobId, "cancelled", started);
+                        }
+                    });
+        });
     }
 
     /** One read of the job's row, off the event loop. Empty if the row is gone. */
