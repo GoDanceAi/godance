@@ -3,6 +3,7 @@ import Layout from './components/Layout';
 import ProtectedRoute from './components/ProtectedRoute';
 import { AuthProvider } from './lib/auth';
 import { AdminProvider } from './lib/admin';
+import { CommunityProvider } from './lib/community-context';
 import { useFirstTouch } from './lib/first-touch';
 import { ReferralProvider } from './lib/referral';
 import LoginPage from './pages/LoginPage';
@@ -39,6 +40,7 @@ export default function App() {
       <FirstTouch />
       <AdminProvider>
       <ReferralProvider>
+      <CommunityProvider>
       <Layout>
         <Routes>
           {/* Public */}
@@ -90,6 +92,7 @@ export default function App() {
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
       </Layout>
+      </CommunityProvider>
       </ReferralProvider>
       </AdminProvider>
     </AuthProvider>

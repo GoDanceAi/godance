@@ -209,6 +209,8 @@ export class MockApi {
       .on('GET', '/v1/jobs', { json: [] })
       // Asked once signed in. Referrals ship off, so by default the API says so.
       .on('GET', '/v1/referrals/me', { json: { enabled: false } })
+      // Asked once signed in. The community ships off (round 14), so by default the API says so.
+      .on('GET', '/v1/profile', problem(404, 'the community is not open', 'community_disabled'))
       // The Studio reads the gallery recipes an account saved; it has none until a test says so.
       .on('GET', '/v1/saved-recipes', { json: [] })
       // A recipe page lists the recipe's batches; an account has none until a test says so.
