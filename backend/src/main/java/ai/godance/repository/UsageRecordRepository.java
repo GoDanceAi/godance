@@ -102,4 +102,34 @@ public interface UsageRecordRepository extends JpaRepository<UsageRecord, UUID> 
             """, nativeQuery = true)
     List<TopUserRow> topUsersBySpend(@Param("from") Instant from, @Param("to") Instant to,
                                      @Param("limit") int limit);
+
+    /**
+     * Round 4's Phase 2 margin view: one row per routing policy and rule in
+     * [from, to), from the records routed requests wrote (V41). A served
+     * request writes one OK record; a failed attempt writes a record that
+     * costs nothing, counted apart. Sums the exact microcent columns and
+     * rounds once, as {@link #aggregateDailyUsage} does.
+     */
+    interface RoutingMarginRow {
+        String getPolicy();
+        String getRule();
+        long getRequests();
+        long getFailedAttempts();
+        long getPaidCents();
+        long getCostCents();
+    }
+
+    @Query(value = """
+            SELECT routed_policy                                                   AS "policy",
+                   routed_rule                                                     AS "rule",
+                   COUNT(*) FILTER (WHERE outcome IS NULL OR outcome = 'OK')       AS "requests",
+                   COUNT(*) FILTER (WHERE outcome IS NOT NULL AND outcome <> 'OK') AS "failedAttempts",
+                   CAST(COALESCE(ROUND(SUM(COALESCE(cost_microcents, cost_cents * 10000)) / 10000.0), 0) AS BIGINT) AS "paidCents",
+                   CAST(COALESCE(ROUND(SUM(COALESCE(provider_cost_microcents, COALESCE(provider_cost_cents, 0) * 10000)) / 10000.0), 0) AS BIGINT) AS "costCents"
+            FROM usage_records
+            WHERE routed_policy IS NOT NULL AND recorded_at >= :from AND recorded_at < :to
+            GROUP BY routed_policy, routed_rule
+            ORDER BY routed_policy, routed_rule
+            """, nativeQuery = true)
+    List<RoutingMarginRow> routingMargins(@Param("from") Instant from, @Param("to") Instant to);
 }

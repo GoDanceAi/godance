@@ -89,6 +89,46 @@ public class CostCalculator {
         return halfUpDiv(microcents, MICROCENTS_PER_CENT);
     }
 
+    // ===== Bring your own key (round 14) ================================
+
+    /**
+     * What a chat request costs at list price: its input and output tokens
+     * at the catalog's rates, before Godance's markup, in microcents. On the
+     * caller's own key the provider bills them this; Godance's fee is a
+     * share of it ({@link #feeMicrocents}).
+     */
+    public long listMicrocents(ModelInfo model, int inputTokens, int outputTokens) {
+        return model.inputMicrocentsPer1k() * inputTokens / 1000
+                + model.outputMicrocentsPer1k() * outputTokens / 1000;
+    }
+
+    /** {@link #listMicrocents} of the input tokens alone: what a chat pre-debit is worked out from. */
+    public long listInputMicrocents(ModelInfo model, int inputTokens) {
+        return model.inputMicrocentsPer1k() * inputTokens / 1000;
+    }
+
+    /** What an image request costs at list price, before markup, in microcents. */
+    public long imageListMicrocents(ModelInfo model, int imageCount, int inputImages) {
+        if (imageCount <= 0) return 0L;
+        return model.perImageMicrocents() * imageCount + model.perInputImageMicrocents() * Math.max(0, inputImages);
+    }
+
+    /**
+     * Godance's fee on a request that goes out on the caller's own key:
+     * {@code basisPoints} of its list price, in microcents, rounded HALF_UP.
+     * The ledger settles it like any cost, through
+     * {@code CreditLedgerService.settle}.
+     */
+    public static long feeMicrocents(long listMicrocents, int basisPoints) {
+        if (listMicrocents <= 0 || basisPoints <= 0) return 0L;
+        return halfUpDiv(listMicrocents * basisPoints, BASIS_POINTS);
+    }
+
+    /** What a fee holds before the request runs: whole cents, rounded up, and at least 1. */
+    public static long feeHoldCents(long feeMicrocents) {
+        return Math.max(1L, ceilDiv(feeMicrocents, MICROCENTS_PER_CENT));
+    }
+
     /**
      * Applies the markup in integer arithmetic: the percent becomes basis
      * points (12.5% → 1250 bp) once, then {@code microcents × (10000 + bp) / 10000}

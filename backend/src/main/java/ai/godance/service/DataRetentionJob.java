@@ -33,10 +33,10 @@ public class DataRetentionJob implements Job {
     /** What one pass did. */
     record Summary(int jobsPurged, int jobsFailed, int conversationsDeleted, int auditRowsDeleted,
                    int unapprovedChildAccountsDeleted, int inputFilesDeleted, int inputFilesFailed,
-                   int batchesDeleted) { }
+                   int batchesDeleted, int communityCopiesCleared) { }
 
     /**
-     * One pass over all six rules. Each rule runs even when an earlier one
+     * One pass over all seven rules. Each rule runs even when an earlier one
      * threw; whatever it left undone is picked up by the next run.
      */
     static Summary run(DataRetentionService retention, Instant now) {
@@ -77,15 +77,22 @@ public class DataRetentionJob implements Job {
         } catch (RuntimeException e) {
             log.error("DataRetentionJob: recipe batch delete failed", e);
         }
+        int community = 0;
+        try {
+            community = retention.deleteClosedCommunityCopies();
+        } catch (RuntimeException e) {
+            log.error("DataRetentionJob: community example copy delete failed", e);
+        }
         Summary summary = new Summary(jobs.purged(), jobs.failed(), conversations, auditRows, children,
-                inputFiles.deleted(), inputFiles.failed(), batches);
+                inputFiles.deleted(), inputFiles.failed(), batches, community);
         log.info("DataRetentionJob: purged {} generation job(s) ({} could not be purged, retried next run), "
                         + "deleted {} archived conversation(s), {} audit row(s), {} unapproved child account(s), "
                         + "{} unused input file(s) ({} could not be deleted, retried next run) "
-                        + "and {} finished recipe batch(es)",
+                        + "{} finished recipe batch(es) and the example copies of {} unpublished recipe(s)",
                 summary.jobsPurged(), summary.jobsFailed(), summary.conversationsDeleted(),
                 summary.auditRowsDeleted(), summary.unapprovedChildAccountsDeleted(),
-                summary.inputFilesDeleted(), summary.inputFilesFailed(), summary.batchesDeleted());
+                summary.inputFilesDeleted(), summary.inputFilesFailed(), summary.batchesDeleted(),
+                summary.communityCopiesCleared());
         return summary;
     }
 }

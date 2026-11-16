@@ -63,6 +63,17 @@ public class ImageProviderGateway {
         return adapter != null && adapter.editsImages();
     }
 
+    /**
+     * Whether the provider's adapter sends a caller's own key (round 14),
+     * read without a regional check: it prices a request before dispatch,
+     * and reports what a stored key is used for. It chooses no key and sends
+     * nothing; {@link #dispatch} stays the one region check before any call.
+     */
+    public boolean takesCallerKeys(Provider provider) {
+        ImageProviderAdapter adapter = adapters.get(provider);
+        return adapter != null && adapter.takesCallerKeys();
+    }
+
     public Region region() {
         return region;
     }

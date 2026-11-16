@@ -26,6 +26,7 @@ import software.amazon.awssdk.http.SdkHttpRequest;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.S3Configuration;
+import software.amazon.awssdk.services.s3.model.CopyObjectRequest;
 import software.amazon.awssdk.services.s3.model.CreateBucketRequest;
 import software.amazon.awssdk.services.s3.model.Delete;
 import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
@@ -177,6 +178,22 @@ public class S3ObjectStorageClient implements ObjectStorageClient {
                 .getObjectRequest(get)
                 .build();
         return presigner.presignGetObject(req).url().toString();
+    }
+
+    @Override
+    public String copy(String sourceKey, String targetKey) {
+        try {
+            s3.copyObject(CopyObjectRequest.builder()
+                    .sourceBucket(props.bucket())
+                    .sourceKey(sourceKey)
+                    .destinationBucket(props.bucket())
+                    .destinationKey(targetKey)
+                    .build());
+            return targetKey;
+        } catch (SdkException e) {
+            throw new IllegalStateException(
+                    "object storage copy failed from key=" + sourceKey + " to key=" + targetKey + ": " + e.getMessage(), e);
+        }
     }
 
     @Override

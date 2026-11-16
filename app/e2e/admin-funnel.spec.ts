@@ -30,7 +30,12 @@ const EMPTY: AdminFunnel = { cohorts: [], by_source: [], gallery_recipes: [] };
 async function signInAsStaff(api: MockApi, role: 'SUPPORT' | 'FINANCE' | 'ADMIN' = 'SUPPORT') {
   await api.signIn(makeUser({ role }));
   api.on('GET', '/v1/admin/me', { json: { email: 'ada@example.com', role } })
-    .on('GET', '/v1/admin/usage/summary', { json: SUMMARY });
+    .on('GET', '/v1/admin/usage/summary', { json: SUMMARY })
+    // Finance and admins also see the routing margins (round 14): none in this window.
+    .on('GET', '/v1/admin/routing/margins', {
+      json: { from: SUMMARY.from, to: SUMMARY.to, rows: [],
+              total: { requests: 0, failed_attempts: 0, paid_cents: 0, cost_cents: 0, spread_cents: 0 } },
+    });
 }
 
 const funnelCalls = (api: MockApi) => api.callsTo('GET', '/v1/admin/funnel');

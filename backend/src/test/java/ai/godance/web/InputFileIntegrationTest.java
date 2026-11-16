@@ -413,6 +413,27 @@ class InputFileIntegrationTest {
     }
 
     @Test
+    void upload_givenAFormOfMorePartsThanItMayHave_expects400NotA500AndNothingStored() {
+        Signed u = ready();
+        MultipartBodyBuilder form = new MultipartBodyBuilder();
+        form.part("file", InputFixtures.named(InputFixtures.image("plain.png"), "plain.png")).contentType(MediaType.IMAGE_PNG);
+        for (int i = 0; i < 30; i++) form.part("note" + i, "a value");
+
+        http.post().uri("/v1/files").header(HttpHeaders.AUTHORIZATION, u.bearer())
+                .contentType(MediaType.MULTIPART_FORM_DATA).body(BodyInserters.fromMultipartData(form.build()))
+                .exchange()
+                .expectStatus().isBadRequest()
+                .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON)
+                .expectBody()
+                .jsonPath("$.code").isEqualTo("invalid_parameter")
+                .jsonPath("$.detail").value(detail -> assertThat((String) detail)
+                        .startsWith("The form could not be read (Too many parts")
+                        .endsWith("Send the image in one part named file, and purpose beside it if you like."));
+
+        assertNothingStoredFor(u);
+    }
+
+    @Test
     void upload_givenNoPurpose_expectsItStoredAsAGenerationInput() {
         Signed u = ready();
         MultipartBodyBuilder form = new MultipartBodyBuilder();

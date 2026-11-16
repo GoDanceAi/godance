@@ -40,7 +40,7 @@ final class ProblemResponse {
         return response.writeWith(Mono.just(buffer));
     }
 
-    /** OpenAI's {@code error} member, on the routes that follow its Videos API ({@link OpenAiError}). */
+    /** OpenAI's {@code error} member, on the routes that follow OpenAI's API ({@link OpenAiError}). */
     private static String openAiError(HttpStatus status, String detail, String code) {
         return ",\"" + OpenAiError.MEMBER + "\":{\"message\":\"" + escape(detail)
                 + "\",\"type\":\"" + OpenAiError.type(status.value())

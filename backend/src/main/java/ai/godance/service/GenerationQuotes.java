@@ -1,5 +1,7 @@
 package ai.godance.service;
 
+import java.util.UUID;
+
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ResponseStatusException;
@@ -25,17 +27,58 @@ import ai.godance.gateway.VideoProviderGateway;
 @Component
 public class GenerationQuotes {
 
-    /** What a request will hold: the model, the resolved count and length, and the price. */
-    public record Quote(ModelInfo model, int n, Integer seconds, long costCents) { }
+    /**
+     * What a request will hold: the model, the resolved count and length, and
+     * the price. {@code byok}: the request goes out on the caller's own key
+     * (round 14), so the price is Godance's fee on the list price.
+     */
+    public record Quote(ModelInfo model, int n, Integer seconds, long costCents, boolean byok) {
+        public Quote(ModelInfo model, int n, Integer seconds, long costCents) {
+            this(model, n, seconds, costCents, false);
+        }
+    }
 
     private final ModelCatalog catalog;
     private final CostCalculator calculator;
     private final VideoProviderGateway videoGateway;
+    private final ProviderCredentialService byok;
 
-    public GenerationQuotes(ModelCatalog catalog, CostCalculator calculator, VideoProviderGateway videoGateway) {
+    public GenerationQuotes(ModelCatalog catalog, CostCalculator calculator, VideoProviderGateway videoGateway,
+                            ProviderCredentialService byok) {
         this.catalog = catalog;
         this.calculator = calculator;
         this.videoGateway = videoGateway;
+        this.byok = byok;
+    }
+
+    /**
+     * {@link #image(String, Integer, int)} for this caller: on their own key
+     * (round 14) the price is Godance's fee on the list price, still with
+     * the 1-cent minimum. A null caller is quoted the platform price.
+     */
+    public Quote image(UUID userId, String modelName, Integer n, int inputImages) {
+        return onCallerKey(userId, image(modelName, n, inputImages), inputImages);
+    }
+
+    /** {@link #any(String, Integer, Integer, Integer)} for this caller, as {@link #image(UUID, String, Integer, int)} prices it. */
+    public Quote any(UUID userId, String modelName, Integer n, Integer seconds, Integer inputImages) {
+        Quote quote = any(modelName, n, seconds, inputImages);
+        return quote.model().modality() == Modality.IMAGE
+                ? onCallerKey(userId, quote, inputImages == null ? 0 : inputImages)
+                : quote;
+    }
+
+    private Quote onCallerKey(UUID userId, Quote platform, int inputImages) {
+        if (!byok.applies(userId, platform.model())) return platform;
+        long fee = CostCalculator.feeMicrocents(
+                calculator.imageListMicrocents(platform.model(), platform.n(), inputImages), byok.feeBasisPoints());
+        return new Quote(platform.model(), platform.n(), platform.seconds(), CostCalculator.feeHoldCents(fee), true);
+    }
+
+    /** Godance's fee, in microcents, on {@code images} images made from {@code inputImages} on the caller's own key. */
+    public long imageFeeMicrocents(ModelInfo model, int images, int inputImages) {
+        return CostCalculator.feeMicrocents(calculator.imageListMicrocents(model, images, inputImages),
+                byok.feeBasisPoints());
     }
 
     /** An image request's quote. 404 for an unknown model, 400 for a non-image model or too large an {@code n}. */

@@ -26,7 +26,10 @@ public final class ChatCompletionDtos {
             @NotEmpty List<@Valid Message> messages,
             @JsonProperty("max_tokens") Integer maxTokens,
             Double temperature,
-            Boolean stream
+            Boolean stream,
+            // Godance's routing hint (round 4's Phase 3); the X-Godance-Route header wins over it.
+            // Never sent to a provider: the request is rebuilt as a ChatRequest without it.
+            @JsonProperty("route_hint") String routeHint
     ) { }
 
     /**
