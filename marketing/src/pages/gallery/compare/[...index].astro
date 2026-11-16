@@ -1,0 +1,57 @@
+---
+/**
+ * /gallery/compare: every comparison page.
+ *
+ * A rest parameter instead of index.astro, as /gallery does, so that the page
+ * has no path, and is not built, while the gallery is off or no pair of
+ * models has enough recipes for a comparison.
+ */
+import type { GetStaticPaths } from 'astro';
+import Layout from '../../../layouts/Layout.astro';
+import { COMPARE_PATH, compareIndexJsonLd, comparePath, comparisons } from '../../../lib/gallery-compare';
+import { GALLERY_PATH, loadGallery, scriptJson } from '../../../lib/gallery-recipes';
+
+export const getStaticPaths = (async () => {
+  const gallery = await loadGallery();
+  return gallery.on && comparisons(gallery.recipes, gallery.config.compareMin).length > 0 ? [{ params: { index: undefined } }] : [];
+}) satisfies GetStaticPaths;
+
+const gallery = await loadGallery();
+const all = comparisons(gallery.recipes, gallery.config.compareMin);
+const jsonLd = compareIndexJsonLd(all, Astro.site ?? Astro.url);
+
+const title = 'Model comparisons — the same prompts on two models | Godance gallery';
+const description =
+  'Pairs of models run on the same gallery prompts through the Godance API: both outputs side by side, ' +
+  'what each run cost, and the price of each model today.';
+const link = 'underline';
+const linkStyle = 'color: var(--color-primary)';
+---
+
+<Layout {title} {description} canonicalPath={COMPARE_PATH}>
+  <section class="mx-auto max-w-4xl px-6 pt-16 pb-20" data-compare-index>
+    <p class="text-sm text-fg-subtle">
+      <a href={GALLERY_PATH} class="underline hover:text-fg">Gallery</a>
+      <span aria-hidden="true"> / </span>Comparisons
+    </p>
+    <h1 class="mt-2 text-4xl font-bold tracking-tight text-fg">Model comparisons</h1>
+    <p class="mt-4 text-fg-muted max-w-2xl">
+      Each page puts two models side by side on the same prompts, with what every run cost. A pair gets a page
+      once {gallery.config.compareMin} or more recipes have been run on both.
+    </p>
+    <ul class="mt-8 card p-0 divide-y divide-border">
+      {all.map((comparison) => (
+        <li class="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 px-4 py-3" data-compare-link={comparison.slug}>
+          <a href={comparePath(comparison.a, comparison.b)} class:list={['font-mono', link]} style={linkStyle}>
+            {comparison.a} vs {comparison.b}
+          </a>
+          <span class="text-sm text-fg-muted">
+            {comparison.recipes.length} {comparison.modality === 'VIDEO' ? 'video' : 'image'} recipes
+          </span>
+        </li>
+      ))}
+    </ul>
+  </section>
+
+  <script type="application/ld+json" set:html={scriptJson(jsonLd)} />
+</Layout>

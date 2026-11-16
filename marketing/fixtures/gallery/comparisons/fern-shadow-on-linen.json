@@ -1,0 +1,70 @@
+{
+  "slug": "fern-shadow-on-linen",
+  "title": {
+    "en": "Fern shadow on linen",
+    "zh": "亚麻布上的蕨影"
+  },
+  "modality": "IMAGE",
+  "tags": [
+    "minimal"
+  ],
+  "prompt": {
+    "en": "The shadow of a fern falling across white linen curtains in late afternoon sun, minimal, high key.",
+    "zh": "午后阳光下，蕨类植物的影子落在白色亚麻窗帘上，极简，高调。",
+    "zh_origin": "list"
+  },
+  "runs": [
+    {
+      "model": "gpt-image-2",
+      "prompt_lang": "en",
+      "params": {
+        "size": "1024x1536",
+        "n": 1
+      },
+      "cost_cents": 6,
+      "generated_on": "2026-11-12",
+      "outputs": [
+        {
+          "file": "fern-shadow-on-linen/gpt-image-2-0.webp",
+          "thumb": "fern-shadow-on-linen/gpt-image-2-0-480.webp",
+          "content_type": "image/webp",
+          "width": 1024,
+          "height": 1536
+        }
+      ]
+    },
+    {
+      "model": "seedream-5.0",
+      "prompt_lang": "en",
+      "params": {
+        "n": 1
+      },
+      "cost_cents": 4,
+      "generated_on": "2026-11-22",
+      "approved_on": "2026-11-23",
+      "outputs": [
+        {
+          "file": "fern-shadow-on-linen/seedream-5.0-0.webp",
+          "thumb": "fern-shadow-on-linen/seedream-5.0-0-480.webp",
+          "content_type": "image/webp",
+          "width": 1024,
+          "height": 1024
+        }
+      ]
+    }
+  ],
+  "source": {
+    "list": "example-org/invented-image-prompts",
+    "list_commit": "0000000000000000000000000000000000000000",
+    "licence": "CC-BY-4.0",
+    "author": "fixture_fern",
+    "author_url": "https://example.com/@fixture_fern",
+    "original_url": "https://example.com/@fixture_fern/posts/12003",
+    "changes": []
+  },
+  "review": {
+    "approved_on": "2026-11-13",
+    "standard_version": 2
+  },
+  "published_on": "2026-11-13"
+}
