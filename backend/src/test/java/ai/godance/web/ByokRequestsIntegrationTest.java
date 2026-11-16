@@ -365,6 +365,84 @@ class ByokRequestsIntegrationTest {
     }
 
     @Test
+    void chatStream_givenRefusedKeyWithFallback_expectsOneRetryOnThePlatformsKeyBilledOnce() {
+        Account a = fx.account(10_00L);
+        String key = ByokFixture.userKey("sk");
+        fx.saveOpenAiKey(openAiMock, a, key, true);
+        ByokFixture.stubOpenAiRefuses(openAiMock, "/v1/chat/completions", key);
+        String sse = String.join("",
+                "data: {\"id\":\"chatcmpl-p\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"gpt-4o\",",
+                "\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"Hi\"},\"finish_reason\":null}]}\n\n",
+                "data: {\"id\":\"chatcmpl-p\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"gpt-4o\",",
+                "\"choices\":[],\"usage\":{\"prompt_tokens\":100000,\"completion_tokens\":50000,\"total_tokens\":150000}}\n\n",
+                "data: [DONE]\n\n");
+        openAiMock.stubFor(post(urlEqualTo("/v1/chat/completions"))
+                .withHeader("Authorization", equalTo("Bearer " + ByokFixture.PLATFORM_OPENAI_KEY))
+                .willReturn(aResponse().withStatus(200).withHeader("content-type", "text/event-stream").withBody(sse)));
+
+        List<String> events = http.post().uri("/v1/chat/completions")
+                .header("Authorization", a.bearer())
+                .accept(MediaType.TEXT_EVENT_STREAM)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("model", "gpt-4o", "stream", true,
+                        "messages", List.of(Map.of("role", "user", "content", "Hello"))))
+                .exchange()
+                .expectStatus().isOk()
+                .returnResult(String.class).getResponseBody()
+                .collectList().block(Duration.ofSeconds(10));
+
+        assertThat(events).anySatisfy(e -> assertThat(e).contains("\"content\":\"Hi\""));
+        openAiMock.verify(1, postRequestedFor(urlEqualTo("/v1/chat/completions"))
+                .withHeader("Authorization", equalTo("Bearer " + key)));
+        openAiMock.verify(1, postRequestedFor(urlEqualTo("/v1/chat/completions"))
+                .withHeader("Authorization", equalTo("Bearer " + ByokFixture.PLATFORM_OPENAI_KEY)));
+        long platform = calculator.actualMicrocents(catalog.find("gpt-4o").orElseThrow(), 100_000, 50_000);
+        long deadline = System.currentTimeMillis() + 10_000;
+        while (ledger.authoritativeBalance(a.id()) != 10_00L - platform / 10_000 && System.currentTimeMillis() < deadline) {
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException(e);
+            }
+        }
+        // The fee's hold went back in full; the platform price was billed once.
+        assertThat(ledger.authoritativeBalance(a.id())).isEqualTo(10_00L - platform / 10_000);
+        assertThat(fx.credentials(a.bearer()).get(0)).containsEntry("status", "invalid");
+    }
+
+    @Test
+    void chatStream_givenRefusedKeyWithoutFallback_expects402AndNothingSpent() {
+        Account a = fx.account(10_00L);
+        String key = ByokFixture.userKey("sk");
+        fx.saveOpenAiKey(openAiMock, a, key, false);
+        ByokFixture.stubOpenAiRefuses(openAiMock, "/v1/chat/completions", key);
+
+        http.post().uri("/v1/chat/completions")
+                .header("Authorization", a.bearer())
+                .accept(MediaType.TEXT_EVENT_STREAM)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("model", "gpt-4o", "stream", true,
+                        "messages", List.of(Map.of("role", "user", "content", "Hello"))))
+                .exchange()
+                .expectStatus().isEqualTo(402);
+
+        long deadline = System.currentTimeMillis() + 10_000;
+        while (ledger.authoritativeBalance(a.id()) != 10_00L && System.currentTimeMillis() < deadline) {
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException(e);
+            }
+        }
+        assertThat(ledger.authoritativeBalance(a.id())).isEqualTo(10_00L);
+        openAiMock.verify(0, postRequestedFor(urlEqualTo("/v1/chat/completions"))
+                .withHeader("Authorization", equalTo("Bearer " + ByokFixture.PLATFORM_OPENAI_KEY)));
+        assertThat(fx.credentials(a.bearer()).get(0)).containsEntry("status", "invalid");
+    }
+
+    @Test
     void image_givenRefusedKeyWithFallback_expectsTheJobRetriedOnThePlatformsKeyAtThePlatformPrice() {
         Account a = fx.account(10_00L);
         String key = ByokFixture.userKey("sk");
