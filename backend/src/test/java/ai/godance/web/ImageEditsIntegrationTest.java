@@ -580,7 +580,7 @@ class ImageEditsIntegrationTest {
         }
         assertThat(refused(me, () -> jsonEdit(me.bearer(), bodies.get("recipe.variable")), 400, "invalid_parameter")
                 .get("detail").asString())
-                .isEqualTo("POST /v1/images/edits does not take recipe.variable: recipe has version_id, variables and inputs.");
+                .isEqualTo("POST /v1/images/edits does not take recipe.variable: recipe has version_id, variables, inputs and published_id.");
 
         // Every refusal came before a part was stored: the account still has the one upload made above.
         assertThat(files.findByUserId(me.id())).hasSize(1);

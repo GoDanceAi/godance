@@ -115,7 +115,7 @@ class StrictRequestReaderTest {
         assertThat(recipe.hook).isEqualTo("invalid");
         assertThat(recipe.param).isEqualTo("recipe.variable");
         assertThat(recipe.getMessage())
-                .isEqualTo("POST /v1/things does not take recipe.variable: recipe has version_id, variables and inputs.");
+                .isEqualTo("POST /v1/things does not take recipe.variable: recipe has version_id, variables, inputs and published_id.");
 
         Refused listed = refused(() -> body("{\"inputs\": [{\"file_id\": \"" + A + "\"}, {\"url\": \"https://example.test/b.png\"}]}"));
         assertThat(listed.param).isEqualTo("inputs[1].url");
@@ -192,7 +192,7 @@ class StrictRequestReaderTest {
         Refused typo = refused(() -> reader.recipe(fields("recipe[version_id]", VERSION.toString(), "recipe[variable][subject]", "Koi")));
         assertThat(typo.param).isEqualTo("recipe[variable]");
         assertThat(typo.getMessage())
-                .isEqualTo("POST /v1/things does not take recipe[variable]: recipe has version_id, variables and inputs.");
+                .isEqualTo("POST /v1/things does not take recipe[variable]: recipe has version_id, variables, inputs and published_id.");
 
         Refused slot = refused(() -> reader.recipe(fields("recipe[version_id]", VERSION.toString(),
                 "recipe[inputs][opening][url]", "https://example.test/a.png")));
