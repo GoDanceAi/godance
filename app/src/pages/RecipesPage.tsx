@@ -5,11 +5,18 @@ import { formatCents } from '../lib/auth';
 import { formatAge, formatDateTime } from '../lib/time';
 import { attemptsText, listRecipes } from '../lib/user-recipes';
 import RecipesTabs from '../components/RecipesTabs';
+import GalleryBookmarks from '../components/GalleryBookmarks';
+import { useSignedInAccountId } from '../lib/after-sign-in';
 
 const PAGE_SIZE = 24;
 
 /** /recipes — the user's own recipes, newest first, a page at a time. */
 export default function RecipesPage() {
+  const account = useSignedInAccountId();
+  return <RecipesLibrary key={account} />;
+}
+
+function RecipesLibrary() {
   const [recipes, setRecipes] = useState<UserRecipe[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(false);
@@ -116,6 +123,7 @@ export default function RecipesPage() {
           )}
         </>
       )}
+      <GalleryBookmarks />
     </div>
   );
 }
