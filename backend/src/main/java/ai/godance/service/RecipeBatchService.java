@@ -233,7 +233,22 @@ public class RecipeBatchService {
      */
     @Transactional
     public BatchView create(UUID userId, UUID apiKeyId, BatchRequest req, String ip) {
+        return create(userId, apiKeyId, req, ip, null);
+    }
+
+    /**
+     * {@link #create(UUID, UUID, BatchRequest, String)} with the most the whole
+     * batch may cost (round 13, the MCP tool {@code start_batch}). A batch
+     * whose estimate is above it is refused with {@link MaxCostExceededException}
+     * and nothing is written. The ceiling is kept on the batch: each row's job
+     * is then priced against what is left of it ({@link RecipeBatchRunner}), so
+     * a price that rises while the batch runs cannot take it past the ceiling.
+     * Null is no ceiling.
+     */
+    @Transactional
+    public BatchView create(UUID userId, UUID apiKeyId, BatchRequest req, String ip, Long maxCostCents) {
         Plan plan = plan(userId, req);
+        MaxCostExceededException.requireWithin(plan.totalCents(), maxCostCents);
 
         // Counted and written one request at a time, so two cannot both take the last place.
         batches.lockBatchesOf(BATCHES_LOCK_SPACE, userId.hashCode());
@@ -255,6 +270,7 @@ public class RecipeBatchService {
         batch.setWebhookUrl(plan.webhookUrl());
         batch.setRowsTotal(plan.rows().size());
         batch.setEstimatedTotalCents(plan.totalCents());
+        batch.setMaxCostCents(maxCostCents);
         batches.save(batch);
         UUID batchId = batch.getId();
 
@@ -273,6 +289,7 @@ public class RecipeBatchService {
         detail.put("recipeId", plan.recipe().getId().toString());
         detail.put("rows", plan.rows().size());
         detail.put("estimatedTotalCents", plan.totalCents());
+        if (maxCostCents != null) detail.put("maxCostCents", maxCostCents);
         detail.put("channel", batch.getCreatedByChannel().name());
         audit.record(AuditLogService.EVT_BATCH_CREATED, AuditOutcome.SUCCESS, userId, ip, detail);
         return views.view(requireOwned(userId, batchId));

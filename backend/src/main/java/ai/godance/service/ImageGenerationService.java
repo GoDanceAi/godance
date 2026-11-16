@@ -110,7 +110,17 @@ public class ImageGenerationService {
      */
     public ImageResult execute(UUID userId, UUID apiKeyId, ImageRequest request, JobOrigin origin,
                                List<InputService.ResolvedInput> inputs) {
-        return executeInternal(userId, apiKeyId, request, null, origin, inputs);
+        return execute(userId, apiKeyId, request, origin, inputs, null);
+    }
+
+    /**
+     * {@link #execute(UUID, UUID, ImageRequest, JobOrigin, List)} with the most
+     * the request may cost: a price above {@code maxCostCents} is refused
+     * ({@link MaxCostExceededException}) before the pre-debit. Null is no ceiling.
+     */
+    public ImageResult execute(UUID userId, UUID apiKeyId, ImageRequest request, JobOrigin origin,
+                               List<InputService.ResolvedInput> inputs, Long maxCostCents) {
+        return executeInternal(userId, apiKeyId, request, null, origin, inputs, maxCostCents);
     }
 
     /**
@@ -144,11 +154,22 @@ public class ImageGenerationService {
      */
     public UUID executeAsync(UUID userId, UUID apiKeyId, ImageRequest request, String webhookUrl,
                              JobOrigin origin, List<InputService.ResolvedInput> inputs) {
+        return executeAsync(userId, apiKeyId, request, webhookUrl, origin, inputs, null);
+    }
+
+    /**
+     * {@link #executeAsync(UUID, UUID, ImageRequest, String, JobOrigin, List)}
+     * with the most the request may cost: a price above {@code maxCostCents} is
+     * refused ({@link MaxCostExceededException}) before the pre-debit, so no
+     * job is written. Null is no ceiling.
+     */
+    public UUID executeAsync(UUID userId, UUID apiKeyId, ImageRequest request, String webhookUrl,
+                             JobOrigin origin, List<InputService.ResolvedInput> inputs, Long maxCostCents) {
         webhookDestinations.requireAllowed(webhookUrl);   // before any charge (spec risk R-02)
         // 404 / 400 before any charge. An edit's input images are part of the price.
         Quote quote = quotes.image(request.model(), request.n(), request.images().size());
         ModelInfo model = quote.model();
-        GenerationJob job = acceptJob(userId, apiKeyId, quote, request, webhookUrl, origin, inputs);
+        GenerationJob job = acceptJob(userId, apiKeyId, quote, request, webhookUrl, origin, inputs, maxCostCents);
 
         // Kick off async processing. The pre-debit and the job row are already
         // committed together; if this worker dies, GenerationJobSweepJob fails
@@ -161,19 +182,23 @@ public class ImageGenerationService {
     }
 
     private ImageResult executeInternal(UUID userId, UUID apiKeyId, ImageRequest request, String webhookUrl,
-                                        JobOrigin origin, List<InputService.ResolvedInput> inputs) {
+                                        JobOrigin origin, List<InputService.ResolvedInput> inputs,
+                                        Long maxCostCents) {
         Quote quote = quotes.image(request.model(), request.n(), request.images().size());   // 404 / 400 before any charge
-        GenerationJob job = acceptJob(userId, apiKeyId, quote, request, webhookUrl, origin, inputs);
+        GenerationJob job = acceptJob(userId, apiKeyId, quote, request, webhookUrl, origin, inputs, maxCostCents);
         return runJob(job, userId, apiKeyId, quote.model(), request, webhookUrl);
     }
 
     /**
      * Builds the job and accepts it: pre-debit and QUEUED row in one
      * transaction, or 402. The pre-debit is the quote, the same figure
-     * {@code POST /v1/estimates} returns.
+     * {@code POST /v1/estimates} returns. A quote above {@code maxCostCents}
+     * is refused first, so nothing is charged or written.
      */
     private GenerationJob acceptJob(UUID userId, UUID apiKeyId, Quote quote, ImageRequest request,
-                                    String webhookUrl, JobOrigin origin, List<InputService.ResolvedInput> inputs) {
+                                    String webhookUrl, JobOrigin origin, List<InputService.ResolvedInput> inputs,
+                                    Long maxCostCents) {
+        MaxCostExceededException.requireWithin(quote.costCents(), maxCostCents);
         GenerationJob job = newJob(userId, quote.model(), request, quote.costCents(), newRequestId(), webhookUrl);
         origin.applyTo(job);
         if (!settlement.accept(job, apiKeyId, inputs)) {
