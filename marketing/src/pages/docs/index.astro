@@ -1110,6 +1110,65 @@ def verify(payload, header, secret):
       address.
     </p>
 
+    <!-- ===== Bring your own key ===== -->
+    <h2 id="byok" class="scroll-mt-24 text-2xl font-bold mt-16 mb-4 text-fg">Bring your own key</h2>
+    <p class="text-fg-muted">
+      If you have your own account with a provider, you can store its API key in Godance. Requests to that
+      provider's models then go out on your key: the provider bills you directly, and Godance charges only its
+      fee. Your balance, spending caps, recipes, batches and every other Godance feature work as before.
+    </p>
+    <ul class="mt-4 space-y-2 text-fg-muted">
+      <li>
+        <strong class="text-fg">Which providers.</strong> Only those Godance offers for this, listed under
+        <strong class="text-fg">Settings → Provider keys</strong>; the section appears once one is offered.
+        Godance can use your key for OpenAI's chat and image models and Anthropic's chat models. Every other
+        request, OpenAI's video models included, goes out on Godance's own key at Godance's price, and your
+        provider key's entry says what it is used for (<code class="code-chip">used_for</code>).
+      </li>
+      <li>
+        <strong class="text-fg">The fee.</strong> A request on your key costs a share of the model's list price
+        (the provider's price, before Godance's markup): <code class="code-chip">fee_basis_points</code> on your
+        key's entry, 500 being 5%. It is billed like any request, to the fraction of a cent, and counts against
+        your spending caps. <a href="#estimates" class="underline" style="color: var(--color-primary)"><code class="code-chip">POST /v1/estimates</code></a>
+        answers the fee for an image request on your key, with <code class="code-chip">"byok": true</code>.
+      </li>
+      <li>
+        <strong class="text-fg">When the provider refuses your key.</strong> A <code class="code-chip">401</code> or
+        <code class="code-chip">403</code> from the provider marks the key <code class="code-chip">invalid</code>.
+        With <code class="code-chip">fallback_to_platform</code> off (the default) the request fails with
+        <code class="code-chip">402</code> <code class="code-chip">byok_credential_rejected</code> and nothing is
+        charged; with it on, the request is tried once more on Godance's key, at Godance's price. Store the key
+        again once it works.
+      </li>
+      <li>
+        <strong class="text-fg">The regional rule comes first.</strong> Your key never changes where a request may
+        go. A provider that is not available in a Godance region is not available there with your key either,
+        and Godance never sends your key to it, not even to check it.
+      </li>
+    </ul>
+    <p class="mt-4 text-fg-muted">
+      These endpoints need a signed-in session; an API key gets <code class="code-chip">403</code>:
+    </p>
+    <ul class="mt-4 space-y-2 text-fg-muted">
+      <li>
+        <code class="code-chip">PUT /v1/provider-credentials/&#123;provider&#125;</code> with
+        <code class="code-chip">api_key</code> and <code class="code-chip">fallback_to_platform</code>. The key is
+        checked with the provider's model list first and stored only if the provider accepts it, encrypted; it
+        is never shown again, only its last four characters. Leave out <code class="code-chip">api_key</code> to
+        change only the fallback setting.
+      </li>
+      <li>
+        <code class="code-chip">GET /v1/provider-credentials</code> → each provider offered and each key you hold:
+        <code class="code-chip">provider</code>, <code class="code-chip">last4</code>,
+        <code class="code-chip">status</code>, <code class="code-chip">fallback_to_platform</code>,
+        <code class="code-chip">used_for</code>, <code class="code-chip">fee_basis_points</code>.
+      </li>
+      <li>
+        <code class="code-chip">DELETE /v1/provider-credentials/&#123;provider&#125;</code> →
+        <code class="code-chip">204</code>; requests go out on Godance's key from then on.
+      </li>
+    </ul>
+
     <!-- ===== Billing ===== -->
     <h2 id="billing" class="scroll-mt-24 text-2xl font-bold mt-16 mb-4 text-fg">POST /v1/billing/topup</h2>
     <p class="text-fg-muted">
