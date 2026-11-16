@@ -36,8 +36,9 @@ of that run is summarised in [the last section](#how-this-guide-was-tested).
 **You do not get:**
 
 - **Updates or support,** unless the operator of `godance.ai` offers them.
-  Nothing here phones home or updates itself; you pull and rebuild when you
-  choose (see [Upgrades](#9-upgrades)).
+  Nothing updates itself; you pull and rebuild when you choose (see
+  [Upgrades](#9-upgrades)). What the stack fetches from elsewhere is listed
+  at the end of [Optional parts](#10-optional-parts).
 - **The name.** The licence covers the code, not the name: section 6 of the
   Apache License grants no permission to use the licensor's trade names or
   marks beyond describing where the work came from. No trademark policy for
@@ -112,8 +113,8 @@ while any placeholder is left. Back up `KEY_VAULT_KEY` somewhere other than the
 server now (see [Security checklist](#8-security-checklist)).
 
 > **A trial on one machine**, with no domain and no TLS: use these instead,
-> and open `http://godance.localhost:8080`. Browsers and curl send any
-> `*.localhost` name to the machine itself.
+> and open `http://godance.localhost:8080`. Browsers and recent curl send
+> any `*.localhost` name to the machine itself.
 >
 > ```ini
 > GODANCE_URL=http://godance.localhost:8080
@@ -159,7 +160,8 @@ app built for another address, and says so in `docker compose logs web`.
    docker compose restart api
    docker compose logs api | grep "promoted"
    ```
-4. Sign in again, then turn on two-factor sign-in under **Settings**. Every
+4. Back in the app (sign in again if asked), turn on two-factor sign-in under
+   **Settings**. Every
    admin-console request needs it: until then they answer
    `403 two_factor_required`.
 
@@ -867,7 +869,7 @@ docker compose build web
 docker compose build minio              # bundled storage only
 docker compose up -d
 docker compose logs api | grep -i "flyway\|Started"
-curl -fsS "$GODANCE_URL/healthz"        # git_sha is the new commit
+curl -fsS https://godance.example.test/healthz    # git_sha is the new commit
 ```
 
 The API applies new database migrations (Flyway) when it starts, before it
@@ -900,9 +902,13 @@ checks stop the start if a required one is missing.
 - **The community** (published recipes, profiles and follows) is not in this
   version; round 14 of the roadmap adds it.
 
-Two things the app always loads from elsewhere: its fonts, from Google
-Fonts, and (as above) the gallery list, so people's browsers contact
-`fonts.googleapis.com` and `godance.ai`.
+**What reaches outside your server.** People's browsers load the app's fonts
+from Google Fonts and, in the Studio, the gallery list (as above), so they
+contact `fonts.googleapis.com` and `godance.ai`. The API calls the providers
+you set keys for, Resend if you set its key, the two price feeds
+(`openrouter.ai`, `raw.githubusercontent.com`) once a day with
+`REGION=digitalocean`, and the gallery when an MCP tool reads it. Nothing
+else: no telemetry.
 
 ## 11. Troubleshooting
 
