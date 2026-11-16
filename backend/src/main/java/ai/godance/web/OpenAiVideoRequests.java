@@ -1,13 +1,9 @@
 package ai.godance.web;
 
-import java.util.ArrayList;
-import java.util.Collection;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
-import org.springframework.http.codec.multipart.FormFieldPart;
 import org.springframework.http.codec.multipart.Part;
 import org.springframework.util.MultiValueMap;
 
@@ -18,27 +14,18 @@ import ai.godance.web.dto.InputDtos.JobOutputRef;
 import ai.godance.web.dto.OpenAiVideoDtos.CreateRequest;
 import ai.godance.web.dto.OpenAiVideoDtos.InputReference;
 import ai.godance.web.dto.RecipeDtos.RecipeRef;
-import tools.jackson.core.JacksonException;
-import tools.jackson.core.JacksonException.Reference;
-import tools.jackson.core.JsonParser;
-import tools.jackson.core.JsonToken;
-import tools.jackson.databind.DeserializationContext;
-import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JavaType;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.ObjectReader;
-import tools.jackson.databind.ValueDeserializer;
-import tools.jackson.databind.deser.DeserializationProblemHandler;
-import tools.jackson.databind.exc.MismatchedInputException;
-import tools.jackson.databind.exc.UnrecognizedPropertyException;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
 /**
  * A {@code POST /v1/videos} request as the route reads it, from JSON or from
  * the multipart form OpenAI's SDK sends. What the route would not use is
- * refused, never dropped.
+ * refused, never dropped; how the request is read strictly, and how the
+ * form's bracketed fields are read back into the values they were written
+ * from, is {@link StrictRequestReader}'s.
  *
  * <p><b>Nothing is dropped without a word.</b> A field the route does not
  * read answers 400 {@code invalid_parameter}, its {@code param} naming the
@@ -74,7 +61,8 @@ final class OpenAiVideoRequests {
                   InputRef lastFrame, List<InputRef> referenceImages) { }
 
     static final String INPUT_REFERENCE = "input_reference";
-    private static final String RECIPE = "recipe";
+    private static final String ROUTE = "POST /v1/videos";
+    private static final String RECIPE = StrictRequestReader.RECIPE;
     private static final String LAST_FRAME = "last_frame";
     private static final String REFERENCE_IMAGES = "reference_images";
 
@@ -103,42 +91,53 @@ final class OpenAiVideoRequests {
     private static final String TAKES = "It takes model, prompt, seconds, size and input_reference, and the Godance "
             + "extensions last_frame, reference_images, recipe and webhook_url.";
 
-    /** A field set to null carries nothing: passing over it drops nothing. */
-    private static final DeserializationProblemHandler NULL_CARRIES_NOTHING = new DeserializationProblemHandler() {
+    /** How this route refuses: its own exception, and its own words for what it does not read. */
+    private static final StrictRequestReader.Route REFUSALS = new StrictRequestReader.Route() {
         @Override
-        public boolean handleUnknownProperty(DeserializationContext ctxt, JsonParser p,
-                                             ValueDeserializer<?> deserializer, Object beanOrClass, String propertyName) {
-            return p.currentToken() == JsonToken.VALUE_NULL;
+        public String name() {
+            return ROUTE;
+        }
+
+        @Override
+        public RuntimeException invalid(String param, String detail) {
+            return OpenAiVideoRefusedException.invalid(param, detail);
+        }
+
+        @Override
+        public RuntimeException unknownField(String field) {
+            return OpenAiVideoRequests.unknownField(field);
+        }
+
+        @Override
+        public RuntimeException notText(String field) {
+            String root = StrictRequestReader.root(field);
+            if (!root.equals(LAST_FRAME) && !root.equals(REFERENCE_IMAGES)) {
+                return StrictRequestReader.Route.super.notText(field);
+            }
+            return invalid(field, field + " cannot be a file. Upload the image with POST /v1/files and send its id: "
+                    + (root.equals(LAST_FRAME) ? "last_frame[file_id]" : REFERENCE_FILE_ID) + ".");
         }
     };
 
     private final ObjectMapper json;
-    /** The HTTP mapper's reading, except that a field no record has is an error rather than skipped. */
-    private final ObjectReader strict;
+    private final StrictRequestReader reader;
     private final JavaType createRequest;
-    private final JavaType recipeRef;
     private final JavaType inputRef;
     private final JavaType inputRefs;
 
     OpenAiVideoRequests(ObjectMapper json) {
         this.json = json;
-        this.strict = json.reader()
-                .with(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
-                .withHandler(NULL_CARRIES_NOTHING);
-        this.createRequest = json.getTypeFactory().constructType(CreateRequest.class);
-        this.recipeRef = json.getTypeFactory().constructType(RecipeRef.class);
-        this.inputRef = json.getTypeFactory().constructType(InputRef.class);
-        this.inputRefs = json.getTypeFactory().constructCollectionType(List.class, InputRef.class);
+        this.reader = new StrictRequestReader(json, REFUSALS);
+        this.createRequest = reader.type(CreateRequest.class);
+        this.inputRef = reader.type(InputRef.class);
+        this.inputRefs = reader.listOf(InputRef.class);
     }
 
     // ===== JSON =======================================================
 
     /** The JSON request body, with every field it has read or refused. */
     Fields json(JsonNode body) {
-        if (body == null || !body.isObject()) {
-            throw OpenAiVideoRefusedException.invalid(null, "The request body must be a JSON object.");
-        }
-        CreateRequest request = read(body, createRequest, "", false);
+        CreateRequest request = reader.body(body, createRequest);
         return new Fields(request.model(), request.prompt(), seconds(request.seconds()), request.size(),
                 request.webhookUrl(), request.galleryRecipe(), request.recipe(), request.inputReference(),
                 request.lastFrame(), request.referenceImages());
@@ -173,24 +172,14 @@ final class OpenAiVideoRequests {
      * {@code input_reference} file part is left to the caller.
      */
     Fields form(MultiValueMap<String, Part> form) {
-        requireKnown(form);
-        return new Fields(text(form, "model"), text(form, "prompt"), seconds(text(form, "seconds")),
-                text(form, "size"), text(form, "webhook_url"), text(form, "gallery_recipe"),
-                value(form, RECIPE, recipeRef), referenceOf(form),
-                value(form, LAST_FRAME, inputRef), value(form, REFERENCE_IMAGES, inputRefs));
-    }
-
-    /** Refuses a field the route would not read, and a field sent more than once. */
-    private static void requireKnown(MultiValueMap<String, Part> form) {
-        for (Map.Entry<String, List<Part>> field : form.entrySet()) {
-            String name = field.getKey();
-            if (!isRead(name)) throw unknownField(name);
-            // A list's fields come once per element; every other field once.
-            if (field.getValue().size() > 1 && !REFERENCE_FIELDS.contains(name)) {
-                throw OpenAiVideoRefusedException.invalid(name, "send " + name + " once: the form has it "
-                        + field.getValue().size() + " times");
-            }
-        }
+        // A list's fields come once per element; every other field once.
+        reader.requireKnown(form, OpenAiVideoRequests::isRead, REFERENCE_FIELDS::contains);
+        return new Fields(reader.text(form, "model"), reader.text(form, "prompt"), seconds(reader.text(form, "seconds")),
+                reader.text(form, "size"), reader.text(form, "webhook_url"), reader.text(form, "gallery_recipe"),
+                reader.recipe(form), referenceOf(form),
+                reader.objectValue(form, LAST_FRAME, inputRef, shapeOf(LAST_FRAME)),
+                reader.value(form, REFERENCE_IMAGES, referenceImageFields(form), "reference_images[][…]",
+                        inputRefs, shapeOf(REFERENCE_IMAGES)));
     }
 
     /**
@@ -201,8 +190,7 @@ final class OpenAiVideoRequests {
     private static boolean isRead(String name) {
         if (TEXT_FIELDS.contains(name) || VALUE_FIELDS.contains(name) || REFERENCE_FIELDS.contains(name)) return true;
         if (name.equals(INPUT_REFERENCE) || INPUT_REFERENCE_FIELDS.contains(name)) return true;
-        String root = root(name);
-        return root.equals(RECIPE) || root.equals(LAST_FRAME);
+        return StrictRequestReader.isRecipe(name) || StrictRequestReader.root(name).equals(LAST_FRAME);
     }
 
     /**
@@ -212,11 +200,11 @@ final class OpenAiVideoRequests {
      * {@code input_reference[job_output][job_id]} and {@code […][index]}.
      * Null when the form has none of them.
      */
-    private static InputReference referenceOf(MultiValueMap<String, Part> form) {
-        String fileId = text(form, "input_reference[file_id]");
-        String imageUrl = text(form, "input_reference[image_url]");
-        String jobId = text(form, "input_reference[job_output][job_id]");
-        String index = text(form, "input_reference[job_output][index]");
+    private InputReference referenceOf(MultiValueMap<String, Part> form) {
+        String fileId = reader.text(form, "input_reference[file_id]");
+        String imageUrl = reader.text(form, "input_reference[image_url]");
+        String jobId = reader.text(form, "input_reference[job_output][job_id]");
+        String index = reader.text(form, "input_reference[job_output][index]");
         if (fileId == null && imageUrl == null && jobId == null && index == null) return null;
         JobOutputRef jobOutput = null;
         if (jobId != null || index != null) {
@@ -231,49 +219,6 @@ final class OpenAiVideoRequests {
     }
 
     /**
-     * {@code recipe}, {@code last_frame} or {@code reference_images}: its
-     * bracketed fields, or the value as JSON text. Null when the form has
-     * neither.
-     */
-    private <T> T value(MultiValueMap<String, Part> form, String name, JavaType type) {
-        String text = text(form, name);
-        JsonNode fields = name.equals(REFERENCE_IMAGES) ? referenceImageFields(form) : objectFields(form, name);
-        if (text != null && fields != null) {
-            throw OpenAiVideoRefusedException.invalid(name, "send " + name + " once: as JSON text, or as "
-                    + bracketsOf(name) + " fields, not both");
-        }
-        if (fields != null) return read(fields, type, name, true);
-        if (text == null) return null;
-        JsonNode parsed;
-        try {
-            parsed = json.readTree(text);
-        } catch (JacksonException e) {
-            throw OpenAiVideoRefusedException.invalid(name, name + " must be " + shapeOf(name));
-        }
-        return read(parsed, type, name, false);
-    }
-
-    /**
-     * The fields {@code name[…]…} of the form, as the JSON object OpenAI's
-     * SDK flattened into them: {@code recipe[version_id]} and
-     * {@code recipe[variables][subject]} are {@code {"version_id": …,
-     * "variables": {"subject": …}}}. Each value is the text sent, an empty
-     * one included. Null when the form has none.
-     */
-    private ObjectNode objectFields(MultiValueMap<String, Part> form, String name) {
-        ObjectNode value = null;
-        for (String field : form.keySet()) {
-            if (!field.startsWith(name + "[")) continue;
-            List<String> path = path(field, name.length());
-            // Brackets that do not close, and a list where the value has none, are no field of this route.
-            if (path == null || path.contains("")) throw unknownField(field);
-            if (value == null) value = json.createObjectNode();
-            put(value, path, rawText(form, field), name, field);
-        }
-        return value;
-    }
-
-    /**
      * {@code reference_images} as OpenAI's SDK writes a list of input
      * references into a form, one field per element:
      * {@code reference_images[][file_id]}, or
@@ -283,9 +228,9 @@ final class OpenAiVideoRequests {
      * fields. Null when the form has none of them.
      */
     private ArrayNode referenceImageFields(MultiValueMap<String, Part> form) {
-        List<String> fileIds = rawTexts(form, REFERENCE_FILE_ID);
-        List<String> jobIds = rawTexts(form, REFERENCE_JOB_ID);
-        List<String> indexes = rawTexts(form, REFERENCE_INDEX);
+        List<String> fileIds = reader.rawTexts(form, REFERENCE_FILE_ID);
+        List<String> jobIds = reader.rawTexts(form, REFERENCE_JOB_ID);
+        List<String> indexes = reader.rawTexts(form, REFERENCE_INDEX);
         if (fileIds.isEmpty() && jobIds.isEmpty() && indexes.isEmpty()) return null;
         if (!fileIds.isEmpty() && !(jobIds.isEmpty() && indexes.isEmpty())) {
             throw OpenAiVideoRefusedException.invalid(REFERENCE_IMAGES, "reference_images mixes file_id and "
@@ -307,177 +252,17 @@ final class OpenAiVideoRequests {
         return list;
     }
 
-    /** {@code [a][b]} after a field's name, as {@code [a, b]}; null when the brackets are not that shape. */
-    private static List<String> path(String field, int from) {
-        List<String> path = new ArrayList<>();
-        int at = from;
-        while (at < field.length()) {
-            int close = field.indexOf(']', at);
-            if (field.charAt(at) != '[' || close < 0) return null;
-            path.add(field.substring(at + 1, close));
-            at = close + 1;
-        }
-        return path.isEmpty() ? null : path;
-    }
-
-    /** Sets the value at its path, refusing a path that is also a value of its own. */
-    private static void put(ObjectNode value, List<String> path, String text, String name, String field) {
-        ObjectNode at = value;
-        StringBuilder reached = new StringBuilder(name);
-        for (String step : path.subList(0, path.size() - 1)) {
-            reached.append('[').append(step).append(']');
-            JsonNode next = at.get(step);
-            if (next == null) {
-                next = at.putObject(step);
-            } else if (!next.isObject()) {
-                throw sentBothWays(reached.toString(), field);
-            }
-            at = (ObjectNode) next;
-        }
-        String last = path.get(path.size() - 1);
-        if (at.has(last)) throw sentBothWays(field, null);
-        at.put(last, text);
-    }
-
-    private static OpenAiVideoRefusedException sentBothWays(String field, String inside) {
-        return OpenAiVideoRefusedException.invalid(field, "the form sends " + field + " as a value and as fields "
-                + "inside it" + (inside == null ? "" : ", such as " + inside) + "; send one or the other");
-    }
-
-    /** A text field's value, or null when the form has no such field or it is empty. */
-    private static String text(MultiValueMap<String, Part> form, String name) {
-        Part part = form.getFirst(name);
-        if (part == null) return null;
-        String value = textOf(part, name);
-        return value == null || value.isBlank() ? null : value;
-    }
-
-    /** A text field's value as it was sent, an empty one included. */
-    private static String rawText(MultiValueMap<String, Part> form, String name) {
-        return textOf(form.getFirst(name), name);
-    }
-
-    /** Every value of a field that may come more than once, in the order sent. */
-    private static List<String> rawTexts(MultiValueMap<String, Part> form, String name) {
-        List<Part> parts = form.get(name);
-        if (parts == null) return List.of();
-        List<String> values = new ArrayList<>(parts.size());
-        for (Part part : parts) values.add(textOf(part, name));
-        return values;
-    }
-
-    private static String textOf(Part part, String name) {
-        if (part instanceof FormFieldPart field) return field.value();
-        String root = root(name);
-        if (root.equals(LAST_FRAME) || root.equals(REFERENCE_IMAGES)) {
-            throw OpenAiVideoRefusedException.invalid(name, name + " cannot be a file. Upload the image with "
-                    + "POST /v1/files and send its id: " + (root.equals(LAST_FRAME)
-                    ? "last_frame[file_id]" : REFERENCE_FILE_ID) + ".");
-        }
-        throw OpenAiVideoRefusedException.invalid(name, name + " must be a text field");
-    }
-
-    /** A field's name before its first bracket: {@code recipe} for {@code recipe[version_id]}. */
-    private static String root(String field) {
-        int bracket = field.indexOf('[');
-        return bracket < 0 ? field : field.substring(0, bracket);
-    }
-
-    private static String bracketsOf(String name) {
-        return name.equals(REFERENCE_IMAGES) ? "reference_images[][…]" : name + "[…]";
-    }
-
     private static String shapeOf(String name) {
         return switch (name) {
-            case RECIPE -> "a JSON object: {\"version_id\": …, \"variables\": {…}}";
+            case RECIPE -> StrictRequestReader.RECIPE_SHAPE;
             case REFERENCE_IMAGES -> "a JSON list of input references: [{\"file_id\": …}, …]";
             default -> "a JSON object: {\"file_id\": …} or {\"job_output\": {\"job_id\": …, \"index\": …}}";
         };
     }
 
-    // ===== Reading a value strictly ===================================
-
-    /**
-     * The value as the record it is, with a field the record does not have
-     * refused rather than skipped. {@code name} is the field the value came
-     * in (empty for the request body itself); {@code brackets} says whether
-     * the caller wrote it as bracketed form fields, which is how a refusal
-     * names the field.
-     */
-    private <T> T read(JsonNode value, JavaType type, String name, boolean brackets) {
-        try {
-            return strict.forType(type).readValue(value);
-        } catch (UnrecognizedPropertyException e) {
-            throw unrecognized(e, name, brackets);
-        } catch (JacksonException e) {
-            throw mistyped(e, name, brackets);
-        }
-    }
-
-    private static OpenAiVideoRefusedException unrecognized(UnrecognizedPropertyException e, String name,
-                                                            boolean brackets) {
-        List<Reference> path = e.getPath();
-        String field = name(name, path, brackets);
-        if (name.isEmpty() && path.size() == 1) return unknownField(field);
-        String parent = name(name, path.subList(0, path.size() - 1), brackets);
-        return OpenAiVideoRefusedException.invalid(field, "POST /v1/videos does not take " + field + ": "
-                + parent + " has " + listed(e.getKnownPropertyIds()) + ".");
-    }
-
-    private static OpenAiVideoRefusedException mistyped(JacksonException e, String name, boolean brackets) {
-        String field = name(name, e.getPath(), brackets);
-        if (field.isEmpty()) {
-            return OpenAiVideoRefusedException.invalid(null, "The request body must be a JSON object.");
-        }
-        Class<?> target = e instanceof MismatchedInputException mismatch ? mismatch.getTargetType() : null;
-        String expected = expected(target);
-        return OpenAiVideoRefusedException.invalid(field, expected == null
-                ? field + " has a value POST /v1/videos cannot read."
-                : field + " must be " + expected + ".");
-    }
-
-    /** What a value of this type is, for a person: "an id", "a list". Null for a type it has no words for. */
-    private static String expected(Class<?> type) {
-        if (type == null) return null;
-        if (type == InputRef.class) {
-            return "an input reference: {\"file_id\": …} or {\"job_output\": {\"job_id\": …, \"index\": …}}";
-        }
-        if (type == InputReference.class) {
-            return "an object: {\"file_id\": …} or {\"job_output\": {\"job_id\": …, \"index\": …}}";
-        }
-        if (type == JobOutputRef.class) return "an object: {\"job_id\": …, \"index\": …}";
-        if (type == RecipeRef.class) return shapeOf(RECIPE);
-        if (type == UUID.class) return "an id";
-        if (type == Integer.class || type == int.class) return "a whole number";
-        if (type == String.class) return "a string";
-        if (Collection.class.isAssignableFrom(type)) return "a list";
-        if (Map.class.isAssignableFrom(type) || Record.class.isAssignableFrom(type)) return "an object";
-        return null;
-    }
-
-    /**
-     * A field's name as the caller wrote it: {@code recipe.variables} or
-     * {@code reference_images[1].file_id} in JSON, {@code recipe[variables]}
-     * or {@code reference_images[][file_id]} in a form's brackets.
-     */
-    private static String name(String name, List<Reference> path, boolean brackets) {
-        StringBuilder field = new StringBuilder(name);
-        for (Reference step : path) {
-            String property = step.getPropertyName();
-            if (brackets) {
-                field.append('[').append(property == null ? "" : property).append(']');
-            } else if (property == null) {
-                field.append('[').append(step.getIndex()).append(']');
-            } else {
-                if (!field.isEmpty()) field.append('.');
-                field.append(property);
-            }
-        }
-        return field.toString();
-    }
-
     /** A field of the request itself that the route does not read. */
     private static OpenAiVideoRefusedException unknownField(String field) {
+        String root = StrictRequestReader.root(field);
         String detail;
         if (field.equals("n")) {
             detail = "POST /v1/videos makes one video per request and takes no n. To make several clips from one "
@@ -485,31 +270,22 @@ final class OpenAiVideoRequests {
         } else if (field.equals("first_frame")) {
             detail = "POST /v1/videos takes the first frame as input_reference: send input_reference in place of "
                     + "first_frame.";
-        } else if (root(field).equals(INPUT_REFERENCE)) {
+        } else if (root.equals(INPUT_REFERENCE)) {
             detail = "POST /v1/videos does not take " + field + ". In a form, input_reference is a file, "
                     + "input_reference[file_id], or input_reference[job_output][job_id] with "
                     + "input_reference[job_output][index].";
-        } else if (root(field).equals(REFERENCE_IMAGES)) {
+        } else if (root.equals(REFERENCE_IMAGES)) {
             detail = "POST /v1/videos does not take " + field + ". In a form, reference_images is JSON text, or one "
                     + REFERENCE_FILE_ID + " field per image, or one " + REFERENCE_JOB_ID + " and one "
                     + REFERENCE_INDEX + " per image.";
-        } else if (root(field).equals(LAST_FRAME)) {
+        } else if (root.equals(LAST_FRAME)) {
             detail = "POST /v1/videos does not take " + field + ". In a form, last_frame is JSON text, "
                     + "last_frame[file_id], or last_frame[job_output][job_id] with last_frame[job_output][index].";
-        } else if (root(field).equals(RECIPE)) {
-            detail = "POST /v1/videos does not take " + field + ". In a form, recipe is JSON text, or "
-                    + "recipe[version_id] with recipe[variables][name] and recipe[inputs][slot][file_id] fields.";
+        } else if (root.equals(RECIPE)) {
+            detail = "POST /v1/videos does not take " + field + ". " + StrictRequestReader.RECIPE_IN_A_FORM;
         } else {
             detail = "POST /v1/videos does not take " + field + ". " + TAKES;
         }
         return OpenAiVideoRefusedException.invalid(field, detail);
-    }
-
-    /** {@code a, b and c}. */
-    private static String listed(Collection<Object> names) {
-        List<String> all = names == null ? List.of() : names.stream().map(String::valueOf).toList();
-        if (all.isEmpty()) return "no fields";
-        if (all.size() == 1) return all.get(0);
-        return String.join(", ", all.subList(0, all.size() - 1)) + " and " + all.get(all.size() - 1);
     }
 }

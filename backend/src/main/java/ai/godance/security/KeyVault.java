@@ -54,6 +54,14 @@ public class KeyVault {
         }
     }
 
+    /**
+     * Whether {@code stored} has the form {@link #encrypt} writes, which a
+     * secret kept in clear never has. Says nothing of whether it decrypts.
+     */
+    public static boolean isVaultValue(String stored) {
+        return stored != null && stored.startsWith(PREFIX);
+    }
+
     /** Fails if the value was changed, or was encrypted with another key or context. */
     public byte[] decrypt(String stored, String context) {
         if (stored == null || !stored.startsWith(PREFIX)) {

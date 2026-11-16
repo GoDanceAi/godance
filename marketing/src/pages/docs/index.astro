@@ -99,7 +99,37 @@ result = client.images.edit(
 )
 image_b64 = result.data[0].b64_json`;
 
-const editCurlSnippet = `# The same request with curl. Repeat -F "image[]=@..." to send several images.
+const editRecipeSnippet = `# A recipe in place of the prompt. The SDK requires prompt, so it is empty.
+result = client.images.edit(
+    model="gpt-image-2",
+    image=open("mug.png", "rb"),
+    prompt="",
+    extra_body={"recipe": {"version_id": version_id, "variables": {"surface": "marble counter"}}},
+)
+
+# A recipe whose slots name its own images takes image=[], which sends no image part.
+result = client.images.edit(
+    model="gpt-image-2",
+    image=[],
+    prompt="",
+    extra_body={"recipe": {"version_id": version_id, "inputs": {"product": {"file_id": file_id}}}},
+)`;
+
+const editErrorSnippet = `import openai
+
+try:
+    client.images.edit(
+        model="gpt-image-2",
+        image=open("mug.png", "rb"),
+        prompt="Put the mug on a marble counter, soft window light.",
+        output_format="webp",
+    )
+except openai.BadRequestError as e:
+    print(e)        # Error code: 400 - POST /v1/images/edits does not take output_format. It takes …
+    print(e.code)   # invalid_parameter
+    print(e.param)  # output_format`;
+
+const editCurlSnippet =`# The same request with curl. Repeat -F "image[]=@..." to send several images.
 curl https://api.godance.ai/v1/images/edits \\
   -H "Authorization: Bearer $GODANCE_API_KEY" \\
   -F model=gpt-image-2 \\
@@ -653,6 +683,8 @@ def verify(payload, header, secret):
       <li><strong class="text-fg">The wait.</strong> The request is held for up to about 90 seconds. It is the same job either way: the same price, reserved when the job is accepted, and the same <code class="code-chip">webhook_url</code> delivery. The response adds <code class="code-chip">job_id</code> and <code class="code-chip">cost_cents</code> to OpenAI's <code class="code-chip">created</code> and <code class="code-chip">data</code>.</li>
       <li><strong class="text-fg">Still running at the limit.</strong> The request answers <code class="code-chip">202 Accepted</code> with the job body above and a <code class="code-chip">Retry-After: 5</code> header. The job carries on; read it at <code class="code-chip">poll_url</code>. Code that only reads <code class="code-chip">data</code> should check for the 202.</li>
       <li><strong class="text-fg">Failed.</strong> A job that fails answers <code class="code-chip">502</code> as problem JSON with <code class="code-chip">code: "generation_failed"</code>, the job's error in <code class="code-chip">detail</code> and its <code class="code-chip">job_id</code>. The reserved credit is refunded, as for any failed job.</li>
+      <li><strong class="text-fg">Errors</strong> are problem responses, as everywhere, and on <code class="code-chip">POST /v1/images/generations</code> and <code class="code-chip">POST /v1/images/edits</code> also carry OpenAI's <code class="code-chip">error</code> object, so the SDK's exception shows the sentence, <code class="code-chip">Error code: 402 - insufficient credit; top up via /v1/billing/topup</code>, and has <code class="code-chip">code</code> set.</li>
+      <li><strong class="text-fg">Variations</strong> are not supported. <code class="code-chip">client.images.create_variation</code> (<code class="code-chip">POST /v1/images/variations</code>) answers <code class="code-chip">404 image_variations_not_supported</code>, with OpenAI's <code class="code-chip">error</code> object, and charges nothing. To work from an image, send it to <a href="#image-edits" class="underline" style="color: var(--color-primary)">edits</a> with a prompt.</li>
       <li><strong class="text-fg"><code class="code-chip">response_format</code>.</strong> <code class="code-chip">"url"</code> returns a link per image and <code class="code-chip">"b64_json"</code> returns each image base64-encoded. Without it, GPT Image models return <code class="code-chip">b64_json</code>, as OpenAI's API does, and a <code class="code-chip">url</code> as well; every other model returns a <code class="code-chip">url</code>. A result larger than 25 MB is returned as links only. Links are signed and expire after a while: read the job again for a fresh one.</li>
       <li><strong class="text-fg">One request as a job.</strong> With a sync key, send <code class="code-chip">"async": true</code> in the body or a <code class="code-chip">Prefer: respond-async</code> header to get the 202 at once.</li>
       <li>Video is not affected: <code class="code-chip">POST /v1/videos/generations</code> always answers with a job.</li>
@@ -676,10 +708,15 @@ def verify(payload, header, secret):
     <pre class="code-block mt-4"><code>{editCurlSnippet}</code></pre>
     <ul class="mt-4 space-y-2 text-fg-muted">
       <li><strong class="text-fg">The multipart form.</strong> <code class="code-chip">model</code> and <code class="code-chip">prompt</code>, one or more <code class="code-chip">image</code> parts (also accepted as <code class="code-chip">image[]</code>), and optionally <code class="code-chip">mask</code>, <code class="code-chip">n</code>, <code class="code-chip">size</code>, <code class="code-chip">quality</code> and <code class="code-chip">response_format</code>.</li>
+      <li><strong class="text-fg">Nothing is ignored.</strong> A field the route does not read answers <code class="code-chip">400</code> with <code class="code-chip">code: "invalid_parameter"</code> and <code class="code-chip">param</code> naming it, at any depth: <code class="code-chip">output_format</code>, <code class="code-chip">recipe.variable</code>, <code class="code-chip">images[1].url</code>. That includes OpenAI's own fields that Godance does not act on, such as <code class="code-chip">background</code>, <code class="code-chip">input_fidelity</code>, <code class="code-chip">stream</code> and <code class="code-chip">user</code>, and <code class="code-chip">style</code>, which only a generation takes. In JSON a field set to <code class="code-chip">null</code> passes. A form field sent twice is refused too, except <code class="code-chip">image</code>.</li>
       <li><strong class="text-fg">What happens to the images you send.</strong> Each one is checked exactly as an upload to <a href="#files" class="underline" style="color: var(--color-primary)"><code class="code-chip">POST /v1/files</code></a> is, with the same limits and the same refusals, and becomes one of your files. It is kept for as long as the job is.</li>
       <li><strong class="text-fg">The answer</strong> follows the key, as for a generation: a job to poll, or with a key set to <a href="#image-responses" class="underline" style="color: var(--color-primary)"><code class="code-chip">sync</code></a> the images in OpenAI's shape. The SDK example above needs a sync key.</li>
       <li><strong class="text-fg">The same job as a generation.</strong> The price is reserved when the job is accepted and returned in full if it fails; <code class="code-chip">webhook_url</code>, <code class="code-chip">async</code>{recipesOn && <Fragment>, <code class="code-chip">gallery_recipe</code></Fragment>} and <code class="code-chip">recipe</code> work as they do there. The job lists what it worked from under <a href="#job-inputs" class="underline" style="color: var(--color-primary)"><code class="code-chip">inputs</code></a>.</li>
+      <li><strong class="text-fg">Godance's fields from OpenAI's SDK</strong> go in <code class="code-chip">extra_body</code>. The SDK always sends a form, and writes a nested value into it as bracketed fields: <code class="code-chip">recipe[version_id]</code>, <code class="code-chip">recipe[variables][surface]</code>, <code class="code-chip">recipe[inputs][product][file_id]</code>. Godance reads them back into the recipe; <code class="code-chip">recipe</code> may be JSON text too, <code class="code-chip">extra_body=&#123;"recipe": json.dumps(&#123;...&#125;)&#125;</code>. A form has at most 24 parts, counting each image and each bracketed field: past that it answers <code class="code-chip">400</code> with <code class="code-chip">code: "invalid_parameter"</code>, and the recipe fits as JSON text. In the form the images are file parts; to edit images that are already stored, send the JSON form below.</li>
+      <li><strong class="text-fg">Errors</strong> are problem responses, as everywhere, and on this route also carry OpenAI's <code class="code-chip">error</code> object, so the SDK's exception shows the sentence, with <code class="code-chip">e.code</code> and <code class="code-chip">e.param</code> set, as below. <code class="code-chip">input_not_supported</code> names the input in the problem's <code class="code-chip">field</code>, not in <code class="code-chip">param</code>: read it from <code class="code-chip">e.response.json()["field"]</code>.</li>
     </ul>
+    <pre class="code-block mt-4"><code>{editRecipeSnippet}</code></pre>
+    <pre class="code-block mt-4"><code>{editErrorSnippet}</code></pre>
     <p class="mt-6 text-fg-muted">
       <strong class="text-fg">The JSON form</strong> names images that are already stored, in either
       <a href="#input-references" class="underline" style="color: var(--color-primary)">form of input</a>:
@@ -698,6 +735,8 @@ def verify(payload, header, secret):
       <strong class="text-fg">Refusals,</strong> each before anything is stored or charged:
       <code class="code-chip">400</code> with <code class="code-chip">code: "input_not_supported"</code>
       when the model takes no input images, takes fewer than were sent, or takes no mask;
+      <code class="code-chip">400</code> with <code class="code-chip">code: "invalid_parameter"</code>
+      for a field the route does not read, or a form it cannot read;
       <code class="code-chip">400</code> when there is no image at all; and everything under
       <a href="#input-refusals" class="underline" style="color: var(--color-primary)">what is refused, and why</a>.
     </p>
@@ -929,6 +968,7 @@ def verify(payload, header, secret):
       <li><code class="code-chip">403 inputs_disabled</code> — inputs are not switched on.</li>
       <li><code class="code-chip">403 inputs_not_allowed_for_account</code> — the account is not an adult's.</li>
       <li><code class="code-chip">403 inputs_terms_required</code> — the account has not accepted the current input terms. <code class="code-chip">terms_version</code> in the response is the version to accept.</li>
+      <li><code class="code-chip">400 invalid_parameter</code> — the form could not be read: one of more than 24 parts, for one.</li>
       <li><code class="code-chip">413 input_too_large</code> — more than 20&nbsp;MB, or more than 40 megapixels.</li>
       <li><code class="code-chip">415 input_type_unsupported</code> — not a PNG, JPEG or WebP still image: another format, an animation, or a file that is cut short.</li>
       <li><code class="code-chip">409 input_limit_reached</code> — the account already keeps 200 files. Delete one to upload another.</li>
@@ -1125,10 +1165,70 @@ def verify(payload, header, secret):
       </li>
     </ul>
     <p class="mt-4 text-fg-muted">
-      An unknown, inactive or expired key returns <code class="code-chip">401</code>. A key
-      restricted to an IP allowlist returns <code class="code-chip">403</code> from any other
-      address.
+      An unknown, inactive or expired key returns <code class="code-chip">401</code>, and so
+      does a bearer token that is not a Godance key at all, such as an OpenAI key; the
+      problem's <code class="code-chip">detail</code> says which. A key restricted to an IP
+      allowlist returns <code class="code-chip">403</code> from any other address.
     </p>
+
+    <!-- ===== Bring your own key ===== -->
+    <h2 id="byok" class="scroll-mt-24 text-2xl font-bold mt-16 mb-4 text-fg">Bring your own key</h2>
+    <p class="text-fg-muted">
+      If you have your own account with a provider, you can store its API key in Godance. Requests to that
+      provider's models then go out on your key: the provider bills you directly, and Godance charges only its
+      fee. Your balance, spending caps, recipes, batches and every other Godance feature work as before.
+    </p>
+    <ul class="mt-4 space-y-2 text-fg-muted">
+      <li>
+        <strong class="text-fg">Which providers.</strong> Only those Godance offers for this, listed under
+        <strong class="text-fg">Settings → Provider keys</strong>; the section appears once one is offered.
+        Godance can use your key for OpenAI's chat and image models and Anthropic's chat models. Every other
+        request, OpenAI's video models included, goes out on Godance's own key at Godance's price, and your
+        provider key's entry says what it is used for (<code class="code-chip">used_for</code>).
+      </li>
+      <li>
+        <strong class="text-fg">The fee.</strong> A request on your key costs a share of the model's list price
+        (the provider's price, before Godance's markup): <code class="code-chip">fee_basis_points</code> on your
+        key's entry, 500 being 5%. It is billed like any request, to the fraction of a cent, and counts against
+        your spending caps. <a href="#estimates" class="underline" style="color: var(--color-primary)"><code class="code-chip">POST /v1/estimates</code></a>
+        answers the fee for an image request on your key, with <code class="code-chip">"byok": true</code>.
+      </li>
+      <li>
+        <strong class="text-fg">When the provider refuses your key.</strong> A <code class="code-chip">401</code> or
+        <code class="code-chip">403</code> from the provider marks the key <code class="code-chip">invalid</code>.
+        With <code class="code-chip">fallback_to_platform</code> off (the default) the request fails with
+        <code class="code-chip">402</code> <code class="code-chip">byok_credential_rejected</code> and nothing is
+        charged; with it on, the request is tried once more on Godance's key, at Godance's price. Store the key
+        again once it works.
+      </li>
+      <li>
+        <strong class="text-fg">The regional rule comes first.</strong> Your key never changes where a request may
+        go. A provider that is not available in a Godance region is not available there with your key either,
+        and Godance never sends your key to it, not even to check it.
+      </li>
+    </ul>
+    <p class="mt-4 text-fg-muted">
+      These endpoints need a signed-in session; an API key gets <code class="code-chip">403</code>:
+    </p>
+    <ul class="mt-4 space-y-2 text-fg-muted">
+      <li>
+        <code class="code-chip">PUT /v1/provider-credentials/&#123;provider&#125;</code> with
+        <code class="code-chip">api_key</code> and <code class="code-chip">fallback_to_platform</code>. The key is
+        checked with the provider's model list first and stored only if the provider accepts it, encrypted; it
+        is never shown again, only its last four characters. Leave out <code class="code-chip">api_key</code> to
+        change only the fallback setting.
+      </li>
+      <li>
+        <code class="code-chip">GET /v1/provider-credentials</code> → each provider offered and each key you hold:
+        <code class="code-chip">provider</code>, <code class="code-chip">last4</code>,
+        <code class="code-chip">status</code>, <code class="code-chip">fallback_to_platform</code>,
+        <code class="code-chip">used_for</code>, <code class="code-chip">fee_basis_points</code>.
+      </li>
+      <li>
+        <code class="code-chip">DELETE /v1/provider-credentials/&#123;provider&#125;</code> →
+        <code class="code-chip">204</code>; requests go out on Godance's key from then on.
+      </li>
+    </ul>
 
     <!-- ===== Billing ===== -->
     <h2 id="billing" class="scroll-mt-24 text-2xl font-bold mt-16 mb-4 text-fg">POST /v1/billing/topup</h2>
@@ -1236,14 +1336,20 @@ def verify(payload, header, secret):
         <strong class="text-fg">Errors:</strong> non-2xx responses use RFC 7807
         <code class="code-chip">application/problem+json</code> bodies
         (<code class="code-chip">title</code>, <code class="code-chip">status</code>,
-        <code class="code-chip">detail</code>) rather than OpenAI's error object. Status codes
+        <code class="code-chip">detail</code>), a <code class="code-chip">401</code> included. Status codes
         keep their usual meaning — <code class="code-chip">400</code> invalid request,
         <code class="code-chip">401</code> bad key, <code class="code-chip">402</code> insufficient
         credit or spending cap reached, <code class="code-chip">404</code> unknown model or job —
-        so SDKs still raise their usual status errors. On the
-        <a href="#videos-openai" class="underline" style="color: var(--color-primary)">OpenAI-shaped video routes</a>
+        so SDKs still raise their usual status errors. On the image routes
+        (<a href="#images" class="underline" style="color: var(--color-primary)">generations</a>,
+        <a href="#image-edits" class="underline" style="color: var(--color-primary)">edits</a>, and
+        <a href="#image-responses" class="underline" style="color: var(--color-primary)">variations</a>,
+        which Godance does not offer) and the
+        <a href="#videos-openai" class="underline" style="color: var(--color-primary)">OpenAI-shaped video routes</a>,
         the body also carries OpenAI's <code class="code-chip">error</code> object, so the
-        SDK's exception shows the message.
+        SDK's exception shows the message. Elsewhere, chat completions included, the exception
+        shows only the status, and the sentence is in
+        <code class="code-chip">e.response.json()["detail"]</code>.
       </li>
     </ul>
 

@@ -33,7 +33,8 @@ API keys); the key is shown once. A key calls the model API: chat, images, video
 files, recipes, batches, estimates and usage. Creating and revoking keys, billing and the account
 itself need a signed-in session, so a key gets 403 on those routes.
 
-- No key, or an unknown, revoked or expired one: 401.
+- No key, or an unknown, revoked or expired one: 401. So is a bearer token that is not a
+  Godance key, such as an OpenAI key; the problem's `detail` says so.
 - A key on a route that needs a signed-in session: 403.
 - `GET /v1/models`, `GET /v1/status`, `GET /healthz` and `GET /v1/openapi.yaml` need no key.
 
@@ -200,6 +201,28 @@ Images in chat. A user message's `content` can be OpenAI's array of parts:
   `image_fetch_failed`, `image_type_unsupported`, `too_many_images`,
   `model_does_not_accept_images`; 413 `image_too_large`; 404 `file_not_found`.
 
+Routing. `model` can be a virtual model that picks a real one per request: `godance-fast`,
+`godance-auto` and `godance-quality` are built in, and `GET /v1/models` lists them with
+`"virtual": true`. The answer's `model` is the model that served.
+
+Your own routing policies are being rolled out: until the operator turns them on,
+`GET /v1/routing/policies`, `GET /v1/routing/policies/{id}`, `PUT /v1/routing/policies/{id}`
+and `DELETE /v1/routing/policies/{id}` answer 404 `routing_policies_disabled`. Once they
+are on, a policy you PUT is called by its id as the `model`. Its rules pick models by task,
+size or hint; `limits.excluded_providers` keeps a provider out of every attempt; and a header
+`X-Godance-Route: <hint>` (or a `route_hint` field) picks the rule whose `when.hint_equals`
+names it. A policy that breaks a rule answers 400 `routing_policy_invalid`, listing every
+problem in `errors`.
+
+```bash
+curl -X PUT https://api.godance.ai/v1/routing/policies/my-coder \
+  -H "Authorization: Bearer $GODANCE_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"default_model": "deepseek-v4-flash",
+       "rules": [{"name": "code", "when": {"task_in": ["CODE"]}, "targets": ["gpt-4o", "deepseek-v4-pro"]}],
+       "limits": {"excluded_providers": ["ZHIPU"]}}'
+```
+
 ## Images
 
 `POST /v1/images/generations` takes OpenAI's request: `model`, `prompt`, `size`, `n`,
@@ -265,9 +288,19 @@ result = client.images.generate(model="gpt-image-2", prompt="a lighthouse at dus
 image_url = result.data[0].url        # a signed link; it expires, so download it
 ```
 
+Errors on this route carry OpenAI's `error` object as well (see Errors), so the SDK's
+exception says what is wrong: `openai.APIStatusError: Error code: 402 - insufficient
+credit; top up via /v1/billing/topup`, with `e.code` set to `insufficient_credit`.
+
 Price: the per-image price × `n`, reserved when the job is accepted. A model that returns
 fewer images than `n` is charged for the images it returned. `n` above the model's `max_n`
 answers 400. Too little credit answers 402 `insufficient_credit`.
+
+Not supported: variations of an image (`POST /v1/images/variations`, which is
+`client.images.create_variation` in OpenAI's SDK). The route answers 404
+`image_variations_not_supported` to a key and a session alike, with OpenAI's `error` object,
+and charges nothing. To work from an image, send it to `POST /v1/images/edits` with a prompt
+(see Edits).
 
 ## Edits
 
@@ -275,10 +308,16 @@ answers 400. Too little credit answers 402 `insufficient_credit`.
 
 - Multipart, OpenAI's own form, which `client.images.edit(…)` sends: `model`, `prompt`, one
   or more `image` parts (also `image[]`), and optionally `mask`, `n`, `size`, `quality`,
-  `response_format`. Each image is checked as an upload to `POST /v1/files` is and becomes
-  one of your files.
+  `response_format`, and the Godance extensions `async`, `webhook_url` and `recipe`. Each
+  image is checked as an upload to `POST /v1/files` is and becomes one of your files.
 - JSON, naming images that are already stored: `images` (a list) and `mask`, each an input
-  reference (see Files and inputs).
+  reference (see Files and inputs), with the same other fields.
+
+Any other field answers 400 `invalid_parameter` with `param` naming it, at any depth
+(`output_format`, `recipe.variable`, `images[1].url`); nothing is ignored. That includes
+OpenAI's own fields that Godance does not act on, such as `background`, `output_format`,
+`input_fidelity`, `stream` and `user`, and `style`, which only a generation takes. In JSON
+a field set to `null` passes. A form field sent twice is refused too, except `image`.
 
 The answer follows the key exactly as for a generation: a job to poll, or the images with
 a sync key. Edits are part of inputs, which are being rolled out: until they are switched
@@ -308,6 +347,46 @@ result = client.images.edit(
 image_b64 = result.data[0].b64_json
 ```
 
+A recipe in place of the prompt goes in `extra_body`. The SDK requires `prompt`, so it is
+empty; it requires `image` too, and a recipe whose input slots name its images takes
+`image=[]`, which sends no image part:
+
+```python
+# The recipe's template, filled in with this value, edits the image sent.
+result = client.images.edit(
+    model="gpt-image-2",
+    image=open("mug.png", "rb"),
+    prompt="",
+    extra_body={"recipe": {"version_id": version_id, "variables": {"surface": "marble counter"}}},
+)
+
+# A recipe whose slots name its own images: a stored file, by its id.
+result = client.images.edit(
+    model="gpt-image-2",
+    image=[],
+    prompt="",
+    extra_body={"recipe": {"version_id": version_id, "inputs": {"product": {"file_id": file_id}}}},
+)
+```
+
+Notes for OpenAI SDK users:
+
+- The SDK always sends a multipart form, and writes a nested value from `extra_body` into
+  it as bracketed fields: `{"recipe": {"version_id": "…", "variables": {"surface": "…"}}}`
+  arrives as `recipe[version_id]` and `recipe[variables][surface]`, and a slot's image as
+  `recipe[inputs][product][file_id]`. Godance reads them back into the recipe. `recipe`
+  may be JSON text too: `extra_body={"recipe": json.dumps({...})}`.
+- A form has at most 24 parts, counting each image and each bracketed field. Past that it
+  answers 400 `invalid_parameter` ("The form could not be read (Too many parts …)"): send
+  `recipe` as JSON text, or upload the images with `POST /v1/files` and send JSON.
+- In the form the images are file parts. To edit images that are already stored, send
+  JSON with `images`; `extra_body={"images": [...]}` answers 400 in a form.
+- Errors on this route carry OpenAI's `error` object as well, so the SDK's exception
+  carries the sentence: `openai.BadRequestError: Error code: 400 - POST /v1/images/edits
+  does not take output_format. …`, with `e.code` (`invalid_parameter`) and `e.param`
+  (`output_format`) set. `input_not_supported` names the input in the problem's `field`,
+  not in `param`: read it from `e.response.json()["field"]`.
+
 The JSON form, editing an output of one of your own jobs with no upload at all:
 
 ```json
@@ -320,8 +399,8 @@ The JSON form, editing an output of one of your own jobs with no upload at all:
   one request may carry and `mask` whether a mask is taken.
 - Price: the images made, plus `per_input_image_microcents` for each input image where the
   model has one. Send `input_images` to `POST /v1/estimates` to see it first.
-- Refusals before anything is stored or charged: 400 `input_not_supported`, and everything
-  an upload can answer.
+- Refusals before anything is stored or charged: 400 `input_not_supported`, 400
+  `invalid_parameter` (`param` names the field), and everything an upload can answer.
 
 ## Files and inputs
 
@@ -380,7 +459,8 @@ your own DONE jobs whose files still exist; it needs no upload. Anything else an
 Upload refusals, in the order they are checked: 403 `inputs_disabled`, 403
 `inputs_not_allowed_for_account`, 403 `inputs_terms_required`, 413 `input_too_large`, 415
 `input_type_unsupported`, 409 `input_limit_reached`, 422 `input_person_not_allowed`, 503
-`input_check_unavailable`, and 429 for too many uploads in an hour.
+`input_check_unavailable`, and 429 for too many uploads in an hour. A form that cannot be
+read, such as one of more than 24 parts, answers 400 `invalid_parameter`.
 
 ## Video
 
@@ -881,20 +961,42 @@ Every error is an RFC 7807 problem document, `Content-Type: application/problem+
 ```json
 {"title": "Payment Required", "status": 402,
  "detail": "insufficient credit; top up via /v1/billing/topup",
- "instance": "/v1/images/generations", "code": "insufficient_credit"}
+ "instance": "/v1/videos/generations", "code": "insufficient_credit"}
 ```
 
 `status` repeats the HTTP status. `detail` is a sentence for a person. `code`, where
-present, is a stable string to branch on. On the OpenAI-shaped video routes (`/v1/videos`, not `/v1/videos/generations`) the
-document also carries OpenAI's `error` object: `{"message", "type", "param", "code"}`.
+present, is a stable string to branch on.
+
+A 401 is a problem document too. When a request has no credential, or a bearer token that
+is neither a Godance API key nor a session (an OpenAI key sent by mistake), the 401 also
+keeps its `WWW-Authenticate: Bearer` challenge, with RFC 6750's `error="invalid_token"`
+for a token that was sent.
+
+On the routes that follow OpenAI's own API, `POST /v1/images/generations`,
+`POST /v1/images/edits`, `POST /v1/images/variations` and the `/v1/videos` routes (not
+`/v1/videos/generations`), the document also carries OpenAI's `error` object, which
+OpenAI's SDKs build their exceptions from. Every other member is still there:
+
+```json
+{"title": "Payment Required", "status": 402,
+ "detail": "insufficient credit; top up via /v1/billing/topup",
+ "instance": "/v1/images/generations", "code": "insufficient_credit",
+ "error": {"message": "insufficient credit; top up via /v1/billing/topup",
+           "type": "invalid_request_error", "param": null, "code": "insufficient_credit"}}
+```
+
+`message` is the `detail`. `code` and `param` are the problem's own, or null where it has
+none. `type` follows the status: `authentication_error` (401), `permission_error` (403),
+`not_found_error` (404), `rate_limit_error` (429), `server_error` (5xx), and
+`invalid_request_error` for every other 4xx.
 
 | Status | Meaning |
 |---|---|
 | 400 | The request is not valid. `detail` says which field. |
-| 401 | No key, or an unknown, revoked or expired one. |
+| 401 | No key, an unknown, revoked or expired one, or a bearer token that is not a Godance key at all. |
 | 402 | `insufficient_credit`: top up. Without a `code`: a spending cap was reached, and topping up does not lift it. |
 | 403 | A key on a route that needs a signed-in session, or a refusal named by `code` (`inputs_disabled`, …). |
-| 404 | No such model, job, file, recipe or video for this account. Another account's answers the same. |
+| 404 | No such model, job, file, recipe or video for this account. Another account's answers the same. A part of OpenAI's API that Godance does not offer has a `code` of its own (`image_variations_not_supported`, `video_remix_not_supported`, …). |
 | 409 | The request cannot be carried out as things stand (`job_not_saveable`, `saved_limit_reached`, `video_not_ready`, `batch_not_resumable`, `batch_limit_reached`, …). |
 | 413, 415, 422 | An input image that is too large, of the wrong type, or not accepted. A batch's `results.zip` over 500 MB is 413 `results_too_large`. |
 | 429 | Too many requests. `Retry-After` says how many seconds to wait. |
@@ -927,8 +1029,29 @@ if response.status_code >= 400:
 
 With OpenAI's SDK, a non-2xx answer raises the SDK's usual exception
 (`openai.BadRequestError`, `openai.AuthenticationError`, `openai.NotFoundError`, …).
-`e.status_code` is always right. On `/v1/videos` routes the exception text carries the
-sentence and `e.code` is set; elsewhere read `e.response.json()["detail"]`.
+`e.status_code` is always right. On the routes that carry the `error` object, the
+exception's text carries the sentence (`Error code: 402 - insufficient credit; top up via
+/v1/billing/topup`), and `e.code`, `e.param` and `e.type` come from the object, which is
+also `e.body`; the whole problem is `e.response.json()`. On every other route the text
+is only `Error code: 402`, and the sentence is `e.response.json()["detail"]`.
+
+```python
+import os
+import openai
+
+client = openai.OpenAI(base_url="https://api.godance.ai/v1", api_key=os.environ["GODANCE_API_KEY"])
+try:
+    client.images.generate(model="gpt-image-2", prompt="a lighthouse at dusk, watercolor")
+except openai.APIStatusError as e:
+    print(e)                               # Error code: 402 - insufficient credit; top up via /v1/billing/topup
+    print(e.status_code, e.code, e.param)  # 402 insufficient_credit None
+    print(e.response.json()["instance"])   # /v1/images/generations
+```
+
+A client left with an OpenAI key (OpenAI's SDK reads `OPENAI_API_KEY` when no `api_key`
+is given) gets `openai.AuthenticationError: Error code: 401 - The bearer token is not a
+Godance API key or a current session. Godance API keys start with gd_live_.` on the routes
+that carry the `error` object.
 
 ## Limits and retention
 

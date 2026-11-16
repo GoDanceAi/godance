@@ -52,6 +52,7 @@ export function createRecipe(recipe: RecipeSetup & {
   title: string;
   modality: MediaModality;
   source_gallery_recipe?: string;
+  source_published_recipe?: string;   // a published recipe it starts from, by public id (round 14)
 }): Promise<UserRecipe> {
   return apiFetch<UserRecipe>('/v1/recipes', { method: 'POST', json: recipe });
 }

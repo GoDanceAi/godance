@@ -25,11 +25,12 @@ info:
     account) needs a signed-in session, and answers an API key with 403.
 
     **Errors.** Every error is an RFC 7807 problem document
-    (`application/problem+json`) with `title`, `status` and `detail`. Many
-    carry `code`, a stable string to branch on. On the routes that follow
-    OpenAI's Videos API (`/v1/videos`, not `/v1/videos/generations`) the same
-    document also carries OpenAI's `error` object, which is where OpenAI's
-    SDKs read a message from.
+    (`application/problem+json`) with `title`, `status` and `detail`, a 401
+    included. Many carry `code`, a stable string to branch on. On the routes
+    that follow OpenAI's own API (`POST /v1/images/generations`,
+    `POST /v1/images/edits`, `POST /v1/images/variations`, and `/v1/videos`,
+    not `/v1/videos/generations`) the same document also carries OpenAI's
+    `error` object, which is where OpenAI's SDKs read a message from.
 
     **Money.** Every amount is integer cents of US dollars, never a decimal.
     A generation reserves its price when it is accepted and returns the
@@ -68,8 +69,25 @@ tags:
       refuses one, the batch is PAUSED (it does not fail) until it is resumed.
       A row is never submitted twice.
   - name: Estimates
+  - name: Routing
+    description: |
+      A chat request's `model` can be a virtual model that picks a real one
+      per request: `godance-fast`, `godance-auto` and `godance-quality` are
+      built in. Once the operator turns on user routing policies, an account
+      can also write its own, with rules, provider limits (the compliance
+      opt-out) and fallbacks for batches, and call each by its id; until
+      then these routes answer 404 `routing_policies_disabled`.
   - name: Usage
   - name: API keys
+  - name: Provider keys
+    description: |
+      Bring your own key. A key of your own for a provider: requests to that
+      provider's models then go out on it, and Godance charges only its fee
+      (`fee_basis_points` of the list price). Switched off by default: until a
+      provider is offered, every key answers 400 `byok_provider_not_supported`.
+      The regional rule still decides first: a key never makes a provider
+      that is not available in the region reachable. A signed-in session
+      only; an API key cannot read, set or remove one.
   - name: Account
   - name: Two-factor sign-in
   - name: Billing
@@ -157,7 +175,17 @@ paths:
         `image_type_unsupported`, `too_many_images`,
         `model_does_not_accept_images` (400), `image_too_large` (413),
         `file_not_found` (404).
+
+        `model` may be a routing policy: a built-in preset, or one of your own
+        once user policies are on. The answer's `model` is the model that
+        served. `X-Godance-Route` (or `route_hint`) picks a policy rule that
+        names it in `hint_equals`; a direct model call ignores it.
       security: [{ apiKey: [] }, { session: [] }]
+      parameters:
+        - name: X-Godance-Route
+          in: header
+          description: A routing hint for a policy's rules (`hint_equals`); it wins over `route_hint`. 1-64 letters, digits, `.`, `_` or `-`; any other value is ignored.
+          schema: { type: string }
       requestBody:
         required: true
         content:
@@ -224,11 +252,11 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/JobAccepted" }
-        "400": { $ref: "#/components/responses/BadRequest" }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "402": { $ref: "#/components/responses/PaymentRequired" }
-        "404": { $ref: "#/components/responses/NotFound" }
-        "502": { $ref: "#/components/responses/GenerationFailed" }
+        "400": { $ref: "#/components/responses/OpenAiProblem" }
+        "401": { $ref: "#/components/responses/OpenAiProblem" }
+        "402": { $ref: "#/components/responses/OpenAiProblem", description: "`insufficient_credit` (top up to go on), or a spending cap was reached (no `code`; topping up does not lift a cap)." }
+        "404": { $ref: "#/components/responses/OpenAiProblem" }
+        "502": { $ref: "#/components/responses/OpenAiProblem", description: "The job a request waited for failed: `code` `generation_failed`, with `job_id`. The reservation is returned." }
   /v1/images/edits:
     post:
       operationId: createImageEdit
@@ -242,8 +270,25 @@ paths:
         caller's files. JSON names images that are already stored. The answer
         follows the key, as for a generation.
 
+        A field the route does not read is refused, not ignored: 400
+        `invalid_parameter`, with `param` naming it, at any depth
+        (`output_format`, `recipe.variable`, `images[1].url`). That includes
+        OpenAI's own fields that Godance does not act on, such as
+        `background`, `output_format`, `input_fidelity`, `stream` and
+        `user`, and `style`, which only a generation takes. In JSON, a field
+        set to null passes. A form field sent twice is refused, except
+        `image`.
+
+        In a form, OpenAI's SDK writes a nested value as bracketed fields,
+        and they are read back into it: `extra_body={"recipe": {…}}` arrives
+        as `recipe[version_id]`, `recipe[variables][subject]` and
+        `recipe[inputs][slot][file_id]`. `recipe` may also be sent as JSON
+        text. A form of more parts than 24 (each image and each bracketed
+        field is one) answers 400 `invalid_parameter`.
+
         Part of inputs: answers 403 `inputs_disabled` until they are switched
-        on. Further problem codes: `input_not_supported` (400), everything an
+        on. Further problem codes: `input_not_supported` (400),
+        `invalid_parameter` (400, `param` names the field), everything an
         upload can answer, and everything a generation can.
       security: [{ apiKey: [] }, { session: [] }]
       parameters:
@@ -257,10 +302,12 @@ paths:
             schema:
               type: object
               required: [model]
+              additionalProperties: false
               properties:
                 model: { type: string }
                 prompt: { type: string }
                 image: { type: string, format: binary, description: "Repeat the part, or use `image[]`, to send several." }
+                "image[]": { type: string, format: binary, description: "How OpenAI's SDK names the parts of a list of images." }
                 mask: { type: string, format: binary }
                 n: { type: integer, minimum: 1 }
                 size: { type: string }
@@ -270,6 +317,14 @@ paths:
                 webhook_url: { type: string }
                 gallery_recipe: { type: string }
                 recipe: { type: string, description: "The `recipe` object of the JSON form, as JSON text." }
+                "recipe[version_id]": { type: string, format: uuid }
+              patternProperties:
+                "^recipe\\[variables\\]\\[[^\\]]+\\]$":
+                  type: string
+                  description: "`recipe[variables][subject]`: one variable's value. An empty value is a value."
+                "^recipe\\[inputs\\]\\[[^\\]]+\\](\\[file_id\\]|\\[job_output\\]\\[(job_id|index)\\])$":
+                  type: string
+                  description: "`recipe[inputs][product photo][file_id]`: an input reference for one of the version's slots."
       responses:
         "200":
           description: The images, for a request that waited.
@@ -281,14 +336,27 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/JobAccepted" }
-        "400": { $ref: "#/components/responses/BadRequest" }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "402": { $ref: "#/components/responses/PaymentRequired" }
-        "403": { $ref: "#/components/responses/Forbidden" }
-        "404": { $ref: "#/components/responses/NotFound" }
-        "413": { $ref: "#/components/responses/TooLarge" }
-        "415": { $ref: "#/components/responses/UnsupportedType" }
-        "502": { $ref: "#/components/responses/GenerationFailed" }
+        "400": { $ref: "#/components/responses/OpenAiProblem" }
+        "401": { $ref: "#/components/responses/OpenAiProblem" }
+        "402": { $ref: "#/components/responses/OpenAiProblem", description: "`insufficient_credit` (top up to go on), or a spending cap was reached (no `code`; topping up does not lift a cap)." }
+        "403": { $ref: "#/components/responses/OpenAiProblem" }
+        "404": { $ref: "#/components/responses/OpenAiProblem" }
+        "413": { $ref: "#/components/responses/OpenAiProblem" }
+        "415": { $ref: "#/components/responses/OpenAiProblem" }
+        "502": { $ref: "#/components/responses/OpenAiProblem", description: "The job a request waited for failed: `code` `generation_failed`, with `job_id`. The reservation is returned." }
+  /v1/images/variations:
+    post:
+      operationId: createImageVariation
+      tags: [Images]
+      summary: "Not supported: variations of an image."
+      description: |
+        Part of OpenAI's Images API that Godance does not offer. Always 404
+        `image_variations_not_supported`, to an API key and a session alike. The form is not read
+        and nothing is charged. To work from an image, send it to `POST /v1/images/edits` with a
+        prompt.
+      security: [{ apiKey: [] }, { session: [] }]
+      responses:
+        "404": { $ref: "#/components/responses/OpenAiProblem" }
   /v1/videos/generations:
     post:
       operationId: createVideoGeneration
@@ -418,13 +486,13 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Video" }
-        "400": { $ref: "#/components/responses/VideoError" }
-        "401": { $ref: "#/components/responses/VideoError" }
-        "402": { $ref: "#/components/responses/VideoError" }
-        "403": { $ref: "#/components/responses/VideoError" }
-        "404": { $ref: "#/components/responses/VideoError" }
-        "413": { $ref: "#/components/responses/VideoError" }
-        "415": { $ref: "#/components/responses/VideoError" }
+        "400": { $ref: "#/components/responses/OpenAiProblem" }
+        "401": { $ref: "#/components/responses/OpenAiProblem" }
+        "402": { $ref: "#/components/responses/OpenAiProblem" }
+        "403": { $ref: "#/components/responses/OpenAiProblem" }
+        "404": { $ref: "#/components/responses/OpenAiProblem" }
+        "413": { $ref: "#/components/responses/OpenAiProblem" }
+        "415": { $ref: "#/components/responses/OpenAiProblem" }
     get:
       operationId: listVideos
       tags: [Video (OpenAI shape)]
@@ -444,8 +512,8 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/VideoList" }
-        "400": { $ref: "#/components/responses/VideoError" }
-        "401": { $ref: "#/components/responses/VideoError" }
+        "400": { $ref: "#/components/responses/OpenAiProblem" }
+        "401": { $ref: "#/components/responses/OpenAiProblem" }
   /v1/videos/{id}:
     get:
       operationId: getVideo
@@ -469,8 +537,8 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Video" }
-        "401": { $ref: "#/components/responses/VideoError" }
-        "404": { $ref: "#/components/responses/VideoError" }
+        "401": { $ref: "#/components/responses/OpenAiProblem" }
+        "404": { $ref: "#/components/responses/OpenAiProblem" }
     delete:
       operationId: deleteVideo
       tags: [Video (OpenAI shape)]
@@ -489,10 +557,10 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/VideoDeleted" }
-        "401": { $ref: "#/components/responses/VideoError" }
-        "404": { $ref: "#/components/responses/VideoError" }
-        "409": { $ref: "#/components/responses/VideoError" }
-        "503": { $ref: "#/components/responses/VideoError" }
+        "401": { $ref: "#/components/responses/OpenAiProblem" }
+        "404": { $ref: "#/components/responses/OpenAiProblem" }
+        "409": { $ref: "#/components/responses/OpenAiProblem" }
+        "503": { $ref: "#/components/responses/OpenAiProblem" }
   /v1/videos/{id}/content:
     get:
       operationId: downloadVideoContent
@@ -518,11 +586,11 @@ paths:
               schema: { type: string, format: binary }
             application/octet-stream:
               schema: { type: string, format: binary }
-        "400": { $ref: "#/components/responses/VideoError" }
-        "401": { $ref: "#/components/responses/VideoError" }
-        "404": { $ref: "#/components/responses/VideoError" }
-        "409": { $ref: "#/components/responses/VideoError" }
-        "503": { $ref: "#/components/responses/VideoError" }
+        "400": { $ref: "#/components/responses/OpenAiProblem" }
+        "401": { $ref: "#/components/responses/OpenAiProblem" }
+        "404": { $ref: "#/components/responses/OpenAiProblem" }
+        "409": { $ref: "#/components/responses/OpenAiProblem" }
+        "503": { $ref: "#/components/responses/OpenAiProblem" }
   /v1/videos/{id}/remix:
     post:
       operationId: remixVideo
@@ -533,7 +601,7 @@ paths:
       parameters:
         - { $ref: "#/components/parameters/VideoId" }
       responses:
-        "404": { $ref: "#/components/responses/VideoError" }
+        "404": { $ref: "#/components/responses/OpenAiProblem" }
   /v1/videos/edits:
     post:
       operationId: editVideo
@@ -542,7 +610,7 @@ paths:
       description: Part of OpenAI's Videos API that Godance does not offer. Always 404 `video_edits_not_supported`.
       security: [{ apiKey: [] }, { session: [] }]
       responses:
-        "404": { $ref: "#/components/responses/VideoError" }
+        "404": { $ref: "#/components/responses/OpenAiProblem" }
   /v1/videos/extensions:
     post:
       operationId: extendVideo
@@ -551,7 +619,7 @@ paths:
       description: Part of OpenAI's Videos API that Godance does not offer. Always 404 `video_extensions_not_supported`.
       security: [{ apiKey: [] }, { session: [] }]
       responses:
-        "404": { $ref: "#/components/responses/VideoError" }
+        "404": { $ref: "#/components/responses/OpenAiProblem" }
   /v1/videos/characters:
     post:
       operationId: createVideoCharacter
@@ -560,7 +628,7 @@ paths:
       description: Part of OpenAI's Videos API that Godance does not offer. Always 404 `video_characters_not_supported`.
       security: [{ apiKey: [] }, { session: [] }]
       responses:
-        "404": { $ref: "#/components/responses/VideoError" }
+        "404": { $ref: "#/components/responses/OpenAiProblem" }
   /v1/videos/characters/{id}:
     get:
       operationId: getVideoCharacter
@@ -571,7 +639,7 @@ paths:
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
       responses:
-        "404": { $ref: "#/components/responses/VideoError" }
+        "404": { $ref: "#/components/responses/OpenAiProblem" }
   /v1/jobs:
     get:
       operationId: listJobs
@@ -664,6 +732,9 @@ paths:
         `input_too_large` (413), `input_type_unsupported` (415),
         `input_limit_reached` (409), `input_person_not_allowed` (422),
         `input_check_unavailable` (503); and 429 for too many uploads in an hour.
+        A form with no `file` part, another `purpose`, or a form that cannot
+        be read at all, such as one of more than 24 parts, answers 400; the
+        last with `invalid_parameter`.
       security: [{ apiKey: [] }, { session: [] }]
       requestBody:
         required: true
@@ -681,6 +752,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/File" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "409": { $ref: "#/components/responses/Conflict" }
@@ -942,7 +1014,13 @@ paths:
         Problem codes: `batch_too_large` (400, more than 500 rows),
         `invalid_batch` (400), `recipe_not_found` (404, the version is not
         one of the caller's), `batch_limit_reached` (409, two batches that
-        are not finished already).
+        are not finished already), `fallbacks_unavailable` (400, `fallbacks`
+        asked for without a routing policy that has fallbacks for the model).
+
+        With `"fallbacks": true`, a row whose job fails on a provider error
+        or a timeout (never a content refusal) is retried once, on the
+        alternative one of your routing policies names for the model: a new
+        job with its own reservation, the failed one refunded as always.
       security: [{ apiKey: [] }, { session: [] }]
       requestBody:
         required: true
@@ -1064,7 +1142,9 @@ paths:
         Columns: `index`, `status`, one for each of the recipe's variables,
         `job_id`, `cost_cents`, `error`, then a signed link to each output as
         `output_1` to `output_n`. The links expire; download the file again
-        for fresh ones.
+        for fresh ones. A batch created with `fallbacks` also has `model`
+        (the model the row's job ran on) and `retried_job_id` (the failed job
+        a fallback replaced) after `job_id`.
       security: [{ apiKey: [] }, { session: [] }]
       parameters:
         - { $ref: "#/components/parameters/BatchId" }
@@ -1115,6 +1195,92 @@ paths:
               schema: { $ref: "#/components/schemas/Estimate" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/routing/policies:
+    get:
+      operationId: listRoutingPolicies
+      tags: [Routing]
+      summary: The built-in routing presets, then your own routing policies.
+      description: 404 `routing_policies_disabled` while user policies are off; 403 `routing_policies_not_allowed` for an account they are not open to.
+      security: [{ apiKey: [] }, { session: [] }]
+      responses:
+        "200":
+          description: Every policy you can call.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RoutingPolicyList" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/routing/policies/{id}:
+    get:
+      operationId: getRoutingPolicy
+      tags: [Routing]
+      summary: One routing policy, yours or a built-in preset.
+      security: [{ apiKey: [] }, { session: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/RoutingPolicyId" }
+      responses:
+        "200":
+          description: The policy.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RoutingPolicy" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      operationId: putRoutingPolicy
+      tags: [Routing]
+      summary: Create or replace one of your routing policies.
+      description: |
+        Checked before it is stored; a policy that breaks a rule answers 400
+        `routing_policy_invalid` with every problem in `errors`. The id is
+        1-63 lowercase letters, digits, `.`, `_` or `-`, and is neither a
+        model nor a preset's (`godance-…`). Past the most an account may
+        keep, 409 `routing_policy_limit_reached`.
+      security: [{ apiKey: [] }, { session: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/RoutingPolicyId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RoutingPolicyRequest" }
+            example:
+              default_model: deepseek-v4-flash
+              rules:
+                - name: code
+                  when: { task_in: [CODE] }
+                  targets: [gpt-4o, deepseek-v4-pro]
+              limits: { excluded_providers: [ZHIPU] }
+      responses:
+        "200":
+          description: Replaced.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RoutingPolicy" }
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RoutingPolicy" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    delete:
+      operationId: deleteRoutingPolicy
+      tags: [Routing]
+      summary: Delete one of your routing policies.
+      security: [{ apiKey: [] }, { session: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/RoutingPolicyId" }
+      responses:
+        "204": { description: Deleted. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
   /v1/usage:
     get:
@@ -1205,6 +1371,65 @@ paths:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
         "204": { description: Revoked. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/provider-credentials:
+    get:
+      operationId: listProviderCredentials
+      tags: [Provider keys]
+      summary: Every provider a key may be stored for, and every key the caller holds. Never the key.
+      security: [{ session: [] }]
+      responses:
+        "200":
+          description: One entry per provider. Empty while no provider is offered.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/ProviderCredential" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/provider-credentials/{provider}:
+    put:
+      operationId: setProviderCredential
+      tags: [Provider keys]
+      summary: Store your own key for a provider, once the provider accepts it.
+      description: |
+        The key is checked with the provider's model list first and stored
+        only if it is accepted, encrypted; it is never returned. Leave out
+        `api_key` to change only `fallback_to_platform` of a key already
+        stored. `byok_provider_not_supported` (400) for a provider not
+        offered, `byok_key_rejected` (400) when the provider refuses the key,
+        `byok_check_failed` (502) when it does not answer, and 503 when the
+        provider is not available in this region.
+      security: [{ session: [] }]
+      parameters:
+        - { name: provider, in: path, required: true, schema: { type: string, example: OPENAI } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ProviderCredentialRequest" }
+      responses:
+        "200":
+          description: The key's entry.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProviderCredential" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { description: The provider did not answer the key check; nothing was stored. }
+        "503": { $ref: "#/components/responses/Unavailable" }
+    delete:
+      operationId: deleteProviderCredential
+      tags: [Provider keys]
+      summary: Delete your key for a provider. Its requests go out on Godance's key from then on.
+      security: [{ session: [] }]
+      parameters:
+        - { name: provider, in: path, required: true, schema: { type: string, example: OPENAI } }
+      responses:
+        "204": { description: Deleted. }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -2116,6 +2341,12 @@ components:
       in: header
       description: "`respond-async` asks for the 202 with the job, also from a key set to `sync`."
       schema: { type: string }
+    RoutingPolicyId:
+      name: id
+      in: path
+      required: true
+      description: A routing policy's id. Yours can be written and deleted; a built-in preset's can only be read.
+      schema: { type: string }
     VideoId:
       name: id
       in: path
@@ -2223,11 +2454,6 @@ components:
       content:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }
-    GenerationFailed:
-      description: "The job a request waited for failed: `code` `generation_failed`, with `job_id`. The reservation is returned."
-      content:
-        application/problem+json:
-          schema: { $ref: "#/components/schemas/Problem" }
     BatchRefused:
       description: |
         The batch request is refused and nothing is written: `batch_too_large`,
@@ -2237,11 +2463,11 @@ components:
       content:
         application/problem+json:
           schema: { $ref: "#/components/schemas/BatchProblem" }
-    VideoError:
+    OpenAiProblem:
       description: A problem document that also carries OpenAI's `error` object. `code` says which refusal.
       content:
         application/problem+json:
-          schema: { $ref: "#/components/schemas/VideoProblem" }
+          schema: { $ref: "#/components/schemas/OpenAiProblem" }
   schemas:
     Problem:
       type: object
@@ -2255,8 +2481,13 @@ components:
         instance: { type: string, description: The path of the request. }
         code: { type: string, description: "A stable string to branch on, where the refusal has one." }
       additionalProperties: true
-    VideoProblem:
-      description: A problem document on OpenAI's video routes.
+    OpenAiProblem:
+      description: |
+        A problem document on the routes that follow OpenAI's own API: its
+        image routes (`/v1/images/generations`, `/v1/images/edits`,
+        `/v1/images/variations`) and its video routes (`/v1/videos`). Every
+        member of the problem is there, and OpenAI's `error` object beside
+        them, which OpenAI's SDKs build an exception from.
       allOf:
         - { $ref: "#/components/schemas/Problem" }
         - type: object
@@ -2266,7 +2497,7 @@ components:
             error: { $ref: "#/components/schemas/OpenAiError" }
     OpenAiError:
       type: object
-      description: OpenAI's error object. `message` repeats the problem's `detail`, and `code` its `code`.
+      description: OpenAI's error object. `message` repeats the problem's `detail`, `code` its `code` and `param` its `param`, each null where the problem has none.
       required: [message, type]
       properties:
         message: { type: string }
@@ -2367,6 +2598,7 @@ components:
         max_tokens: { type: integer }
         temperature: { type: number }
         stream: { type: boolean, default: false }
+        route_hint: { type: string, description: "Godance extension: a routing hint, as the `X-Godance-Route` header (which wins over it). Never sent to a provider." }
     ChatMessage:
       type: object
       required: [role, content]
@@ -2445,6 +2677,77 @@ components:
       properties:
         role: { type: [string, "null"] }
         content: { type: [string, "null"] }
+    RoutingPolicyRequest:
+      type: object
+      description: |
+        A routing policy (round 4's design). The first rule whose `when`
+        matches supplies the models to try, in order; with none matching,
+        `default_model`. Every model must be in the catalog, a TEXT model,
+        and allowed by the policy's own `limits`.
+      required: [default_model]
+      properties:
+        modality: { type: string, enum: [TEXT], default: TEXT, description: Routing chooses chat models; image and video models go in `fallbacks`. }
+        rules: { type: array, maxItems: 16, items: { $ref: "#/components/schemas/RoutingRule" } }
+        default_model: { type: string }
+        limits: { $ref: "#/components/schemas/RoutingLimits" }
+        fallbacks: { type: array, maxItems: 16, items: { $ref: "#/components/schemas/MediaFallback" } }
+        enabled: { type: boolean, default: true, description: A disabled policy is kept but cannot be called. }
+    RoutingRule:
+      type: object
+      required: [name, targets]
+      properties:
+        name: { type: string, description: "Recorded on the request's usage as its rule. `default` is the default model's." }
+        when: { $ref: "#/components/schemas/RoutingCondition" }
+        targets: { type: array, minItems: 1, items: { type: string }, description: Models to try in order; no more than `limits.max_candidates`. }
+    RoutingCondition:
+      type: object
+      description: Every field present must hold; an empty condition matches every request.
+      properties:
+        max_input_tokens: { type: integer, minimum: 0 }
+        min_input_tokens: { type: integer, minimum: 0 }
+        task_in: { type: array, items: { type: string, enum: [CHAT, CODE, REASONING, LONG_CONTEXT, UNKNOWN] } }
+        hint_equals: { type: string, description: "Matches the request's `X-Godance-Route` hint, ignoring case." }
+        always: { type: boolean }
+    RoutingLimits:
+      type: object
+      description: Guardrails on every decision. `allowed_providers` and `excluded_providers` are the compliance opt-out; they hold for a model's static fallbacks too.
+      properties:
+        max_candidates: { type: integer, minimum: 1, maximum: 6, default: 4 }
+        max_estimate_cents_ceiling: { type: integer, minimum: 1, description: "A model whose input estimate for the request is above it is not tried; when that leaves none, 400." }
+        allowed_providers: { type: array, items: { type: string }, description: "Left empty, every provider." }
+        excluded_providers: { type: array, items: { type: string } }
+    MediaFallback:
+      type: object
+      description: 'For batches created with `"fallbacks": true`, where a row goes when its job on `primary` fails. Image or video models of one modality.'
+      required: [primary, alternatives]
+      properties:
+        primary: { type: string }
+        alternatives: { type: array, minItems: 1, maxItems: 4, items: { $ref: "#/components/schemas/MediaFallbackAlternative" } }
+    MediaFallbackAlternative:
+      type: object
+      description: A row is retried once, on the first alternative whose `on` covers the failure. A content refusal is never retried.
+      required: [model, "on"]
+      properties:
+        model: { type: string }
+        "on": { type: array, minItems: 1, items: { type: string, enum: [provider_error, timeout, health_below] } }
+        health_below: { type: number, description: "For `health_below`: the primary's success rate over its recent jobs (0-1) under which a failure moves on." }
+    RoutingPolicy:
+      type: object
+      properties:
+        id: { type: string }
+        built_in: { type: boolean, description: "A preset; it can be read, not changed." }
+        enabled: { type: boolean }
+        modality: { type: string, enum: [TEXT] }
+        rules: { type: array, items: { $ref: "#/components/schemas/RoutingRule" } }
+        default_model: { type: string }
+        limits: { $ref: "#/components/schemas/RoutingLimits" }
+        fallbacks: { type: array, items: { $ref: "#/components/schemas/MediaFallback" } }
+        created_at: { type: [string, "null"], format: date-time }
+        updated_at: { type: [string, "null"], format: date-time }
+    RoutingPolicyList:
+      type: object
+      properties:
+        data: { type: array, items: { $ref: "#/components/schemas/RoutingPolicy" } }
     ImageGenerationRequest:
       type: object
       required: [model]
@@ -2482,8 +2785,9 @@ components:
         poll_url: { type: string, description: "`/v1/jobs/{job_id}`" }
     ImageEditRequest:
       type: object
-      description: The JSON form of an edit.
+      description: The JSON form of an edit. A field not listed here is refused unless it is null.
       required: [model]
+      additionalProperties: { type: "null" }
       properties:
         model: { type: string }
         prompt: { type: string }
@@ -2779,6 +3083,7 @@ components:
         rows: { type: array, minItems: 1, maxItems: 500, items: { $ref: "#/components/schemas/BatchRowRequest" } }
         max_concurrency: { type: integer, minimum: 1, maximum: 4, default: 2, description: How many rows run at a time. }
         webhook_url: { type: string, format: uri, description: "Where to POST once, when the batch ends: one signed `recipe_batch.completed` event." }
+        fallbacks: { type: boolean, default: false, description: "Retry a row once on another model when its job fails on a provider error or a timeout, as your routing policies' fallbacks for the model say. Needs routing policies." }
     BatchRowRequest:
       type: object
       description: One row of a batch request.
@@ -2827,6 +3132,7 @@ components:
         created_at: { type: string, format: date-time }
         started_at: { type: [string, "null"], format: date-time }
         completed_at: { type: [string, "null"], format: date-time, description: When the last row ended. }
+        fallbacks: { type: boolean, description: "Present, and true, for a batch created with `fallbacks`." }
     BatchRow:
       type: object
       properties:
@@ -2837,6 +3143,8 @@ components:
         cost_cents: { type: [integer, "null"], description: "What the row's job was charged: null until the row has ended, 0 for a row that failed." }
         error: { type: [string, "null"] }
         outputs: { type: array, items: { $ref: "#/components/schemas/BatchRowOutput" } }
+        model: { type: string, description: "For a row retried on a fallback, the model its job ran on. Left out for every other row, whose model is the batch's." }
+        retried_job_id: { type: string, format: uuid, description: "For a row retried on a fallback, the failed job it replaced." }
     BatchRowOutput:
       type: object
       properties:
@@ -2862,6 +3170,22 @@ components:
         estimated_cost_cents: { type: integer }
         currency: { type: string }
         input_images: { type: integer }
+        byok: { type: boolean, description: "Present, and true, when the request would go out on your own provider key: the figure is then Godance's fee." }
+    ProviderCredentialRequest:
+      type: object
+      properties:
+        api_key: { type: string, description: "Your key. Leave it out to change only fallback_to_platform." }
+        fallback_to_platform: { type: boolean, description: "When the provider refuses your key, retry once on Godance's key at Godance's price." }
+    ProviderCredential:
+      type: object
+      properties:
+        provider: { type: string }
+        last4: { type: [string, "null"] }
+        status: { type: string, enum: [valid, invalid, unchecked, unsupported_adapter, not_supported, none] }
+        fallback_to_platform: { type: boolean }
+        used_for: { type: array, items: { type: string, enum: [chat, images] } }
+        checked_at: { type: [string, "null"], format: date-time }
+        fee_basis_points: { type: integer, description: "Godance's fee on a request on your key, in basis points of the list price." }
     UsageRecord:
       type: object
       properties:

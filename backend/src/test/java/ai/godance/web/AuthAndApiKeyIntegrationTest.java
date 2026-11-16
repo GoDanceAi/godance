@@ -17,17 +17,26 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webtestclient.autoconfigure.AutoConfigureWebTestClient;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
+import org.springframework.security.oauth2.jwt.JwsHeader;
+import org.springframework.security.oauth2.jwt.JwtClaimsSet;
+import org.springframework.security.oauth2.jwt.JwtEncoder;
+import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 import org.springframework.test.web.reactive.server.WebTestClient;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
+import ai.godance.config.JwtProperties;
 import ai.godance.domain.AuditOutcome;
 import ai.godance.domain.OAuthProvider;
 import ai.godance.repository.AuditLogEntryRepository;
 import ai.godance.repository.UserRepository;
+import ai.godance.security.JwtService;
 import ai.godance.service.AuditLogService;
 import ai.godance.service.OAuthLoginService;
 import ai.godance.service.mail.LoggingEmailSender;
@@ -38,6 +47,8 @@ import ch.qos.logback.core.read.ListAppender;
 import ai.godance.web.dto.ApiKeyDtos.CreateApiKeyResponse;
 import ai.godance.web.dto.AuthDtos.AuthResponse;
 import ai.godance.web.dto.AuthDtos.MeResponse;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * End-to-end auth + API-key surface. One Testcontainers Postgres shared
@@ -57,6 +68,9 @@ class AuthAndApiKeyIntegrationTest {
     @Autowired UserRepository users;
     @Autowired OAuthLoginService oauthLogin;
     @Autowired AuditLogEntryRepository audits;
+    @Autowired JwtEncoder jwtEncoder;
+    @Autowired JwtProperties jwtProperties;
+    @Autowired ObjectMapper json;
 
     private static String uniqueEmail(String tag) {
         return tag + "-" + UUID.randomUUID() + "@godance.test";
@@ -235,6 +249,79 @@ class AuthAndApiKeyIntegrationTest {
                 .expectStatus().isUnauthorized();
     }
 
+    // ---------- not authenticated: Spring's 401, as a problem ----------
+
+    @Test
+    void godanceRoutes_givenNoCredentialOrABearerThatIsNotGodances_expect401ProblemWithoutOpenAisErrorObject() {
+        String expiredSession = "Bearer " + expiredSessionToken(uniqueEmail("expired-session"));
+        // The shape of an OpenAI key left in OPENAI_API_KEY: not a real key.
+        String openAiStyleKey = "Bearer sk-proj-not-a-real-key-0000000000000000";
+
+        // A signed-in session's own routes, and the model API's job list: none follows OpenAI's API.
+        for (String route : List.of("/v1/auth/me", "/v1/keys", "/v1/jobs")) {
+            JsonNode none = unauthorized(http.get().uri(route), "Bearer");
+            assertThat(none.get("type").asString()).isEqualTo("about:blank");
+            assertThat(none.get("title").asString()).isEqualTo("Unauthorized");
+            assertThat(none.get("status").asInt()).isEqualTo(401);
+            assertThat(none.get("detail").asString()).as(route).isEqualTo("This request has no API key or session. "
+                    + "Send a Godance API key as Authorization: Bearer gd_live_…, or sign in.");
+            assertThat(none.has("error")).as(route + " carries no OpenAI error object").isFalse();
+
+            for (String bearer : List.of(openAiStyleKey, "Bearer not.a.valid.jwt", expiredSession)) {
+                JsonNode refused = unauthorized(http.get().uri(route).header("Authorization", bearer),
+                        "Bearer error=\"invalid_token\".*");
+                assertThat(refused.get("detail").asString()).as(route + " " + bearer).isEqualTo("The bearer token "
+                        + "is not a Godance API key or a current session. Godance API keys start with gd_live_.");
+                assertThat(refused.has("error")).as(route + " carries no OpenAI error object").isFalse();
+            }
+        }
+
+        // The decoder's words are in the challenge, as Spring writes it, and never in the problem.
+        JsonNode expired = unauthorized(http.get().uri("/v1/auth/me").header("Authorization", expiredSession),
+                "Bearer error=\"invalid_token\", error_description=\"[^\"]*Jwt expired at [^\"]*\".*");
+        assertThat(expired.toString()).doesNotContain("expired").doesNotContain("Jwt");
+    }
+
+    @Test
+    void godanceRoutes_givenTwoBearerTokens_expectSpringsStatus400AsAProblem() {
+        JsonNode refused = json.readTree(http.get().uri("/v1/jobs?access_token=not-a-session")
+                .header("Authorization", "Bearer not.a.valid.jwt")
+                .exchange()
+                .expectStatus().isBadRequest()
+                .expectHeader().valueMatches(HttpHeaders.WWW_AUTHENTICATE, "Bearer error=\"invalid_request\".*")
+                .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON)
+                .expectBody(String.class).returnResult().getResponseBody());
+        assertThat(refused.get("detail").asString()).isEqualTo(
+                "The bearer token is empty or sent more than once. Send one, in the Authorization header.");
+    }
+
+    /** Sends a request that does not authenticate and returns its 401 problem, once Spring's challenge matches. */
+    private JsonNode unauthorized(WebTestClient.RequestHeadersSpec<?> request, String challenge) {
+        return json.readTree(request.exchange()
+                .expectStatus().isUnauthorized()
+                .expectHeader().valueMatches(HttpHeaders.WWW_AUTHENTICATE, challenge)
+                .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON)
+                .expectBody(String.class).returnResult().getResponseBody());
+    }
+
+    /** A session token for a new account, signed as sign-in signs one, that expired an hour ago. */
+    private String expiredSessionToken(String email) {
+        signup(email);
+        var user = users.findByEmail(email).orElseThrow();
+        Instant issued = Instant.now().minus(Duration.ofHours(2));
+        JwtClaimsSet claims = JwtClaimsSet.builder()
+                .issuer(jwtProperties.issuer())
+                .issuedAt(issued)
+                .expiresAt(issued.plus(Duration.ofHours(1)))
+                .subject(user.getId().toString())
+                .claim("email", email)
+                .claim("scope", user.getRole().name())
+                .claim(JwtService.SESSION_VERSION_CLAIM, user.getSessionVersion())
+                .build();
+        return jwtEncoder.encode(JwtEncoderParameters.from(JwsHeader.with(MacAlgorithm.HS256).build(), claims))
+                .getTokenValue();
+    }
+
     // ---------- /v1/auth/verify ---------------------------------------
 
     @Test
@@ -405,9 +492,10 @@ class AuthAndApiKeyIntegrationTest {
         // An API key reaches the model API only, so probe it there.
         http.get().uri("/v1/usage").header("Authorization", "Bearer " + oldApiKey)
                 .exchange().expectStatus().isOk();
-        http.get().uri("/v1/webhooks/secret").header("Authorization", oldBearer)
-                .exchange().expectStatus().isOk();
-        String oldSecret = users.findByEmail(email).orElseThrow().getWebhookSigningSecret();
+        // A webhook secret, rotated once, so the first one still signs in its grace window.
+        String firstSecret = webhookSecret(oldBearer);
+        String oldSecret = rotateWebhookSecret(oldBearer);
+        assertThat(users.findByEmail(email).orElseThrow().getWebhookSigningSecretPreviousEncrypted()).isNotNull();
 
         // The owner resets the password from the emailed link.
         String token = requestResetToken(email);
@@ -431,11 +519,12 @@ class AuthAndApiKeyIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(Map.of("email", email, "password", "correct-horse-battery-staple"))
                 .exchange().expectStatus().isUnauthorized();
-        assertThat(users.findByEmail(email).orElseThrow().getWebhookSigningSecret())
-                .isNotEqualTo(oldSecret);
+        // No grace window after a reset: neither webhook secret they knew signs any more.
+        assertThat(users.findByEmail(email).orElseThrow().getWebhookSigningSecretPreviousEncrypted()).isNull();
 
-        // ... and the owner holds a verified account with no keys.
+        // ... and the owner holds a verified account with no keys, and a new webhook secret.
         String newBearer = "Bearer " + reset.accessToken();
+        assertThat(webhookSecret(newBearer)).startsWith("whsec_").isNotIn(oldSecret, firstSecret);
         MeResponse me = http.get().uri("/v1/auth/me").header("Authorization", newBearer)
                 .exchange().expectStatus().isOk()
                 .expectBody(MeResponse.class).returnResult().getResponseBody();
@@ -466,6 +555,21 @@ class AuthAndApiKeyIntegrationTest {
                 .exchange()
                 .expectStatus().isOk()
                 .expectBody(MeResponse.class).returnResult().getResponseBody();
+    }
+
+    /** The webhook signing secret, as its owner sees it. */
+    private String webhookSecret(String bearer) {
+        return secretIn(http.get().uri("/v1/webhooks/secret").header("Authorization", bearer).exchange());
+    }
+
+    private String rotateWebhookSecret(String bearer) {
+        return secretIn(http.post().uri("/v1/webhooks/secret/rotate").header("Authorization", bearer).exchange());
+    }
+
+    private static String secretIn(WebTestClient.ResponseSpec response) {
+        return response.expectStatus().isOk()
+                .expectBody(new ParameterizedTypeReference<Map<String, String>>() { })
+                .returnResult().getResponseBody().get("secret");
     }
 
     private WebTestClient.ResponseSpec changeEmail(String bearer, String email, String currentPassword) {

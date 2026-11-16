@@ -4,10 +4,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
-import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.http.codec.multipart.FormFieldPart;
 import org.springframework.http.codec.multipart.Part;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -17,12 +15,12 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.server.ServerWebExchange;
 
 import ai.godance.domain.Modality;
 import ai.godance.gateway.ImageDtos.ImageRequest;
 import ai.godance.security.JwtService;
+import ai.godance.service.ImageEditRefusedException;
 import ai.godance.service.ImageEdits;
 import ai.godance.service.ImageGenerationService;
 import ai.godance.service.ImageGenerationService.ImageResult;
@@ -32,13 +30,13 @@ import ai.godance.service.JobOrigin;
 import ai.godance.service.RecipeRefusedException;
 import ai.godance.service.RecipeRunService;
 import ai.godance.service.RecipeRunService.RunPrompt;
+import ai.godance.web.ImageEditRequests.Fields;
 import ai.godance.web.dto.ImageEditDtos.ImageEditRequest;
 import ai.godance.web.dto.InputDtos.InputRef;
-import ai.godance.web.dto.RecipeDtos.RecipeRef;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
-import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 /**
@@ -63,24 +61,30 @@ import tools.jackson.databind.ObjectMapper;
  * {@code image_response} ({@link ImageJobAnswers}). {@code gallery_recipe}
  * and {@code recipe} are taken as on generations.
  *
+ * <p><b>Nothing is dropped without a word.</b> A field the route does not
+ * read, OpenAI's {@code output_format} or {@code user} included, answers
+ * 400 {@code invalid_parameter} naming it, in either form. In a form, the
+ * bracketed fields OpenAI's SDK writes {@code extra_body={"recipe": {…}}}
+ * as ({@code recipe[version_id]}, {@code recipe[variables][subject]}) are
+ * read back into the recipe ({@link ImageEditRequests}).
+ *
  * <p>While inputs are switched off the route answers {@code inputs_disabled}
  * before it reads a part or looks anything up, and writes nothing.
+ *
+ * <p>Errors are problem+json, as everywhere, and on this route also carry
+ * OpenAI's {@code error} object, which is where its SDKs read an error's
+ * message, {@code code} and {@code param} ({@link ai.godance.security.OpenAiError}).
  */
 @RestController
 @RequestMapping("/v1")
 public class ImageEditController {
-
-    /** The fields both forms share, as text or already parsed. */
-    private record Fields(String model, String prompt, Integer n, String size, String quality,
-                          String responseFormat, Boolean async, String webhookUrl, String galleryRecipe,
-                          RecipeRef recipe) { }
 
     private final ImageGenerationService service;
     private final ImageEdits edits;
     private final RecipeRunService recipes;
     private final ImageJobAnswers answers;
     private final InputUploadIntake intake;
-    private final ObjectMapper json;
+    private final ImageEditRequests requests;
 
     public ImageEditController(ImageGenerationService service, ImageEdits edits, RecipeRunService recipes,
                                ImageJobAnswers answers, InputUploadIntake intake, ObjectMapper json) {
@@ -89,19 +93,19 @@ public class ImageEditController {
         this.recipes = recipes;
         this.answers = answers;
         this.intake = intake;
-        this.json = json;
+        this.requests = new ImageEditRequests(json);
     }
 
+    /** The body is read here rather than bound, so that a field the route does not read is refused, not skipped. */
     @PostMapping(value = "/images/edits", consumes = MediaType.APPLICATION_JSON_VALUE)
     public Mono<ResponseEntity<?>> editJson(
-            @RequestBody ImageEditRequest req,
+            @RequestBody JsonNode body,
             @AuthenticationPrincipal Jwt jwt,
             @RequestHeader(name = "Prefer", required = false) String prefer) {
         edits.requireEnabled();
+        ImageEditRequest req = requests.json(body);
         UUID userId = JwtService.userIdFromSubject(jwt.getSubject());
-        Fields fields = new Fields(req.model(), req.prompt(), req.n(), req.size(), req.quality(),
-                req.responseFormat(), req.async(), req.webhookUrl(), req.galleryRecipe(), req.recipe());
-        return run(userId, apiKeyId(jwt), fields, new ImageEdits.Refs(req.images(), req.mask()), prefer);
+        return run(userId, apiKeyId(jwt), Fields.of(req), new ImageEdits.Refs(req.images(), req.mask()), prefer);
     }
 
     @PostMapping(value = "/images/edits", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -117,12 +121,12 @@ public class ImageEditController {
         // Whether the account may use inputs at all is settled before a byte of the form is read.
         return Mono.fromRunnable(() -> edits.requireMayUse(userId))
                 .subscribeOn(Schedulers.boundedElastic())
-                .then(Mono.defer(exchange::getMultipartData))
+                .then(Mono.defer(() -> InputUploads.form(exchange, ImageEditController::unreadableForm)))
                 .flatMap(form -> {
-                    Fields fields = fieldsOf(form);
-                    List<Part> images = new ArrayList<>(parts(form, "image"));
-                    images.addAll(parts(form, "image[]"));
-                    Part mask = form.getFirst("mask");
+                    Fields fields = requests.form(form);
+                    List<Part> images = new ArrayList<>(parts(form, ImageEditRequests.IMAGE));
+                    images.addAll(parts(form, ImageEditRequests.IMAGE_LIST));
+                    Part mask = form.getFirst(ImageEditRequests.MASK);
                     // Everything that can refuse the request without its images does so first,
                     // so a request that cannot run leaves no stored file behind.
                     requireWellFormed(fields);
@@ -143,6 +147,17 @@ public class ImageEditController {
                             .flatMap(refs -> run(userId, apiKeyId, fields, refs, prefer));
                 })
                 .onErrorMap(InputUploads::isTooLarge, e -> intake.tooLarge(userId, ip));
+    }
+
+    /**
+     * A form that cannot be read at all, and why. The likeliest: more parts
+     * than a form may have ({@code spring.webflux.multipart.max-parts}),
+     * which a recipe of many variables reaches as bracketed fields, one per
+     * value, and many images reach one part each.
+     */
+    private static ImageEditRefusedException unreadableForm(String why) {
+        return ImageEditRefusedException.invalid(null, why + " Send recipe as JSON text, in one field, or upload "
+                + "the images with POST /v1/files and send the request as JSON.");
     }
 
     /** Stores the images one after another, in the order given, each admitted as an upload of its own. */
@@ -195,62 +210,16 @@ public class ImageEditController {
 
     private static void requireWellFormed(Fields fields) {
         if (fields.model() == null || fields.model().isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "model must not be blank");
+            throw ImageEditRefusedException.invalid("model", "model must not be blank");
         }
         if (fields.n() != null && fields.n() < 1) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "n must be at least 1");
+            throw ImageEditRefusedException.invalid("n", "n must be at least 1");
         }
-    }
-
-    // ===== The multipart form =========================================
-
-    private Fields fieldsOf(MultiValueMap<String, Part> form) {
-        return new Fields(text(form, "model"), text(form, "prompt"), integer(form, "n"), text(form, "size"),
-                text(form, "quality"), text(form, "response_format"), bool(form, "async"),
-                text(form, "webhook_url"), text(form, "gallery_recipe"), recipe(form));
     }
 
     private static List<Part> parts(MultiValueMap<String, Part> form, String name) {
         List<Part> found = form.get(name);
         return found == null ? List.of() : found;
-    }
-
-    /** A text field's value, or null when the form has no such field or it is empty. */
-    private static String text(MultiValueMap<String, Part> form, String name) {
-        Part part = form.getFirst(name);
-        if (part == null) return null;
-        if (!(part instanceof FormFieldPart field)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, name + " must be a text field");
-        }
-        String value = field.value();
-        return value == null || value.isBlank() ? null : value;
-    }
-
-    private static Integer integer(MultiValueMap<String, Part> form, String name) {
-        String value = text(form, name);
-        if (value == null) return null;
-        try {
-            return Integer.valueOf(value.trim());
-        } catch (NumberFormatException e) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, name + " must be a whole number");
-        }
-    }
-
-    private static Boolean bool(MultiValueMap<String, Part> form, String name) {
-        String value = text(form, name);
-        return value == null ? null : Boolean.valueOf(value.trim());
-    }
-
-    /** {@code recipe} in a form is the JSON object a JSON request would carry, as text. */
-    private RecipeRef recipe(MultiValueMap<String, Part> form) {
-        String value = text(form, "recipe");
-        if (value == null) return null;
-        try {
-            return json.readValue(value, RecipeRef.class);
-        } catch (JacksonException e) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "recipe must be a JSON object: {\"version_id\": …, \"variables\": {…}}");
-        }
     }
 
     /** The API key id when the caller authenticated with an API key; null for a JWT session. */

@@ -30,6 +30,7 @@ import {
   generationBody,
   generationPath,
   PROMPT_MAX_LENGTH,
+  publishedRefOf,
   recipeRefOf,
   startGeneration,
   useEstimate,
@@ -48,6 +49,7 @@ import {
   type Prefill,
 } from '../lib/studio-prefill';
 import type { DescribeSource } from '../lib/describe';
+import { publishedSlots, type PublicRecipe } from '../lib/community';
 import type { GalleryRecipe, RecipeLang } from '../lib/recipe';
 import {
   checkTemplate,
@@ -71,6 +73,7 @@ import { JobInputs, JobOutputs } from '../components/JobMedia';
 import JobStatusPill from '../components/JobStatusPill';
 import MakeVariable from '../components/MakeVariable';
 import RecipeSource from '../components/RecipeSource';
+import PublishedSource from '../components/community/PublishedSource';
 import { RunAtScaleDisclosure } from '../components/run/RunAtScale';
 import SaveJobButton from '../components/SaveJobButton';
 import SaveRecipe from '../components/SaveRecipe';
@@ -146,6 +149,8 @@ export default function StudioPage({ modality }: { modality: MediaModality }) {
   const [templateOpen, setTemplateOpen] = useState(false);
   // One of the user's own recipes in the form: loaded with ?recipe=, or saved from here.
   const [own, setOwn] = useState<OwnRecipe | null>(null);
+  // A community recipe the form was filled from (?published=, round 14).
+  const [published, setPublished] = useState<PublicRecipe | null>(null);
   // Opened with nothing to load, or with nothing that could be: the Studio offers examples.
   const [startedEmpty, setStartedEmpty] = useState(false);
   // The gallery recipes this account saved. Null until read, and when the API has no such list.
@@ -221,7 +226,8 @@ export default function StudioPage({ modality }: { modality: MediaModality }) {
     setTemplate(start.template ?? null);
     setTemplateOpen(false);
     setOwn(prefill.own ?? null);
-    setStartedEmpty(!prefill.job && !prefill.recipe && !prefill.own && !prefill.animate
+    setPublished(prefill.published ?? null);
+    setStartedEmpty(!prefill.job && !prefill.recipe && !prefill.own && !prefill.published && !prefill.animate
       && Object.keys(prefill.values).length === 0);
     setPrefill(null);
     setReady(true);
@@ -263,13 +269,17 @@ export default function StudioPage({ modality }: { modality: MediaModality }) {
     ? generationBody(modality, { ...values, prompt: promptText }, controls, galleryRecipe)
     : null;
   // One of the user's own recipes runs by reference, so the API renders it and counts the attempt.
-  const recipeRef = recipeRefOf(own?.version ?? null, template, values.prompt);
+  // So does a community recipe, by its public id, while the form is still what its author published.
+  const ownRef = recipeRefOf(own?.version ?? null, template, values.prompt);
+  const recipeRef = ownRef ?? publishedRefOf(published, template, values.prompt);
   // The images the request carries: the slots the chosen model can use, and nothing while inputs are off.
   const takes = inputsOn ? model?.godance.capabilities?.inputs : undefined;
   const usable = usableSlots(slots, takes, modality);
   const filled = usable.filter((slot) => slot.input !== null);
   // One of the user's recipes that names its own inputs runs with those, each under its slot's name.
-  const recipeSlots = recipeRef && inputsOn ? own?.version.inputs ?? [] : [];
+  const recipeSlots = recipeRef && inputsOn
+    ? ownRef ? own?.version.inputs ?? [] : published ? publishedSlots(published) : []
+    : [];
   const requestFor = (using: Slot[]): GenerationBody | null => {
     if (!plainRequest) return null;
     const sent = usableSlots(using, takes, modality).filter((slot) => slot.input !== null);
@@ -408,7 +418,9 @@ export default function StudioPage({ modality }: { modality: MediaModality }) {
 
   const groups = models ? groupByProvider(models) : [];
   // What the form's contents would be called as a recipe: the gallery recipe's title, or the start of the prompt.
-  const suggestedTitle = recipe ? recipe.recipe.title.en ?? recipe.recipe.title.zh ?? '' : titleFrom(promptText ?? '');
+  const suggestedTitle = recipe
+    ? recipe.recipe.title.en ?? recipe.recipe.title.zh ?? ''
+    : published ? published.title : titleFrom(promptText ?? '');
 
   return (
     <div className="mx-auto max-w-6xl px-6 py-8">
@@ -459,7 +471,8 @@ export default function StudioPage({ modality }: { modality: MediaModality }) {
               saveError={recipeSaveError}
             />
           )}
-          {own && <OwnRecipeLine own={own} counted={recipeRef !== null} />}
+          {published && <PublishedSource recipe={published} />}
+          {own && <OwnRecipeLine own={own} counted={ownRef !== null} />}
           {template && (
             <VariableFields
               template={template}
@@ -650,6 +663,7 @@ export default function StudioPage({ modality }: { modality: MediaModality }) {
               modality={modality}
               suggestedTitle={suggestedTitle}
               galleryRecipe={recipe?.recipe.slug ?? null}
+              publishedRecipe={published?.public_id ?? null}
               onSaved={setOwn}
             />
           </div>

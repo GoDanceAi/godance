@@ -2,6 +2,7 @@ package ai.godance.web;
 
 import java.util.UUID;
 
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -10,6 +11,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 
 import ai.godance.gateway.ImageDtos.ImageRequest;
 import ai.godance.service.ImageResponseFormat;
@@ -35,10 +37,20 @@ import reactor.core.scheduler.Schedulers;
  * 200 in OpenAI's shape, unless it sets {@code "async": true} or sends
  * {@code Prefer: respond-async}. A signed-in session never waits. That rule
  * lives in {@link ImageJobAnswers}, which the edits route uses too.
+ *
+ * <p>Errors are problem+json, as everywhere, and on this route also carry
+ * OpenAI's {@code error} object, which is where its SDKs read an error's
+ * message ({@link ai.godance.security.OpenAiError}).
+ *
+ * <p>{@code POST /v1/images/variations}, OpenAI's variations of an image, is
+ * here only to answer that Godance does not offer it.
  */
 @RestController
 @RequestMapping("/v1")
 public class ImageController {
+
+    /** The {@code code} of {@code POST /v1/images/variations}'s 404. */
+    public static final String CODE_VARIATIONS_NOT_SUPPORTED = "image_variations_not_supported";
 
     private final ImageGenerationService service;
     private final RecipeRuns runs;
@@ -85,6 +97,24 @@ public class ImageController {
                 })
                 .subscribeOn(Schedulers.boundedElastic())
                 .map(result -> answers.forResult(result, format, domain.model()));
+    }
+
+    // ===== What OpenAI's Images API has and Godance does not ==========
+
+    /**
+     * {@code client.images.create_variation}. Godance does not make variations
+     * of an image, so this answers 404 with a code of its own, as the video
+     * routes Godance does not offer do, to a session and an API key alike. The
+     * form is never read and nothing is charged.
+     */
+    @PostMapping("/images/variations")
+    public Mono<Void> createVariation() {
+        ResponseStatusException refused = new ResponseStatusException(HttpStatus.NOT_FOUND,
+                "Creating a variation of an image is not supported. Godance serves generations and edits "
+                        + "of OpenAI's Images API: to work from an image, send it to POST /v1/images/edits "
+                        + "with a prompt.");
+        refused.getBody().setProperty("code", CODE_VARIATIONS_NOT_SUPPORTED);
+        throw refused;
     }
 
     /** The API key id when the caller authenticated with an API key; null for a JWT session. */

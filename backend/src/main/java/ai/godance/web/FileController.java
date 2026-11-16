@@ -83,7 +83,7 @@ public class FileController {
         // The limits, the account and the upload itself are taken in by the same code
         // as an image sent with an edit, so neither route is a way around the other.
         return intake.admit(userId, ip)
-                .then(Mono.defer(exchange::getMultipartData))
+                .then(Mono.defer(() -> InputUploads.form(exchange, FileController::unreadableForm)))
                 .flatMap(form -> {
                     requirePurpose(form.getFirst("purpose"));
                     Part file = form.getFirst("file");
@@ -162,6 +162,18 @@ public class FileController {
         return Mono.fromRunnable(() -> inputs.acceptTerms(userId, version, ip))
                 .subscribeOn(Schedulers.boundedElastic())
                 .then(Mono.just(ResponseEntity.noContent().<Void>build()));
+    }
+
+    /**
+     * A form that cannot be read at all, and why: such as one of more parts
+     * than a form may have ({@code spring.webflux.multipart.max-parts}).
+     * 400 {@code invalid_parameter}, as on the other routes that take a form.
+     */
+    private static ResponseStatusException unreadableForm(String why) {
+        ResponseStatusException refused = new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                why + " Send the image in one part named file, and purpose beside it if you like.");
+        refused.getBody().setProperty("code", "invalid_parameter");
+        return refused;
     }
 
     /** {@code purpose} may be left out; when it is given it must be the one purpose there is. */

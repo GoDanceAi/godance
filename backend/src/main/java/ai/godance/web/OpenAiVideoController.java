@@ -4,7 +4,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.UUID;
 
-import org.springframework.core.codec.DecodingException;
 import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.core.io.buffer.DataBufferUtils;
 import org.springframework.http.CacheControl;
@@ -150,7 +149,7 @@ public class OpenAiVideoController {
     public Mono<Video> createMultipart(@AuthenticationPrincipal Jwt jwt, ServerWebExchange exchange) {
         UUID userId = JwtService.userIdFromSubject(jwt.getSubject());
         String ip = InputUploadIntake.clientIp(exchange);
-        return exchange.getMultipartData()
+        return InputUploads.form(exchange, OpenAiVideoController::unreadableForm)
                 .flatMap(form -> {
                     Fields fields = requests.form(form);
                     requireWellFormed(fields);
@@ -180,18 +179,18 @@ public class OpenAiVideoController {
                             .then(Mono.defer(() -> intake.store(userId, ip, file)))
                             .flatMap(stored -> create(jwt, fields, InputRef.file(stored.getId())));
                 })
-                .onErrorMap(InputUploads::isTooLarge, e -> intake.tooLarge(userId, ip))
-                .onErrorMap(DecodingException.class, OpenAiVideoController::unreadableForm);
+                .onErrorMap(InputUploads::isTooLarge, e -> intake.tooLarge(userId, ip));
     }
 
     /**
-     * A form that cannot be read at all. The likeliest: more fields than a
-     * form may have ({@code spring.webflux.multipart.max-parts}), which a
-     * recipe of many variables reaches as bracketed fields, one per value.
+     * A form that cannot be read at all, and why. The likeliest: more fields
+     * than a form may have ({@code spring.webflux.multipart.max-parts}),
+     * which a recipe of many variables reaches as bracketed fields, one per
+     * value.
      */
-    private static OpenAiVideoRefusedException unreadableForm(DecodingException e) {
-        return OpenAiVideoRefusedException.invalid(null, "The form could not be read (" + e.getMessage() + "). "
-                + "Send recipe or reference_images as JSON text, one field each, or send the request as JSON.");
+    private static OpenAiVideoRefusedException unreadableForm(String why) {
+        return OpenAiVideoRefusedException.invalid(null, why
+                + " Send recipe or reference_images as JSON text, one field each, or send the request as JSON.");
     }
 
     /**

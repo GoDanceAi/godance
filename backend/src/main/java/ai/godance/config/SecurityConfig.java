@@ -44,6 +44,7 @@ import ai.godance.security.JwtService;
 import ai.godance.security.OAuthLoginFailureHandler;
 import ai.godance.security.OAuthLoginNonce;
 import ai.godance.security.OAuthLoginSuccessHandler;
+import ai.godance.security.ProblemAuthenticationEntryPoint;
 import ai.godance.security.SessionCookieFilter;
 import ai.godance.security.SessionCookies;
 import ai.godance.security.SessionVersionJwtDecoder;
@@ -166,6 +167,7 @@ public class SecurityConfig {
             ApiKeyAuthFilter apiKeyAuthFilter, SessionCookieFilter sessionCookieFilter,
             SpendingLimitFilter spendingLimitFilter,
             ai.godance.security.AdminAuthorizationFilter adminAuthorizationFilter) {
+        ProblemAuthenticationEntryPoint unauthenticated = new ProblemAuthenticationEntryPoint();
         return http
                 // CORS is handled by the standalone CorsWebFilter bean above.
                 // Spring's CSRF tokens are off: SessionCookieFilter guards the
@@ -229,6 +231,11 @@ public class SecurityConfig {
                         .pathMatchers(HttpMethod.POST, "/v1/chat/completions",
                                 "/v1/images/generations", "/v1/images/edits", "/v1/videos/generations")
                                 .hasAnyAuthority(sessionOr(ApiKeyAuthFilter.API_KEY_AUTHORITY))
+                        // OpenAI's image variations: the route exists only to say that Godance
+                        // does not offer them, to an API key as to a session, as the video routes
+                        // below do for theirs.
+                        .pathMatchers(HttpMethod.POST, "/v1/images/variations")
+                                .hasAnyAuthority(sessionOr(ApiKeyAuthFilter.API_KEY_AUTHORITY))
                         .pathMatchers(HttpMethod.GET, "/v1/jobs", "/v1/jobs/*", "/v1/usage")
                                 .hasAnyAuthority(sessionOr(ApiKeyAuthFilter.API_KEY_AUTHORITY))
                         // OpenAI's video routes (round 12): the same video jobs in OpenAI's shape,
@@ -265,6 +272,10 @@ public class SecurityConfig {
                         // Price of an image or video request before it is sent; charges nothing.
                         .pathMatchers(HttpMethod.POST, "/v1/estimates")
                                 .hasAnyAuthority(sessionOr(ApiKeyAuthFilter.API_KEY_AUTHORITY))
+                        // A user's own routing policies (round 14): the owner, with a session or
+                        // an API key, as recipes are. Answers 404 while they are switched off.
+                        .pathMatchers("/v1/routing/policies", "/v1/routing/policies/*")
+                                .hasAnyAuthority(sessionOr(ApiKeyAuthFilter.API_KEY_AUTHORITY))
                         // The MCP server (round 13): the API above as tools for an agent's MCP client.
                         // An API key only: never public, and a browser session cannot call it.
                         .pathMatchers("/mcp").hasAuthority(ApiKeyAuthFilter.API_KEY_AUTHORITY)
@@ -273,7 +284,14 @@ public class SecurityConfig {
                         // leaked key can't mint a key that outlives it, read the webhook
                         // secret or turn on auto-recharge (spec risk R-01).
                         .anyExchange().hasAnyAuthority(SESSION))
-                .exceptionHandling(e -> e.accessDeniedHandler(ApiKeyAuthFilter::accessDenied))
+                // No credential, or a bearer token that is neither an API key nor a
+                // current session: 401 as a problem document, WWW-Authenticate kept
+                // (ProblemAuthenticationEntryPoint). The resource server below answers a
+                // bearer token it cannot decode through its own entry point, so the same
+                // one is named there too.
+                .exceptionHandling(e -> e
+                        .authenticationEntryPoint(unauthenticated)
+                        .accessDeniedHandler(ApiKeyAuthFilter::accessDenied))
                 // API-key auth runs before the JWT bearer filter; on success it
                 // installs a Jwt-principal so downstream controllers stay agnostic
                 // to whether the caller used a JWT or an API key.
@@ -288,6 +306,7 @@ public class SecurityConfig {
                 // Spending caps are checked after authorization, before the controller.
                 .addFilterAfter(spendingLimitFilter::filter, SecurityWebFiltersOrder.AUTHORIZATION)
                 .oauth2ResourceServer(oauth -> oauth
+                        .authenticationEntryPoint(unauthenticated)
                         .bearerTokenConverter(resourceServerBearerConverter())
                         .jwt(Customizer.withDefaults()))
                 .build();

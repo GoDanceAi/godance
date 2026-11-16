@@ -70,7 +70,9 @@ import tools.jackson.databind.ObjectMapper;
  * {@code POST /v1/images/edits} end to end, with inputs switched on: OpenAI's
  * multipart form and the JSON form, through the job path to each provider's
  * cassette. Every refusal is checked to come before any charge, and a
- * multipart request that is refused for its model to leave no file behind.
+ * multipart request that is refused for its model or its fields to leave no
+ * file behind. How each field is read or refused, unit by unit, is in
+ * {@link ImageEditRequestsTest} and {@link StrictRequestReaderTest}.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.MOCK, properties = {
         "godance.images.sync-poll-interval=50ms"})
@@ -464,6 +466,266 @@ class ImageEditsIntegrationTest {
         assertThat(files.findByUserId(me.id())).isEmpty();
     }
 
+    // ===== OpenAI's SDK form: recipe, and fields the route does not read ===
+
+    @Test
+    void edit_givenARecipeAsOpenAisSdkWritesIt_expectsItsPromptWithTheFormsImage() throws Exception {
+        // client.images.edit(image=…, prompt="", extra_body={"recipe": {"version_id": …, "variables": {"object": "mug"}}})
+        // sends the recipe as bracketed fields; json.dumps(…) in extra_body sends it as JSON text. Both are read.
+        Account me = account(100_00L);
+        String version = versionId(createRecipe(me, "Put the {{object}} on a marble counter.", List.of()));
+        byte[] photo = InputFixtures.image("plain.png");
+        Map<String, MultipartForm> forms = new LinkedHashMap<>();
+        forms.put("brackets", form("gpt-image-2", "").image("image", photo, "mug.png")
+                .field("recipe[version_id]", version).field("recipe[variables][object]", "mug"));
+        forms.put("JSON text", form("gpt-image-2", "").image("image", photo, "mug.png")
+                .field("recipe", "{\"version_id\": \"" + version + "\", \"variables\": {\"object\": \"mug\"}}"));
+
+        for (Map.Entry<String, MultipartForm> each : forms.entrySet()) {
+            openAi.resetAll();
+            stubOpenAiEdit(1);
+            String body = multipart(me.bearer(), each.getValue()).expectStatus().isAccepted()
+                    .expectBody(String.class).returnResult().getResponseBody();
+            JobView done = pollJob(me.bearer(), jobIdOf(body));
+
+            assertThat(done.status()).as(each.getKey()).isEqualTo(JobStatus.DONE);
+            assertThat(done.inputs()).as(each.getKey()).singleElement()
+                    .satisfies(input -> assertThat(input.role()).isEqualTo("image"));
+            // The provider got the recipe's prompt, rendered with the form's value, beside the form's image.
+            LoggedRequest sent = onlyPost(openAi, "/v1/images/edits");
+            assertThat(text(sent, "prompt")).as(each.getKey()).isEqualTo("Put the mug on a marble counter.");
+            assertThat(parts(sent, "image")).as(each.getKey()).hasSize(1);
+            assertThat(jobs.findById(done.id()).orElseThrow().getRecipeVersionId()).isEqualTo(UUID.fromString(version));
+        }
+    }
+
+    @Test
+    void edit_givenARecipeWithSlotsAsOpenAisSdkWritesIt_expectsTheSlotsImagesAndNoUpload() throws Exception {
+        // client.images.edit(image=[], prompt="", extra_body={"recipe": {"version_id": …, "inputs": {…}}}):
+        // the SDK sends no image part for an empty list, and the recipe's slots name the images.
+        Account me = account(100_00L);
+        UUID product = upload(me, InputFixtures.image("plain.png"), "product.png");
+        GenerationJob room = doneImageJob(me.id(), InputFixtures.image("plain.jpg"));
+        String version = versionId(createRecipe(me, "The product in the room.", List.of(slot("product"), slot("room"))));
+        stubOpenAiEdit(1);
+
+        String body = multipart(me.bearer(), form("gpt-image-2", "")
+                .field("recipe[version_id]", version)
+                .field("recipe[inputs][room][job_output][job_id]", room.getId().toString())
+                .field("recipe[inputs][room][job_output][index]", "0")
+                .field("recipe[inputs][product][file_id]", product.toString()))
+                .expectStatus().isAccepted()
+                .expectBody(String.class).returnResult().getResponseBody();
+        JobView done = pollJob(me.bearer(), jobIdOf(body));
+
+        assertThat(done.status()).isEqualTo(JobStatus.DONE);
+        // The recipe's order, whatever order the form had: the product, then the room.
+        assertThat(done.inputs()).hasSize(2);
+        assertThat(done.inputs().get(0).fileId()).isEqualTo(product);
+        assertThat(done.inputs().get(1).jobOutput().jobId()).isEqualTo(room.getId());
+        LoggedRequest sent = onlyPost(openAi, "/v1/images/edits");
+        assertThat(text(sent, "prompt")).isEqualTo("The product in the room.");
+        assertThat(parts(sent, "image[]")).hasSize(2);
+        // Nothing was uploaded with the edit: the account still has only the product photo.
+        assertThat(files.findByUserId(me.id())).hasSize(1);
+    }
+
+    @Test
+    void edit_givenFieldsTheRouteDoesNotRead_expectsInvalidParameterNamingEachAndNothingStoredOrCharged() {
+        Account me = account(100_00L);
+        UUID existing = upload(me, InputFixtures.image("plain.png"), "a.png");
+        byte[] photo = InputFixtures.image("plain.png");
+        String version = UUID.randomUUID().toString();
+
+        // In the form OpenAI's SDK sends: its own fields that Godance does not act on, a generation's style,
+        // a file part it does not read, a recipe's typo, stored images by id, and a field sent twice.
+        Map<String, MultipartForm> forms = new LinkedHashMap<>();
+        forms.put("output_format", form("gpt-image-2", "x").image("image", photo, "a.png").field("output_format", "webp"));
+        forms.put("background", form("gpt-image-2", "x").image("image", photo, "a.png").field("background", "transparent"));
+        forms.put("user", form("gpt-image-2", "x").image("image", photo, "a.png").field("user", "end-user-7"));
+        forms.put("style", form("gpt-image-2", "x").image("image", photo, "a.png").field("style", "vivid"));
+        forms.put("markup", form("gpt-image-2", "x").image("image", photo, "a.png").image("markup", photo, "m.png"));
+        forms.put("recipe[variable]", form("gpt-image-2", "").image("image", photo, "a.png")
+                .field("recipe[version_id]", version).field("recipe[variable][subject]", "Koi"));
+        forms.put("images[][file_id]", form("gpt-image-2", "x").field("images[][file_id]", existing.toString()));
+        forms.put("mask", form("gpt-image-2", "x").image("image", photo, "a.png")
+                .image("mask", photo, "m1.png").image("mask", photo, "m2.png"));
+        forms.put("model", form("gpt-image-2", "x").field("model", "flux-2-pro").image("image", photo, "a.png"));
+        for (Map.Entry<String, MultipartForm> each : forms.entrySet()) {
+            JsonNode problem = refused(me, () -> multipart(me.bearer(), each.getValue()), 400, "invalid_parameter");
+            assertThat(problem.get("param").asString()).as(each.getKey()).isEqualTo(each.getKey());
+        }
+        JsonNode outputFormat = refused(me, () -> multipart(me.bearer(), forms.get("output_format")), 400, "invalid_parameter");
+        assertThat(outputFormat.get("detail").asString()).isEqualTo("POST /v1/images/edits does not take output_format. "
+                + "It takes model, prompt, image, mask, n, size, quality and response_format, and the Godance extensions "
+                + "async, recipe and webhook_url.");
+        assertThat(refused(me, () -> multipart(me.bearer(), forms.get("images[][file_id]")), 400, "invalid_parameter")
+                .get("detail").asString()).contains("send the request as JSON");
+
+        // The same in JSON, at any depth.
+        Map<String, Object> ref = Map.of("file_id", existing.toString());
+        Map<String, Map<String, Object>> bodies = new LinkedHashMap<>();
+        bodies.put("output_format", Map.of("model", "gpt-image-2", "prompt", "x", "images", List.of(ref), "output_format", "webp"));
+        bodies.put("style", Map.of("model", "gpt-image-2", "prompt", "x", "images", List.of(ref), "style", "vivid"));
+        bodies.put("image", Map.of("model", "gpt-image-2", "prompt", "x", "image", ref));
+        bodies.put("images[1].url", Map.of("model", "gpt-image-2", "prompt", "x",
+                "images", List.of(ref, Map.of("url", "https://example.test/b.png"))));
+        bodies.put("mask.url", Map.of("model", "gpt-image-2", "prompt", "x", "images", List.of(ref),
+                "mask", Map.of("url", "https://example.test/m.png")));
+        bodies.put("recipe.variable", Map.of("model", "gpt-image-2", "images", List.of(ref),
+                "recipe", Map.of("version_id", version, "variable", Map.of("subject", "Koi"))));
+        for (Map.Entry<String, Map<String, Object>> each : bodies.entrySet()) {
+            JsonNode problem = refused(me, () -> jsonEdit(me.bearer(), each.getValue()), 400, "invalid_parameter");
+            assertThat(problem.get("param").asString()).as(each.getKey()).isEqualTo(each.getKey());
+        }
+        assertThat(refused(me, () -> jsonEdit(me.bearer(), bodies.get("recipe.variable")), 400, "invalid_parameter")
+                .get("detail").asString())
+                .isEqualTo("POST /v1/images/edits does not take recipe.variable: recipe has version_id, variables, inputs and published_id.");
+
+        // Every refusal came before a part was stored: the account still has the one upload made above.
+        assertThat(files.findByUserId(me.id())).hasSize(1);
+    }
+
+    @Test
+    void edit_givenJsonWithFieldsItDoesNotReadSetToNull_expectsThemPassedOverAsTheyCarryNothing() throws Exception {
+        Account me = account(100_00L);
+        UUID fileId = upload(me, InputFixtures.image("plain.png"), "a.png");
+        stubOpenAiEdit(1);
+
+        String body = http.post().uri("/v1/images/edits")
+                .header(HttpHeaders.AUTHORIZATION, me.bearer())
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("{\"model\": \"gpt-image-2\", \"prompt\": \"Again.\", \"images\": [{\"file_id\": \"" + fileId
+                        + "\", \"note\": null}], \"output_format\": null, \"user\": null, \"style\": null}")
+                .exchange()
+                .expectStatus().isAccepted()
+                .expectBody(String.class).returnResult().getResponseBody();
+
+        assertThat(pollJob(me.bearer(), jobIdOf(body)).status()).isEqualTo(JobStatus.DONE);
+    }
+
+    @Test
+    void edit_givenAFormOfMorePartsThanItMayHave_expects400SayingHowToSendFewerAndNothingStored() {
+        // A recipe of many variables, as the SDK writes it: one field per value, past the form's 24 parts.
+        Account me = account(100_00L);
+        MultipartForm edit = form("gpt-image-2", "").image("image", InputFixtures.image("plain.png"), "a.png")
+                .field("recipe[version_id]", UUID.randomUUID().toString());
+        for (int i = 0; i < 30; i++) edit.field("recipe[variables][v" + i + "]", "a value");
+
+        JsonNode problem = refused(me, () -> multipart(me.bearer(), edit), 400, "invalid_parameter");
+
+        // Spring's own words say which limit; the rest says what to send instead.
+        assertThat(problem.get("detail").asString())
+                .startsWith("The form could not be read (Too many parts")
+                .endsWith("Send recipe as JSON text, in one field, or upload the images with POST /v1/files and send "
+                        + "the request as JSON.");
+        assertThat(problem.has("param")).isFalse();
+        assertThat(files.findByUserId(me.id())).isEmpty();
+    }
+
+    // ===== Errors: the problem, with OpenAI's error object beside it ===
+
+    @Test
+    void errors_givenAFieldTheRouteDoesNotRead_expectOpenAisErrorObjectBesideEveryProblemMember() {
+        Account me = account(100_00L);
+        byte[] photo = InputFixtures.image("plain.png");
+
+        // output_format as OpenAI's SDK sends it: a field of the form.
+        JsonNode problem = refused(me, () -> multipart(me.bearer(), form("gpt-image-2", "x")
+                .image("image", photo, "a.png").field("output_format", "webp")), 400, "invalid_parameter");
+
+        // Still the problem document it was…
+        assertThat(problem.get("title").asString()).isEqualTo("Bad Request");
+        assertThat(problem.get("status").asInt()).isEqualTo(400);
+        assertThat(problem.get("instance").asString()).isEqualTo("/v1/images/edits");
+        assertThat(problem.get("detail").asString()).startsWith("POST /v1/images/edits does not take output_format.");
+        assertThat(problem.get("param").asString()).isEqualTo("output_format");
+        // …and OpenAI's error object, which is where its SDK reads the message, the code and the field.
+        JsonNode error = problem.get("error");
+        assertThat(error.get("message").asString()).isEqualTo(problem.get("detail").asString());
+        assertThat(error.get("type").asString()).isEqualTo("invalid_request_error");
+        assertThat(error.get("param").asString()).isEqualTo("output_format");
+        assertThat(error.get("code").asString()).isEqualTo("invalid_parameter");
+        assertThat(error.propertyNames()).containsExactly("message", "type", "param", "code");
+
+        // In JSON a field at any depth: param is its path, in both places.
+        UUID file = upload(me, photo, "a.png");
+        JsonNode deep = refused(me, () -> jsonEdit(me.bearer(), Map.of("model", "gpt-image-2", "prompt", "x",
+                "images", List.of(Map.of("file_id", file.toString()), Map.of("url", "https://example.test/b.png")))),
+                400, "invalid_parameter");
+        assertThat(deep.get("param").asString()).isEqualTo("images[1].url");
+        assertThat(deep.get("error").get("param").asString()).isEqualTo("images[1].url");
+        assertThat(deep.get("error").get("message").asString()).isEqualTo(deep.get("detail").asString());
+    }
+
+    @Test
+    void errors_givenRefusalsOfOtherKinds_expectOpenAisErrorObjectWithTheirTypeAndCode() {
+        Account me = account(100_00L);
+        Account other = account(0L);
+        UUID theirs = upload(other, InputFixtures.image("plain.png"), "theirs.png");
+        byte[] photo = InputFixtures.image("plain.png");
+
+        // 404 with a code: another account's file.
+        JsonNode notFound = refused(me, () -> jsonEdit(me.bearer(), Map.of("model", "gpt-image-2", "prompt", "Theirs.",
+                "images", List.of(Map.of("file_id", theirs.toString())))), 404, "file_not_found");
+        assertThat(notFound.get("error").get("message").asString()).isEqualTo("file not found");
+        assertThat(notFound.get("error").get("type").asString()).isEqualTo("not_found_error");
+        assertThat(notFound.get("error").get("code").asString()).isEqualTo("file_not_found");
+        assertThat(notFound.get("error").get("param").isNull()).isTrue();
+
+        // 404 without a code: an unknown model. The object's code is null, as the problem has none.
+        JsonNode unknownModel = json.readTree(refusedPlain(me, () -> multipart(me.bearer(),
+                form("no-such-model", "x").image("image", photo, "a.png")), 404)
+                .returnResult().getResponseBody());
+        assertThat(unknownModel.has("code")).isFalse();
+        assertThat(unknownModel.get("error").get("message").asString()).isEqualTo("unknown model: no-such-model");
+        assertThat(unknownModel.get("error").get("type").asString()).isEqualTo("not_found_error");
+        assertThat(unknownModel.get("error").get("code").isNull()).isTrue();
+
+        // input_not_supported names the input in field, which is the problem's own member, not OpenAI's param.
+        JsonNode mask = refused(me, () -> multipart(me.bearer(), form("seedream-5.0", "Only here.")
+                .image("image", photo, "a.png").image("mask", InputFixtures.image("alpha.webp"), "mask.webp")),
+                400, "input_not_supported");
+        assertThat(mask.get("field").asString()).isEqualTo("mask");
+        assertThat(mask.get("error").get("code").asString()).isEqualTo("input_not_supported");
+        assertThat(mask.get("error").get("param").isNull()).isTrue();
+
+        // A part refused as an upload is: 415, which OpenAI has no type of its own for.
+        JsonNode notAnImage = refused(me, () -> multipart(me.bearer(), form("gpt-image-2", "Edit this.")
+                .image("image", InputFixtures.image("picture.gif"), "photo.png")), 415, "input_type_unsupported");
+        assertThat(notAnImage.get("error").get("type").asString()).isEqualTo("invalid_request_error");
+        assertThat(notAnImage.get("error").get("code").asString()).isEqualTo("input_type_unsupported");
+
+        // The same refusal from POST /v1/files, the route beside it, is as it was: no error object.
+        JsonNode upload = json.readTree(InputFixtures.upload(http, me.bearer(), InputFixtures.image("picture.gif"),
+                        "photo.png", MediaType.IMAGE_PNG)
+                .expectStatus().isEqualTo(415)
+                .expectBody(String.class).returnResult().getResponseBody());
+        assertThat(upload.get("code").asString()).isEqualTo("input_type_unsupported");
+        assertThat(upload.has("error")).as("POST /v1/files carries no OpenAI error object").isFalse();
+    }
+
+    @Test
+    void errors_givenAnInvalidApiKey_expectOpenAisErrorObjectFromTheFilterThatRefusesIt() {
+        String badKey = "Bearer gd_live_this_key_does_not_exist_0000000000";
+
+        // Refused by the API key filter, before the route reads anything: on both forms.
+        for (WebTestClient.ResponseSpec response : List.of(
+                multipart(badKey, form("gpt-image-2", "x").image("image", InputFixtures.image("plain.png"), "a.png")),
+                jsonEdit(badKey, Map.of("model", "gpt-image-2", "prompt", "x")))) {
+            JsonNode problem = json.readTree(response
+                    .expectStatus().isUnauthorized()
+                    .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON)
+                    .expectBody(String.class).returnResult().getResponseBody());
+            assertThat(problem.get("status").asInt()).isEqualTo(401);
+            assertThat(problem.get("detail").asString()).isEqualTo("invalid API key");
+            assertThat(problem.get("error").get("message").asString()).isEqualTo("invalid API key");
+            assertThat(problem.get("error").get("type").asString()).isEqualTo("authentication_error");
+            assertThat(problem.get("error").get("code").isNull()).isTrue();
+            assertThat(problem.get("error").get("param").isNull()).isTrue();
+        }
+    }
+
     // ===== The key's answer: sync and async ===========================
 
     @Test
@@ -662,6 +924,37 @@ class ImageEditsIntegrationTest {
 
     private UUID jobIdOf(String body) {
         return UUID.fromString(json.readTree(body).get("job_id").asString());
+    }
+
+    /** One of the caller's image recipes on gpt-image-2, with a variable for each {{name}} in the template. */
+    private JsonNode createRecipe(Account account, String template, List<Map<String, Object>> slots) {
+        List<Map<String, String>> variables = new ArrayList<>();
+        java.util.regex.Matcher marker = java.util.regex.Pattern.compile("\\{\\{([^{}]+)\\}\\}").matcher(template);
+        while (marker.find()) variables.add(Map.of("name", marker.group(1), "default", "a " + marker.group(1)));
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("title", "Edit recipe " + UUID.randomUUID());
+        body.put("modality", "IMAGE");
+        body.put("template", template);
+        body.put("variables", variables);
+        body.put("model", "gpt-image-2");
+        body.put("inputs", slots);
+        String created = http.post().uri("/v1/recipes")
+                .header(HttpHeaders.AUTHORIZATION, account.bearer())
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(body)
+                .exchange()
+                .expectStatus().isCreated()
+                .expectBody(String.class).returnResult().getResponseBody();
+        return json.readTree(created);
+    }
+
+    private static String versionId(JsonNode recipe) {
+        return recipe.get("latest_version").get("id").asString();
+    }
+
+    /** An input slot of an image recipe. */
+    private static Map<String, Object> slot(String name) {
+        return Map.of("slot", name, "role", "image", "hint", "");
     }
 
     private UUID upload(Account account, byte[] bytes, String filename) {
