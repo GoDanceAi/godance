@@ -67,20 +67,27 @@ function requestBody(recipe) {
 /** The request as the code is written from it: it asks for a job and reads it. */
 const codeRequest = (recipe) => ({ apiBase: API, kind: kindOf(recipe), body: requestBody(recipe), mode: 'poll' });
 
+/** The fields POST /v1/videos reads, by the names they have there. It refuses any other. */
+const OPENAI_VIDEO_FIELDS = [
+  'model', 'prompt', 'seconds', 'size', 'input_reference', 'last_frame', 'reference_images', 'recipe', 'webhook_url',
+  'gallery_recipe',
+];
+
 /**
  * A video's request as OpenAI's POST /v1/videos takes it: the first frame is
- * `input_reference` there, and seconds a string. Null when that route has no
- * field for part of it, a last frame or reference images: then the request
- * goes to Godance's own route as it is.
+ * `input_reference` there, and seconds a string; a last frame and reference
+ * images are fields of that route too. Null when that route would refuse part
+ * of it, such as a count of clips: then the request goes to Godance's own
+ * route as it is.
  */
 function openAiVideo(recipe) {
-  const body = requestBody(recipe);
-  if (recipe.modality !== 'VIDEO' || 'last_frame' in body || 'reference_images' in body) return null;
+  if (recipe.modality !== 'VIDEO') return null;
   const shaped = {};
-  for (const [key, value] of Object.entries(body)) {
-    if (key === 'first_frame') shaped.input_reference = value;
-    else if (key === 'seconds') shaped.seconds = String(value);
-    else shaped[key] = value;
+  for (const [key, value] of Object.entries(requestBody(recipe))) {
+    if (key === 'n' && value === 1) continue;
+    const name = key === 'first_frame' ? 'input_reference' : key;
+    if (!OPENAI_VIDEO_FIELDS.includes(name)) return null;
+    shaped[name] = key === 'seconds' ? String(value) : value;
   }
   return shaped;
 }
@@ -201,9 +208,14 @@ describe('Run at scale on the gallery recipe pages', { timeout: 300_000 }, () =>
     assert.ok(recipes.some((r) => r.prompt.template), 'a recipe with a template');
     assert.ok(recipes.some((r) => r.modality === 'IMAGE' && r.inputs), 'an image recipe with an input');
     assert.ok(recipes.some((r) => r.modality === 'VIDEO' && r.inputs), 'a video recipe with an input');
-    // A video goes to OpenAI's route, unless it has what that route takes no field for.
-    assert.ok(recipes.some((r) => routeOf(r) === '/v1/videos'), 'a video on OpenAI\'s route');
-    assert.ok(recipes.some((r) => routeOf(r) === '/v1/videos/generations'), 'a video on Godance\'s own route');
+    // A video goes to OpenAI's route, from text or from images: a first frame and a reference
+    // image (paper-boat-sets-off) as much as a prompt alone. Only a count of clips would not.
+    const roles = (r) => slotsOf(r).map((slot) => slot.role);
+    assert.ok(recipes.some((r) => routeOf(r) === '/v1/videos' && !r.inputs), 'a video from text on OpenAI\'s route');
+    assert.ok(
+      recipes.some((r) => routeOf(r) === '/v1/videos' && roles(r).includes('first_frame') && roles(r).includes('reference_image')),
+      'a video from a first frame and a reference image on OpenAI\'s route',
+    );
   });
 
   test('every recipe page has the block, once, with its three parts in order', () => {
@@ -259,9 +271,12 @@ describe('Run at scale on the gallery recipe pages', { timeout: 300_000 }, () =>
       assert.equal(text.includes('A video request answers 200 with the video'), openAi, recipe.slug);
       assert.equal(text.includes('client.videos.create_and_poll'), openAi, recipe.slug);
       assert.equal(text.includes('An image request answers in one of two ways'), recipe.modality === 'IMAGE', recipe.slug);
-      // Inputs go by their role, but a first frame sent to OpenAI's route is its input_reference.
-      assert.equal(text.includes('Each input goes in the field its "role" names'), slotsOf(recipe).length > 0 && !openAi, recipe.slug);
-      assert.equal(text.includes('"input_reference"'), slotsOf(recipe).length > 0 && openAi, recipe.slug);
+      // Inputs go in the field their role names; on OpenAI's route that is in extra_body, where
+      // a first frame is input_reference.
+      const inputs = slotsOf(recipe).length > 0;
+      assert.equal(text.includes('Each input goes in the field its "role" names'), inputs && !openAi, recipe.slug);
+      assert.equal(text.includes('Each input goes in extra_body, in the field its "role" names'), inputs && openAi, recipe.slug);
+      assert.equal(text.includes('"input_reference"'), inputs && openAi, recipe.slug);
     }
   });
 
@@ -310,7 +325,7 @@ describe('Run at scale on the gallery recipe pages', { timeout: 300_000 }, () =>
       }
 
       // The curl sends the run's own request. An image asks for a job; a video is always one, in
-      // OpenAI's shape where that carries all of it, else as it is on Godance's own route.
+      // OpenAI's shape where that route takes all of it, else as it is on Godance's own route.
       const curl = codeOf(block, 'curl').map((code) => code.text);
       const start = curl[slotsOf(recipe).length > 0 ? 1 : 0];
       const openAi = openAiVideo(recipe);
@@ -326,6 +341,10 @@ describe('Run at scale on the gallery recipe pages', { timeout: 300_000 }, () =>
         assert.ok(python.includes('video = client.videos.create_and_poll('), recipe.slug);
         assert.ok(python.includes(`    seconds="${openAi.seconds}",`), recipe.slug);
         assert.ok(!python.includes('/jobs/'), recipe.slug);
+        // The SDK sends a form, in which a list of images goes as JSON text.
+        const list = 'reference_images' in openAi;
+        assert.equal(python.includes('        "reference_images": json.dumps(['), list, recipe.slug);
+        assert.equal(python.startsWith('import json\n'), list, recipe.slug);
       } else {
         assert.ok(curl.at(-1).startsWith(`curl ${API}/v1/jobs/$JOB_ID`), recipe.slug);
       }
