@@ -106,7 +106,7 @@ class ImageEditRequestsTest {
                 + "{\"version_id\": \"" + VERSION + "\", \"variable\": {\"subject\": \"Koi\"}}}"));
         assertThat(param(recipe)).isEqualTo("recipe.variable");
         assertThat(recipe.getReason())
-                .isEqualTo("POST /v1/images/edits does not take recipe.variable: recipe has version_id, variables and inputs.");
+                .isEqualTo("POST /v1/images/edits does not take recipe.variable: recipe has version_id, variables, inputs and published_id.");
     }
 
     @Test
@@ -172,7 +172,7 @@ class ImageEditRequestsTest {
                 "recipe[variable][subject]", "Koi");
         assertThat(param(typo)).isEqualTo("recipe[variable]");
         assertThat(typo.getReason())
-                .isEqualTo("POST /v1/images/edits does not take recipe[variable]: recipe has version_id, variables and inputs.");
+                .isEqualTo("POST /v1/images/edits does not take recipe[variable]: recipe has version_id, variables, inputs and published_id.");
 
         ImageEditRefusedException unclosed = refusedForm("model", "gpt-image-2", "recipe[version_id", VERSION.toString());
         assertThat(param(unclosed)).isEqualTo("recipe[version_id");

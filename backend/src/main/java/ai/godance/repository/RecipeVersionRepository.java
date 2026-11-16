@@ -16,6 +16,9 @@ public interface RecipeVersionRepository extends JpaRepository<RecipeVersion, UU
     /** A recipe's versions, newest first. */
     List<RecipeVersion> findByRecipeIdOrderByNumberDesc(UUID recipeId);
 
+    /** Version {@code number} of the recipe. */
+    Optional<RecipeVersion> findByRecipeIdAndNumber(UUID recipeId, int number);
+
     /** The latest version of a recipe. Every recipe has one. */
     Optional<RecipeVersion> findFirstByRecipeIdOrderByNumberDesc(UUID recipeId);
 
