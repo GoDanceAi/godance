@@ -143,6 +143,28 @@ class UserRoutingPoliciesOffIntegrationTest {
                 });
     }
 
+    @Test
+    void createBatch_givenFallbacksWhileUserPoliciesAreOff_expects400FallbacksUnavailable() {
+        Signed u = signUp();
+        Map<?, ?> recipe = http.post().uri("/v1/recipes").header(HttpHeaders.AUTHORIZATION, u.bearer())
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("title", "Mug", "modality", "IMAGE", "template", "A {{color}} mug.",
+                        "variables", List.of(Map.of("name", "color", "default", "red")),
+                        "model", "gpt-image-2", "params", Map.of("n", 1)))
+                .exchange()
+                .expectStatus().isCreated()
+                .expectBody(Map.class).returnResult().getResponseBody();
+        Object versionId = ((Map<?, ?>) recipe.get("latest_version")).get("id");
+
+        http.post().uri("/v1/recipe-batches").header(HttpHeaders.AUTHORIZATION, u.bearer())
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("version_id", versionId, "fallbacks", true,
+                        "rows", List.of(Map.of("variables", Map.of("color", "blue")))))
+                .exchange()
+                .expectStatus().isBadRequest().expectBody()
+                .jsonPath("$.code").isEqualTo("fallbacks_unavailable");
+    }
+
     private record Signed(UUID id, String bearer) { }
 
     private Signed signUp() {

@@ -96,6 +96,13 @@ public class RecipeBatchResults {
         header.add("status");
         header.addAll(names);
         header.add("job_id");
+        // A batch with fallbacks (round 14) also says which model each row's job ran on, and the
+        // failed job a fallback replaced. Every other batch's file is as it always was.
+        boolean fallbacks = batch.isFallbacks();
+        if (fallbacks) {
+            header.add("model");
+            header.add("retried_job_id");
+        }
         header.add("cost_cents");
         header.add("error");
         for (int n = 1; n <= outputColumns; n++) header.add("output_" + n);
@@ -113,6 +120,10 @@ public class RecipeBatchResults {
                 Map<String, String> values = row.getVariables();
                 for (String name : names) line.add(values == null ? null : values.get(name));
                 line.add(row.getJobId() == null ? null : row.getJobId().toString());
+                if (fallbacks) {
+                    line.add(row.getJobId() == null ? null : row.getModel() != null ? row.getModel() : batch.getModel());
+                    line.add(row.getRetriedJobId() == null ? null : row.getRetriedJobId().toString());
+                }
                 line.add(row.getCostCents() == null ? null : row.getCostCents().toString());
                 line.add(row.getError());
                 List<GenerationJobOutput> stored = outputs.getOrDefault(row.getJobId(), List.of());

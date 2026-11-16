@@ -911,7 +911,13 @@ paths:
         Problem codes: `batch_too_large` (400, more than 500 rows),
         `invalid_batch` (400), `recipe_not_found` (404, the version is not
         one of the caller's), `batch_limit_reached` (409, two batches that
-        are not finished already).
+        are not finished already), `fallbacks_unavailable` (400, `fallbacks`
+        asked for without a routing policy that has fallbacks for the model).
+
+        With `"fallbacks": true`, a row whose job fails on a provider error
+        or a timeout (never a content refusal) is retried once, on the
+        alternative one of your routing policies names for the model: a new
+        job with its own reservation, the failed one refunded as always.
       security: [{ apiKey: [] }, { session: [] }]
       requestBody:
         required: true
@@ -1033,7 +1039,9 @@ paths:
         Columns: `index`, `status`, one for each of the recipe's variables,
         `job_id`, `cost_cents`, `error`, then a signed link to each output as
         `output_1` to `output_n`. The links expire; download the file again
-        for fresh ones.
+        for fresh ones. A batch created with `fallbacks` also has `model`
+        (the model the row's job ran on) and `retried_job_id` (the failed job
+        a fallback replaced) after `job_id`.
       security: [{ apiKey: [] }, { session: [] }]
       parameters:
         - { $ref: "#/components/parameters/BatchId" }
@@ -2654,6 +2662,7 @@ components:
         rows: { type: array, minItems: 1, maxItems: 500, items: { $ref: "#/components/schemas/BatchRowRequest" } }
         max_concurrency: { type: integer, minimum: 1, maximum: 4, default: 2, description: How many rows run at a time. }
         webhook_url: { type: string, format: uri, description: "Where to POST once, when the batch ends: one signed `recipe_batch.completed` event." }
+        fallbacks: { type: boolean, default: false, description: "Retry a row once on another model when its job fails on a provider error or a timeout, as your routing policies' fallbacks for the model say. Needs routing policies." }
     BatchRowRequest:
       type: object
       description: One row of a batch request.
@@ -2702,6 +2711,7 @@ components:
         created_at: { type: string, format: date-time }
         started_at: { type: [string, "null"], format: date-time }
         completed_at: { type: [string, "null"], format: date-time, description: When the last row ended. }
+        fallbacks: { type: boolean, description: "Present, and true, for a batch created with `fallbacks`." }
     BatchRow:
       type: object
       properties:
@@ -2712,6 +2722,8 @@ components:
         cost_cents: { type: [integer, "null"], description: "What the row's job was charged: null until the row has ended, 0 for a row that failed." }
         error: { type: [string, "null"] }
         outputs: { type: array, items: { $ref: "#/components/schemas/BatchRowOutput" } }
+        model: { type: string, description: "For a row retried on a fallback, the model its job ran on. Left out for every other row, whose model is the batch's." }
+        retried_job_id: { type: string, format: uuid, description: For a row retried on a fallback, the failed job it replaced. }
     BatchRowOutput:
       type: object
       properties:

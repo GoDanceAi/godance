@@ -43,3 +43,23 @@ CREATE TABLE routing_policies (
 -- or a timeout, following the fallback rules of its owner's policies.
 ALTER TABLE recipe_batches
     ADD COLUMN fallbacks BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- A row of such a batch that was retried: the model its new job ran on, and the
+-- failed job that one replaced. Both NULL for a row that was not retried, whose
+-- model is the batch's.
+ALTER TABLE recipe_batch_rows
+    ADD COLUMN model          VARCHAR(128),
+    ADD COLUMN retried_job_id UUID;
+
+COMMENT ON COLUMN recipe_batch_rows.model IS
+    'The model of the row''s job when a fallback replaced the batch''s model; NULL otherwise';
+COMMENT ON COLUMN recipe_batch_rows.retried_job_id IS
+    'The failed job a fallback replaced; NULL when the row was not retried';
+
+-- One live job per row (V36 allowed one ever): a failed or cancelled job no
+-- longer counts, so a fallback's job can belong to the row its first job
+-- failed in. A row still never has two jobs that can run or be charged at once.
+DROP INDEX uq_generation_jobs_batch_row;
+CREATE UNIQUE INDEX uq_generation_jobs_batch_row
+    ON generation_jobs (batch_row_id)
+    WHERE batch_row_id IS NOT NULL AND status NOT IN ('FAILED', 'CANCELLED');

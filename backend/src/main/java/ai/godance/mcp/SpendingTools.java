@@ -247,7 +247,8 @@ class SpendingTools implements McpToolProvider {
         Map<String, Object> params = args.has("params") ? objectMap(args, "params") : null;
         List<ai.godance.web.dto.BatchDtos.BatchRowRequest> rows =
                 args.listOf("rows", ai.godance.web.dto.BatchDtos.BatchRowRequest.class, json);
-        return new BatchRequest(versionId, args.text("model"), params, rows, args.integer("max_concurrency"), null);
+        return new BatchRequest(versionId, args.text("model"), params, rows, args.integer("max_concurrency"), null,
+                null);
     }
 
     // ===== The shared image path ======================================
