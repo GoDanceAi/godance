@@ -42,6 +42,10 @@ public class Recipe {
     @Column(name = "source_gallery_recipe", updatable = false)
     private String sourceGalleryRecipe;
 
+    /** The published recipe this one was started from (V39), or null; cleared if that row is deleted. */
+    @Column(name = "source_published_recipe_id", updatable = false)
+    private UUID sourcePublishedRecipeId;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -69,6 +73,9 @@ public class Recipe {
 
     public String getSourceGalleryRecipe() { return sourceGalleryRecipe; }
     public void setSourceGalleryRecipe(String sourceGalleryRecipe) { this.sourceGalleryRecipe = sourceGalleryRecipe; }
+
+    public UUID getSourcePublishedRecipeId() { return sourcePublishedRecipeId; }
+    public void setSourcePublishedRecipeId(UUID sourcePublishedRecipeId) { this.sourcePublishedRecipeId = sourcePublishedRecipeId; }
 
     public Instant getCreatedAt() { return createdAt; }
 

@@ -21,10 +21,13 @@ import ai.godance.domain.User;
 import ai.godance.domain.UserRole;
 import ai.godance.repository.ApiKeyRepository;
 import ai.godance.repository.ConversationRepository;
+import ai.godance.repository.FollowRepository;
 import ai.godance.repository.GenerationJobRepository;
 import ai.godance.repository.OAuthIdentityRepository;
+import ai.godance.repository.ProfileRepository;
 import ai.godance.repository.RecipeBatchRepository;
 import ai.godance.repository.RecipeRepository;
+import ai.godance.repository.ReportRepository;
 import ai.godance.repository.SavedRecipeRepository;
 import ai.godance.repository.UserRepository;
 import ai.godance.repository.UserTwoFactorRepository;
@@ -89,6 +92,10 @@ public class AccountClosureService {
     private final DataRetentionService retention;
     private final InputService inputs;
     private final AuditLogService audit;
+    private final PublishService publishing;
+    private final ProfileRepository profiles;
+    private final FollowRepository follows;
+    private final ReportRepository reports;
     private final TransactionTemplate tx;
 
     public AccountClosureService(UserRepository users, UserTwoFactorRepository twoFactors,
@@ -98,7 +105,12 @@ public class AccountClosureService {
                                  RecipeRepository recipes, RecipeBatchRepository batches,
                                  GenerationJobRepository jobs, GenerationJobSettlement settlement,
                                  DataRetentionService retention, InputService inputs, AuditLogService audit,
-                                 PlatformTransactionManager txManager) {
+                                 PublishService publishing, ProfileRepository profiles, FollowRepository follows,
+                                 ReportRepository reports, PlatformTransactionManager txManager) {
+        this.publishing = publishing;
+        this.profiles = profiles;
+        this.follows = follows;
+        this.reports = reports;
         this.users = users;
         this.twoFactors = twoFactors;
         this.apiKeys = apiKeys;
@@ -223,6 +235,15 @@ public class AccountClosureService {
         // runner has nothing of this account left to start. A row's job that is
         // already running is ended below with every other open job.
         int batchesDeleted = batches.deleteByUserId(userId);
+        // The community (round 14). The account's published recipes are unpublished
+        // first, while their recipes still exist; their example copies are deleted once
+        // this commits. Then the profile, every follow by or of the account, and the
+        // reports it made go; open reports about its profile are closed.
+        int unpublished = publishing.unpublishForClosedAccount(userId, actorId, ip);
+        profiles.deleteByUserId(userId);
+        int followsDeleted = follows.deleteByAccount(userId);
+        int reportsDeleted = reports.deleteByReporterId(userId);
+        reports.resolveForProfile(userId, actorId, java.time.Instant.now());
         // The owner's own recipes go, with their versions. Their jobs are purged below.
         recipes.deleteByUserId(userId);
 
@@ -234,6 +255,9 @@ public class AccountClosureService {
         detail.put("oauthIdentitiesDeleted", links);
         detail.put("conversationsDeleted", convs);
         detail.put("batchesDeleted", batchesDeleted);
+        detail.put("publishedRecipesUnpublished", unpublished);
+        detail.put("followsDeleted", followsDeleted);
+        detail.put("reportsDeleted", reportsDeleted);
         audit.record(AuditLogService.EVT_ADMIN_ACCOUNT_CLOSED, AuditOutcome.SUCCESS, userId, ip, detail);
         return new AccountStep(alreadyClosed, keys, links, convs);
     }

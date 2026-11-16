@@ -27,6 +27,7 @@ export type AnswerMode = 'poll' | 'wait';
 export const API_KEY_ENV = 'GODANCE_API_KEY';
 export const API_KEY_VAR = `$${API_KEY_ENV}`;
 export const JOB_ID_VAR = '$JOB_ID';
+export const VIDEO_ID_VAR = '$VIDEO_ID';
 
 export const IMAGE_CREATE_PATH = '/v1/images/generations';
 export const IMAGE_EDIT_PATH = '/v1/images/edits';
@@ -34,14 +35,44 @@ export const JOBS_PATH = '/v1/jobs';
 export const FILES_PATH = '/v1/files';
 
 /**
- * Where generated code sends a video request, and the field of the answer
- * that holds the job's id. Today that is POST /v1/videos/generations. The
- * OpenAI-shaped POST /v1/videos (round 12 brief 04) is not live on this
- * branch: when it is, this constant is the one line to change (its answer
- * names the job `id`; check the body's `seconds` against that route too).
+ * Where generated code sends a video: OpenAI's Videos API, POST /v1/videos
+ * (round 12 brief 04). The answer is the video itself, queued, and its `id`
+ * is the job's id. The code reads it at GET /v1/videos/{id} until it ends,
+ * then saves it from GET /v1/videos/{id}/content.
  * The Studio's own requests do not read this: they go where lib/studio.ts says.
  */
-export const VIDEO_CREATE = { path: '/v1/videos/generations', jobIdField: 'job_id' } as const;
+export const VIDEO_CREATE = { path: '/v1/videos', idField: 'id' } as const;
+
+/**
+ * Godance's own video route, for a request OpenAI's shape cannot carry:
+ * a last frame, reference images, more than one clip. POST /v1/videos takes
+ * one image, the first frame, and answers 200 to a field it does not know
+ * without using it, so such a request is sent here as it is and read as a job.
+ */
+export const VIDEO_GENERATIONS = { path: '/v1/videos/generations', jobIdField: 'job_id' } as const;
+
+/** What POST /v1/videos takes as it is: OpenAI's fields, and the Godance extensions it shares with /v1/videos/generations. */
+const OPENAI_VIDEO_FIELDS = ['model', 'prompt', 'recipe', 'size', 'gallery_recipe', 'webhook_url'];
+
+/**
+ * A video request in OpenAI's shape, for POST /v1/videos: the first frame
+ * is `input_reference` there, and `seconds` is a string ("8"). One request
+ * makes one video, so a count of 1 goes without saying. Null when the shape
+ * cannot carry the whole request: a last frame, reference images, a larger
+ * count or any other field would be dropped without a word, so that request
+ * goes to Godance's own route instead (VIDEO_GENERATIONS).
+ */
+export function openAiVideoBody(body: Record<string, unknown>): Record<string, unknown> | null {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(body)) {
+    if (value === undefined || key === 'async' || (key === 'n' && value === 1)) continue;
+    if (key === 'first_frame') out.input_reference = value;
+    else if (key === 'seconds') out.seconds = typeof value === 'number' ? String(value) : value;
+    else if (OPENAI_VIDEO_FIELDS.includes(key)) out[key] = value;
+    else return null;
+  }
+  return out;
+}
 
 /** One request, as every language is written from it. */
 export interface CodeRequest {
@@ -67,8 +98,13 @@ function isEdit(body: Record<string, unknown>): boolean {
 
 /** The route a request goes to. */
 export function createPath(kind: CodeRequest['kind'], body: Record<string, unknown>): string {
-  if (kind === 'video') return VIDEO_CREATE.path;
+  if (kind === 'video') return openAiVideoBody(body) ? VIDEO_CREATE.path : VIDEO_GENERATIONS.path;
   return isEdit(body) ? IMAGE_EDIT_PATH : IMAGE_CREATE_PATH;
+}
+
+/** The body of a video request that goes to POST /v1/videos; null for an image, or a video that does not. */
+function openAiVideo(request: Pick<CodeRequest, 'kind' | 'mode' | 'body'>): Record<string, unknown> | null {
+  return request.kind === 'video' ? openAiVideoBody(bodyFor(request)) : null;
 }
 
 /** How a request is answered: a video is always a job, whatever was asked. */
@@ -84,11 +120,6 @@ export function bodyFor(request: Pick<CodeRequest, 'kind' | 'mode' | 'body'>): R
   const { async: _async, ...rest } = request.body;
   if (request.kind === 'video' || request.mode === 'wait') return rest;
   return 'async' in request.body ? { ...request.body, async: true } : { ...rest, async: true };
-}
-
-/** The field of the first answer that holds the job's id. */
-function jobIdField(kind: CodeRequest['kind']): string {
-  return kind === 'video' ? VIDEO_CREATE.jobIdField : 'job_id';
 }
 
 const trimBase = (apiBase: string) => apiBase.replace(/\/+$/, '');
@@ -124,16 +155,51 @@ export function curlGet(apiBase: string, path: string): string {
 const WAIT_NOTE = 'With a key set to synchronous image responses, the answer holds the images under "data". '
   + 'Any other key answers 202 with a job to poll.';
 
+/** Said with a video that goes to Godance's own route rather than to OpenAI's. */
+export const VIDEO_GENERATIONS_NOTE = 'OpenAI\'s POST /v1/videos has no field for part of this request (such as a '
+  + 'last frame or reference images), so it goes to Godance\'s own video route as it is, and answers 202 with a job to poll.';
+
+/** The note for the request itself: a video says why it is not in OpenAI's shape. */
+const jobNote = (request: CodeRequest) => (request.kind === 'video' ? { note: VIDEO_GENERATIONS_NOTE } : {});
+
 function curlCode(request: CodeRequest): CodeSnippet[] {
+  const video = openAiVideo(request);
+  if (video) return curlVideo(request.apiBase, video);
   const post = curlPost(request.apiBase, createPath(request.kind, request.body), bodyFor(request));
   if (answerMode(request) === 'wait') return [{ title: 'Send the request', code: post, note: WAIT_NOTE }];
   return [
-    { title: 'Start the job', code: post },
+    { title: 'Start the job', code: post, ...jobNote(request) },
     {
       title: 'Check on it',
       code: curlGet(request.apiBase, `${JOBS_PATH}/${JOB_ID_VAR}`),
-      note: `JOB_ID is the ${jobIdField(request.kind)} the first request answers with. `
+      note: 'JOB_ID is the job_id the first request answers with. '
         + 'Ask again every few seconds until "status" is DONE, then read "outputs".',
+    },
+  ];
+}
+
+/** A video in OpenAI's shape: start it, read it until it ends, then download it. */
+function curlVideo(apiBase: string, body: Record<string, unknown>): CodeSnippet[] {
+  const video = `${VIDEO_CREATE.path}/${VIDEO_ID_VAR}`;
+  return [
+    {
+      title: 'Start the video',
+      code: curlPost(apiBase, VIDEO_CREATE.path, body),
+      note: 'The answer is the video, with its "id" and "status": "queued".',
+    },
+    {
+      title: 'Check on it',
+      code: curlGet(apiBase, video),
+      note: `VIDEO_ID is the "${VIDEO_CREATE.idField}" the first request answers with. `
+        + 'Ask again every few seconds until "status" is completed or failed.',
+    },
+    {
+      title: 'Download it',
+      code: [
+        `curl -o "${VIDEO_ID_VAR}.mp4" ${trimBase(apiBase)}${video}/content \\`,
+        `  -H "Authorization: Bearer ${API_KEY_VAR}"`,
+      ].join('\n'),
+      note: 'Once "status" is completed. The answer is the video file itself.',
     },
   ];
 }
@@ -208,10 +274,61 @@ function pythonPlainImage(request: CodeRequest, body: Record<string, unknown>): 
   ].join('\n');
 }
 
+/** What `client.videos.create_and_poll` takes by name, in this order; anything else a body holds goes in `extra_body`. */
+const SDK_VIDEO_ARGUMENTS = ['model', 'prompt', 'seconds', 'size'];
+
+/**
+ * A video in OpenAI's shape is the SDK's own call. It sends a multipart
+ * form, so what goes in `extra_body` becomes form fields: a reference such as
+ * {"file_id": …} is written the way the API reads it, but `recipe` has to be
+ * JSON text. The SDK requires a prompt, which a recipe run leaves empty.
+ */
+function pythonVideo(apiBase: string, body: Record<string, unknown>): string {
+  const recipe = body.recipe !== undefined;
+  const args: string[] = [];
+  if (body.model !== undefined) args.push(`    model=${pythonLiteral(body.model, 1)},`);
+  if (typeof body.prompt === 'string') args.push(`    prompt=${pythonLiteral(body.prompt, 1)},`);
+  else args.push(recipe ? '    prompt="",  # the recipe is the prompt: Godance fills its template in' : '    prompt="",');
+  if (body.seconds !== undefined) args.push(`    seconds=${pythonLiteral(body.seconds, 1)},`);
+  if (body.size !== undefined) args.push(`    size=${pythonLiteral(body.size, 1)},`);
+  const extra = Object.entries(body).filter(([key]) => !SDK_VIDEO_ARGUMENTS.includes(key));
+  if (extra.length > 0) {
+    args.push('    extra_body={');
+    if (recipe) args.push('        # The SDK sends a form, in which "recipe" is JSON text.');
+    for (const [key, value] of extra) {
+      const literal = pythonLiteral(value, 2);
+      args.push(`        ${JSON.stringify(key)}: ${key === 'recipe' ? `json.dumps(${literal})` : literal},`);
+    }
+    args.push('    },');
+  }
+  return [
+    ...(recipe ? ['import json'] : []),
+    'import os',
+    '',
+    'from openai import OpenAI',
+    '',
+    pythonClient(apiBase),
+    '',
+    '# Start the video, then read it every few seconds until it is completed or failed.',
+    '# The SDK warns that OpenAI shut its own video API (Sora) down: these calls go to Godance.',
+    'video = client.videos.create_and_poll(',
+    ...args,
+    ')',
+    '',
+    'if video.status != "completed":',
+    '    raise SystemExit(f"{video.status}: {video.error.message if video.error else None}")',
+    '# Save the video under its id.',
+    'client.videos.download_content(video.id, variant="video").write_to_file(f"{video.id}.mp4")',
+    'print(f"{video.id}.mp4")',
+  ].join('\n');
+}
+
 function pythonCode(request: CodeRequest): CodeSnippet[] {
   const body = bodyFor(request);
   const title = 'Python script';
   if (isPlainImage(request, body)) return [{ title, code: pythonPlainImage(request, body), note: WAIT_NOTE }];
+  const video = openAiVideo(request);
+  if (video) return [{ title, code: pythonVideo(request.apiBase, video) }];
 
   const path = underV1(createPath(request.kind, request.body));
   // cast_to=object hands back the answer's JSON as a dict. Not httpx.Response: the
@@ -247,9 +364,9 @@ function pythonCode(request: CodeRequest): CodeSnippet[] {
     }];
   }
 
-  const idField = jobIdField(request.kind);
   return [{
     title,
+    ...jobNote(request),
     code: [
       'import os',
       'import time',
@@ -258,12 +375,12 @@ function pythonCode(request: CodeRequest): CodeSnippet[] {
       '',
       pythonClient(request.apiBase),
       '',
-      `# Start the job. The answer is 202 with a ${idField}.`,
+      '# Start the job. The answer is 202 with a job_id.',
       `started = ${post}`,
       '',
       '# Read the job every few seconds until it ends.',
       'while True:',
-      `    job = client.get(f"${underV1(JOBS_PATH)}/{started['${idField}']}", cast_to=object)`,
+      `    job = client.get(f"${underV1(JOBS_PATH)}/{started['job_id']}", cast_to=object)`,
       '    if job["status"] in ("DONE", "FAILED", "CANCELLED"):',
       '        break',
       '    time.sleep(3)',
@@ -309,9 +426,42 @@ function javaClient(apiBase: string, largeAnswers: boolean): string[] {
   ];
 }
 
+/**
+ * A video in OpenAI's shape: the answer is the video, read again until it
+ * ends. Its file is written to disk as it streams in, so a clip of any size
+ * passes WebClient's in-memory limit.
+ */
+function javaVideoTail(post: string[]): string[] {
+  return [
+    '        // Start the video. The answer is the video, with its "id" and "status": "queued".',
+    ...post,
+    '',
+    '        // Read it every few seconds until it ends.',
+    `        Object id = video.get(${JSON.stringify(VIDEO_CREATE.idField)});`,
+    '        while (List.of("queued", "in_progress").contains(String.valueOf(video.get("status")))) {',
+    '            Thread.sleep(5_000);',
+    `            video = godance.get().uri(${JSON.stringify(`${VIDEO_CREATE.path}/{id}`)}, id)`,
+    '                    .retrieve()',
+    '                    .bodyToMono(JSON)',
+    '                    .block();',
+    '        }',
+    '',
+    '        if (!"completed".equals(video.get("status"))) {',
+    '            throw new IllegalStateException(video.get("status") + ": " + video.get("error"));',
+    '        }',
+    '        // Save the video under its id.',
+    '        Path file = Path.of(id + ".mp4");',
+    `        DataBufferUtils.write(godance.get().uri(${JSON.stringify(`${VIDEO_CREATE.path}/{id}/content`)}, id)`,
+    '                        .retrieve()',
+    '                        .bodyToFlux(DataBuffer.class), file)',
+    '                .block();',
+    '        System.out.println(file);',
+  ];
+}
+
 function javaCode(request: CodeRequest): CodeSnippet[] {
   const wait = answerMode(request) === 'wait';
-  const idField = jobIdField(request.kind);
+  const video = openAiVideo(request);
   const post = (name: string) => [
     `        Map<String, Object> ${name} = godance.post().uri(${JSON.stringify(createPath(request.kind, request.body))})`,
     '                .contentType(MediaType.APPLICATION_JSON)',
@@ -321,10 +471,14 @@ function javaCode(request: CodeRequest): CodeSnippet[] {
     '                .block();',
   ];
   const head = [
+    ...(video ? ['import java.nio.file.Path;'] : []),
     'import java.util.List;',
     'import java.util.Map;',
     '',
     'import org.springframework.core.ParameterizedTypeReference;',
+    ...(video
+      ? ['import org.springframework.core.io.buffer.DataBuffer;', 'import org.springframework.core.io.buffer.DataBufferUtils;']
+      : []),
     'import org.springframework.http.MediaType;',
     'import org.springframework.web.reactive.function.client.WebClient;',
     '',
@@ -336,10 +490,10 @@ function javaCode(request: CodeRequest): CodeSnippet[] {
     `    public static void main(String[] args)${wait ? '' : ' throws InterruptedException'} {`,
     ...javaClient(request.apiBase, wait),
     '',
-    `        String request = ${javaTextBlock(bodyFor(request), '                ')}`,
+    `        String request = ${javaTextBlock(video ?? bodyFor(request), '                ')}`,
     '',
   ];
-  const tail = wait
+  const tail = video ? javaVideoTail(post('video')) : wait
     ? [
         '        // With a key set to synchronous image responses, the request waits for the images.',
         ...post('answer'),
@@ -353,13 +507,13 @@ function javaCode(request: CodeRequest): CodeSnippet[] {
         '        }',
       ]
     : [
-        `        // Start the job. The answer is 202 with a ${idField}.`,
+        '        // Start the job. The answer is 202 with a job_id.',
         ...post('started'),
         '',
         '        // Read the job every few seconds until it ends.',
         '        Map<String, Object> job;',
         '        while (true) {',
-        `            job = godance.get().uri(${JSON.stringify(`${JOBS_PATH}/{id}`)}, started.get(${JSON.stringify(idField)}))`,
+        `            job = godance.get().uri(${JSON.stringify(`${JOBS_PATH}/{id}`)}, started.get("job_id"))`,
         '                    .retrieve()',
         '                    .bodyToMono(JSON)',
         '                    .block();',
@@ -379,7 +533,7 @@ function javaCode(request: CodeRequest): CodeSnippet[] {
   return [{
     title: 'Java class',
     code: [...head, ...tail, '    }', '}'].join('\n'),
-    ...(wait ? { note: WAIT_NOTE } : {}),
+    ...(wait ? { note: WAIT_NOTE } : video ? {} : jobNote(request)),
   }];
 }
 
