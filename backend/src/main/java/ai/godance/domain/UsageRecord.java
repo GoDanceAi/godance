@@ -82,6 +82,17 @@ public class UsageRecord {
     @Column(name = "outcome")
     private CallOutcome outcome;
 
+    /**
+     * The virtual model id the caller asked for, when routing chose the model
+     * (V41, round 4's Phase 2); {@code null} for a direct model call.
+     */
+    @Column(name = "routed_policy")
+    private String routedPolicy;
+
+    /** The routing policy's rule that matched, or {@code "default"}; set with {@link #routedPolicy}. */
+    @Column(name = "routed_rule")
+    private String routedRule;
+
     @Column(name = "recorded_at", nullable = false, updatable = false)
     private Instant recordedAt;
 
@@ -143,6 +154,12 @@ public class UsageRecord {
 
     public CallOutcome getOutcome() { return outcome; }
     public void setOutcome(CallOutcome outcome) { this.outcome = outcome; }
+
+    public String getRoutedPolicy() { return routedPolicy; }
+    public void setRoutedPolicy(String routedPolicy) { this.routedPolicy = routedPolicy; }
+
+    public String getRoutedRule() { return routedRule; }
+    public void setRoutedRule(String routedRule) { this.routedRule = routedRule; }
 
     public Instant getRecordedAt() { return recordedAt; }
     public void setRecordedAt(Instant recordedAt) { this.recordedAt = recordedAt; }

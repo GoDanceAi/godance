@@ -155,6 +155,9 @@ class RoutingRegionFallthroughIntegrationTest {
         assertThat(records).singleElement().satisfies(r -> {
             assertThat(r.getModelName()).isEqualTo("deepseek-v4-pro");
             assertThat(r.isFallbackUsed()).isTrue();
+            // Phase 2 (V41): the region decided the model, the policy still owns the request.
+            assertThat(r.getRoutedPolicy()).isEqualTo("godance-quality");
+            assertThat(r.getRoutedRule()).isEqualTo("premium-first");
         });
     }
 
@@ -200,6 +203,8 @@ class RoutingRegionFallthroughIntegrationTest {
                         .singleElement().satisfies(r -> {
                             assertThat(r.getModelName()).isEqualTo("deepseek-v4-pro");
                             assertThat(r.isFallbackUsed()).isTrue();
+                            assertThat(r.getRoutedPolicy()).isEqualTo("godance-quality");
+                            assertThat(r.getRoutedRule()).isEqualTo("premium-first");
                         }));
     }
 

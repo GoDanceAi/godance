@@ -164,7 +164,7 @@ public class ChatCompletionService {
                 CallOutcome outcome = classifyOutcome(upstreamErr);
                 log.warn("Attempt {} ({}) failed for request {} [{}, {}ms]: {}",
                         i, modelName, requestId, outcome, latencyMs, upstreamErr.getMessage());
-                recordFailure(userId, apiKeyId, model, requestId, isFallback, latencyMs, outcome);
+                recordFailure(userId, apiKeyId, model, requestId, isFallback, latencyMs, outcome, route);
                 lastError = upstreamErr;
                 continue;
             }
@@ -180,7 +180,7 @@ public class ChatCompletionService {
                         response.usage().promptTokens(), response.usage().completionTokens());
                 long billedCents = ledger.settle(userId, estimateCents, actualMicrocents, requestId);
                 usage.save(buildUsageRecord(userId, apiKeyId, model, response, billedCents,
-                        actualMicrocents, requestId, isFallback, latencyMs, CallOutcome.OK));
+                        actualMicrocents, requestId, isFallback, latencyMs, CallOutcome.OK, route));
             } catch (RuntimeException settlementErr) {
                 log.error("Settlement failed for request {} after a successful upstream call to {}; "
                         + "not retrying upstream: {}", requestId, modelName, settlementErr.getMessage(),
@@ -300,7 +300,7 @@ public class ChatCompletionService {
                                          ChatResponse response, long billedCents,
                                          long costMicrocents, String requestId,
                                          boolean fallbackUsed, int latencyMs,
-                                         CallOutcome outcome) {
+                                         CallOutcome outcome, ResolvedRoute route) {
         long providerCostMicrocents =
                 model.inputMicrocentsPer1k()  * response.usage().promptTokens()     / 1000
               + model.outputMicrocentsPer1k() * response.usage().completionTokens() / 1000;
@@ -324,11 +324,22 @@ public class ChatCompletionService {
         r.setRequestId(requestId);
         r.setLatencyMs(latencyMs);
         r.setOutcome(outcome);
+        attributeRoute(r, route);
         return r;
     }
 
     private static Region asDomainRegion(Region r) {
         return r == null ? Region.LOCAL : r;
+    }
+
+    /**
+     * Round 4's Phase 2 (V41): every usage record of a request made to a
+     * virtual id names the policy and the rule that routed it, so the margin
+     * view can sum them. Both stay null for a direct model call.
+     */
+    private static void attributeRoute(UsageRecord r, ResolvedRoute route) {
+        r.setRoutedPolicy(route.policyId());
+        r.setRoutedRule(route.matchedRule());
     }
 
     // ===== Observability =============================================
@@ -338,8 +349,10 @@ public class ChatCompletionService {
      * {@code requestId} so it joins to the {@link UsageRecord} written for
      * whichever concrete model actually served — that join yields the
      * spread between what the caller paid for the virtual id and the served
-     * model's {@code providerCostCents} (Phase 1 exit gate; the dedicated
-     * routed_policy/routed_rule columns are Phase 2). No-op for direct calls.
+     * model's {@code providerCostCents} (Phase 1 exit gate). Phase 2 records
+     * the policy and rule on the usage records themselves (V41,
+     * {@link #attributeRoute}); this line stays because it also gives the
+     * ordered candidates, which the records do not. No-op for direct calls.
      */
     private void logRoutingDecision(String requestId, ResolvedRoute route, List<String> attemptModels) {
         if (route.fromVirtual()) {
@@ -372,7 +385,8 @@ public class ChatCompletionService {
 
     /** Write a zero-cost {@link UsageRecord} for a failed upstream attempt. */
     private void recordFailure(UUID userId, UUID apiKeyId, ModelInfo model, String requestId,
-                               boolean fallbackUsed, int latencyMs, CallOutcome outcome) {
+                               boolean fallbackUsed, int latencyMs, CallOutcome outcome,
+                               ResolvedRoute route) {
         try {
             UsageRecord r = new UsageRecord();
             r.setUserId(userId);
@@ -390,6 +404,7 @@ public class ChatCompletionService {
             r.setRequestId(requestId);
             r.setLatencyMs(latencyMs);
             r.setOutcome(outcome);
+            attributeRoute(r, route);
             usage.save(r);
         } catch (RuntimeException e) {
             // Health bookkeeping must never mask the real upstream failure.
@@ -467,7 +482,7 @@ public class ChatCompletionService {
         reorderByHealth(attemptModels);
 
         StreamState state = new StreamState(userId, apiKeyId, request, requestId,
-                estimateCents, attemptModels, firstChoice);
+                estimateCents, attemptModels, firstChoice, route);
         return streamAttempt(state, 0, null)
                 .doFinally(signal -> dispatchPostStream(signal, state));
     }
@@ -484,6 +499,8 @@ public class ChatCompletionService {
         final long estimateCents;
         final List<String> attempts;
         final String firstChoice;
+        /** The route resolved for the request; its policy and rule go on each usage record. */
+        final ResolvedRoute route;
         /** The attempt in flight, or the last one to run. Null until an upstream call starts. */
         final AtomicReference<StreamAttempt> current = new AtomicReference<>();
         /** Set on the first chunk relayed to the client; from then on there is no fall-through. */
@@ -491,7 +508,8 @@ public class ChatCompletionService {
         final AtomicReference<Usage> usage = new AtomicReference<>();
 
         StreamState(UUID userId, UUID apiKeyId, ChatRequest request, String requestId,
-                    long estimateCents, List<String> attempts, String firstChoice) {
+                    long estimateCents, List<String> attempts, String firstChoice,
+                    ResolvedRoute route) {
             this.userId = userId;
             this.apiKeyId = apiKeyId;
             this.request = request;
@@ -499,6 +517,7 @@ public class ChatCompletionService {
             this.estimateCents = estimateCents;
             this.attempts = List.copyOf(attempts);
             this.firstChoice = firstChoice;
+            this.route = route;
         }
     }
 
@@ -560,7 +579,7 @@ public class ChatCompletionService {
                             ? re : new IllegalStateException(err);
                     // recordFailure blocks on JPA, so keep it off the stream thread.
                     return Mono.fromRunnable(() -> recordFailure(s.userId, s.apiKeyId, model,
-                                    s.requestId, isFallback, latencyMs, outcome))
+                                    s.requestId, isFallback, latencyMs, outcome, s.route))
                             .subscribeOn(Schedulers.boundedElastic())
                             .thenMany(Flux.defer(() -> streamAttempt(s, i + 1, failure)));
                 });
@@ -583,7 +602,8 @@ public class ChatCompletionService {
                     long billedCents = ledger.settle(s.userId, s.estimateCents, actualMicrocents, s.requestId);
                     this.usage.save(buildStreamedUsageRecord(
                             s.userId, s.apiKeyId, served.model(), usage, billedCents, actualMicrocents,
-                            s.requestId, served.fallbackUsed(), elapsedMs(served.startNanos()), CallOutcome.OK));
+                            s.requestId, served.fallbackUsed(), elapsedMs(served.startNanos()), CallOutcome.OK,
+                            s.route));
                 } else if (signal == SignalType.ON_COMPLETE) {
                     // Stream completed but provider never emitted a usage block.
                     // Keep the pre-debit as the recorded cost; write a UsageRecord
@@ -593,14 +613,15 @@ public class ChatCompletionService {
                             s.userId, s.apiKeyId, served.model(), new Usage(0, 0, 0), s.estimateCents,
                             s.estimateCents * CreditLedgerService.MICROCENTS_PER_CENT,
                             s.requestId, served.fallbackUsed(), elapsedMs(served.startNanos()),
-                            CallOutcome.OK));
+                            CallOutcome.OK, s.route));
                 } else if (signal == SignalType.ON_ERROR && s.relayed.get()) {
                     // Upstream failed mid-stream — full refund, plus a failure
                     // UsageRecord so the outage shows up in provider health.
                     ledger.refundEstimate(s.userId, s.estimateCents, s.requestId,
                             "stream signal " + signal);
                     recordFailure(s.userId, s.apiKeyId, served.model(), s.requestId,
-                            served.fallbackUsed(), elapsedMs(served.startNanos()), CallOutcome.ERROR);
+                            served.fallbackUsed(), elapsedMs(served.startNanos()), CallOutcome.ERROR,
+                            s.route);
                 } else if (signal == SignalType.ON_ERROR) {
                     // Every attempt failed before its first chunk; each upstream
                     // failure already wrote its own UsageRecord.
@@ -622,7 +643,8 @@ public class ChatCompletionService {
     private UsageRecord buildStreamedUsageRecord(UUID userId, UUID apiKeyId, ModelInfo model, Usage u,
                                                  long billedCents, long costMicrocents,
                                                  String requestId, boolean fallbackUsed,
-                                                 int latencyMs, CallOutcome outcome) {
+                                                 int latencyMs, CallOutcome outcome,
+                                                 ResolvedRoute route) {
         long providerCostMicrocents =
                 model.inputMicrocentsPer1k()  * u.promptTokens()     / 1000
               + model.outputMicrocentsPer1k() * u.completionTokens() / 1000;
@@ -646,6 +668,7 @@ public class ChatCompletionService {
         r.setRequestId(requestId);
         r.setLatencyMs(latencyMs);
         r.setOutcome(outcome);
+        attributeRoute(r, route);
         return r;
     }
 }
