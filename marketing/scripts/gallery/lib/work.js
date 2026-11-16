@@ -24,6 +24,7 @@ export function workPaths(root = DEFAULT_WORK_DIR) {
     translated: path.join(root, 'translated.json'), // translate
     samples: path.join(root, 'samples.json'), // sample: slots and a sample input for each input recipe
     runs: path.join(root, 'runs.json'), // generate: one record per entry, job id included
+    reruns: path.join(root, 'reruns.json'), // rerun: one record per published recipe and model, job id included
     ledger: path.join(root, 'ledger.json'), // every cent spent, by any stage
     media: path.join(root, 'media'), // generated files, in the layout recipes refer to
     review: path.join(root, 'review'),
@@ -41,6 +42,8 @@ export function configPaths(root = DEFAULT_CONFIG_DIR) {
     modelMap: path.join(root, 'model-map.json'),
     screenTerms: path.join(root, 'screen-terms.json'),
     removalList: path.join(root, 'removal-list.json'),
+    chinaHosted: path.join(root, 'china-hosted.json'), // rerun --china-hosted chooses from these
+    rerunParams: path.join(root, 'rerun-params.json'), // rerun: exceptions to how parameters carry over
   };
 }
 

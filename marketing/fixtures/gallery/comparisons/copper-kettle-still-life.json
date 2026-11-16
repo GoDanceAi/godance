@@ -1,0 +1,71 @@
+{
+  "slug": "copper-kettle-still-life",
+  "title": {
+    "en": "Copper kettle still life",
+    "zh": "铜壶静物"
+  },
+  "modality": "IMAGE",
+  "tags": [
+    "still-life"
+  ],
+  "prompt": {
+    "en": "A dented copper kettle on a linen cloth beside two lemons, soft north light, painterly still life.",
+    "zh": "一只有凹痕的铜壶放在亚麻布上，旁边是两个柠檬，柔和的北窗光，油画般的静物。",
+    "zh_origin": "list"
+  },
+  "runs": [
+    {
+      "model": "gpt-image-2",
+      "prompt_lang": "en",
+      "params": {
+        "size": "1024x1024",
+        "n": 1
+      },
+      "cost_cents": 6,
+      "generated_on": "2026-11-11",
+      "outputs": [
+        {
+          "file": "copper-kettle-still-life/gpt-image-2-0.webp",
+          "thumb": "copper-kettle-still-life/gpt-image-2-0-480.webp",
+          "content_type": "image/webp",
+          "width": 1024,
+          "height": 1024
+        }
+      ]
+    },
+    {
+      "model": "seedream-5.0",
+      "prompt_lang": "en",
+      "params": {
+        "size": "1024x1024",
+        "n": 1
+      },
+      "cost_cents": 4,
+      "generated_on": "2026-11-22",
+      "approved_on": "2026-11-23",
+      "outputs": [
+        {
+          "file": "copper-kettle-still-life/seedream-5.0-0.webp",
+          "thumb": "copper-kettle-still-life/seedream-5.0-0-480.webp",
+          "content_type": "image/webp",
+          "width": 1024,
+          "height": 1024
+        }
+      ]
+    }
+  ],
+  "source": {
+    "list": "example-org/invented-image-prompts",
+    "list_commit": "0000000000000000000000000000000000000000",
+    "licence": "CC0-1.0",
+    "author": "fixture_copper",
+    "author_url": "https://example.com/@fixture_copper",
+    "original_url": "https://example.com/@fixture_copper/posts/12002",
+    "changes": []
+  },
+  "review": {
+    "approved_on": "2026-11-12",
+    "standard_version": 2
+  },
+  "published_on": "2026-11-12"
+}

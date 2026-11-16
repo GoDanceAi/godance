@@ -1,0 +1,170 @@
+---
+/**
+ * /gallery/compare/<a>-vs-<b>: two models on the same prompts. Built only for
+ * a pair that at least GALLERY_COMPARE_MIN published recipes have a run on
+ * both (src/lib/gallery-compare.ts), and only while the gallery is on.
+ *
+ * Evidence, not a verdict: each recipe's two outputs side by side, what each
+ * run cost when it was made, and each model's price today. The reader judges.
+ */
+import type { GetStaticPaths } from 'astro';
+import Layout from '../../../layouts/Layout.astro';
+import RunOutput from '../../../components/gallery/RunOutput.astro';
+import { loadCatalog } from '../../../lib/catalog';
+import {
+  COMPARE_PATH,
+  compareIntro,
+  compareJsonLd,
+  comparePath,
+  compareTitle,
+  compareTotals,
+  comparisons,
+  dollars,
+  getKeyUrl,
+  runThisUrl,
+  type Comparison,
+} from '../../../lib/gallery-compare';
+import {
+  GALLERY_PATH,
+  excerpt,
+  formatCost,
+  formatDate,
+  formatParam,
+  loadGallery,
+  modelPath,
+  recipePath,
+  scriptJson,
+} from '../../../lib/gallery-recipes';
+
+export const getStaticPaths = (async () => {
+  const gallery = await loadGallery();
+  if (!gallery.on) return [];
+  return comparisons(gallery.recipes, gallery.config.compareMin).map((comparison) => ({
+    params: { pair: comparison.slug },
+    props: { comparison },
+  }));
+}) satisfies GetStaticPaths;
+
+interface Props {
+  comparison: Comparison;
+}
+
+const { comparison } = Astro.props;
+const { config } = await loadGallery();
+const mediaBase = config.mediaBaseUrl;
+const totals = compareTotals(comparison);
+const intro = compareIntro(comparison);
+const count = comparison.recipes.length;
+const unit = comparison.modality === 'VIDEO' ? 'second' : 'image';
+
+// Today's price of each model, from the catalogue the build read (the same as /pricing). A
+// snapshot is not today's price, so without the live catalogue the table points to /pricing.
+const catalog = await loadCatalog();
+const priceToday = (model: string) => {
+  const row = catalog.live ? catalog.rows.find((each) => each.id === model) : undefined;
+  return row && row.godancePrice !== '—' ? `${row.godancePrice} ${row.unitShort}` : null;
+};
+
+const appUrl = import.meta.env.PUBLIC_APP_URL || 'https://app.godance.ai';
+const title = compareTitle(comparison);
+const description = excerpt(intro);
+
+const link = 'underline';
+const linkStyle = 'color: var(--color-primary)';
+---
+
+<Layout {title} {description} canonicalPath={comparePath(comparison.a, comparison.b)}>
+  <article class="mx-auto max-w-6xl px-6 pt-12 pb-20" data-compare-page={comparison.slug}>
+    <p class="text-sm text-fg-subtle">
+      <a href={GALLERY_PATH} class="underline hover:text-fg">Gallery</a>
+      <span aria-hidden="true"> / </span>
+      <a href={COMPARE_PATH} class="underline hover:text-fg">Comparisons</a>
+    </p>
+
+    <h1 class="mt-2 text-3xl md:text-4xl font-bold tracking-tight text-fg">
+      <span class="font-mono">{comparison.a}</span> vs <span class="font-mono">{comparison.b}</span>
+    </h1>
+    <p class="mt-2 text-lg text-fg-muted">{count} prompts, the output of each on both models, and what each run cost.</p>
+    <p class="mt-4 max-w-3xl text-fg-muted" data-compare-intro>{intro}</p>
+
+    <!-- ===== Summary ===== -->
+    <section class="mt-8" data-compare-summary>
+      <h2 class="text-2xl font-bold text-fg">Summary</h2>
+      <div class="mt-4 card p-0 overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="border-b border-border bg-bg-muted text-left text-fg-subtle">
+            <tr>
+              <th scope="col" class="px-4 py-2.5 font-semibold">Model</th>
+              <th scope="col" class="px-4 py-2.5 font-semibold">Recipes compared</th>
+              <th scope="col" class="px-4 py-2.5 font-semibold">Cost of these runs</th>
+              <th scope="col" class="px-4 py-2.5 font-semibold">Average per recipe</th>
+              <th scope="col" class="px-4 py-2.5 font-semibold">Price per {unit} today</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-border">
+            {totals.map((model) => (
+              <tr data-compare-model={model.model}>
+                <th scope="row" class="px-4 py-2.5 text-left font-mono font-normal">
+                  <a href={modelPath(model.model)} class={link} style={linkStyle}>{model.model}</a>
+                </th>
+                <td class="px-4 py-2.5 text-fg">{count}</td>
+                <td class="px-4 py-2.5 text-fg" data-compare-total>{dollars(model.total)}</td>
+                <td class="px-4 py-2.5 text-fg" data-compare-average>{dollars(model.average)}</td>
+                <td class="px-4 py-2.5 text-fg" data-compare-price>
+                  <a href="/pricing" class={link} style={linkStyle}>{priceToday(model.model) ?? 'see current prices'}</a>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p class="mt-3 text-sm text-fg-subtle">
+        A run's cost is what it was charged on the day it was made; prices change. See
+        <a href="/pricing" class={link} style={linkStyle}>current prices</a> for every model.
+      </p>
+    </section>
+
+    <!-- ===== Each recipe on both models ===== -->
+    <section class="mt-14">
+      <h2 class="text-2xl font-bold text-fg">The prompts</h2>
+      <div class="mt-6 space-y-12">
+        {comparison.recipes.map(({ recipe, a, b }) => (
+          <section data-compare-recipe={recipe.slug}>
+            <h3 class="text-lg font-semibold text-fg">
+              <a href={recipePath(recipe.slug)} class={link} style={linkStyle}>{recipe.title.en}</a>
+            </h3>
+            {recipe.title.zh && <p class="text-fg-muted" lang="zh-Hans">{recipe.title.zh}</p>}
+            <div class="mt-4 grid gap-6 md:grid-cols-2">
+              {[a, b].map((run) => (
+                <div class="min-w-0" data-compare-run={run.model}>
+                  <p class="text-sm font-semibold text-fg">
+                    <a href={modelPath(run.model)} class:list={['font-mono', link]} style={linkStyle}>{run.model}</a>
+                  </p>
+                  <div class="mt-2">
+                    <RunOutput {recipe} {run} {mediaBase} />
+                  </div>
+                  <p class="mt-2 text-sm text-fg-muted">
+                    <span data-compare-cost>{formatCost(run.cost_cents)}</span> ·
+                    <time datetime={run.generated_on}>{formatDate(run.generated_on)}</time> ·
+                    {run.prompt_lang === 'zh' ? 'Chinese' : 'English'} prompt
+                    {Object.entries(run.params).map(([key, value]) => (
+                      <Fragment> · <span class="font-mono">{key}={formatParam(value)}</span></Fragment>
+                    ))}
+                  </p>
+                </div>
+              ))}
+            </div>
+            <p class="mt-4 text-sm" data-cta>
+              {config.runThis
+                ? <a href={runThisUrl(appUrl, recipe)} class="btn btn-secondary btn-sm" data-run-this>Run this</a>
+                : <a href={getKeyUrl(appUrl, recipe)} class="btn btn-secondary btn-sm" data-get-key>Get an API key</a>}
+              <a href={recipePath(recipe.slug)} class:list={['ml-3', link]} style={linkStyle}>The recipe, its prompt and the API call</a>
+            </p>
+          </section>
+        ))}
+      </div>
+    </section>
+  </article>
+
+  <script type="application/ld+json" set:html={scriptJson(compareJsonLd(comparison, Astro.site ?? Astro.url, description))} />
+</Layout>

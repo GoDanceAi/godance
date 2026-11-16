@@ -1,0 +1,92 @@
+{
+  "slug": "windmill-at-blue-hour",
+  "title": {
+    "en": "Windmill at blue hour",
+    "zh": "蓝调时刻的风车"
+  },
+  "modality": "IMAGE",
+  "tags": [
+    "rural",
+    "night"
+  ],
+  "prompt": {
+    "en": "An old windmill against a deep blue evening sky, one lit window, flat fields, calm.",
+    "zh": "深蓝色的傍晚天空下的一座老风车，一扇亮着灯的窗，平坦的田野，宁静。",
+    "zh_origin": "list"
+  },
+  "runs": [
+    {
+      "model": "gpt-image-2",
+      "prompt_lang": "en",
+      "params": {
+        "size": "1024x1024",
+        "n": 1
+      },
+      "cost_cents": 6,
+      "generated_on": "2026-11-20",
+      "outputs": [
+        {
+          "file": "windmill-at-blue-hour/gpt-image-2-0.webp",
+          "thumb": "windmill-at-blue-hour/gpt-image-2-0-480.webp",
+          "content_type": "image/webp",
+          "width": 1024,
+          "height": 1024
+        }
+      ]
+    },
+    {
+      "model": "seedream-5.0",
+      "prompt_lang": "en",
+      "params": {
+        "size": "1024x1024",
+        "n": 1
+      },
+      "cost_cents": 4,
+      "generated_on": "2026-11-22",
+      "approved_on": "2026-11-23",
+      "outputs": [
+        {
+          "file": "windmill-at-blue-hour/seedream-5.0-0.webp",
+          "thumb": "windmill-at-blue-hour/seedream-5.0-0-480.webp",
+          "content_type": "image/webp",
+          "width": 1024,
+          "height": 1024
+        }
+      ]
+    },
+    {
+      "model": "qwen-image-2.0",
+      "prompt_lang": "en",
+      "params": {
+        "size": "1024x1024",
+        "n": 1
+      },
+      "cost_cents": 4,
+      "generated_on": "2026-11-22",
+      "approved_on": "2026-11-23",
+      "outputs": [
+        {
+          "file": "windmill-at-blue-hour/qwen-image-2.0-0.webp",
+          "thumb": "windmill-at-blue-hour/qwen-image-2.0-0-480.webp",
+          "content_type": "image/webp",
+          "width": 1024,
+          "height": 1024
+        }
+      ]
+    }
+  ],
+  "source": {
+    "list": "example-org/invented-image-prompts",
+    "list_commit": "0000000000000000000000000000000000000000",
+    "licence": "CC0-1.0",
+    "author": "fixture_windmill",
+    "author_url": "https://example.com/@fixture_windmill",
+    "original_url": "https://example.com/@fixture_windmill/posts/12011",
+    "changes": []
+  },
+  "review": {
+    "approved_on": "2026-11-21",
+    "standard_version": 2
+  },
+  "published_on": "2026-11-21"
+}

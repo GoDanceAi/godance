@@ -1,0 +1,71 @@
+{
+  "slug": "rust-red-desert-road",
+  "title": {
+    "en": "Rust red desert road",
+    "zh": "锈红色的沙漠公路"
+  },
+  "modality": "IMAGE",
+  "tags": [
+    "landscape",
+    "desert"
+  ],
+  "prompt": {
+    "en": "A straight road through rust red desert under a pale sky, heat haze, a single car far away.",
+    "zh": "苍白天空下穿过锈红色沙漠的笔直公路，热浪，远处一辆车。",
+    "zh_origin": "list"
+  },
+  "runs": [
+    {
+      "model": "gpt-image-2",
+      "prompt_lang": "en",
+      "params": {
+        "size": "1536x1024",
+        "n": 1
+      },
+      "cost_cents": 7,
+      "generated_on": "2026-11-21",
+      "outputs": [
+        {
+          "file": "rust-red-desert-road/gpt-image-2-0.webp",
+          "thumb": "rust-red-desert-road/gpt-image-2-0-480.webp",
+          "content_type": "image/webp",
+          "width": 1536,
+          "height": 1024
+        }
+      ]
+    },
+    {
+      "model": "flux-2-pro",
+      "prompt_lang": "en",
+      "params": {
+        "n": 1
+      },
+      "cost_cents": 4,
+      "generated_on": "2026-11-22",
+      "approved_on": "2026-11-23",
+      "outputs": [
+        {
+          "file": "rust-red-desert-road/flux-2-pro-0.webp",
+          "thumb": "rust-red-desert-road/flux-2-pro-0-480.webp",
+          "content_type": "image/webp",
+          "width": 1024,
+          "height": 1024
+        }
+      ]
+    }
+  ],
+  "source": {
+    "list": "example-org/invented-image-prompts",
+    "list_commit": "0000000000000000000000000000000000000000",
+    "licence": "CC0-1.0",
+    "author": "fixture_rust",
+    "author_url": "https://example.com/@fixture_rust",
+    "original_url": "https://example.com/@fixture_rust/posts/12013",
+    "changes": []
+  },
+  "review": {
+    "approved_on": "2026-11-21",
+    "standard_version": 2
+  },
+  "published_on": "2026-11-21"
+}

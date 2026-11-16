@@ -179,6 +179,47 @@ test.describe('a recipe link, signed in', () => {
     await expect(page.getByLabel('Number of images')).toHaveCount(0);
   });
 
+  // Round 13: a recipe lists every run, and opens on the first whose model the catalog lists.
+  test('opens on the next run when the first run\'s model is not in the catalog, in that run\'s language, with no note', async ({ page, api, gallery }) => {
+    gallery.serveRecipe(imageRecipe({
+      run: { model: 'imagen-9', prompt_lang: 'en', params: { size: '1536x1024', n: 2 } },
+      runs: [
+        { model: 'imagen-9', prompt_lang: 'en', params: { size: '1536x1024', n: 2 }, cost_cents: 9 },
+        { model: 'gpt-image-1.5', prompt_lang: 'zh', params: { size: '1024x1536', n: 1 }, cost_cents: 5 },
+        { model: 'sdxl', prompt_lang: 'en', params: { size: '1024x1024', n: 1 }, cost_cents: 6 },
+      ],
+    }));
+    await openStudio(page, api, RECIPE_LINK);
+
+    await expect(page.getByLabel('Model', { exact: true })).toHaveValue('gpt-image-1.5');
+    await expect(prompt(page)).toHaveValue(PROMPT_ZH);
+    await expect(page.getByRole('button', { name: '中文' })).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByLabel('Size')).toHaveValue('1024x1536');
+    await expect(page.getByLabel('Number of images')).toHaveValue('1');
+    await expect(page.getByText("isn't available")).toHaveCount(0);
+    await expect(page.getByText('From the gallery:')).toBeVisible();
+    // Still that recipe: the run it would send says so.
+    await page.getByRole('button', { name: /^View code/ }).click();
+    await expect(page.getByRole('figure', { name: 'Start the job' })).toContainText(`"gallery_recipe": "${IMAGE_SLUG}"`);
+    expect(generations(api)).toEqual([]);
+  });
+
+  test('when the catalog lists none of its runs\' models, gives way to the default and says so', async ({ page, api, gallery }) => {
+    gallery.serveRecipe(imageRecipe({
+      run: { model: 'imagen-9', prompt_lang: 'en', params: { size: '1536x1024', n: 2 } },
+      runs: [
+        { model: 'imagen-9', prompt_lang: 'en', params: { size: '1536x1024', n: 2 }, cost_cents: 9 },
+        { model: 'dall-e-9', prompt_lang: 'zh', params: { size: '1024x1536', n: 1 }, cost_cents: 5 },
+      ],
+    }));
+    await openStudio(page, api, RECIPE_LINK);
+
+    await expect(page.getByLabel('Model', { exact: true })).toHaveValue('flux-2-pro');
+    await expect(page.getByText("“imagen-9” isn't available, so FLUX.2 [pro] is selected.")).toBeVisible();
+    await expect(prompt(page)).toHaveValue(PROMPT_EN);
+    expect(generations(api)).toEqual([]);
+  });
+
   test('values the model does not allow, and anything unexpected, are left out', async ({ page, api, gallery }) => {
     const long = 'A street of paper lanterns. '.repeat(200);
     gallery.serveRecipe(imageRecipe({

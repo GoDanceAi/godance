@@ -12,6 +12,10 @@
  * where each language's template, filled with its defaults, is that
  * language's prompt (lib/template has the rules).
  *
+ * Since round 13 a recipe also lists every run, in order, `run` being the
+ * first: `runs: [{ model, prompt_lang, params, cost_cents }]`. The Studio
+ * opens a recipe on the first run whose model its catalog lists.
+ *
  * Whatever arrives is untrusted input. These parsers keep only the fields the
  * app uses, with the types and sizes it expects, and drop the rest; a recipe
  * whose shape doesn't match is ignored whole. Nothing in this module touches
@@ -57,6 +61,13 @@ export interface GalleryTemplate {
   variables: GalleryVariable[];
 }
 
+/** One run of a gallery recipe: its model, the language of the prompt it sent, and its params. */
+export interface RecipeRun {
+  model: string;
+  promptLang: RecipeLang;
+  params: RecipeParams;
+}
+
 export interface GalleryRecipe {
   slug: string;
   title: RecipeText;
@@ -65,7 +76,10 @@ export interface GalleryRecipe {
   prompt: RecipeText;
   /** Null for a recipe without variables, and for one whose template doesn't hold together. */
   template: GalleryTemplate | null;
-  run: { model: string; promptLang: RecipeLang; params: RecipeParams };
+  /** The run the form is filled from: the first run, or the one the Studio chose (studio-prefill's onAvailableRun). */
+  run: RecipeRun;
+  /** Every run the app can read, in order (round 13); just `run` for a gallery that lists no others. */
+  runs: RecipeRun[];
   /** The recipe's page, and only when it is on the gallery's own origin. */
   url: string | null;
   /** Its input slots, each with a sample generated for the gallery. Empty for a recipe that takes no input. */
@@ -138,11 +152,10 @@ export function parseRecipe(json: unknown, expected: { slug: string; galleryOrig
   const title = localized(json.title, TITLE_MAX, true);
   const modality = modalityOf(json.modality);
   const prompt = localized(json.prompt, PROMPT_MAX, false);
-  if (!title || !modality || !prompt || !isRecord(json.run)) return null;
+  if (!title || !modality || !prompt) return null;
 
-  const model = modelOf(json.run.model);
-  const promptLang = json.run.prompt_lang === 'en' || json.run.prompt_lang === 'zh' ? json.run.prompt_lang : null;
-  if (!model || !promptLang || prompt[promptLang] === null) return null;
+  const run = runOf(json.run, prompt);
+  if (!run) return null;
 
   return {
     slug: json.slug,
@@ -150,10 +163,32 @@ export function parseRecipe(json: unknown, expected: { slug: string; galleryOrig
     modality,
     prompt,
     template: templateOf(json.prompt, prompt),
-    run: { model, promptLang, params: paramsOf(json.run.params) },
+    run,
+    runs: runsOf(json.runs, prompt, run),
     url: pageUrlOf(json.url, expected.galleryOrigin),
     inputs: inputsOf(json.inputs, modality),
   };
+}
+
+const RUNS_MAX = 16;
+
+/** A run as the JSON has it, or null when its model, its prompt's language or that prompt is missing. */
+function runOf(value: unknown, prompt: RecipeText): RecipeRun | null {
+  if (!isRecord(value)) return null;
+  const model = modelOf(value.model);
+  const promptLang = value.prompt_lang === 'en' || value.prompt_lang === 'zh' ? value.prompt_lang : null;
+  if (!model || !promptLang || prompt[promptLang] === null) return null;
+  return { model, promptLang, params: paramsOf(value.params) };
+}
+
+/**
+ * The recipe's runs (round 13), in order. A run that can't be read is left
+ * out; a gallery that lists none, or none the app can read, gives `run` alone.
+ */
+function runsOf(value: unknown, prompt: RecipeText, first: RecipeRun): RecipeRun[] {
+  if (!Array.isArray(value)) return [first];
+  const runs = value.slice(0, RUNS_MAX).map((item) => runOf(item, prompt)).filter((run): run is RecipeRun => run !== null);
+  return runs.length > 0 ? runs : [first];
 }
 
 const SLOT_NAME = /^[A-Za-z0-9](?:[A-Za-z0-9 _-]{0,38}[A-Za-z0-9])?$/;

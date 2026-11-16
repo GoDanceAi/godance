@@ -40,9 +40,10 @@ other host, and it is removed from anything printed or saved.
 | `review` | Builds the review sheet. | no |
 | `publish` | Writes a recipe for each entry the operator approved. | no |
 
-Also: `remove <slug>` takes a recipe down, `retemplate <slug>` gives a
-published recipe its template, and `status` shows what each stage has done
-and what has been spent.
+Also: `rerun` adds runs on other models to recipes already published (see
+[rerun](#rerun)), `remove <slug>` takes a recipe down, `retemplate <slug>`
+gives a published recipe its template, and `status` shows what each stage
+has done and what has been spent.
 
 A first batch, once the operator has given the go-ahead and a cap:
 
@@ -217,6 +218,57 @@ Media is never committed. `publish` lists the files to upload in
 operator's step. The files are in `.gallery-work/media/`, in the layout the
 recipes refer to.
 
+### rerun
+
+`rerun` adds a run on other models to recipes that are already published,
+so a recipe can show the same prompt on several models, with what each run
+cost. The comparison pages are built from these runs.
+
+```bash
+node scripts/gallery/cli.js rerun --models seedream-5.0,nano-banana --slugs harbour-card,tea-label --max-spend-cents 1000
+node scripts/gallery/cli.js rerun --models flux-2-pro --tag poster --max-spend-cents 1000 --apply
+node scripts/gallery/cli.js rerun --china-hosted --all --max-spend-cents 1000
+```
+
+- **What it runs.** One job per selected recipe (`--slugs a,b`, `--tag
+  <tag>` or `--all`) and model (`--models`): the recipe's prompt, in the
+  language its first run sent, and for a recipe with inputs its sample
+  inputs, uploaded as `generate` does. A recipe with a template is run with
+  its template filled with the defaults, which is the prompt itself. A
+  recipe that already has a run on a model gets no second one. A model the
+  catalogue does not list, that makes the other kind of output, or that
+  cannot take the recipe's input slots is reported with the reason, and
+  nothing is spent on it.
+- **Parameters.** The first run's are carried over only where the catalogue
+  (`GET /v1/models`) says the model takes them: a size it lists, or its
+  default size; a count up to its `max_n` (1 when it states none); a clip
+  length it lists, or its default. Anything else is left out, and the plan
+  says what and why. A video always states its seconds: the model's default
+  when the first run's cannot be kept. `config/rerun-params.json` holds the
+  exceptions, each one confirmed by the provider's own documentation.
+- **`--china-hosted`** adds, to each selected recipe with no run on a
+  China-hosted model, a run on the cheapest one of its kind (the price of an
+  image, or of a second of video, with the fee), from
+  `config/china-hosted.json`. When two cost the same, the one listed first
+  in that file is chosen.
+- **Money.** As `generate`: a dry run unless `--apply`, the same budget over
+  everything the work folder has spent and holds, at most two jobs in
+  flight, and the same rules against paying twice (`--retry-failed`,
+  `--retry-uncertain`). `--max-spend-cents` is needed even for a dry run,
+  which says how much of the plan the cap leaves room for. Outputs are saved
+  as `<slug>/<model>-<n>`, so no file of a recipe's other runs is touched.
+- **Review.** `review --apply` shows each new run beside its recipe's first
+  run, with both costs and what the new run left out. It works in a work
+  folder that imported nothing. Each new run is approved or rejected on its
+  own; its decision is saved under `runs` in `decisions.json`, by
+  `<slug>@<model>`.
+- **Publish.** `publish --apply` adds each approved run at the end of its
+  recipe's runs, with the day it was approved (`approved_on`). Nothing else
+  in the recipe changes: not its other runs, not their order, not its
+  review. A run is refused when its recipe's prompt or samples are no longer
+  the ones it was made with. Its media goes into the manifest, as for a new
+  recipe.
+
 ### retemplate
 
 `retemplate <slug>`, or `retemplate --all`, gives a recipe that was
@@ -268,6 +320,14 @@ All in `config/`, all committed:
   the content standard, and under `input_people` the words that mark an
   input as being of a person. A starting list, meant to be extended.
 - **`removal-list.json`** — written by `remove`.
+- **`china-hosted.json`** — the models `rerun --china-hosted` chooses from:
+  each catalogue model whose provider is in the Alicloud region's
+  allowlist. A test fails when it and the backend's allowlist and catalogue
+  disagree.
+- **`rerun-params.json`** — exceptions to how `rerun` carries parameters
+  over: values a model takes beyond what the catalogue lists, and values to
+  send instead of others. Add one only when the provider's documentation
+  confirms it.
 
 ## The work folder
 
@@ -281,6 +341,7 @@ published.
 | `entries.json`, `screened.json`, `translated.json` | the state of each stage |
 | `samples.json` | each input recipe's slots, and its samples with their job ids |
 | `runs.json` | one record per run, with its job id |
+| `reruns.json` | one record per published recipe and model `rerun` ran, with its job id |
 | `ledger.json` | every cent spent, one line per paid call |
 | `media/` | generated images and videos, and sample inputs |
 | `review/index.html`, `review/decisions.json` | the sheet, and the operator's decisions |

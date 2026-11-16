@@ -2,11 +2,12 @@
 /**
  * Draws the placeholder images for the fixture recipes: every image output,
  * its thumbnail, every video poster and every sample input named in
- * fixtures/gallery/recipes/.
+ * fixtures/gallery/recipes/ and fixtures/gallery/comparisons/.
  * The pictures are abstract shapes made here, coloured from the recipe's
  * slug. Nothing is downloaded or copied from anywhere.
  *
- *   node fixtures/gallery/make-media.mjs
+ *   node fixtures/gallery/make-media.mjs                both folders
+ *   node fixtures/gallery/make-media.mjs comparisons    one folder
  *
  * The tiny .webm clips were recorded once from a canvas animation and are
  * committed as they are; this script leaves them alone.
@@ -17,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const recipesDir = path.join(here, 'recipes');
+const folders = process.argv.length > 2 ? process.argv.slice(2) : ['recipes', 'comparisons'];
 const mediaDir = path.join(here, 'media');
 
 /** A small stable number from a string. @param {string} text */
@@ -58,6 +59,7 @@ async function draw(/** @type {string} */ file, /** @type {number} */ width, /**
   console.log(`${file}  ${w}x${h}`);
 }
 
+for (const recipesDir of folders.map((folder) => path.join(here, folder)))
 for (const name of (await readdir(recipesDir)).filter((n) => n.endsWith('.json')).sort()) {
   const recipe = JSON.parse(await readFile(path.join(recipesDir, name), 'utf8'));
   // A recipe with inputs: the sample for each slot.

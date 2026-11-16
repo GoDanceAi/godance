@@ -21,6 +21,12 @@
  * with its slot: the name and the hints, which the operator can change
  * here, the prompt the sample was generated from, and what it cost. The
  * sample is held to the content standard like the output.
+ *
+ * A new run on a published recipe (rerun) is shown beside the recipe's first
+ * run, with what each cost and which of the first run's parameters the new
+ * model did not take. It is approved or rejected on its own, and its decision
+ * is saved under `runs` in decisions.json, by `<slug>@<model>`. Approving it
+ * changes nothing about the recipe's own review.
  */
 import { parseTemplate } from '../../../src/lib/gallery-template.js';
 import { recipeInputs } from './sample.js';
@@ -68,12 +74,13 @@ export function reviewItems({ entries, screened, translated, runs, samples = {} 
  *
  * @param {object} options
  * @param {object[]} options.items From reviewItems.
+ * @param {object[]} [options.reruns] New runs on published recipes, from rerunReviewItems.
  * @param {number} options.standardVersion The version of the content standard the review is made against.
  * @param {object | null} [options.decisions] An earlier decisions.json, to carry on from.
  * @param {string} [options.mediaBase] Where the media folder is, relative to the page.
  */
-export function reviewSheet({ items, standardVersion, decisions = null, mediaBase = '../media/', builtAt = new Date().toISOString() }) {
-  const data = { items, standardVersion, builtAt, mediaBase, earlier: decisions?.decisions ?? {} };
+export function reviewSheet({ items, reruns = [], standardVersion, decisions = null, mediaBase = '../media/', builtAt = new Date().toISOString() }) {
+  const data = { items, reruns, standardVersion, builtAt, mediaBase, earlier: decisions?.decisions ?? {}, earlierRuns: decisions?.runs ?? {} };
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -106,6 +113,7 @@ export function reviewSheet({ items, standardVersion, decisions = null, mediaBas
   table.vars th, table.vars td { border: 1px solid var(--line); padding: 3px 8px; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
   table.vars th { color: var(--muted); font-weight: 600; }
   table.vars input { font: inherit; width: 100%; min-width: 9em; box-sizing: border-box; padding: 2px 4px; }
+  h2.section { font-size: 17px; margin: 32px 0 4px; }
 </style>
 </head>
 <body>
@@ -127,6 +135,10 @@ export function reviewSheet({ items, standardVersion, decisions = null, mediaBas
   const storeKey = 'gallery-review:' + data.items.map((item) => item.id).join(',').length + ':' + (data.items[0]?.id ?? '');
   let decisions = { ...data.earlier };
   try { decisions = { ...decisions, ...JSON.parse(localStorage.getItem(storeKey) ?? '{}') }; } catch {}
+  // New runs on published recipes are decided on their own, by <slug>@<model>.
+  const runStoreKey = 'gallery-review-runs:' + data.reruns.map((item) => item.key).join(',').length + ':' + (data.reruns[0]?.key ?? '');
+  let runDecisions = { ...data.earlierRuns };
+  try { runDecisions = { ...runDecisions, ...JSON.parse(localStorage.getItem(runStoreKey) ?? '{}') }; } catch {}
 
   const el = (tag, props = {}, ...children) => {
     const node = Object.assign(document.createElement(tag), props);
@@ -136,25 +148,30 @@ export function reviewSheet({ items, standardVersion, decisions = null, mediaBas
   const link = (text, url) => (/^https:\\/\\//.test(url ?? '') ? el('a', { textContent: text, href: url, target: '_blank', rel: 'noopener noreferrer' }) : el('span', { textContent: text }));
   const today = () => new Date().toISOString().slice(0, 10);
   const persist = () => { try { localStorage.setItem(storeKey, JSON.stringify(decisions)); } catch {} };
+  const persistRuns = () => { try { localStorage.setItem(runStoreKey, JSON.stringify(runDecisions)); } catch {} };
+  const centsText = (amount) => amount + ' cent' + (amount === 1 ? '' : 's');
 
   document.getElementById('standard').textContent = 'content standard version ' + data.standardVersion + ' · built ' + data.builtAt.slice(0, 16).replace('T', ' ');
   const cards = document.getElementById('cards');
   const nodes = new Map();
+  const runNodes = new Map();
 
   function refresh() {
     let approved = 0, rejected = 0;
-    for (const item of data.items) {
-      const made = decisions[item.id];
-      const node = nodes.get(item.id);
+    const mark = (node, made) => {
       node.card.classList.toggle('approved', made?.decision === 'approved');
       node.card.classList.toggle('rejected', made?.decision === 'rejected');
       node.warn.textContent = made?.decision === 'rejected' && !made.reason.trim() ? 'A rejection needs a reason.' : '';
       node.card.hidden = document.getElementById('undecided').checked && Boolean(made);
       if (made?.decision === 'approved') approved++;
       if (made?.decision === 'rejected') rejected++;
-    }
+    };
+    for (const item of data.items) mark(nodes.get(item.id), decisions[item.id]);
+    for (const item of data.reruns) mark(runNodes.get(item.key), runDecisions[item.key]);
+    const total = data.items.length + data.reruns.length;
     document.getElementById('counts').textContent =
-      data.items.length + ' candidates · ' + approved + ' approved · ' + rejected + ' rejected · ' + (data.items.length - approved - rejected) + ' undecided';
+      data.items.length + ' candidates · ' + (data.reruns.length ? data.reruns.length + ' new runs · ' : '') +
+      approved + ' approved · ' + rejected + ' rejected · ' + (total - approved - rejected) + ' undecided';
   }
 
   for (const item of data.items) {
@@ -269,11 +286,85 @@ export function reviewSheet({ items, standardVersion, decisions = null, mediaBas
     cards.append(card);
   }
 
+  // New runs on published recipes: each beside the recipe's first run.
+  if (data.reruns.length) {
+    cards.append(el('h2', { className: 'section', textContent: 'New runs on published recipes' }));
+    cards.append(el('div', { className: 'meta', textContent: 'Each new run is shown beside the recipe\\'s first run. Approving it adds it to the published recipe, after its other runs, with the day you approved it; the recipe\\'s own review stays as it is. The content standard applies to the new output as to any other.' }));
+  }
+  for (const item of data.reruns) {
+    const media = el('div', { className: 'media' });
+    const show = (run, label, published) => {
+      media.append(el('div', { className: 'label', textContent: label }));
+      for (const output of run.outputs) {
+        const src = data.mediaBase + output.file;
+        if (item.modality === 'VIDEO') {
+          const video = el('video', { controls: true, preload: 'metadata', src });
+          if (output.poster) video.poster = data.mediaBase + output.poster;
+          media.append(video);
+        } else {
+          const img = el('img', { loading: 'lazy', src, width: output.width, height: output.height, alt: '' });
+          // A published output may not be in this work folder: say where to see it instead.
+          if (published) img.addEventListener('error', () => img.replaceWith(el('div', { className: 'meta' }, 'Not in this work folder: see it on ', link('the recipe page', item.recipe_url), '.')));
+          media.append(img);
+        }
+        media.append(el('div', { className: 'meta', textContent: output.width + ' × ' + output.height + (output.duration_seconds ? ' · ' + output.duration_seconds + ' s' : '') }));
+      }
+    };
+    if (item.first) show(item.first, 'First run, published: ' + item.first.model, true);
+    show(item.run, 'New run: ' + item.model, false);
+
+    const body = el('div');
+    body.append(el('h2', { textContent: item.title.en }));
+    if (item.title.zh) body.append(el('div', { className: 'zh-title', lang: 'zh-Hans', textContent: item.title.zh }));
+    body.append(el('div', { className: 'meta', textContent: [item.modality, item.slug, 'run on the ' + (item.prompt_lang === 'zh' ? 'Chinese' : 'English') + ' prompt'].join(' · ') }));
+    if (item.first) {
+      body.append(el('div', { className: 'meta', textContent: 'First run: ' + [item.first.model, JSON.stringify(item.first.params), centsText(item.first.cost_cents), 'generated ' + item.first.generated_on].join(' · ') }));
+    }
+    body.append(el('div', { className: 'meta', textContent: 'New run: ' + [item.run.model, JSON.stringify(item.run.params), centsText(item.run.cost_cents), 'generated ' + item.run.generated_on].join(' · ') }));
+    const source = el('div', { className: 'meta' });
+    source.append(link('The recipe page', item.recipe_url));
+    body.append(source);
+    if (item.run.left.length) {
+      body.append(el('div', { className: 'label', textContent: 'Left out of the first run\\'s parameters' }));
+      const list = el('ul', { className: 'notes' });
+      for (const left of item.run.left) list.append(el('li', { textContent: left.param + ' ' + JSON.stringify(left.value) + ': ' + left.why }));
+      body.append(list);
+    }
+    const notes = [];
+    if (!item.published) notes.push('The recipe is not in the gallery folder: publish cannot add this run to it.');
+    if (item.already) notes.push('The recipe already has a run on ' + item.model + ': publish will leave it as it is.');
+    if (notes.length) {
+      const list = el('ul', { className: 'notes' });
+      for (const note of notes) list.append(el('li', { textContent: note }));
+      body.append(list);
+    }
+    body.append(el('div', { className: 'label', textContent: 'The prompt it was run with' }), el('pre', item.prompt_lang === 'zh' ? { lang: 'zh-Hans', textContent: item.prompt } : { textContent: item.prompt }));
+
+    const reason = el('input', { type: 'text', placeholder: 'Reason (needed for a rejection)', value: runDecisions[item.key]?.reason ?? '' });
+    const warn = el('span', { className: 'warn' });
+    const choose = (decision) => {
+      if (decision === null) delete runDecisions[item.key];
+      else runDecisions[item.key] = { slug: item.slug, model: item.model, decision, reason: reason.value, decided_on: today() };
+      persistRuns(); refresh();
+    };
+    reason.addEventListener('input', () => { if (runDecisions[item.key]) { runDecisions[item.key].reason = reason.value; persistRuns(); refresh(); } });
+    body.append(el('div', { className: 'decide' },
+      el('button', { textContent: 'Approve', onclick: () => choose('approved') }),
+      el('button', { textContent: 'Reject', onclick: () => choose('rejected') }),
+      el('button', { textContent: 'Clear', onclick: () => choose(null) }),
+      reason, warn));
+
+    const card = el('section', { className: 'card' }, media, body);
+    runNodes.set(item.key, { card, warn });
+    cards.append(card);
+  }
+
   document.getElementById('undecided').addEventListener('change', refresh);
   document.getElementById('save').addEventListener('click', () => {
-    const missing = Object.values(decisions).filter((made) => made.decision === 'rejected' && !made.reason.trim()).length;
+    const missing = [...Object.values(decisions), ...Object.values(runDecisions)].filter((made) => made.decision === 'rejected' && !made.reason.trim()).length;
     if (missing > 0) { alert(missing + ' rejection' + (missing === 1 ? ' has' : 's have') + ' no reason yet.'); return; }
-    const file = { standard_version: data.standardVersion, saved_at: new Date().toISOString(), decisions };
+    const withRuns = data.reruns.length > 0 || Object.keys(runDecisions).length > 0;
+    const file = { standard_version: data.standardVersion, saved_at: new Date().toISOString(), decisions, ...(withRuns ? { runs: runDecisions } : {}) };
     const url = URL.createObjectURL(new Blob([JSON.stringify(file, null, 2) + '\\n'], { type: 'application/json' }));
     el('a', { href: url, download: 'decisions.json' }).click();
     URL.revokeObjectURL(url);
@@ -300,10 +391,16 @@ export function checkDecisions(file) {
   const problems = [];
   if (!file || typeof file !== 'object' || typeof file.decisions !== 'object' || file.decisions === null) return ['it is not a decisions file'];
   if (!Number.isInteger(file.standard_version) || file.standard_version < 1) problems.push('it does not say which version of the content standard was applied');
-  for (const [id, made] of Object.entries(file.decisions)) {
+  const check = (id, made) => {
     if (made?.decision !== 'approved' && made?.decision !== 'rejected') problems.push(`${id}: the decision is neither approved nor rejected`);
     else if (made.decision === 'rejected' && !String(made.reason ?? '').trim()) problems.push(`${id}: rejected without a reason`);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(made?.decided_on ?? '')) problems.push(`${id}: no date`);
+  };
+  for (const [id, made] of Object.entries(file.decisions)) check(id, made);
+  // New runs on published recipes (rerun), by <slug>@<model>, when the sheet had any.
+  if (file.runs !== undefined) {
+    if (typeof file.runs !== 'object' || file.runs === null || Array.isArray(file.runs)) problems.push('its runs are not decisions by run');
+    else for (const [key, made] of Object.entries(file.runs)) check(key, made);
   }
   return problems;
 }

@@ -1,0 +1,19 @@
+{
+  "about": [
+    "Exceptions to how `rerun` carries a recipe's first run's parameters to another model.",
+    "By default a parameter is kept only where the catalogue (GET /v1/models) says the model",
+    "takes it: a size it lists, or its default size; a count up to its max_n (1 when it states",
+    "none); a clip length it lists, or its default length. Anything else is left out, and the",
+    "plan says what and why. A video always states its seconds: the model's default when the",
+    "first run's cannot be kept.",
+    "allow: values a model is confirmed to take beyond what the catalogue lists,",
+    "  { \"<model>\": { \"<param>\": [<value>, ...] } }",
+    "map: a value to send instead of another, for one model,",
+    "  { \"<model>\": { \"<param>\": { \"<value as text>\": <value to send> } } }",
+    "Add an entry only when the provider's own documentation confirms it, with that page",
+    "named in the commit. None is seeded yet: the catalogue lists sizes for gpt-image-1.5",
+    "only, and clip lengths for no video model."
+  ],
+  "allow": {},
+  "map": {}
+}
