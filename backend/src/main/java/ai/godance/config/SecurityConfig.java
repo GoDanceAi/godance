@@ -261,6 +261,10 @@ public class SecurityConfig {
                         // Price of an image or video request before it is sent; charges nothing.
                         .pathMatchers(HttpMethod.POST, "/v1/estimates")
                                 .hasAnyAuthority(sessionOr(ApiKeyAuthFilter.API_KEY_AUTHORITY))
+                        // A user's own routing policies (round 14): the owner, with a session or
+                        // an API key, as recipes are. Answers 404 while they are switched off.
+                        .pathMatchers("/v1/routing/policies", "/v1/routing/policies/*")
+                                .hasAnyAuthority(sessionOr(ApiKeyAuthFilter.API_KEY_AUTHORITY))
                         // The MCP server (round 13): the API above as tools for an agent's MCP client.
                         // An API key only: never public, and a browser session cannot call it.
                         .pathMatchers("/mcp").hasAuthority(ApiKeyAuthFilter.API_KEY_AUTHORITY)

@@ -89,14 +89,24 @@ public class ChatCompletionService {
     }
 
     public ChatResponse execute(UUID userId, UUID apiKeyId, ChatRequest request) {
+        return execute(userId, apiKeyId, request, null);
+    }
+
+    /**
+     * {@code routeHint} is the caller's {@code X-Godance-Route} header or
+     * {@code route_hint} field (round 4's Phase 3), or null: the rules of a
+     * routing policy may match on it. A direct model call ignores it.
+     */
+    public ChatResponse execute(UUID userId, UUID apiKeyId, ChatRequest request, String routeHint) {
         String requestId = "req_" + UUID.randomUUID().toString().replace("-", "").substring(0, 24);
 
         int estimatedInputTokens = estimateInputTokens(request.messages());
 
-        // Resolve routing first: a virtual id (godance-auto/...) becomes an
-        // ordered list of concrete candidates; a direct model call is an
-        // unchanged passthrough of [model] + fallbacksFor(model).
-        ResolvedRoute route = routeResolver.resolve(request, estimatedInputTokens, gateway.region());
+        // Resolve routing first: a virtual id (godance-auto/..., or the caller's
+        // own policy) becomes an ordered list of concrete candidates; a direct
+        // model call is an unchanged passthrough of [model] + fallbacksFor(model).
+        ResolvedRoute route = routeResolver.resolve(userId, request, routeHint, estimatedInputTokens,
+                gateway.region());
         List<String> attemptModels = new ArrayList<>(route.orderedCandidates());
         logRoutingDecision(requestId, route, attemptModels);
 
@@ -447,12 +457,18 @@ public class ChatCompletionService {
      * error ends the stream rather than splicing in a second model's output.
      */
     public Flux<ChatChunk> executeStreaming(UUID userId, UUID apiKeyId, ChatRequest request) {
+        return executeStreaming(userId, apiKeyId, request, null);
+    }
+
+    /** {@link #executeStreaming(UUID, UUID, ChatRequest)} with the caller's route hint, as {@link #execute} takes it. */
+    public Flux<ChatChunk> executeStreaming(UUID userId, UUID apiKeyId, ChatRequest request, String routeHint) {
         String requestId = "req_" + UUID.randomUUID().toString().replace("-", "").substring(0, 24);
 
         int estimatedInputTokens = estimateInputTokens(request.messages());
 
         // Resolve routing first (same as execute()).
-        ResolvedRoute route = routeResolver.resolve(request, estimatedInputTokens, gateway.region());
+        ResolvedRoute route = routeResolver.resolve(userId, request, routeHint, estimatedInputTokens,
+                gateway.region());
         List<String> attemptModels = new ArrayList<>(route.orderedCandidates());
         logRoutingDecision(requestId, route, attemptModels);
 

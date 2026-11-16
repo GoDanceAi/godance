@@ -18,3 +18,28 @@ COMMENT ON COLUMN usage_records.routed_rule IS
 -- The margin view reads routed rows by time range.
 CREATE INDEX ix_usage_records_routed_recorded ON usage_records (recorded_at)
     WHERE routed_policy IS NOT NULL;
+
+-- Round 4's Phase 3: a user's own routing policies (design §6), offered only
+-- while godance.routing.user-policies.enabled is on. The policy itself is one
+-- validated JSON document; nothing queries inside it, so its rule schema can
+-- grow without a migration. The id is the user's name for it, kept apart from
+-- every other account's by the owner: usr_<user id>:<name>.
+CREATE TABLE routing_policies (
+    id          VARCHAR(128) PRIMARY KEY,
+    user_id     UUID         NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name        VARCHAR(63)  NOT NULL,
+    modality    VARCHAR(16)  NOT NULL,
+    enabled     BOOLEAN      NOT NULL DEFAULT TRUE,
+    policy_json JSONB        NOT NULL,
+    created_at  TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    CONSTRAINT uq_routing_policies_user_name UNIQUE (user_id, name),
+    CONSTRAINT ck_routing_policies_id CHECK (id = 'usr_' || user_id::text || ':' || name),
+    CONSTRAINT ck_routing_policies_name CHECK (name ~ '^[a-z0-9][a-z0-9._-]{0,62}$')
+);
+
+-- Round 14's addition to the design: a batch that opts in with "fallbacks": true
+-- retries a row once on another model when its job fails on a provider error
+-- or a timeout, following the fallback rules of its owner's policies.
+ALTER TABLE recipe_batches
+    ADD COLUMN fallbacks BOOLEAN NOT NULL DEFAULT FALSE;
