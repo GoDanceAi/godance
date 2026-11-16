@@ -54,9 +54,15 @@ client = OpenAI(base_url="https://api.godance.ai/v1", api_key=os.environ["GODANC
 print([model.id for model in client.models.list().data][:5])
 ```
 
-Each key has one setting, `image_response`: `async` (image requests answer with a job) or
+Each key has a setting, `image_response`: `async` (image requests answer with a job) or
 `sync` (image requests wait and answer with the images). See Images. It is chosen when the
 key is created and can be changed in the app.
+
+A key can also have a daily and a monthly spending cap, counted in UTC days and months,
+and an expiry. Its owner sets them in the app when the key is made, and can change them
+there at any time. A request that would take the key past a cap answers 402 without a
+`code` (topping up does not lift it; the cap's next day or month does), and an expired key
+answers 401. A script handed a capped key should stop on 402, not retry.
 
 ## Models and capabilities
 

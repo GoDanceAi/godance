@@ -1,5 +1,6 @@
+import type { Page } from '@playwright/test';
 import type { ApiKeySummary } from '../src/lib/api';
-import { expect, problem, test } from './mock-api';
+import { expect, FAKE_KEY, makeKey, problem, serveKeys, test, type MockApi } from './mock-api';
 
 // Not a real key: the format only has to look like what the API returns.
 const PLAINTEXT = 'gd_live_e2e0fake0plaintext0shown0once';
@@ -168,5 +169,279 @@ test.describe("a key's image responses", () => {
 
     await expect(page.getByRole('row', { name: /production backend/ })).toBeVisible();
     await expect(page.getByLabel('Image responses for production backend')).toHaveCount(0);
+  });
+});
+
+// Round 12 brief 03: a key's owner caps what it may spend and says when it stops working.
+
+const row = (page: Page, name: string | RegExp) => page.getByRole('row', { name });
+const limits = (page: Page) => page.getByRole('dialog');
+
+/** The keys page over `keys`, served to the round 12 contract. */
+async function openKeys(page: Page, api: MockApi, keys: ApiKeySummary[], path = '/keys') {
+  await api.signIn();
+  serveKeys(api, keys);
+  await page.goto(path);
+  await expect(page.getByRole('heading', { level: 1, name: 'API keys' })).toBeVisible();
+}
+
+test.describe('a capped key', () => {
+  test('is created with a daily cap and an expiry, and shown once', async ({ page, api }) => {
+    const keys: ApiKeySummary[] = [];
+    await openKeys(page, api, keys);
+
+    await page.getByLabel('Key name').fill('nightly script');
+    await page.getByLabel('Daily cap (USD)').fill('2.50');
+    await page.getByLabel(/^Expires/).fill('2031-06-30');
+    await page.getByRole('button', { name: 'Create key' }).click();
+
+    const shown = page.getByRole('status', { name: 'New API key' });
+    await expect(shown).toContainText('Key created: nightly script');
+    await expect(shown).toContainText(FAKE_KEY);
+    await expect(shown).toContainText('Set it as GODANCE_API_KEY');
+    await expect(shown).toContainText('It can spend up to $2.50 a day.');
+    await expect(shown).toContainText('It stops working after Jun 30, 2031.');
+    const body = api.callsTo('POST', '/v1/keys')[0].body as { name: string; daily_cap_cents: number; expires_at: string };
+    expect(body).toEqual({ name: 'nightly script', daily_cap_cents: 250, expires_at: body.expires_at });
+    expect(Date.parse(body.expires_at)).toBeGreaterThan(Date.parse('2031-06-30T00:00:00Z'));
+
+    // The list shows its cap with nothing spent, and its expiry.
+    await expect(row(page, /nightly script/)).toContainText('Today $0.00 of $2.50');
+    await expect(row(page, /nightly script/)).toContainText('This month $0.00 · no cap');
+    await expect(row(page, /nightly script/)).toContainText('Jun 30, 2031');
+    // The form is empty again for the next key.
+    await expect(page.getByLabel('Key name')).toHaveValue('');
+    await expect(page.getByLabel('Daily cap (USD)')).toHaveValue('');
+
+    // Shown once: dismissed, the key is nowhere on the page, and a reload does not bring it back.
+    await shown.getByRole('button', { name: "I've saved it — dismiss" }).click();
+    await expect(page.getByText(FAKE_KEY)).toHaveCount(0);
+    await page.reload();
+    await expect(row(page, /nightly script/)).toBeVisible();
+    await expect(page.getByText(FAKE_KEY)).toHaveCount(0);
+    await expect(page.getByRole('status', { name: 'New API key' })).toHaveCount(0);
+  });
+
+  test('a cap that is not an amount is refused before any request', async ({ page, api }) => {
+    await openKeys(page, api, []);
+
+    await page.getByLabel('Key name').fill('typo');
+    await page.getByLabel('Daily cap (USD)').fill('2,50');
+    await page.getByRole('button', { name: 'Create key' }).click();
+
+    await expect(page.getByRole('alert')).toHaveText('Enter an amount in dollars, such as 5.00, or leave it empty for no cap.');
+    expect(api.callsTo('POST', '/v1/keys')).toHaveLength(0);
+
+    // Corrected, it goes through.
+    await page.getByLabel('Daily cap (USD)').fill('$2.5');
+    await page.getByRole('button', { name: 'Create key' }).click();
+    await expect(page.getByRole('status', { name: 'New API key' })).toContainText('It can spend up to $2.50 a day.');
+    expect(api.callsTo('POST', '/v1/keys')[0].body).toEqual({ name: 'typo', daily_cap_cents: 250 });
+  });
+
+  test('"Create a key for this": the page opens with the recipe\'s name and a 5.00 daily cap', async ({ page, api }) => {
+    const keys: ApiKeySummary[] = [];
+    await openKeys(page, api, keys, `/keys?for=${encodeURIComponent('Mug on a kitchen shelf')}`);
+
+    await expect(page.getByText('A key for “Mug on a kitchen shelf”')).toBeVisible();
+    await expect(page.getByLabel('Key name')).toHaveValue('Mug on a kitchen shelf');
+    await expect(page.getByLabel('Daily cap (USD)')).toHaveValue('5.00');
+
+    // Here the key can also be set to answer image requests synchronously.
+    await page.getByLabel('Image responses for the new key').selectOption('sync');
+    await page.getByRole('button', { name: 'Create a key for this' }).click();
+
+    const shown = page.getByRole('status', { name: 'New API key' });
+    await expect(shown).toContainText('Key created: Mug on a kitchen shelf');
+    await expect(shown).toContainText('Set it as GODANCE_API_KEY');
+    expect(api.callsTo('POST', '/v1/keys')[0].body).toEqual(
+      { name: 'Mug on a kitchen shelf', image_response: 'sync', daily_cap_cents: 500 });
+    await expect(page.getByLabel('Image responses for Mug on a kitchen shelf')).toHaveValue('sync');
+    await expect(row(page, /Mug on a kitchen shelf/)).toContainText('Today $0.00 of $5.00');
+  });
+});
+
+test.describe("a key's caps and spend", () => {
+  /** Three keys: one well inside its caps, one that has reached its daily cap, one that expired. */
+  const three = () => [
+    makeKey({
+      name: 'mug recipe', daily_cap_cents: 500, spent_today_cents: 120, monthly_cap_cents: 5000, spent_month_cents: 4310,
+      expires_at: '2031-03-31T12:00:00Z',
+    }),
+    makeKey({
+      id: 'key-2', name: 'notebook', prefix: 'e2e0sync', image_response: 'sync',
+      daily_cap_cents: 200, spent_today_cents: 200, spent_month_cents: 940,
+    }),
+    makeKey({ id: 'key-3', name: 'old script', prefix: 'e2e0gone', expires_at: '2026-01-15T12:00:00Z' }),
+  ];
+
+  test('each key shows what it spent today and this month against its caps, and when it expires', async ({ page, api }) => {
+    await openKeys(page, api, three());
+
+    const mug = row(page, /mug recipe/);
+    await expect(mug).toContainText('Today $1.20 of $5.00');
+    await expect(mug).toContainText('This month $43.10 of $50.00');
+    await expect(mug).toContainText('Mar 31, 2031');
+    await expect(mug.getByText('Expired')).toHaveCount(0);
+
+    // At its daily cap: it says so. No monthly cap: it says that too.
+    const notebook = row(page, /notebook/);
+    await expect(notebook).toContainText('Today $2.00 of $2.00 · cap reached');
+    await expect(notebook).toContainText('This month $9.40 · no cap');
+    await expect(notebook).toContainText('Never');
+    // Round 10's setting is still there for each key.
+    await expect(page.getByLabel('Image responses for notebook')).toHaveValue('sync');
+    await expect(page.getByLabel('Image responses for mug recipe')).toHaveValue('async');
+
+    const old = row(page, /old script/);
+    await expect(old).toContainText('Today $0.00 · no cap');
+    await expect(old.getByText('Expired')).toBeVisible();
+    await expect(old).toContainText('Jan 15, 2026');
+
+    // The wider table scrolls inside its card: the page does not move sideways, phone included.
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  });
+
+  test('the limits are changed in a dialog that sends only what changed', async ({ page, api }) => {
+    const keys = three();
+    await openKeys(page, api, keys);
+
+    await page.getByRole('button', { name: 'Edit limits for mug recipe' }).click();
+    await expect(limits(page).getByRole('heading', { name: 'Limits for mug recipe' })).toBeVisible();
+    // It opens with the key's limits as they are, and says what it has spent.
+    await expect(limits(page)).toContainText('it has spent $1.20 today and $43.10 this month');
+    await expect(limits(page).getByLabel('Daily cap (USD)')).toHaveValue('5.00');
+    await expect(limits(page).getByLabel('Monthly cap (USD)')).toHaveValue('50.00');
+    await expect(limits(page).getByLabel('Expires')).not.toHaveValue('');
+
+    // Only the daily cap changes.
+    await limits(page).getByLabel('Daily cap (USD)').fill('7.5');
+    await limits(page).getByRole('button', { name: 'Save limits' }).click();
+
+    await expect(limits(page)).toHaveCount(0);
+    expect(api.callsTo('PATCH', '/v1/keys/key-1').map((call) => call.body)).toEqual([{ daily_cap_cents: 750 }]);
+    await expect(row(page, /mug recipe/)).toContainText('Today $1.20 of $7.50');
+    // The rest is as it was, and a reload shows the same.
+    await expect(row(page, /mug recipe/)).toContainText('This month $43.10 of $50.00');
+    expect(keys[0].expires_at).toBe('2031-03-31T12:00:00Z');
+    await page.reload();
+    await expect(row(page, /mug recipe/)).toContainText('Today $1.20 of $7.50');
+  });
+
+  test('an emptied cap and an emptied expiry are cleared, and a new expiry is the end of its day', async ({ page, api }) => {
+    const keys = three();
+    await openKeys(page, api, keys);
+
+    await page.getByRole('button', { name: 'Edit limits for mug recipe' }).click();
+    await limits(page).getByLabel('Monthly cap (USD)').fill('');
+    await limits(page).getByLabel('Expires').fill('');
+    await limits(page).getByRole('button', { name: 'Save limits' }).click();
+
+    await expect(limits(page)).toHaveCount(0);
+    expect(api.callsTo('PATCH', '/v1/keys/key-1')[0].body).toEqual({ monthly_cap_cents: null, expires_at: null });
+    await expect(row(page, /mug recipe/)).toContainText('This month $43.10 · no cap');
+    await expect(row(page, /mug recipe/)).toContainText('Never');
+
+    // A key without limits gets both caps and an expiry.
+    await page.getByRole('button', { name: 'Edit limits for old script' }).click();
+    await limits(page).getByLabel('Daily cap (USD)').fill('1');
+    await limits(page).getByLabel('Monthly cap (USD)').fill('20.00');
+    await limits(page).getByLabel('Expires').fill('2032-02-29');
+    await limits(page).getByRole('button', { name: 'Save limits' }).click();
+
+    await expect(limits(page)).toHaveCount(0);
+    const sent = api.callsTo('PATCH', '/v1/keys/key-3')[0].body as { daily_cap_cents: number; monthly_cap_cents: number; expires_at: string };
+    expect(sent).toEqual({ daily_cap_cents: 100, monthly_cap_cents: 2000, expires_at: sent.expires_at });
+    expect(await page.evaluate((iso) => {
+      const at = new Date(iso);
+      return [at.getFullYear(), at.getMonth() + 1, at.getDate(), at.getHours(), at.getMinutes(), at.getSeconds()];
+    }, sent.expires_at)).toEqual([2032, 2, 29, 23, 59, 59]);
+    const old = row(page, /old script/);
+    await expect(old).toContainText('Today $0.00 of $1.00');
+    await expect(old).toContainText('Feb 29, 2032');
+    // It works again: no longer shown as expired.
+    await expect(old.getByText('Expired')).toHaveCount(0);
+  });
+
+  test('nothing changed sends nothing, and Cancel and Escape close the dialog', async ({ page, api }) => {
+    await openKeys(page, api, three());
+
+    await page.getByRole('button', { name: 'Edit limits for notebook' }).click();
+    await limits(page).getByRole('button', { name: 'Save limits' }).click();
+    await expect(limits(page)).toHaveCount(0);
+
+    await page.getByRole('button', { name: 'Edit limits for notebook' }).click();
+    await limits(page).getByLabel('Daily cap (USD)').fill('9');
+    await limits(page).getByRole('button', { name: 'Cancel' }).click();
+    await expect(limits(page)).toHaveCount(0);
+
+    await page.getByRole('button', { name: 'Edit limits for notebook' }).click();
+    // What was typed and cancelled is not kept: the dialog opens with the key's own cap.
+    await expect(limits(page).getByLabel('Daily cap (USD)')).toHaveValue('2.00');
+    await page.keyboard.press('Escape');
+    await expect(limits(page)).toHaveCount(0);
+
+    expect(api.callsTo('PATCH', /^\/v1\/keys\//)).toHaveLength(0);
+    await expect(row(page, /notebook/)).toContainText('Today $2.00 of $2.00');
+  });
+
+  test('a cap that is not an amount, or a day already gone, keeps the dialog open and sends nothing', async ({ page, api }) => {
+    await openKeys(page, api, three());
+
+    await page.getByRole('button', { name: 'Edit limits for mug recipe' }).click();
+    await limits(page).getByLabel('Monthly cap (USD)').fill('lots');
+    await limits(page).getByRole('button', { name: 'Save limits' }).click();
+    await expect(limits(page).getByRole('alert')).toHaveText('Enter an amount in dollars, such as 5.00, or leave it empty for no cap.');
+
+    await limits(page).getByLabel('Monthly cap (USD)').fill('60');
+    await limits(page).getByLabel('Expires').fill('2021-05-05');
+    await limits(page).getByRole('button', { name: 'Save limits' }).click();
+    await expect(limits(page).getByRole('alert')).toHaveText('Pick a day from today on, or leave it empty for a key that does not expire.');
+
+    expect(api.callsTo('PATCH', /^\/v1\/keys\//)).toHaveLength(0);
+    await expect(limits(page)).toBeVisible();
+  });
+
+  test('a change the API refuses says why in the dialog, and the key stays as it was', async ({ page, api }) => {
+    await openKeys(page, api, three());
+    api.on('PATCH', '/v1/keys/key-1', problem(400, 'expires_at must be in the future'));
+
+    await page.getByRole('button', { name: 'Edit limits for mug recipe' }).click();
+    await limits(page).getByLabel('Daily cap (USD)').fill('8');
+    await limits(page).getByRole('button', { name: 'Save limits' }).click();
+
+    await expect(limits(page).getByRole('alert')).toHaveText('expires_at must be in the future');
+    await expect(limits(page).getByRole('button', { name: 'Save limits' })).toBeEnabled();
+    await page.keyboard.press('Escape');
+    await expect(row(page, /mug recipe/)).toContainText('Today $1.20 of $5.00');
+  });
+
+  test('an expired key keeps its expiry when only a cap is changed', async ({ page, api }) => {
+    const keys = three();
+    await openKeys(page, api, keys);
+
+    await page.getByRole('button', { name: 'Edit limits for old script' }).click();
+    await limits(page).getByLabel('Daily cap (USD)').fill('3');
+    await limits(page).getByRole('button', { name: 'Save limits' }).click();
+
+    await expect(limits(page)).toHaveCount(0);
+    // The day in the past was left alone, so it is not sent, and not refused.
+    expect(api.callsTo('PATCH', '/v1/keys/key-3')[0].body).toEqual({ daily_cap_cents: 300 });
+    await expect(row(page, /old script/).getByText('Expired')).toBeVisible();
+  });
+
+  test('a key from an API without caps shows no spend and nothing to edit', async ({ page, api }) => {
+    await api.signIn();
+    api.on('GET', '/v1/keys', { json: [key()] });
+
+    await page.goto('/keys');
+
+    const older = row(page, /production backend/);
+    await expect(older).toBeVisible();
+    await expect(older).not.toContainText('Today');
+    await expect(page.getByRole('button', { name: /Edit limits/ })).toHaveCount(0);
+    // What it always showed is still there.
+    await expect(page.getByLabel('Image responses for production backend')).toHaveValue('async');
+    await expect(older.getByRole('button', { name: 'Revoke' })).toBeVisible();
   });
 });

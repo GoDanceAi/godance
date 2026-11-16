@@ -9,6 +9,7 @@ import ApiCall from '../../components/gallery/ApiCall.astro';
 import PromptBlock from '../../components/gallery/PromptBlock.astro';
 import RecipeCard from '../../components/gallery/RecipeCard.astro';
 import RecipeInputs from '../../components/gallery/RecipeInputs.astro';
+import RunAtScale from '../../components/gallery/RunAtScale.astro';
 import RunOutput from '../../components/gallery/RunOutput.astro';
 import TemplateBlock from '../../components/gallery/TemplateBlock.astro';
 import { slotsOf } from '../../components/gallery/inputs';
@@ -295,6 +296,9 @@ const linkStyle = 'color: var(--color-primary)';
       )}
       <ApiCall {recipe} run={firstRun} {mediaBase} idPrefix="run-0" />
     </section>
+
+    <!-- ===== Run at scale: an assistant prompt, code, n8n ===== -->
+    <RunAtScale {recipe} run={firstRun} {getKeyUrl} />
 
     <!-- ===== More runs of the same prompt ===== -->
     {otherRuns.length > 0 && (

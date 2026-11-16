@@ -219,6 +219,7 @@ class ApiKeyAuthIntegrationTest {
     @CsvSource({
             "POST,   /v1/keys",
             "GET,    /v1/keys",
+            "PATCH,  /v1/keys/00000000-0000-0000-0000-000000000000",
             "DELETE, /v1/keys/00000000-0000-0000-0000-000000000000",
             "GET,    /v1/webhooks/secret",
             "POST,   /v1/webhooks/secret/rotate",

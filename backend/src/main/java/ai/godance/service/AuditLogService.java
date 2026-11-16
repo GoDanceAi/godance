@@ -51,6 +51,12 @@ public class AuditLogService {
     public static final String EVT_API_KEY_DELETED    = "apikey.deleted";
     /** A key's setting was changed; the detail names the field and its new value. */
     public static final String EVT_API_KEY_UPDATED    = "apikey.updated";
+    /**
+     * A key's owner changed its daily cap, its monthly cap or its expiry
+     * (round 12); the detail holds the three values before and after, under
+     * {@code old} and {@code new}.
+     */
+    public static final String EVT_API_KEY_CAPS_CHANGED = "api_key.caps_changed";
     public static final String EVT_BILLING_TOPUP_INTENT      = "billing.topup.intent";
     public static final String EVT_BILLING_TOPUP_SUCCEEDED   = "billing.topup.succeeded";
     public static final String EVT_BILLING_TOPUP_DUPLICATE   = "billing.topup.duplicate";

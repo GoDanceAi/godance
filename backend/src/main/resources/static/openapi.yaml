@@ -1087,6 +1087,11 @@ paths:
       operationId: createApiKey
       tags: [API keys]
       summary: Create an API key. The key itself is returned once.
+      description: |
+        `daily_cap_cents` and `monthly_cap_cents` are the most the key may
+        spend in a UTC day and a UTC month, and `expires_at` is when it stops
+        working. Left out or null, there is none. A request that would pass a
+        cap answers 402; one with an expired key answers 401.
       security: [{ session: [] }]
       requestBody:
         required: true
@@ -1119,7 +1124,11 @@ paths:
     patch:
       operationId: updateApiKey
       tags: [API keys]
-      summary: Change how image requests made with a key answer.
+      summary: Change a key's image responses, spending caps or expiry.
+      description: |
+        Send only what changes, at least one field. A field left out stays as
+        it is, and null clears a cap or the expiry. A changed cap or expiry is
+        recorded in the audit log as `api_key.caps_changed`.
       security: [{ session: [] }]
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -2569,10 +2578,17 @@ components:
         name: { type: string, maxLength: 255 }
         scopes: { type: array, items: { type: string } }
         image_response: { type: string, enum: [async, sync] }
+        daily_cap_cents: { type: [integer, "null"], minimum: 1, description: "The most the key may spend in a UTC day, in cents. Null for no cap." }
+        monthly_cap_cents: { type: [integer, "null"], minimum: 1, description: "The most the key may spend in a UTC month, in cents. Null for no cap." }
+        expires_at: { type: [string, "null"], format: date-time, description: "When the key stops working: in the future. Null for never." }
     ApiKeyUpdateRequest:
       type: object
+      description: At least one field. One left out stays as it is; null clears a cap or the expiry.
       properties:
         image_response: { type: string, enum: [async, sync] }
+        daily_cap_cents: { type: [integer, "null"], minimum: 1, description: "The most the key may spend in a UTC day, in cents. Null for no cap." }
+        monthly_cap_cents: { type: [integer, "null"], minimum: 1, description: "The most the key may spend in a UTC month, in cents. Null for no cap." }
+        expires_at: { type: [string, "null"], format: date-time, description: "When the key stops working: in the future. Null for never." }
     ApiKeyCreated:
       type: object
       properties:
@@ -2582,6 +2598,9 @@ components:
         plaintext: { type: string, description: The key itself. Returned only this once. }
         createdAt: { type: string, format: date-time }
         image_response: { type: string, enum: [async, sync] }
+        daily_cap_cents: { type: [integer, "null"] }
+        monthly_cap_cents: { type: [integer, "null"] }
+        expires_at: { type: [string, "null"], format: date-time }
     ApiKey:
       type: object
       properties:
@@ -2593,7 +2612,12 @@ components:
         createdAt: { type: string, format: date-time }
         lastUsedAt: { type: [string, "null"], format: date-time }
         expiresAt: { type: [string, "null"], format: date-time }
+        expires_at: { type: [string, "null"], format: date-time, description: "The same as `expiresAt`, under the name the requests use." }
         image_response: { type: string, enum: [async, sync] }
+        daily_cap_cents: { type: [integer, "null"], description: Null for no cap. }
+        monthly_cap_cents: { type: [integer, "null"], description: Null for no cap. }
+        spent_today_cents: { type: integer, description: "What the key has spent in the current UTC day, as its cap counts it." }
+        spent_month_cents: { type: integer, description: "What the key has spent in the current UTC month, as its cap counts it." }
     SignupRequest:
       type: object
       required: [email, password, fullName]
