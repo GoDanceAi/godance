@@ -1,0 +1,145 @@
+# =====================================================================
+# Godance — self-hosted stack. The guide is docs/self-hosting.md.
+#
+#   cd deploy/self-host
+#   cp .env.example .env        # then fill it in, see the guide
+#   docker compose build api && docker compose build web && docker compose build minio
+#   docker compose up -d
+#
+# This file is the core: Caddy (TLS, the app, the API), the API, Postgres,
+# Redis, and a one-shot check of .env. docker-compose.minio.yml adds the
+# bundled MinIO for object storage. .env picks the files with COMPOSE_FILE:
+# both by default, this one alone when the API uses external S3-compatible
+# storage.
+#
+# Adapted from the operator's production stack (backend/deploy/
+# docker-compose.prod.yml, which this does not change): same images for
+# Postgres, Redis and Caddy, the same backend Dockerfile, the same log caps.
+# The differences are that the API is built here rather than pulled, the
+# app is built into the Caddy image, and Postgres and Redis sit on a
+# network with no route out.
+# =====================================================================
+
+name: godance
+
+# Copied from backend/deploy/docker-compose.prod.yml: each service keeps at
+# most 5 x 50 MB of logs.
+x-logging: &bounded-logs
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "5"
+
+services:
+  # Refuses to let the API start while .env still holds a placeholder or an
+  # unusable value. It prints every problem it finds, then exits.
+  preflight:
+    image: alpine:3.22
+    env_file: .env
+    volumes:
+      - ./preflight.sh:/preflight.sh:ro
+    command: ["sh", "/preflight.sh"]
+    network_mode: none
+    restart: "no"
+
+  web:
+    # Caddy with the app's static build in /srv/app. GODANCE_URL is built
+    # into the app as the API's address: rebuild this image after changing it.
+    build:
+      context: ../../app
+      dockerfile: ../deploy/self-host/web.Dockerfile
+      args:
+        GODANCE_URL: ${GODANCE_URL}
+        VITE_GALLERY_URL: ${VITE_GALLERY_URL}
+        GIT_SHA: ${GIT_SHA}
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT}:${HTTP_PORT}"
+      - "${HTTPS_PORT}:${HTTPS_PORT}"
+      - "${HTTPS_PORT}:${HTTPS_PORT}/udp"     # HTTP/3
+    environment:
+      GODANCE_URL: ${GODANCE_URL}
+      ACME_EMAIL: ${ACME_EMAIL}
+      HTTP_PORT: ${HTTP_PORT}
+      HTTPS_PORT: ${HTTPS_PORT}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data         # certificates and the ACME account: keep it
+      - caddy_config:/config
+    networks: [edge]
+    logging: *bounded-logs
+
+  api:
+    # The production image: backend/deploy/Dockerfile, built from backend/.
+    build:
+      context: ../../backend
+      dockerfile: deploy/Dockerfile
+      args:
+        GIT_SHA: ${GIT_SHA}
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Fixed by this stack, or derived from GODANCE_URL. These win over the
+      # same names in .env.
+      DATABASE_URL: jdbc:postgresql://postgres:5432/godance
+      REDIS_HOST: redis
+      CORS_ALLOWED_ORIGINS: ${GODANCE_URL}
+      APP_BASE_URL: ${GODANCE_URL}
+      JWT_ISSUER: ${GODANCE_URL}
+      OAUTH_POST_LOGIN_REDIRECT_URI: ${GODANCE_URL}/oauth/callback
+      STRIPE_SUCCESS_URL: ${GODANCE_URL}/dashboard?topup=success
+      STRIPE_CANCEL_URL: ${GODANCE_URL}/dashboard?topup=cancel
+      NOWPAYMENTS_SUCCESS_URL: ${GODANCE_URL}/dashboard?topup=success
+      NOWPAYMENTS_CANCEL_URL: ${GODANCE_URL}/dashboard?topup=cancel
+    depends_on:
+      preflight:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks: [edge, data]
+    logging: *bounded-logs
+    # No published port: only Caddy reaches the API.
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: godance
+      POSTGRES_USER: ${DATABASE_USERNAME}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DATABASE_USERNAME} -d godance"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks: [data]
+    logging: *bounded-logs
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks: [data]
+    logging: *bounded-logs
+
+volumes:
+  postgres_data:    # every account, the ledger, every job: back this up
+  redis_data:       # rate-limit counters and caches: losing it costs little
+  caddy_data:
+  caddy_config:
+
+networks:
+  edge:             # Caddy and the API; the API reaches providers from here
+  data:             # Postgres and Redis, with no route out
+    internal: true
