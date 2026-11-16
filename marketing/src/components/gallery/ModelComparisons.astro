@@ -24,9 +24,7 @@ const linkStyle = 'color: var(--color-primary)';
     <ul class="mt-2 flex flex-wrap gap-x-6 gap-y-1 text-sm">
       {theirs.map((each) => (
         <li>
-          <a href={comparePath(each.a, each.b)} class:list={['font-mono', link]} style={linkStyle}>
-            {model} vs {each.a === model ? each.b : each.a}
-          </a>
+          <a href={comparePath(each.a, each.b)} class:list={['font-mono', link]} style={linkStyle}>{`${model} vs ${each.a === model ? each.b : each.a}`}</a>
           <span class="text-fg-muted"> · {each.recipes.length} recipes</span>
         </li>
       ))}
