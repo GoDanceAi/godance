@@ -338,8 +338,14 @@ final class ConfigurationReference {
     private static void collectYaml(Map<String, Setting> settings, Path file, boolean base) throws IOException {
         Map<String, Object> flat = new TreeMap<>();
         try (Reader reader = Files.newBufferedReader(file)) {
-            Object first = new org.yaml.snakeyaml.Yaml().loadAll(reader).iterator().next();
-            flatten("", first, flat);
+            // Every document of the file: a later one (a profile's, such as the
+            // "!test" one that production runs with) can hold placeholders too.
+            // A key the first document sets keeps the first document's value.
+            for (Object document : new org.yaml.snakeyaml.Yaml().loadAll(reader)) {
+                Map<String, Object> one = new TreeMap<>();
+                flatten("", document, one);
+                one.forEach(flat::putIfAbsent);
+            }
         }
         List<String> mapPatterns = settings.keySet().stream()
                 .filter(n -> n.endsWith(".*")).map(n -> n.substring(0, n.length() - 1)).toList();
