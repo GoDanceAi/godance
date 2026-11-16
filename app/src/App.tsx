@@ -28,6 +28,7 @@ import ApiKeysPage from './pages/ApiKeysPage';
 import BillingPage from './pages/BillingPage';
 import SettingsPage from './pages/SettingsPage';
 import ReferralPage from './pages/ReferralPage';
+import FollowingPage from './pages/FollowingPage';
 import AdminLayout from './pages/admin/AdminLayout';
 import ProposalsPage from './pages/admin/ProposalsPage';
 import CatalogPage from './pages/admin/CatalogPage';
@@ -77,6 +78,8 @@ export default function App() {
           <Route path="/settings"  element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
           {/* Only while referrals are on; otherwise it leads back to the dashboard. */}
           <Route path="/referral"  element={<ProtectedRoute><ReferralPage /></ProtectedRoute>} />
+          {/* The community (round 14): only while the API has it open; otherwise they lead back to the dashboard. */}
+          <Route path="/following" element={<ProtectedRoute><FollowingPage /></ProtectedRoute>} />
 
           {/* Admin console — nav + routes render only after /v1/admin/me
               returns 200; the server-side role gate stays the real one. */}
