@@ -29,6 +29,7 @@ import BillingPage from './pages/BillingPage';
 import SettingsPage from './pages/SettingsPage';
 import ReferralPage from './pages/ReferralPage';
 import FollowingPage from './pages/FollowingPage';
+import ReportPage from './pages/ReportPage';
 import AdminLayout from './pages/admin/AdminLayout';
 import ProposalsPage from './pages/admin/ProposalsPage';
 import CatalogPage from './pages/admin/CatalogPage';
@@ -80,6 +81,7 @@ export default function App() {
           <Route path="/referral"  element={<ProtectedRoute><ReferralPage /></ProtectedRoute>} />
           {/* The community (round 14): only while the API has it open; otherwise they lead back to the dashboard. */}
           <Route path="/following" element={<ProtectedRoute><FollowingPage /></ProtectedRoute>} />
+          <Route path="/report"    element={<ProtectedRoute><ReportPage /></ProtectedRoute>} />
 
           {/* Admin console — nav + routes render only after /v1/admin/me
               returns 200; the server-side role gate stays the real one. */}
