@@ -1,0 +1,100 @@
+# Self-host packaging — checks deploy/self-host/ (guide: docs/self-hosting.md).
+#
+#   compose   docker compose config, with .env.example as .env, for both ways
+#             the stack is put together: with the bundled MinIO and without
+#   env       .env.example defines every variable the compose files and Caddy
+#             read, and every variable the API's prod profile cannot start
+#             without (deploy/self-host/check-env.py)
+#   caddy     Caddy accepts the configuration, on a server (HTTPS) and on a
+#             trial machine (plain HTTP), with and without the files host
+#   preflight the .env check refuses the example's placeholders and accepts a
+#             filled-in file
+#
+# Runs when the packaging, the guide or the API's YAML configuration changes.
+# Builds nothing and needs no secrets. The configuration reference in the
+# guide has its own check, ConfigurationReferenceTest, in ci.yml's backend
+# job, since any change to the backend's settings can make it stale.
+
+name: Self-host packaging
+
+on:
+  pull_request:
+    paths:
+      - 'deploy/self-host/**'
+      - 'docs/self-hosting.md'
+      - 'backend/src/main/resources/application*.yml'
+      - 'backend/deploy/Dockerfile'
+      - 'backend/dev/minio/Dockerfile'
+      - '.github/workflows/self-host.yml'
+  push:
+    branches-ignore: [main]
+    paths:
+      - 'deploy/self-host/**'
+      - 'docs/self-hosting.md'
+      - 'backend/src/main/resources/application*.yml'
+      - 'backend/deploy/Dockerfile'
+      - 'backend/dev/minio/Dockerfile'
+      - '.github/workflows/self-host.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: self-host-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compose:
+    name: self-host (compose check)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: deploy/self-host
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: docker compose config
+        run: |
+          cp .env.example .env
+          echo "bundled MinIO:";    docker compose config --services
+          docker compose config -q
+          echo "external storage:"; COMPOSE_FILE=docker-compose.yml docker compose config --services
+          COMPOSE_FILE=docker-compose.yml docker compose config -q
+
+      - name: .env.example covers every variable
+        run: python3 check-env.py
+
+      - name: Caddy accepts the configuration
+        run: |
+          check() {  # $1 GODANCE_URL, $2 GODANCE_FILES_URL, $3 HTTP_PORT, $4 HTTPS_PORT, $5 with|without files host
+            mounts=(-v "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro")
+            [ "$5" = with ] && mounts+=(-v "$PWD/storage.caddy:/etc/caddy/sites/storage.caddy:ro")
+            echo "== $1, $5 files host"
+            docker run --rm "${mounts[@]}" \
+              -e GODANCE_URL="$1" -e GODANCE_FILES_URL="$2" -e HTTP_PORT="$3" -e HTTPS_PORT="$4" \
+              -e ACME_EMAIL=ops@example.test -e STORAGE_SUBNET=172.30.253.0/28 -e OBJECT_STORAGE_BUCKET=godance-files \
+              caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+          }
+          for files in with without; do
+            check https://godance.example.test https://files.godance.example.test 80 443 "$files"
+            check http://godance.localhost:8080 http://files.godance.localhost:8080 8080 8443 "$files"
+          done
+
+      - name: Preflight refuses placeholders and accepts a filled-in .env
+        run: |
+          preflight() {
+            docker run --rm --network none --env-file "$1" -e GODANCE_BUNDLED_STORAGE=true \
+              -v "$PWD/preflight.sh:/preflight.sh:ro" alpine:3.22 sh /preflight.sh
+          }
+          if preflight .env.example; then
+            echo "preflight accepted .env.example's placeholders" >&2; exit 1
+          fi
+          sed -e "s|^JWT_SIGNING_KEY=.*|JWT_SIGNING_KEY=$(openssl rand -hex 32)|" \
+              -e "s|^KEY_VAULT_KEY=.*|KEY_VAULT_KEY=$(openssl rand -base64 32)|" \
+              -e "s|^DATABASE_PASSWORD=.*|DATABASE_PASSWORD=$(openssl rand -hex 24)|" \
+              -e "s|^OBJECT_STORAGE_SECRET_KEY=.*|OBJECT_STORAGE_SECRET_KEY=$(openssl rand -hex 24)|" \
+              -e "s|^ACME_EMAIL=.*|ACME_EMAIL=ops@example.test|" \
+              -e "s|^GODANCE_ADMIN_EMAILS=.*|GODANCE_ADMIN_EMAILS=ops@example.test|" \
+              .env.example > "$RUNNER_TEMP/filled.env"
+          preflight "$RUNNER_TEMP/filled.env"

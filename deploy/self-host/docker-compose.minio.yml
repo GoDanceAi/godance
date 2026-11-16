@@ -1,0 +1,95 @@
+# =====================================================================
+# Godance — bundled object storage (MinIO). Added to docker-compose.yml by
+# COMPOSE_FILE in .env; leave it out to use external S3-compatible storage.
+#
+# Why storage gets its own host name: the API hands out generated images
+# and videos as signed links on its storage endpoint, so people's browsers
+# must reach that endpoint, and it must be the same address the API itself
+# uses (the host is part of each signature). Production uses DigitalOcean
+# Spaces, which is also a separate origin from the app.
+#
+# How it is fenced (see "Object storage" in docs/self-hosting.md):
+#   - From the internet, Caddy passes only GET and HEAD for objects in the
+#     bucket, and nothing under /minio/. MinIO's community source has open
+#     advisories, two of them unauthenticated object writes with no fixed
+#     release, so no write may reach it from outside.
+#   - The API reaches the same host name over the internal `storage`
+#     network, where the name resolves to Caddy and Caddy lets that network
+#     (STORAGE_SUBNET) through for every method.
+#   - MinIO itself is on the internal network only, with no published port.
+# =====================================================================
+
+services:
+  minio:
+    # MinIO publishes no public image any more, so it is built from source by
+    # the same Dockerfile the backend's development stack and tests use
+    # (backend/dev/minio/Dockerfile: RELEASE.2024-12-13T22-19-12Z). MinIO is
+    # AGPL-3.0.
+    build:
+      context: ../../backend/dev/minio
+    restart: unless-stopped
+    command: ["server", "/data"]
+    environment:
+      MINIO_ROOT_USER: ${OBJECT_STORAGE_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${OBJECT_STORAGE_SECRET_KEY}
+      MINIO_BROWSER: "off"           # no web console
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [storage]
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  web:
+    environment:
+      GODANCE_FILES_URL: ${GODANCE_FILES_URL}
+      OBJECT_STORAGE_BUCKET: ${OBJECT_STORAGE_BUCKET}
+      STORAGE_SUBNET: ${STORAGE_SUBNET}
+    volumes:
+      - ./storage.caddy:/etc/caddy/sites/storage.caddy:ro
+    networks:
+      storage:
+        # Inside the stack, the files host name is Caddy itself.
+        aliases: ["${GODANCE_FILES_HOST}"]
+    # Healthy once Caddy serves the files host (its certificate is issued)
+    # and MinIO answers behind it: the API needs both to start.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null \"$${GODANCE_FILES_URL}/minio/health/live\""]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    depends_on:
+      minio:
+        condition: service_healthy
+
+  api:
+    environment:
+      OBJECT_STORAGE_ENDPOINT: ${GODANCE_FILES_URL}
+      OBJECT_STORAGE_REGION: us-east-1       # MinIO accepts any region name
+      OBJECT_STORAGE_PATH_STYLE: "true"
+    networks: [storage]
+    depends_on:
+      web:
+        condition: service_healthy
+
+  preflight:
+    environment:
+      GODANCE_BUNDLED_STORAGE: "true"
+
+volumes:
+  minio_data:       # every stored file: back this up with the database
+
+networks:
+  storage:
+    internal: true
+    ipam:
+      config:
+        - subnet: ${STORAGE_SUBNET}

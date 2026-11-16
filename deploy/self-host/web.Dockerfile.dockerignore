@@ -1,0 +1,8 @@
+# Build context for web.Dockerfile is app/. Keep out installed modules, old
+# builds, test output and local env files (Vite would read .env.local).
+node_modules
+dist
+playwright-report
+test-results
+.env
+.env.*
