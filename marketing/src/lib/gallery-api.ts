@@ -94,7 +94,14 @@ export function indexJson(recipes: Recipe[], mediaBase: string) {
   };
 }
 
-/** GET /gallery/<slug>.json: one recipe, for the hand-off into the app. */
+/**
+ * GET /gallery/<slug>.json: one recipe, for the hand-off into the app.
+ *
+ * `run` is the first run, as round 8 fixed it. `runs` (round 13) is every run,
+ * in order, with its model, the language of the prompt it sent, its params and
+ * what it cost; `runs[0]` is `run` with its cost. The app opens a recipe on the
+ * first run whose model its catalogue lists.
+ */
 export function recipeJson(recipe: Recipe, site: URL | string) {
   const run = recipe.runs[0];
   return {
@@ -120,6 +127,12 @@ export function recipeJson(recipe: Recipe, site: URL | string) {
         : {}),
     },
     run: { model: run.model, prompt_lang: run.prompt_lang, params: run.params },
+    runs: recipe.runs.map((each) => ({
+      model: each.model,
+      prompt_lang: each.prompt_lang,
+      params: each.params,
+      cost_cents: each.cost_cents,
+    })),
     url: new URL(recipePath(recipe.slug), site).toString(),
   };
 }
