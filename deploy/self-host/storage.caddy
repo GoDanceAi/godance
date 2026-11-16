@@ -1,0 +1,46 @@
+# =====================================================================
+# Godance (self-hosted) — the files host in front of the bundled MinIO.
+# Imported by the Caddyfile when docker-compose.minio.yml mounts it.
+#
+# Browsers fetch generated images and videos from here through signed
+# links. From the internet only reads of objects in the bucket pass; the
+# API, on the internal storage network (STORAGE_SUBNET), may do anything.
+# MinIO's community source has open advisories, including two
+# unauthenticated object writes with no fixed release, so nothing else from
+# outside reaches it. See "Object storage" in docs/self-hosting.md.
+# =====================================================================
+
+{$GODANCE_FILES_URL} {
+	# The API: uploads, deletes, listings, bucket checks. remote_ip is the
+	# address of the connection itself, never a header a client can set.
+	@from_api remote_ip {$STORAGE_SUBNET}
+	handle @from_api {
+		reverse_proxy minio:9000
+	}
+
+	# Everyone else: GET and HEAD of objects in the bucket, signed by the API.
+	@read {
+		method GET HEAD
+		path /{$OBJECT_STORAGE_BUCKET}/*
+	}
+	handle @read {
+		reverse_proxy minio:9000
+	}
+
+	handle {
+		respond 403
+	}
+
+	header {
+		X-Content-Type-Options "nosniff"
+		# A stored file opened on its own is never a page with scripts.
+		Content-Security-Policy "sandbox"
+		Strict-Transport-Security "max-age=63072000"
+		-Server
+	}
+
+	log {
+		output stdout
+		import redact_credentials
+	}
+}
