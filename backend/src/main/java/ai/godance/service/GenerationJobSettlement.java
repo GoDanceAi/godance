@@ -140,6 +140,63 @@ public class GenerationJobSettlement {
     }
 
     /**
+     * {@link #complete} for a job that went out on the caller's own key
+     * (round 14). Its charge is Godance's fee, in microcents, settled
+     * through {@link CreditLedgerService#settle}: whole cents are billed, the
+     * fraction carries to the account's next request. The fee's hold is
+     * rounded up, so the bill never passes it.
+     */
+    @Transactional
+    public boolean completeSettling(GenerationJob job, String outputUrl, List<StoredOutput> stored,
+                                    long feeMicrocents, UsageRecord usageRecord) {
+        long estimate = job.getEstimatedCostCents() == null ? 0L : job.getEstimatedCostCents();
+        Instant now = Instant.now();
+        if (jobs.completeIfOpen(job.getId(), outputUrl, estimate, now) == 0) return false;
+        long billed = ledger.settle(job.getUserId(), estimate, feeMicrocents, refundRequestId(job));
+        jobs.setActualCost(job.getId(), billed);
+        usageRecord.setCostCents(billed);
+        usageRecord.setCostMicrocents(feeMicrocents);
+        usage.save(usageRecord);
+        for (int i = 0; i < stored.size(); i++) {
+            StoredOutput o = stored.get(i);
+            outputs.save(new GenerationJobOutput(job.getId(), i, o.storageKey(), o.contentType(),
+                    o.sizeBytes(), o.revisedPrompt()));
+        }
+        job.setStatus(JobStatus.DONE);
+        job.setOutputUrl(outputUrl);
+        job.setActualCostCents(billed);
+        job.setCompletedAt(now);
+        return true;
+    }
+
+    /**
+     * A running job priced at Godance's fee on the caller's own key (round
+     * 14) moves to the platform price: the provider refused the key and the
+     * caller allows the platform's instead. The fee's hold is refunded and
+     * {@code platformCents} held under a new request id, together, so the
+     * job is billed at the platform price once. False when the platform
+     * price is not covered: nothing is then held, and failing the job
+     * refunds nothing twice (the refund's key is the old request id's).
+     */
+    @Transactional
+    public boolean reprice(GenerationJob job, java.util.UUID apiKeyId, long platformCents, String newRequestId,
+                           String reason) {
+        Long estimate = job.getEstimatedCostCents();
+        if (estimate != null) {
+            ledger.refundEstimate(job.getUserId(), estimate, refundRequestId(job), reason);
+        }
+        if (!ledger.preDebit(job.getUserId(), apiKeyId, platformCents, newRequestId)) return false;
+        if (jobs.repriceIfRunning(job.getId(), platformCents, newRequestId) == 0) {
+            // The job ended meanwhile: the new hold goes straight back.
+            ledger.refundEstimate(job.getUserId(), platformCents, newRequestId, "job ended before its retry");
+            return false;
+        }
+        job.setEstimatedCostCents(platformCents);
+        job.setRequestId(newRequestId);
+        return true;
+    }
+
+    /**
      * Ends an open job FAILED and refunds its estimate, together. False when
      * the job already ended; then nothing changes.
      */

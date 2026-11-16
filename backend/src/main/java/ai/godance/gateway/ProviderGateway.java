@@ -53,18 +53,39 @@ public class ProviderGateway {
      */
     public ProviderAdapter dispatch(ModelInfo model) {
         Provider provider = model.provider();
-        if (region == Region.ALICLOUD && !AlicloudProviderAllowlist.isAllowed(provider)) {
-            // Fail closed. Message intentionally vague — clients shouldn't
-            // learn which providers are forbidden vs. simply unavailable.
-            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
-                    "provider " + provider + " not available in this region");
-        }
+        requireAllowed(provider);
         ProviderAdapter adapter = adapters.get(provider);
         if (adapter == null) {
             throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
                     "no adapter registered for provider " + provider);
         }
         return adapter;
+    }
+
+    /**
+     * Whether the provider's adapter sends a caller's own key (round 14),
+     * read without a regional check: it prices a request before dispatch,
+     * and reports what a stored key is used for. It chooses no key and sends
+     * nothing; {@link #dispatch} stays the one region check before any call.
+     */
+    public boolean takesCallerKeys(Provider provider) {
+        ProviderAdapter adapter = adapters.get(provider);
+        return adapter != null && adapter.takesCallerKeys();
+    }
+
+    /**
+     * The region check itself: 503 when the current region's allowlist
+     * forbids {@code provider}. {@link #dispatch} makes it before every model
+     * call; checking a caller's own key for a provider (round 14) makes it
+     * before that key is sent anywhere.
+     */
+    public void requireAllowed(Provider provider) {
+        if (region == Region.ALICLOUD && !AlicloudProviderAllowlist.isAllowed(provider)) {
+            // Fail closed. Message intentionally vague — clients shouldn't
+            // learn which providers are forbidden vs. simply unavailable.
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
+                    "provider " + provider + " not available in this region");
+        }
     }
 
     public Region region() {
