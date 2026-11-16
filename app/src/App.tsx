@@ -35,6 +35,7 @@ import ProposalsPage from './pages/admin/ProposalsPage';
 import CatalogPage from './pages/admin/CatalogPage';
 import UsersPage from './pages/admin/UsersPage';
 import OverviewPage from './pages/admin/OverviewPage';
+import CommunityPage from './pages/admin/CommunityPage';
 
 export default function App() {
   return (
@@ -91,6 +92,7 @@ export default function App() {
             <Route path="catalog"   element={<CatalogPage />} />
             <Route path="users"     element={<UsersPage />} />
             <Route path="overview"  element={<OverviewPage />} />
+            <Route path="community" element={<CommunityPage />} />
           </Route>
 
           {/* Fallback */}
