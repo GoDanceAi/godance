@@ -50,4 +50,5 @@ coverage/
 # Internal session docs — working-copy only, never published.
 /PROGRESS.md
 /SESSION-HANDOFF.md
+/docs/SESSION-HANDOFF.md
 .claude/
