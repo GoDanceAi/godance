@@ -135,11 +135,17 @@ public class User {
     @Column(name = "stripe_customer_id", unique = true)
     private String stripeCustomerId;
 
+    /**
+     * The webhook signing secret as {@link ai.godance.security.KeyVault}
+     * stores it (V42), never the secret itself. Only
+     * {@link ai.godance.security.WebhookSigner} encrypts and decrypts it.
+     */
     @Column(name = "webhook_signing_secret")
-    private String webhookSigningSecret;
+    private String webhookSigningSecretEncrypted;
 
+    /** The secret the last rotation replaced, stored the same way; it signs too for the grace window. */
     @Column(name = "webhook_signing_secret_previous")
-    private String webhookSigningSecretPrevious;
+    private String webhookSigningSecretPreviousEncrypted;
 
     @Column(name = "webhook_signing_secret_rotated_at")
     private Instant webhookSigningSecretRotatedAt;
@@ -284,11 +290,11 @@ public class User {
     public String getStripeCustomerId() { return stripeCustomerId; }
     public void setStripeCustomerId(String stripeCustomerId) { this.stripeCustomerId = stripeCustomerId; }
 
-    public String getWebhookSigningSecret() { return webhookSigningSecret; }
-    public void setWebhookSigningSecret(String webhookSigningSecret) { this.webhookSigningSecret = webhookSigningSecret; }
+    public String getWebhookSigningSecretEncrypted() { return webhookSigningSecretEncrypted; }
+    public void setWebhookSigningSecretEncrypted(String s) { this.webhookSigningSecretEncrypted = s; }
 
-    public String getWebhookSigningSecretPrevious() { return webhookSigningSecretPrevious; }
-    public void setWebhookSigningSecretPrevious(String s) { this.webhookSigningSecretPrevious = s; }
+    public String getWebhookSigningSecretPreviousEncrypted() { return webhookSigningSecretPreviousEncrypted; }
+    public void setWebhookSigningSecretPreviousEncrypted(String s) { this.webhookSigningSecretPreviousEncrypted = s; }
 
     public Instant getWebhookSigningSecretRotatedAt() { return webhookSigningSecretRotatedAt; }
     public void setWebhookSigningSecretRotatedAt(Instant t) { this.webhookSigningSecretRotatedAt = t; }
