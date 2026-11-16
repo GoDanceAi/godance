@@ -2723,7 +2723,7 @@ components:
         error: { type: [string, "null"] }
         outputs: { type: array, items: { $ref: "#/components/schemas/BatchRowOutput" } }
         model: { type: string, description: "For a row retried on a fallback, the model its job ran on. Left out for every other row, whose model is the batch's." }
-        retried_job_id: { type: string, format: uuid, description: For a row retried on a fallback, the failed job it replaced. }
+        retried_job_id: { type: string, format: uuid, description: "For a row retried on a fallback, the failed job it replaced." }
     BatchRowOutput:
       type: object
       properties:
