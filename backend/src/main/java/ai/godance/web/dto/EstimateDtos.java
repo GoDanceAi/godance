@@ -37,8 +37,17 @@ public final class EstimateDtos {
             @JsonProperty("estimated_cost_cents") long estimatedCostCents,
             String currency,
             // Echoed only when the request named it, so an estimate without it reads as it always has.
-            @JsonInclude(JsonInclude.Include.NON_NULL) @JsonProperty("input_images") Integer inputImages
+            @JsonInclude(JsonInclude.Include.NON_NULL) @JsonProperty("input_images") Integer inputImages,
+            // true when the request would go out on the caller's own provider key (round 14), and the
+            // figure is Godance's fee; absent otherwise, so other estimates read as they always have.
+            @JsonInclude(JsonInclude.Include.NON_NULL) Boolean byok
     ) {
+        /** An estimate on the platform's key. */
+        public EstimateResponse(String model, String modality, int n, Integer seconds,
+                                long estimatedCostCents, String currency, Integer inputImages) {
+            this(model, modality, n, seconds, estimatedCostCents, currency, inputImages, null);
+        }
+
         /** An estimate for a request that named no input images. */
         public EstimateResponse(String model, String modality, int n, Integer seconds,
                                 long estimatedCostCents, String currency) {

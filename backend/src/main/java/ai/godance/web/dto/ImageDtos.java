@@ -139,6 +139,9 @@ public final class ImageDtos {
      *       (round 12), or null for a job outside a batch, and once the
      *       batch has been deleted. A job in a batch has {@code channel}
      *       {@code BATCH}.</li>
+     *   <li>{@code publishedRecipe}: the public id of the published recipe
+     *       the job ran (round 14); absent for any other job. Kept after
+     *       the purge.</li>
      * </ul>
      */
     public record JobView(
@@ -164,7 +167,8 @@ public final class ImageDtos {
             String galleryRecipe,
             RecipeRunView recipe,
             List<JobInputView> inputs,
-            @JsonInclude(JsonInclude.Include.ALWAYS) JobBatchView batch
+            @JsonInclude(JsonInclude.Include.ALWAYS) JobBatchView batch,
+            @JsonInclude(JsonInclude.Include.NON_NULL) String publishedRecipe
     ) {
         /**
          * {@code outputs} carry links already signed; {@code outputUrl} is the
@@ -173,6 +177,13 @@ public final class ImageDtos {
          */
         public static JobView from(GenerationJob j, List<JobOutputView> outputs, Instant mediaExpiresAt,
                                    RecipeVersion recipeVersion, List<JobInputView> inputs, JobBatchView batch) {
+            return from(j, outputs, mediaExpiresAt, recipeVersion, inputs, batch, null);
+        }
+
+        /** {@code publishedRecipe} is the public id of the published recipe the job ran, or null. */
+        public static JobView from(GenerationJob j, List<JobOutputView> outputs, Instant mediaExpiresAt,
+                                   RecipeVersion recipeVersion, List<JobInputView> inputs, JobBatchView batch,
+                                   String publishedRecipe) {
             boolean purged = j.getPurgedAt() != null;
             List<JobOutputView> shown = purged ? List.of() : outputs;
             String outputUrl = shown.isEmpty() ? j.getOutputUrl() : shown.get(0).url();
@@ -189,7 +200,8 @@ public final class ImageDtos {
                     recipeVersion == null ? null : new RecipeRunView(recipeVersion.getRecipeId(),
                             recipeVersion.getNumber(), purged ? null : recipeVariablesOf(j)),
                     purged || inputs == null ? List.of() : inputs,
-                    batch);
+                    batch,
+                    publishedRecipe);
         }
 
         /** The value each variable had in this run, as the job's request stored them. */

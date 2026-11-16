@@ -67,6 +67,30 @@ function requestBody(recipe) {
 /** The request as the code is written from it: it asks for a job and reads it. */
 const codeRequest = (recipe) => ({ apiBase: API, kind: kindOf(recipe), body: requestBody(recipe), mode: 'poll' });
 
+/**
+ * A video's request as OpenAI's POST /v1/videos takes it: the first frame is
+ * `input_reference` there, and seconds a string. Null when that route has no
+ * field for part of it, a last frame or reference images: then the request
+ * goes to Godance's own route as it is.
+ */
+function openAiVideo(recipe) {
+  const body = requestBody(recipe);
+  if (recipe.modality !== 'VIDEO' || 'last_frame' in body || 'reference_images' in body) return null;
+  const shaped = {};
+  for (const [key, value] of Object.entries(body)) {
+    if (key === 'first_frame') shaped.input_reference = value;
+    else if (key === 'seconds') shaped.seconds = String(value);
+    else shaped[key] = value;
+  }
+  return shaped;
+}
+
+/** The route the page's code sends the request to. */
+function routeOf(recipe) {
+  if (recipe.modality === 'VIDEO') return openAiVideo(recipe) ? '/v1/videos' : '/v1/videos/generations';
+  return slotsOf(recipe).length > 0 ? '/v1/images/edits' : '/v1/images/generations';
+}
+
 /** The recipe as the prompt carries it. */
 function promptRecipe(recipe) {
   const run = recipe.runs[0];
@@ -177,6 +201,9 @@ describe('Run at scale on the gallery recipe pages', { timeout: 300_000 }, () =>
     assert.ok(recipes.some((r) => r.prompt.template), 'a recipe with a template');
     assert.ok(recipes.some((r) => r.modality === 'IMAGE' && r.inputs), 'an image recipe with an input');
     assert.ok(recipes.some((r) => r.modality === 'VIDEO' && r.inputs), 'a video recipe with an input');
+    // A video goes to OpenAI's route, unless it has what that route takes no field for.
+    assert.ok(recipes.some((r) => routeOf(r) === '/v1/videos'), 'a video on OpenAI\'s route');
+    assert.ok(recipes.some((r) => routeOf(r) === '/v1/videos/generations'), 'a video on Godance\'s own route');
   });
 
   test('every recipe page has the block, once, with its three parts in order', () => {
@@ -217,15 +244,24 @@ describe('Run at scale on the gallery recipe pages', { timeout: 300_000 }, () =>
   test('the prompt says only what is true of the recipe: uploads only where there are inputs', () => {
     for (const recipe of recipes) {
       const { text } = promptOf(blockOf(pageOf(recipe.slug)));
-      const wording = promptWording(promptConditions(promptRecipe(recipe)));
+      const route = routeOf(recipe);
+      const openAi = route === '/v1/videos';
+      const wording = promptWording(promptConditions(promptRecipe(recipe), { createPath: route }));
       assert.equal(wording.includes('/v1/files'), slotsOf(recipe).length > 0, recipe.slug);
       assert.equal(text.includes('/v1/files'), slotsOf(recipe).length > 0, recipe.slug);
       // A gallery recipe is run by filling the template in, and says where it came from.
       assert.ok(text.includes('Fill the template in yourself'), recipe.slug);
       assert.ok(text.includes('Send "gallery_recipe" unchanged'), recipe.slug);
       assert.ok(!text.includes('"version_id" names this recipe'), recipe.slug);
-      assert.equal(text.includes('A video request always answers 202'), recipe.modality === 'VIDEO', recipe.slug);
+      // Rule 3 is about the route the request goes to.
+      assert.ok(text.includes(`POST ${API}${route}\n`), recipe.slug);
+      assert.equal(text.includes('A video request always answers 202'), recipe.modality === 'VIDEO' && !openAi, recipe.slug);
+      assert.equal(text.includes('A video request answers 200 with the video'), openAi, recipe.slug);
+      assert.equal(text.includes('client.videos.create_and_poll'), openAi, recipe.slug);
       assert.equal(text.includes('An image request answers in one of two ways'), recipe.modality === 'IMAGE', recipe.slug);
+      // Inputs go by their role, but a first frame sent to OpenAI's route is its input_reference.
+      assert.equal(text.includes('Each input goes in the field its "role" names'), slotsOf(recipe).length > 0 && !openAi, recipe.slug);
+      assert.equal(text.includes('"input_reference"'), slotsOf(recipe).length > 0 && openAi, recipe.slug);
     }
   });
 
@@ -273,13 +309,26 @@ describe('Run at scale on the gallery recipe pages', { timeout: 300_000 }, () =>
         assert.deepEqual(codeOf(block, language).map((code) => code.text), expected, `${recipe.slug} ${language}`);
       }
 
-      // The curl sends the run's own request. An image asks for a job; a video is always one.
+      // The curl sends the run's own request. An image asks for a job; a video is always one, in
+      // OpenAI's shape where that carries all of it, else as it is on Godance's own route.
       const curl = codeOf(block, 'curl').map((code) => code.text);
       const start = curl[slotsOf(recipe).length > 0 ? 1 : 0];
-      const sent = recipe.modality === 'VIDEO' ? requestBody(recipe) : { ...requestBody(recipe), async: true };
+      const openAi = openAiVideo(recipe);
+      const sent = openAi ?? (recipe.modality === 'VIDEO' ? requestBody(recipe) : { ...requestBody(recipe), async: true });
       assert.deepEqual(curlBody(start), sent, recipe.slug);
-      assert.ok(start.startsWith(`curl ${API}${createPath(kindOf(recipe), requestBody(recipe))} \\`), recipe.slug);
-      assert.ok(curl.at(-1).startsWith(`curl ${API}/v1/jobs/$JOB_ID`), recipe.slug);
+      assert.equal(createPath(kindOf(recipe), requestBody(recipe)), routeOf(recipe), recipe.slug);
+      assert.ok(start.startsWith(`curl ${API}${routeOf(recipe)} \\`), recipe.slug);
+      if (openAi) {
+        // The video is read until it ends, then downloaded.
+        assert.ok(curl.at(-2).startsWith(`curl ${API}/v1/videos/$VIDEO_ID \\`), recipe.slug);
+        assert.ok(curl.at(-1).startsWith(`curl -o "$VIDEO_ID.mp4" ${API}/v1/videos/$VIDEO_ID/content \\`), recipe.slug);
+        const python = codeOf(block, 'python').at(-1).text;
+        assert.ok(python.includes('video = client.videos.create_and_poll('), recipe.slug);
+        assert.ok(python.includes(`    seconds="${openAi.seconds}",`), recipe.slug);
+        assert.ok(!python.includes('/jobs/'), recipe.slug);
+      } else {
+        assert.ok(curl.at(-1).startsWith(`curl ${API}/v1/jobs/$JOB_ID`), recipe.slug);
+      }
     }
   });
 

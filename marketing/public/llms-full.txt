@@ -200,6 +200,28 @@ Images in chat. A user message's `content` can be OpenAI's array of parts:
   `image_fetch_failed`, `image_type_unsupported`, `too_many_images`,
   `model_does_not_accept_images`; 413 `image_too_large`; 404 `file_not_found`.
 
+Routing. `model` can be a virtual model that picks a real one per request: `godance-fast`,
+`godance-auto` and `godance-quality` are built in, and `GET /v1/models` lists them with
+`"virtual": true`. The answer's `model` is the model that served.
+
+Your own routing policies are being rolled out: until the operator turns them on,
+`GET /v1/routing/policies`, `GET /v1/routing/policies/{id}`, `PUT /v1/routing/policies/{id}`
+and `DELETE /v1/routing/policies/{id}` answer 404 `routing_policies_disabled`. Once they
+are on, a policy you PUT is called by its id as the `model`. Its rules pick models by task,
+size or hint; `limits.excluded_providers` keeps a provider out of every attempt; and a header
+`X-Godance-Route: <hint>` (or a `route_hint` field) picks the rule whose `when.hint_equals`
+names it. A policy that breaks a rule answers 400 `routing_policy_invalid`, listing every
+problem in `errors`.
+
+```bash
+curl -X PUT https://api.godance.ai/v1/routing/policies/my-coder \
+  -H "Authorization: Bearer $GODANCE_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"default_model": "deepseek-v4-flash",
+       "rules": [{"name": "code", "when": {"task_in": ["CODE"]}, "targets": ["gpt-4o", "deepseek-v4-pro"]}],
+       "limits": {"excluded_providers": ["ZHIPU"]}}'
+```
+
 ## Images
 
 `POST /v1/images/generations` takes OpenAI's request: `model`, `prompt`, `size`, `n`,
@@ -442,8 +464,13 @@ base URL, the key and the model changed. A video's `id` is its job's id.
 
 - `POST /v1/videos` creates a video. JSON, or the multipart form OpenAI's SDK sends.
   Fields: `model` (required), `prompt`, `seconds` (a string such as `"8"`; a number is
-  taken too), `size`, `input_reference`, and the Godance extensions `webhook_url` and
-  `recipe`. Answers 200 with the video object, `status: "queued"`.
+  taken too), `size`, `input_reference`, and the Godance extensions `last_frame`,
+  `reference_images`, `webhook_url` and `recipe`. Answers 200 with the video object,
+  `status: "queued"`.
+- Any other field answers 400 `invalid_parameter` with `param` naming it, at any depth
+  (`colour`, `recipe.variable`); nothing is ignored. In JSON a field set to `null` passes.
+  There is no `n`: a request makes one video. For several clips from one request, use
+  `POST /v1/videos/generations`.
 - `GET /v1/videos/{id}` is one video. `GET /v1/videos?limit=&after=&order=` lists yours,
   newest first: `{"object": "list", "data": [...], "first_id", "last_id", "has_more"}`;
   pass `last_id` as `after` for the next page (`limit` 1 to 100, default 20).
@@ -503,6 +530,25 @@ if video.status == "failed":
 client.videos.download_content(video.id, variant="video").write_to_file("out.mp4")
 ```
 
+The Godance extensions go in `extra_body`:
+
+```python
+# From two of your stored images (POST /v1/files): the first frame and the last.
+video = client.videos.create_and_poll(
+    model="seedance-2.0",
+    prompt="The paper boat drifts out of the frame.",
+    seconds="5",
+    extra_body={"input_reference": {"file_id": first_id}, "last_frame": {"file_id": last_id}},
+)
+
+# A recipe in place of the prompt. The SDK requires prompt, so it is empty.
+video = client.videos.create_and_poll(
+    model="seedance-2.0",
+    prompt="",
+    extra_body={"recipe": {"version_id": version_id, "variables": {"subject": "Koi"}}},
+)
+```
+
 Notes for OpenAI SDK users:
 
 - The SDK marks `client.videos.*` deprecated (OpenAI shut its own Videos API down); the
@@ -513,6 +559,23 @@ Notes for OpenAI SDK users:
   {"file_id": "…"}`, or the Godance extension `{"job_output": {"job_id": "…", "index": 0}}`).
   `{"image_url": …}` answers 400 `image_url_not_supported`. Part of inputs: 403
   `inputs_disabled` until switched on.
+- `last_frame` (the image the video ends on, only with a first frame) and
+  `reference_images` (a list) are input references, as on `/v1/videos/generations`, and go
+  in `extra_body`. They name stored images; neither can be a file part.
+- The SDK always sends a multipart form, and writes a nested value from `extra_body` into
+  it as bracketed fields: `{"recipe": {"version_id": "…", "variables": {"subject": "…"}}}`
+  arrives as `recipe[version_id]` and `recipe[variables][subject]`, and a list as one
+  `reference_images[][file_id]` field per image. Godance reads them back into the value.
+  The SDK groups a list's fields by name, so a `reference_images` that mixes `file_id`
+  and `job_output` would arrive out of order: it answers 400, and works as JSON text,
+  `extra_body={"reference_images": json.dumps([...])}`. `recipe` and `last_frame` may be
+  JSON text too.
+- A recipe in place of the prompt: the SDK requires `prompt`, so pass `prompt=""` with
+  the recipe in `extra_body`. A form has at most 24 fields: a recipe with many variables
+  fits as JSON text, `extra_body={"recipe": json.dumps({...})}`.
+- A field Godance does not read, in the form as in JSON, answers 400
+  `invalid_parameter` with `e.param` naming it (`n`, `recipe[variable]`), so a typo in
+  `extra_body` is never dropped without a word.
 - Errors on these routes carry OpenAI's `error` object as well, so the SDK's exceptions
   read well: `openai.BadRequestError: … seconds must be a whole number of seconds …`, with
   `e.code` and `e.param` set.

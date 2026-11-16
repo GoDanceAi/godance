@@ -19,6 +19,16 @@ public interface ProviderAdapter {
 
     Provider type();
 
+    /**
+     * Whether this adapter sends a caller's own key when the call carries one
+     * ({@link CallerKey}), round 14's bring-your-own-key seam. An adapter
+     * that says no always sends the platform's key, and a request it serves
+     * is billed at the platform price.
+     */
+    default boolean takesCallerKeys() {
+        return false;
+    }
+
     Mono<ChatResponse> chat(ChatRequest request);
 
     /**
