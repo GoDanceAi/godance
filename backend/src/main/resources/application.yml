@@ -254,6 +254,22 @@ godance:
     # answers 409 recipe_limit_reached.
     max-per-account: ${RECIPES_MAX_PER_ACCOUNT:500}   # recipes one account can have
     max-versions:    ${RECIPES_MAX_VERSIONS:200}      # versions one recipe can have
+  community:
+    # Published recipes, profiles, follows and reports (round 14;
+    # CommunityProperties). Off by default: with enabled false nothing can be
+    # published or run, and every /v1/public route answers 404
+    # community_disabled. Publishing is pre-moderated: nothing an account makes
+    # is public until a SUPPORT or ADMIN moderator approves it.
+    enabled: ${COMMUNITY_ENABLED:false}
+    licences: ${COMMUNITY_LICENCES:CC-BY-4.0,CC0-1.0}                  # SPDX ids an author may choose from
+    max-pending-per-day: ${COMMUNITY_MAX_PENDING_PER_DAY:5}            # submissions per account in a day
+    max-published-per-user: ${COMMUNITY_MAX_PUBLISHED_PER_USER:50}     # pending and public at once, per account
+    report-limit-per-hour: ${COMMUNITY_REPORT_LIMIT_PER_HOUR:10}       # reports per account in an hour
+    # An https base that serves the bucket's community/ prefix (a CDN or a
+    # public bucket). Empty: the API serves each example by a redirect to a
+    # short-lived signed link.
+    media-base-url: ${COMMUNITY_MEDIA_BASE_URL:}
+    public-cache-ttl: ${COMMUNITY_PUBLIC_CACHE_TTL:5m}                 # max-age of the /v1/public answers
   batches:
     # Recipe batches (RecipeBatchService, RecipeBatchRunner): one version of a
     # recipe run over many rows, each row an ordinary job. A batch charges
@@ -268,6 +284,16 @@ godance:
     # A never-firing expression such as "0 0 0 1 1 ? 2099" stops batches from
     # starting rows; jobs that are already running still finish.
     tick-cron:                   ${BATCHES_TICK_CRON:0/3 * * * * ?}
+  byok:
+    # Bring your own key (ProviderCredentialService): a user stores their own
+    # key for a provider, requests to its models go out on it, and Godance
+    # charges only its fee. SHIPS OFF: with providers empty no key can be
+    # saved and every request behaves as before. Add a provider only after
+    # checking that its terms allow a customer's key to be used through a
+    # third party. Each needs a key check; OPENAI and ANTHROPIC have one.
+    providers: ${BYOK_PROVIDERS:}
+    fee-basis-points: ${BYOK_FEE_BASIS_POINTS:500}   # of the list price (before markup); 500 = 5%
+    check-timeout: ${BYOK_CHECK_TIMEOUT:10s}          # the provider's answer to a key check
   retention:
     # The most generations one account can save (JobSaveService). A saved
     # generation is kept past the 90-day deletion, at no charge, for as long

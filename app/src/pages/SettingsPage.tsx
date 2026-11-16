@@ -5,6 +5,7 @@ import { useAuth } from '../lib/auth';
 import { Icon } from '../components/Brand';
 import ResendEmailButton from '../components/ResendEmailButton';
 import TwoFactorSection from '../components/TwoFactorSection';
+import ProviderKeysSection from '../components/ProviderKeysSection';
 import { AcceptInputTerms, InputTermsText } from '../components/InputTerms';
 import { INPUT_TERMS } from '../lib/input-terms';
 import { formatDateTime } from '../lib/time';
@@ -62,6 +63,8 @@ export default function SettingsPage() {
       <EmailSection />
 
       <TwoFactorSection />
+
+      <ProviderKeysSection />
 
       <InputsSection />
 

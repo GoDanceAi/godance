@@ -84,6 +84,8 @@ class AdminRolesIntegrationTest {
     private static final Set<UserRole> STAFF = EnumSet.of(UserRole.SUPPORT, UserRole.FINANCE, UserRole.ADMIN);
     private static final Set<UserRole> MONEY = EnumSet.of(UserRole.FINANCE, UserRole.ADMIN);
     private static final Set<UserRole> ADMIN = EnumSet.of(UserRole.ADMIN);
+    /** Who moderates the community (round 14): support and admins. */
+    private static final Set<UserRole> MODERATORS = EnumSet.of(UserRole.SUPPORT, UserRole.ADMIN);
 
     /** A role the gate admits gets a 404 for {@code {id}}, so this suite changes nothing. */
     private record Route(HttpMethod method, String template, Object body, Set<UserRole> allowed) {
@@ -92,7 +94,10 @@ class AdminRolesIntegrationTest {
         }
 
         String path() {
-            return template.replace("{id}", template.contains("/users/") ? UUID.randomUUID().toString() : "0");
+            return template.replace("{id}", template.contains("/users/") ? UUID.randomUUID().toString() : "0")
+                    // A community route names a published recipe or a profile no test made.
+                    .replace("{publicId}", "zzzzzzzzzzzz")
+                    .replace("{handle}", "no-such-handle");
         }
 
         @Override
@@ -118,7 +123,17 @@ class AdminRolesIntegrationTest {
             new Route(HttpMethod.POST, "/v1/admin/pricing/proposals/{id}/reject", ADMIN),
             new Route(HttpMethod.GET, "/v1/admin/pricing/models", STAFF),
             new Route(HttpMethod.PATCH, "/v1/admin/pricing/models/{id}", Map.of("enabled", true), ADMIN),
-            new Route(HttpMethod.GET, "/v1/admin/pricing/models/{id}/history", STAFF));
+            new Route(HttpMethod.GET, "/v1/admin/pricing/models/{id}/history", STAFF),
+            new Route(HttpMethod.GET, "/v1/admin/community/queue", MODERATORS),
+            new Route(HttpMethod.GET, "/v1/admin/community/reports", MODERATORS),
+            new Route(HttpMethod.POST, "/v1/admin/community/recipes/{publicId}/approve", MODERATORS),
+            new Route(HttpMethod.POST, "/v1/admin/community/recipes/{publicId}/reject",
+                    Map.of("reason", "matrix"), MODERATORS),
+            new Route(HttpMethod.POST, "/v1/admin/community/recipes/{publicId}/remove",
+                    Map.of("reason", "matrix"), MODERATORS),
+            new Route(HttpMethod.POST, "/v1/admin/community/profiles/{handle}/approve", MODERATORS),
+            new Route(HttpMethod.POST, "/v1/admin/community/profiles/{handle}/remove",
+                    Map.of("reason", "matrix"), MODERATORS));
 
     @DynamicPropertySource
     static void props(DynamicPropertyRegistry r) {

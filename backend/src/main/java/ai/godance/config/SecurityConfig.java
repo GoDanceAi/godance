@@ -218,6 +218,10 @@ public class SecurityConfig {
                         // The API's own description, for tools and AI assistants. It says
                         // nothing that the public documentation does not.
                         .pathMatchers(HttpMethod.GET, "/v1/openapi.yaml").permitAll()
+                        // Published recipes and profiles (round 14): readable by anyone,
+                        // and only what a moderator approved. GET only, and nothing else
+                        // under /v1/public.
+                        .pathMatchers(HttpMethod.GET, "/v1/public/**").permitAll()
                         // Stripe (and any future) provider webhooks — authenticated by
                         // signature, not by JWT. Handler MUST reject bad signatures.
                         .pathMatchers(HttpMethod.POST, "/v1/billing/webhooks/**").permitAll()

@@ -78,6 +78,15 @@ tags:
       then these routes answer 404 `routing_policies_disabled`.
   - name: Usage
   - name: API keys
+  - name: Provider keys
+    description: |
+      Bring your own key. A key of your own for a provider: requests to that
+      provider's models then go out on it, and Godance charges only its fee
+      (`fee_basis_points` of the list price). Switched off by default: until a
+      provider is offered, every key answers 400 `byok_provider_not_supported`.
+      The regional rule still decides first: a key never makes a provider
+      that is not available in the region reachable. A signed-in session
+      only; an API key cannot read, set or remove one.
   - name: Account
   - name: Two-factor sign-in
   - name: Billing
@@ -85,6 +94,14 @@ tags:
   - name: Conversations
   - name: Referrals
   - name: Saved gallery recipes
+  - name: Community
+    description: |
+      Published recipes, profiles, follows and reports. Switched off by
+      default: until the community is switched on, every route here answers
+      404 `community_disabled`. Publishing is pre-moderated: a submission is
+      `PENDING` until a moderator approves it, and only then is it on the
+      `/v1/public` routes, which need no sign-in and show only approved
+      recipes and profiles.
   - name: Service
 paths:
   /healthz:
@@ -352,8 +369,24 @@ paths:
           `{"file_id"}` or, as a Godance extension, `{"job_output"}`.
           `image_url` answers 400 `image_url_not_supported`. Inputs are
           switched off by default: 403 `inputs_disabled`.
+        - `last_frame` and `reference_images` are Godance extensions: input
+          references, as on `POST /v1/videos/generations`, checked against
+          the model the same way.
         - `webhook_url`, `gallery_recipe` and `recipe` are Godance
           extensions, as on `POST /v1/videos/generations`.
+        - A field the route does not read is refused, not ignored: 400
+          `invalid_parameter`, with `param` naming it, at any depth (`n`,
+          `recipe.variable`). In JSON, a field set to null passes. There is
+          no `n`: a request makes one video.
+
+        In a form, OpenAI's SDK writes a nested value as bracketed fields,
+        and they are read back into it: `extra_body={"recipe": {…}}` arrives
+        as `recipe[version_id]` and `recipe[variables][subject]`, and a list
+        as one `reference_images[][file_id]` field per image. `recipe`,
+        `last_frame` and `reference_images` may also be sent as JSON text.
+        The SDK groups a list's fields by name, so `reference_images` that
+        mixes `file_id` and `job_output` is refused in brackets; send it as
+        JSON text.
 
         Problem codes: `invalid_parameter` (400, `param` names the field),
         `image_url_not_supported` (400), and everything
@@ -369,6 +402,7 @@ paths:
             schema:
               type: object
               required: [model]
+              additionalProperties: false
               properties:
                 model: { type: string }
                 prompt: { type: string }
@@ -378,9 +412,33 @@ paths:
                 "input_reference[file_id]": { type: string, format: uuid }
                 "input_reference[job_output][job_id]": { type: string, format: uuid }
                 "input_reference[job_output][index]": { type: integer }
+                last_frame: { type: string, description: "The `last_frame` input reference of the JSON form, as JSON text." }
+                "last_frame[file_id]": { type: string, format: uuid }
+                "last_frame[job_output][job_id]": { type: string, format: uuid }
+                "last_frame[job_output][index]": { type: integer }
+                reference_images: { type: string, description: "The `reference_images` list of the JSON form, as JSON text. Any mix, in order." }
+                "reference_images[][file_id]":
+                  type: array
+                  description: One field per image, in order. Not together with job outputs.
+                  items: { type: string, format: uuid }
+                "reference_images[][job_output][job_id]":
+                  type: array
+                  description: One field per image, in order, each with an index field beside it.
+                  items: { type: string, format: uuid }
+                "reference_images[][job_output][index]":
+                  type: array
+                  items: { type: integer }
                 webhook_url: { type: string }
                 gallery_recipe: { type: string }
                 recipe: { type: string, description: "The `recipe` object of the JSON form, as JSON text." }
+                "recipe[version_id]": { type: string, format: uuid }
+              patternProperties:
+                "^recipe\\[variables\\]\\[[^\\]]+\\]$":
+                  type: string
+                  description: "`recipe[variables][subject]`: one variable's value. An empty value is a value."
+                "^recipe\\[inputs\\]\\[[^\\]]+\\](\\[file_id\\]|\\[job_output\\]\\[(job_id|index)\\])$":
+                  type: string
+                  description: "`recipe[inputs][product photo][file_id]`: an input reference for one of the version's slots."
       responses:
         "200":
           description: The video, `queued`.
@@ -1271,6 +1329,65 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /v1/provider-credentials:
+    get:
+      operationId: listProviderCredentials
+      tags: [Provider keys]
+      summary: Every provider a key may be stored for, and every key the caller holds. Never the key.
+      security: [{ session: [] }]
+      responses:
+        "200":
+          description: One entry per provider. Empty while no provider is offered.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/ProviderCredential" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/provider-credentials/{provider}:
+    put:
+      operationId: setProviderCredential
+      tags: [Provider keys]
+      summary: Store your own key for a provider, once the provider accepts it.
+      description: |
+        The key is checked with the provider's model list first and stored
+        only if it is accepted, encrypted; it is never returned. Leave out
+        `api_key` to change only `fallback_to_platform` of a key already
+        stored. `byok_provider_not_supported` (400) for a provider not
+        offered, `byok_key_rejected` (400) when the provider refuses the key,
+        `byok_check_failed` (502) when it does not answer, and 503 when the
+        provider is not available in this region.
+      security: [{ session: [] }]
+      parameters:
+        - { name: provider, in: path, required: true, schema: { type: string, example: OPENAI } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ProviderCredentialRequest" }
+      responses:
+        "200":
+          description: The key's entry.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProviderCredential" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { description: The provider did not answer the key check; nothing was stored. }
+        "503": { $ref: "#/components/responses/Unavailable" }
+    delete:
+      operationId: deleteProviderCredential
+      tags: [Provider keys]
+      summary: Delete your key for a provider. Its requests go out on Godance's key from then on.
+      security: [{ session: [] }]
+      parameters:
+        - { name: provider, in: path, required: true, schema: { type: string, example: OPENAI } }
+      responses:
+        "204": { description: Deleted. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /v1/auth/signup:
     post:
       operationId: signUp
@@ -1923,6 +2040,239 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "429": { $ref: "#/components/responses/TooManyRequests" }
+  /v1/profile:
+    get:
+      operationId: getProfile
+      tags: [Community]
+      summary: The caller's profile, and whether they may publish.
+      security: [{ session: [] }]
+      responses:
+        "200":
+          description: The profile; its fields are null before one is set.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Profile" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      operationId: setProfile
+      tags: [Community]
+      summary: Set the caller's public profile.
+      description: |
+        Adult accounts with a verified email only (403 `community_not_allowed`).
+        A handle has 3 to 30 lowercase letters, digits and hyphens; 409
+        `handle_taken` for another account's or a reserved one, and 409
+        `handle_locked` once a moderator has approved the profile. A new display
+        name or link waits for a moderator; until then the public routes show
+        the approved ones.
+      security: [{ session: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ProfileRequest" }
+      responses:
+        "200":
+          description: The profile.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Profile" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /v1/recipes/{id}/publish:
+    get:
+      operationId: getRecipeSubmission
+      tags: [Community]
+      summary: The recipe's latest submission, whatever became of it.
+      security: [{ session: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/RecipeId" }
+      responses:
+        "200":
+          description: The submission.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PublishSubmission" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      operationId: publishRecipe
+      tags: [Community]
+      summary: Submit a recipe for publishing. Nothing is public until a moderator approves it.
+      description: |
+        Choose the version, a licence, one to four of your own finished runs of
+        this recipe as examples, and up to five tags. Examples show no upload:
+        a run that used an input image is refused (`example_has_inputs`).
+        `already_published` (409) while a submission is pending or public;
+        `publish_limit_reached` (429 per day, 409 in all).
+      security: [{ session: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/RecipeId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PublishRequest" }
+      responses:
+        "202":
+          description: Submitted; `PENDING` until a moderator decides.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PublishSubmission" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+    delete:
+      operationId: unpublishRecipe
+      tags: [Community]
+      summary: Unpublish a recipe at once. Its example copies are deleted.
+      security: [{ session: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/RecipeId" }
+      responses:
+        "204": { description: Unpublished. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/follows:
+    get:
+      operationId: listFollowing
+      tags: [Community]
+      summary: The handles the caller follows, most recently followed first.
+      security: [{ session: [] }]
+      responses:
+        "200":
+          description: Handles.
+          content:
+            application/json:
+              schema: { type: array, items: { type: string } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/follows/{handle}:
+    post:
+      operationId: follow
+      tags: [Community]
+      summary: Follow the author of a public profile. Safe to repeat.
+      security: [{ session: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/Handle" }
+      responses:
+        "204": { description: Following. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      operationId: unfollow
+      tags: [Community]
+      summary: Stop following. Safe to repeat.
+      security: [{ session: [] }]
+      parameters:
+        - { $ref: "#/components/parameters/Handle" }
+      responses:
+        "204": { description: Not following. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/follows/feed:
+    get:
+      operationId: getFeed
+      tags: [Community]
+      summary: The newest public recipes of the accounts the caller follows.
+      security: [{ session: [] }]
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100 } }
+        - { name: before, in: query, description: "The public id of the last recipe of the previous page.", schema: { type: string } }
+      responses:
+        "200":
+          description: Public recipes, newest first.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/PublicRecipe" } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/reports:
+    post:
+      operationId: report
+      tags: [Community]
+      summary: Report a public recipe or profile to the moderators.
+      description: A report puts a public recipe back in front of a moderator; it stays public unless one removes it.
+      security: [{ session: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReportRequest" }
+      responses:
+        "202": { description: Received. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+  /v1/public/recipes:
+    get:
+      operationId: listPublicRecipes
+      tags: [Community]
+      summary: Published recipes a moderator approved, newest first. No sign-in.
+      security: []
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+        - { name: before, in: query, description: "The public id of the last recipe of the previous page.", schema: { type: string } }
+        - { name: tag, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: Public recipes. Cached for a few minutes.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/PublicRecipe" } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/public/recipes/{publicId}:
+    get:
+      operationId: getPublicRecipe
+      tags: [Community]
+      summary: One published recipe. No sign-in.
+      security: []
+      parameters:
+        - { $ref: "#/components/parameters/PublicId" }
+      responses:
+        "200":
+          description: The recipe.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PublicRecipe" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/public/recipes/{publicId}/examples/{position}:
+    get:
+      operationId: getPublicRecipeExample
+      tags: [Community]
+      summary: An example output of a published recipe, by a redirect to a short-lived link. No sign-in.
+      security: []
+      parameters:
+        - { $ref: "#/components/parameters/PublicId" }
+        - { name: position, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        "302": { description: The example's link is in `Location`. }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/public/profiles/{handle}:
+    get:
+      operationId: getPublicProfile
+      tags: [Community]
+      summary: A public profile, how many follow it, and its published recipes. No sign-in.
+      security: []
+      parameters:
+        - { $ref: "#/components/parameters/Handle" }
+      responses:
+        "200":
+          description: The profile.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PublicProfile" }
+        "404": { $ref: "#/components/responses/NotFound" }
 components:
   securitySchemes:
     apiKey:
@@ -1983,6 +2333,18 @@ components:
       in: path
       required: true
       schema: { type: string, format: uuid }
+    Handle:
+      name: handle
+      in: path
+      required: true
+      description: A profile's handle.
+      schema: { type: string }
+    PublicId:
+      name: publicId
+      in: path
+      required: true
+      description: A published recipe's public id.
+      schema: { type: string }
     GallerySlug:
       name: slug
       in: path
@@ -2422,8 +2784,9 @@ components:
         reference_images: { type: array, items: { $ref: "#/components/schemas/InputRef" } }
     VideoCreateRequest:
       type: object
-      description: The JSON form of `POST /v1/videos`.
+      description: The JSON form of `POST /v1/videos`. A field not listed here is refused unless it is null.
       required: [model]
+      additionalProperties: { type: "null" }
       properties:
         model: { type: string, description: A Godance video model. Required; there is no default. }
         prompt: { type: string, description: Required unless `recipe` is sent. }
@@ -2434,6 +2797,13 @@ components:
             - { type: integer, minimum: 1 }
         size: { type: string, examples: ["1280x720"] }
         input_reference: { $ref: "#/components/schemas/VideoInputReference" }
+        last_frame:
+          description: Godance extension. The image the video ends on, together with `input_reference`.
+          allOf: [{ $ref: "#/components/schemas/InputRef" }]
+        reference_images:
+          type: array
+          description: Godance extension. Images the video follows, in the order the prompt counts them.
+          items: { $ref: "#/components/schemas/InputRef" }
         webhook_url: { type: string, format: uri, description: Godance extension. }
         gallery_recipe: { type: string, description: Godance extension. }
         recipe: { $ref: "#/components/schemas/RecipeRef" }
@@ -2523,6 +2893,7 @@ components:
           oneOf:
             - { $ref: "#/components/schemas/JobBatch" }
             - { type: "null" }
+        publishedRecipe: { type: string, description: "The public id of the published recipe the job ran. Absent for any other job." }
     JobOutput:
       type: object
       properties:
@@ -2575,10 +2946,13 @@ components:
         version: { type: integer }
     RecipeRef:
       type: object
-      description: Godance extension. Run a version of one of the caller's recipes in place of `prompt`.
-      required: [version_id]
+      description: |
+        Godance extension, in place of `prompt`. Run a version of one of the
+        caller's recipes (`version_id`), or a published recipe anyone may run
+        (`published_id`, its public id): one of the two.
       properties:
         version_id: { type: string, format: uuid }
+        published_id: { type: string, description: "A published recipe's public id. The version its author published is run." }
         variables: { type: object, additionalProperties: { type: string } }
         inputs:
           type: object
@@ -2607,6 +2981,7 @@ components:
         params: { type: object }
         source_gallery_recipe: { type: string }
         inputs: { type: array, items: { $ref: "#/components/schemas/RecipeInputSlot" } }
+        source_published_recipe: { type: string, description: "The public id of the published recipe this one is started from; publishing it then records it as `made_from`." }
     NewRecipeVersionRequest:
       type: object
       required: [template, model]
@@ -2749,6 +3124,22 @@ components:
         estimated_cost_cents: { type: integer }
         currency: { type: string }
         input_images: { type: integer }
+        byok: { type: boolean, description: "Present, and true, when the request would go out on your own provider key: the figure is then Godance's fee." }
+    ProviderCredentialRequest:
+      type: object
+      properties:
+        api_key: { type: string, description: "Your key. Leave it out to change only fallback_to_platform." }
+        fallback_to_platform: { type: boolean, description: "When the provider refuses your key, retry once on Godance's key at Godance's price." }
+    ProviderCredential:
+      type: object
+      properties:
+        provider: { type: string }
+        last4: { type: [string, "null"] }
+        status: { type: string, enum: [valid, invalid, unchecked, unsupported_adapter, not_supported, none] }
+        fallback_to_platform: { type: boolean }
+        used_for: { type: array, items: { type: string, enum: [chat, images] } }
+        checked_at: { type: [string, "null"], format: date-time }
+        fee_basis_points: { type: integer, description: "Godance's fee on a request on your key, in basis points of the list price." }
     UsageRecord:
       type: object
       properties:
@@ -3053,3 +3444,98 @@ components:
         gallery_recipe: { type: string }
         landing_path: { type: string }
         referrer_host: { type: string }
+    ProfileRequest:
+      type: object
+      required: [handle, display_name]
+      properties:
+        handle: { type: string, minLength: 3, maxLength: 30, pattern: "^[a-z0-9][a-z0-9-]{1,28}[a-z0-9]$" }
+        display_name: { type: string, maxLength: 60 }
+        link: { type: [string, "null"], format: uri, description: An https:// address. }
+    Profile:
+      type: object
+      description: The caller's own profile. The profile fields are null before one is set.
+      properties:
+        handle: { type: [string, "null"] }
+        display_name: { type: [string, "null"] }
+        link: { type: [string, "null"] }
+        approved: { type: boolean, description: "A moderator approved the profile; its handle is then fixed." }
+        change_awaiting_review: { type: boolean, description: "The display name or link changed since; the public routes show the approved ones." }
+        review_reason: { type: [string, "null"], description: Why a moderator refused the last change. }
+        followers: { type: integer }
+        cannot_publish: { type: [string, "null"], enum: [email_not_verified, not_adult, no_profile, null] }
+        licences: { type: array, items: { type: string }, description: The licences a recipe can be published under. }
+    PublishRequest:
+      type: object
+      required: [version, licence, job_ids]
+      properties:
+        version: { type: integer, minimum: 1 }
+        licence: { type: string, description: "One of the licences `GET /v1/profile` lists." }
+        job_ids: { type: array, minItems: 1, maxItems: 4, items: { type: string, format: uuid } }
+        tags: { type: array, maxItems: 5, items: { type: string, pattern: "^[a-z0-9][a-z0-9-]{0,23}$" } }
+    PublishSubmission:
+      type: object
+      description: A recipe's submission, as its author sees it.
+      properties:
+        public_id: { type: string }
+        status: { type: string, enum: [PENDING, PUBLIC, REJECTED, REMOVED] }
+        version: { type: integer }
+        licence: { type: string }
+        tags: { type: array, items: { type: string } }
+        job_ids: { type: array, items: { type: string, format: uuid } }
+        reason: { type: [string, "null"], description: The moderator's reason for a rejection or removal. }
+        submitted_at: { type: string, format: date-time }
+        reviewed_at: { type: [string, "null"], format: date-time }
+        published_at: { type: [string, "null"], format: date-time }
+    ReportRequest:
+      type: object
+      required: [kind, id, reason]
+      properties:
+        kind: { type: string, enum: [published_recipe, profile] }
+        id: { type: string, description: "A published recipe's public id, or a profile's handle." }
+        reason: { type: string, maxLength: 1000 }
+    PublicRecipe:
+      type: object
+      description: A published recipe a moderator approved. Exactly these fields.
+      properties:
+        public_id: { type: string }
+        title: { type: string }
+        modality: { type: string, enum: [image, video] }
+        template: { type: string }
+        variables: { type: array, items: { $ref: "#/components/schemas/RecipeVariable" } }
+        inputs: { type: array, items: { $ref: "#/components/schemas/RecipeInputSlot" } }
+        model: { type: string }
+        params: { type: object }
+        examples: { type: array, items: { $ref: "#/components/schemas/PublicExample" } }
+        made_from:
+          oneOf:
+            - { $ref: "#/components/schemas/MadeFrom" }
+            - { type: "null" }
+        runs: { type: integer, description: "Finished jobs that ran it, its author's own excluded." }
+        runners: { type: integer, description: "The accounts that ran it, its author excluded." }
+        licence: { type: string }
+        author: { $ref: "#/components/schemas/PublicAuthor" }
+        tags: { type: array, items: { type: string } }
+        published_at: { type: string, format: date-time }
+    PublicExample:
+      type: object
+      properties:
+        url: { type: string, format: uri }
+        content_type: { type: string }
+    PublicAuthor:
+      type: object
+      properties:
+        handle: { type: string }
+        followers: { type: integer }
+    MadeFrom:
+      type: object
+      properties:
+        kind: { type: string, enum: [gallery, published] }
+        id: { type: string, description: "A gallery recipe's slug, or a published recipe's public id." }
+    PublicProfile:
+      type: object
+      properties:
+        handle: { type: string }
+        display_name: { type: [string, "null"] }
+        link: { type: [string, "null"] }
+        followers: { type: integer }
+        recipes: { type: array, items: { $ref: "#/components/schemas/PublicRecipe" } }

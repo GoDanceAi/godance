@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -21,6 +22,7 @@ import ai.godance.config.GatewayProperties;
 import ai.godance.domain.CallOutcome;
 import ai.godance.domain.Region;
 import ai.godance.domain.UsageRecord;
+import ai.godance.gateway.CallerKey;
 import ai.godance.gateway.ChatDtos.ChatChunk;
 import ai.godance.gateway.ChatDtos.ChatMessage;
 import ai.godance.gateway.ChatDtos.ChatRequest;
@@ -33,6 +35,7 @@ import ai.godance.gateway.ModelCatalog.ModelInfo;
 import ai.godance.gateway.ProviderAdapter;
 import ai.godance.gateway.ProviderGateway;
 import ai.godance.repository.UsageRecordRepository;
+import ai.godance.service.ProviderCredentialService.UsableKey;
 import ai.godance.routing.ResolvedRoute;
 import ai.godance.routing.RouteResolver;
 import reactor.core.publisher.Flux;
@@ -73,11 +76,14 @@ public class ChatCompletionService {
     private final GatewayProperties gatewayProps;
     private final ModelHealthService modelHealth;
     private final RouteResolver routeResolver;
+    private final ProviderCredentialService byok;
 
     public ChatCompletionService(ModelCatalog catalog, CostCalculator calculator,
                                  ProviderGateway gateway, CreditLedgerService ledger,
                                  UsageRecordRepository usage, GatewayProperties gatewayProps,
-                                 ModelHealthService modelHealth, RouteResolver routeResolver) {
+                                 ModelHealthService modelHealth, RouteResolver routeResolver,
+                                 ProviderCredentialService byok) {
+        this.byok = byok;
         this.catalog = catalog;
         this.calculator = calculator;
         this.gateway = gateway;
@@ -121,11 +127,15 @@ public class ChatCompletionService {
         int images = imageCount(request.messages());
         if (images > 0) keepModelsThatAcceptImages(attemptModels, route, request.model(), images);
 
-        long estimateCents = estimateCents(primary, attemptModels, estimatedInputTokens, images);
+        long estimateCents = estimateCents(userId, primary, attemptModels, estimatedInputTokens, images);
 
         if (!ledger.preDebit(userId, apiKeyId, estimateCents, requestId)) {
             throw new InsufficientCreditException();
         }
+        // What the request is billed against. When the provider refuses the
+        // caller's own key and the caller allows the platform's instead, the
+        // fee's hold is swapped for one at the platform price (round 14).
+        Hold hold = new Hold(requestId, estimateCents);
 
         // fallbackUsed means "not the first resolved candidate": request.model()
         // for a direct call, the routed primary for a virtual id (the virtual
@@ -160,23 +170,45 @@ public class ChatCompletionService {
                 continue;
             }
 
-            ChatRequest forAttempt = withModel(request, model.modelName());
+            ChatRequest forAttempt = normalize(withModel(request, model.modelName()), model);
+            // Bring your own key (round 14): chosen only now, after the region check passed.
+            Optional<UsableKey> key = byok.keyFor(userId, model);
+            boolean onCallerKey = key.isPresent();
             long startNanos = System.nanoTime();
             ChatResponse response;
             try {
-                response = adapter.chat(normalize(forAttempt, model))
-                        .block(UPSTREAM_BLOCK_TIMEOUT);
-                if (response == null) {
-                    throw new IllegalStateException("upstream returned null response");
-                }
+                response = call(adapter, forAttempt, key.orElse(null));
             } catch (RuntimeException upstreamErr) {
                 int latencyMs = elapsedMs(startNanos);
                 CallOutcome outcome = classifyOutcome(upstreamErr);
                 log.warn("Attempt {} ({}) failed for request {} [{}, {}ms]: {}",
-                        i, modelName, requestId, outcome, latencyMs, upstreamErr.getMessage());
-                recordFailure(userId, apiKeyId, model, requestId, isFallback, latencyMs, outcome, route);
-                lastError = upstreamErr;
-                continue;
+                        i, modelName, hold.id(), outcome, latencyMs, upstreamErr.getMessage());
+                recordFailure(userId, apiKeyId, model, hold.id(), isFallback, latencyMs, outcome, onCallerKey, route);
+                if (!onCallerKey || !isKeyRefused(upstreamErr)) {
+                    lastError = upstreamErr;
+                    continue;
+                }
+                // The provider refused the caller's key: it is invalid from now on.
+                byok.rejected(key.get(), null);
+                if (!key.get().fallbackToPlatform()) {
+                    ledger.refundEstimate(userId, hold.cents(), hold.id(), "the provider refused the caller's key");
+                    throw ByokRefusedException.credentialRejected(model.provider());
+                }
+                // Retried once on the platform's key, at the platform price.
+                hold = platformHold(userId, apiKeyId, hold, model, estimatedInputTokens, images);
+                onCallerKey = false;
+                startNanos = System.nanoTime();
+                try {
+                    response = call(adapter, forAttempt, null);
+                } catch (RuntimeException retryErr) {
+                    int retryMs = elapsedMs(startNanos);
+                    CallOutcome retryOutcome = classifyOutcome(retryErr);
+                    log.warn("Attempt {} ({}) on the platform's key failed for request {} [{}, {}ms]: {}",
+                            i, modelName, hold.id(), retryOutcome, retryMs, retryErr.getMessage());
+                    recordFailure(userId, apiKeyId, model, hold.id(), isFallback, retryMs, retryOutcome, false, route);
+                    lastError = retryErr;
+                    continue;
+                }
             }
 
             // The upstream call succeeded and was paid for. A failure from here
@@ -186,21 +218,21 @@ public class ChatCompletionService {
             // the request id for reconciliation.
             int latencyMs = elapsedMs(startNanos);
             try {
-                long actualMicrocents = calculator.actualMicrocents(model,
-                        response.usage().promptTokens(), response.usage().completionTokens());
-                long billedCents = ledger.settle(userId, estimateCents, actualMicrocents, requestId);
+                long actualMicrocents = costMicrocents(model, response.usage().promptTokens(),
+                        response.usage().completionTokens(), onCallerKey);
+                long billedCents = ledger.settle(userId, hold.cents(), actualMicrocents, hold.id());
                 usage.save(buildUsageRecord(userId, apiKeyId, model, response, billedCents,
-                        actualMicrocents, requestId, isFallback, latencyMs, CallOutcome.OK, route));
+                        actualMicrocents, hold.id(), isFallback, latencyMs, CallOutcome.OK, onCallerKey, route));
             } catch (RuntimeException settlementErr) {
                 log.error("Settlement failed for request {} after a successful upstream call to {}; "
-                        + "not retrying upstream: {}", requestId, modelName, settlementErr.getMessage(),
+                        + "not retrying upstream: {}", hold.id(), modelName, settlementErr.getMessage(),
                         settlementErr);
             }
             return response;
         }
 
         // Exhausted all attempts.
-        ledger.refundEstimate(userId, estimateCents, requestId,
+        ledger.refundEstimate(userId, hold.cents(), hold.id(),
                 "all providers failed for primary " + request.model());
         if (lastError instanceof ResponseStatusException rse) {
             throw rse;
@@ -270,19 +302,89 @@ public class ChatCompletionService {
      * the hold is the highest such figure over every model that may answer,
      * so whichever one does, the images were covered.
      */
-    private long estimateCents(ModelInfo primary, List<String> attemptModels, int textTokens, int images) {
+    private long estimateCents(UUID userId, ModelInfo primary, List<String> attemptModels, int textTokens, int images) {
         if (images <= 0) {
-            return Math.max(1L, calculator.estimateInputCents(primary, textTokens));
+            return holdCents(userId, primary, textTokens);
         }
         long highest = 1L;
         for (String name : attemptModels) {
             ModelInfo model = catalog.find(name).orElse(null);
             if (model == null) continue;
-            long tokens = (long) textTokens + (long) images * ChatImageTokens.perImage(model);
-            highest = Math.max(highest,
-                    calculator.estimateInputCents(model, (int) Math.min(Integer.MAX_VALUE, tokens)));
+            highest = Math.max(highest, holdCents(userId, model, tokensWithImages(model, textTokens, images)));
         }
         return highest;
+    }
+
+    /**
+     * What a request to {@code model} holds for this many input tokens:
+     * Godance's fee on their list price when it would go out on the
+     * caller's own key (round 14), else the price as before. Both at least 1 cent.
+     */
+    private long holdCents(UUID userId, ModelInfo model, int inputTokens) {
+        if (byok.applies(userId, model)) {
+            return CostCalculator.feeHoldCents(CostCalculator.feeMicrocents(
+                    calculator.listInputMicrocents(model, inputTokens), byok.feeBasisPoints()));
+        }
+        return Math.max(1L, calculator.estimateInputCents(model, inputTokens));
+    }
+
+    private static int tokensWithImages(ModelInfo model, int textTokens, int images) {
+        long tokens = (long) textTokens + (long) Math.max(0, images) * ChatImageTokens.perImage(model);
+        return (int) Math.min(Integer.MAX_VALUE, tokens);
+    }
+
+    /** What the served attempt costs the caller: the fee on its list price on their own key, else the price. */
+    private long costMicrocents(ModelInfo model, int inputTokens, int outputTokens, boolean onCallerKey) {
+        if (onCallerKey) {
+            return CostCalculator.feeMicrocents(calculator.listMicrocents(model, inputTokens, outputTokens),
+                    byok.feeBasisPoints());
+        }
+        return calculator.actualMicrocents(model, inputTokens, outputTokens);
+    }
+
+    /** The hold a request is billed against: its ledger request id and the cents held. */
+    private record Hold(String id, long cents) { }
+
+    /**
+     * The provider refused the caller's key and the caller allows the
+     * platform's: the fee's hold is refunded and the platform price held
+     * under a new request id, so the retry is billed at that price, once.
+     *
+     * @throws InsufficientCreditException 402 when the platform price is not covered
+     */
+    private Hold platformHold(UUID userId, UUID apiKeyId, Hold feeHold, ModelInfo model, int textTokens, int images) {
+        ledger.refundEstimate(userId, feeHold.cents(), feeHold.id(),
+                "the provider refused the caller's key; the platform's key stands in");
+        long cents = Math.max(1L, calculator.estimateInputCents(model, tokensWithImages(model, textTokens, images)));
+        String id = newRequestId();
+        if (!ledger.preDebit(userId, apiKeyId, cents, id)) throw new InsufficientCreditException();
+        return new Hold(id, cents);
+    }
+
+    private static String newRequestId() {
+        return "req_" + UUID.randomUUID().toString().replace("-", "").substring(0, 24);
+    }
+
+    /** One upstream call, on the caller's own key when {@code key} is set, else on the platform's. */
+    private static ChatResponse call(ProviderAdapter adapter, ChatRequest request, UsableKey key) {
+        Mono<ChatResponse> call = adapter.chat(request);
+        if (key != null) call = call.contextWrite(context -> CallerKey.in(context, key.key()));
+        ChatResponse response = call.block(UPSTREAM_BLOCK_TIMEOUT);
+        if (response == null) {
+            throw new IllegalStateException("upstream returned null response");
+        }
+        return response;
+    }
+
+    /** Whether the provider refused the key itself: an HTTP 401 or 403. */
+    static boolean isKeyRefused(Throwable err) {
+        for (Throwable t = err; t != null; t = t.getCause()) {
+            if (t instanceof WebClientResponseException w) {
+                int status = w.getStatusCode().value();
+                return status == 401 || status == 403;
+            }
+        }
+        return false;
     }
 
     /** chars/3 heuristic. Over-estimates by ~33% vs OpenAI's BPE ratio — refund covers the slack. */
@@ -310,9 +412,11 @@ public class ChatCompletionService {
                                          ChatResponse response, long billedCents,
                                          long costMicrocents, String requestId,
                                          boolean fallbackUsed, int latencyMs,
-                                         CallOutcome outcome, ResolvedRoute route) {
-        long providerCostMicrocents =
-                model.inputMicrocentsPer1k()  * response.usage().promptTokens()     / 1000
+                                         CallOutcome outcome, boolean onCallerKey,
+                                         ResolvedRoute route) {
+        // On the caller's own key the provider bills them, not Godance: Godance's cost is nothing.
+        long providerCostMicrocents = onCallerKey ? 0L
+              : model.inputMicrocentsPer1k()  * response.usage().promptTokens()     / 1000
               + model.outputMicrocentsPer1k() * response.usage().completionTokens() / 1000;
         long providerCostCents = (providerCostMicrocents + 5_000) / 10_000;   // HALF_UP
 
@@ -334,6 +438,7 @@ public class ChatCompletionService {
         r.setRequestId(requestId);
         r.setLatencyMs(latencyMs);
         r.setOutcome(outcome);
+        r.setByok(onCallerKey);
         attributeRoute(r, route);
         return r;
     }
@@ -397,6 +502,13 @@ public class ChatCompletionService {
     private void recordFailure(UUID userId, UUID apiKeyId, ModelInfo model, String requestId,
                                boolean fallbackUsed, int latencyMs, CallOutcome outcome,
                                ResolvedRoute route) {
+        recordFailure(userId, apiKeyId, model, requestId, fallbackUsed, latencyMs, outcome, false, route);
+    }
+
+    /** {@code onCallerKey}: the failed attempt went out on the caller's own key (round 14). */
+    private void recordFailure(UUID userId, UUID apiKeyId, ModelInfo model, String requestId,
+                               boolean fallbackUsed, int latencyMs, CallOutcome outcome, boolean onCallerKey,
+                               ResolvedRoute route) {
         try {
             UsageRecord r = new UsageRecord();
             r.setUserId(userId);
@@ -408,6 +520,7 @@ public class ChatCompletionService {
             r.setOutputTokens(0);
             r.setCostCents(0);                 // the user is refunded; the failed call is free
             r.setProviderCostCents(0L);
+            r.setByok(onCallerKey);
             r.setRegion(asDomainRegion(gateway.region()));
             r.setCacheHit(false);
             r.setFallbackUsed(fallbackUsed);
@@ -480,7 +593,7 @@ public class ChatCompletionService {
         int images = imageCount(request.messages());
         if (images > 0) keepModelsThatAcceptImages(attemptModels, route, request.model(), images);
 
-        long estimateCents = estimateCents(primary, attemptModels, estimatedInputTokens, images);
+        long estimateCents = estimateCents(userId, primary, attemptModels, estimatedInputTokens, images);
 
         boolean debited;
         try {
@@ -498,23 +611,32 @@ public class ChatCompletionService {
         reorderByHealth(attemptModels);
 
         StreamState state = new StreamState(userId, apiKeyId, request, requestId,
-                estimateCents, attemptModels, firstChoice, route);
-        return streamAttempt(state, 0, null)
+                estimateCents, attemptModels, firstChoice, estimatedInputTokens, images, route);
+        return streamAttempt(state, 0, null, false)
                 .doFinally(signal -> dispatchPostStream(signal, state));
     }
 
-    /** One attempt's model, once its upstream call has started. */
-    private record StreamAttempt(ModelInfo model, boolean fallbackUsed, long startNanos) { }
+    /**
+     * One attempt's model, once its upstream call has started.
+     * {@code onCallerKey}: it went out on the caller's own key (round 14).
+     */
+    private record StreamAttempt(ModelInfo model, boolean fallbackUsed, long startNanos, boolean onCallerKey) { }
 
     /** Per-request state shared by the attempts of one {@link #executeStreaming} call. */
     private static final class StreamState {
         final UUID userId;
         final UUID apiKeyId;
         final ChatRequest request;
-        final String requestId;
-        final long estimateCents;
         final List<String> attempts;
         final String firstChoice;
+        final int inputTokens;
+        final int images;
+        /**
+         * What the request is billed against: the pre-debit's request id and
+         * cents. Swapped once for the platform price's when the provider
+         * refuses the caller's own key and the caller allows the platform's.
+         */
+        final AtomicReference<Hold> hold = new AtomicReference<>();
         /** The route resolved for the request; its policy and rule go on each usage record. */
         final ResolvedRoute route;
         /** The attempt in flight, or the last one to run. Null until an upstream call starts. */
@@ -524,16 +646,21 @@ public class ChatCompletionService {
         final AtomicReference<Usage> usage = new AtomicReference<>();
 
         StreamState(UUID userId, UUID apiKeyId, ChatRequest request, String requestId,
-                    long estimateCents, List<String> attempts, String firstChoice,
+                    long estimateCents, List<String> attempts, String firstChoice, int inputTokens, int images,
                     ResolvedRoute route) {
             this.userId = userId;
             this.apiKeyId = apiKeyId;
             this.request = request;
-            this.requestId = requestId;
-            this.estimateCents = estimateCents;
+            this.hold.set(new Hold(requestId, estimateCents));
             this.attempts = List.copyOf(attempts);
             this.firstChoice = firstChoice;
+            this.inputTokens = inputTokens;
+            this.images = images;
             this.route = route;
+        }
+
+        String requestId() {
+            return hold.get().id();
         }
     }
 
@@ -544,7 +671,7 @@ public class ChatCompletionService {
      * upstream call or UsageRecord; an upstream error writes the same
      * failure UsageRecord as {@link #execute} before the next attempt.
      */
-    private Flux<ChatChunk> streamAttempt(StreamState s, int i, RuntimeException lastError) {
+    private Flux<ChatChunk> streamAttempt(StreamState s, int i, RuntimeException lastError, boolean platformOnly) {
         if (i >= s.attempts.size()) {
             // Exhausted all attempts; dispatchPostStream refunds the estimate.
             if (lastError instanceof ResponseStatusException rse) {
@@ -561,8 +688,8 @@ public class ChatCompletionService {
         ModelInfo model = catalog.find(modelName).orElse(null);
         if (model == null) {
             log.warn("Fallback model '{}' not in catalog; skipping (request {})",
-                    modelName, s.requestId);
-            return streamAttempt(s, i + 1, lastError);
+                    modelName, s.requestId());
+            return streamAttempt(s, i + 1, lastError, false);
         }
 
         ProviderAdapter adapter;
@@ -572,16 +699,23 @@ public class ChatCompletionService {
             // Allowlist denied this option in the current region — try next.
             log.info("Dispatch rejected for '{}' ({}); trying next attempt",
                     modelName, denied.getReason());
-            return streamAttempt(s, i + 1, denied);
+            return streamAttempt(s, i + 1, denied, false);
         }
+
+        // Bring your own key (round 14): chosen only now, after the region check
+        // passed; never for the one retry on the platform's key.
+        Optional<UsableKey> key = platformOnly ? Optional.empty() : byok.keyFor(s.userId, model);
+        boolean onCallerKey = key.isPresent();
 
         // Rewrite the upstream request to the concrete model name so providers
         // never see the virtual id. No-op for a direct call's primary.
         ChatRequest forStream = withModel(s.request, model.modelName());
-        return Flux.defer(() -> {
-                    s.current.set(new StreamAttempt(model, isFallback, System.nanoTime()));
-                    return adapter.chatStream(normalize(forStream, model));
-                })
+        Flux<ChatChunk> upstream = Flux.defer(() -> {
+            s.current.set(new StreamAttempt(model, isFallback, System.nanoTime(), onCallerKey));
+            return adapter.chatStream(normalize(forStream, model));
+        });
+        if (onCallerKey) upstream = upstream.contextWrite(context -> CallerKey.in(context, key.get().key()));
+        return upstream
                 .doOnNext(chunk -> {
                     s.relayed.set(true);
                     if (chunk.usage() != null) s.usage.set(chunk.usage());
@@ -590,14 +724,32 @@ public class ChatCompletionService {
                     int latencyMs = elapsedMs(s.current.get().startNanos());
                     CallOutcome outcome = classifyOutcome(err);
                     log.warn("Stream attempt {} ({}) failed before its first chunk for request {} [{}, {}ms]: {}",
-                            i, modelName, s.requestId, outcome, latencyMs, err.getMessage());
+                            i, modelName, s.requestId(), outcome, latencyMs, err.getMessage());
                     RuntimeException failure = err instanceof RuntimeException re
                             ? re : new IllegalStateException(err);
+                    String failedHold = s.requestId();
                     // recordFailure blocks on JPA, so keep it off the stream thread.
-                    return Mono.fromRunnable(() -> recordFailure(s.userId, s.apiKeyId, model,
-                                    s.requestId, isFallback, latencyMs, outcome, s.route))
-                            .subscribeOn(Schedulers.boundedElastic())
-                            .thenMany(Flux.defer(() -> streamAttempt(s, i + 1, failure)));
+                    Mono<Void> recorded = Mono.<Void>fromRunnable(() -> recordFailure(s.userId, s.apiKeyId, model,
+                                    failedHold, isFallback, latencyMs, outcome, onCallerKey, s.route))
+                            .subscribeOn(Schedulers.boundedElastic());
+                    if (!onCallerKey || !isKeyRefused(err)) {
+                        return recorded.thenMany(Flux.defer(() -> streamAttempt(s, i + 1, failure, false)));
+                    }
+                    // The provider refused the caller's key: invalid from now on. Without
+                    // the caller's leave to use the platform's key, the request ends here
+                    // and its hold is refunded; with it, this model is tried once more on
+                    // the platform's key, at the platform price.
+                    return recorded
+                            .then(Mono.fromCallable(() -> {
+                                byok.rejected(key.get(), null);
+                                if (!key.get().fallbackToPlatform()) {
+                                    throw ByokRefusedException.credentialRejected(model.provider());
+                                }
+                                s.hold.set(platformHold(s.userId, s.apiKeyId, s.hold.get(), model,
+                                        s.inputTokens, s.images));
+                                return Boolean.TRUE;
+                            }).subscribeOn(Schedulers.boundedElastic()))
+                            .thenMany(Flux.defer(() -> streamAttempt(s, i, failure, true)));
                 });
     }
 
@@ -611,47 +763,48 @@ public class ChatCompletionService {
         Mono.fromRunnable(() -> {
             StreamAttempt served = s.current.get();
             Usage usage = s.usage.get();
+            Hold hold = s.hold.get();
             try {
                 if (signal == SignalType.ON_COMPLETE && usage != null) {
-                    long actualMicrocents = calculator.actualMicrocents(served.model(),
-                            usage.promptTokens(), usage.completionTokens());
-                    long billedCents = ledger.settle(s.userId, s.estimateCents, actualMicrocents, s.requestId);
+                    long actualMicrocents = costMicrocents(served.model(),
+                            usage.promptTokens(), usage.completionTokens(), served.onCallerKey());
+                    long billedCents = ledger.settle(s.userId, hold.cents(), actualMicrocents, hold.id());
                     this.usage.save(buildStreamedUsageRecord(
                             s.userId, s.apiKeyId, served.model(), usage, billedCents, actualMicrocents,
-                            s.requestId, served.fallbackUsed(), elapsedMs(served.startNanos()), CallOutcome.OK,
-                            s.route));
+                            hold.id(), served.fallbackUsed(), elapsedMs(served.startNanos()), CallOutcome.OK,
+                            served.onCallerKey(), s.route));
                 } else if (signal == SignalType.ON_COMPLETE) {
                     // Stream completed but provider never emitted a usage block.
                     // Keep the pre-debit as the recorded cost; write a UsageRecord
                     // with zero token counts so the audit trail isn't blank.
-                    log.warn("Stream {} completed without usage block; keeping pre-debit", s.requestId);
+                    log.warn("Stream {} completed without usage block; keeping pre-debit", hold.id());
                     this.usage.save(buildStreamedUsageRecord(
-                            s.userId, s.apiKeyId, served.model(), new Usage(0, 0, 0), s.estimateCents,
-                            s.estimateCents * CreditLedgerService.MICROCENTS_PER_CENT,
-                            s.requestId, served.fallbackUsed(), elapsedMs(served.startNanos()),
-                            CallOutcome.OK, s.route));
+                            s.userId, s.apiKeyId, served.model(), new Usage(0, 0, 0), hold.cents(),
+                            hold.cents() * CreditLedgerService.MICROCENTS_PER_CENT,
+                            hold.id(), served.fallbackUsed(), elapsedMs(served.startNanos()),
+                            CallOutcome.OK, served.onCallerKey(), s.route));
                 } else if (signal == SignalType.ON_ERROR && s.relayed.get()) {
                     // Upstream failed mid-stream — full refund, plus a failure
                     // UsageRecord so the outage shows up in provider health.
-                    ledger.refundEstimate(s.userId, s.estimateCents, s.requestId,
+                    ledger.refundEstimate(s.userId, hold.cents(), hold.id(),
                             "stream signal " + signal);
-                    recordFailure(s.userId, s.apiKeyId, served.model(), s.requestId,
+                    recordFailure(s.userId, s.apiKeyId, served.model(), hold.id(),
                             served.fallbackUsed(), elapsedMs(served.startNanos()), CallOutcome.ERROR,
-                            s.route);
+                            served.onCallerKey(), s.route);
                 } else if (signal == SignalType.ON_ERROR) {
                     // Every attempt failed before its first chunk; each upstream
                     // failure already wrote its own UsageRecord.
-                    ledger.refundEstimate(s.userId, s.estimateCents, s.requestId,
+                    ledger.refundEstimate(s.userId, hold.cents(), hold.id(),
                             "all providers failed for primary " + s.request.model());
                 } else {
                     // CANCEL — client disconnected. Full refund; not a provider
                     // fault, so no health signal.
-                    ledger.refundEstimate(s.userId, s.estimateCents, s.requestId,
+                    ledger.refundEstimate(s.userId, hold.cents(), hold.id(),
                             "stream signal " + signal);
                 }
             } catch (RuntimeException e) {
                 log.warn("Post-stream reconcile failed for request {}: {}",
-                        s.requestId, e.getMessage());
+                        hold.id(), e.getMessage());
             }
         }).subscribeOn(Schedulers.boundedElastic()).subscribe();
     }
@@ -659,10 +812,11 @@ public class ChatCompletionService {
     private UsageRecord buildStreamedUsageRecord(UUID userId, UUID apiKeyId, ModelInfo model, Usage u,
                                                  long billedCents, long costMicrocents,
                                                  String requestId, boolean fallbackUsed,
-                                                 int latencyMs, CallOutcome outcome,
+                                                 int latencyMs, CallOutcome outcome, boolean onCallerKey,
                                                  ResolvedRoute route) {
-        long providerCostMicrocents =
-                model.inputMicrocentsPer1k()  * u.promptTokens()     / 1000
+        // On the caller's own key the provider bills them, not Godance.
+        long providerCostMicrocents = onCallerKey ? 0L
+              : model.inputMicrocentsPer1k()  * u.promptTokens()     / 1000
               + model.outputMicrocentsPer1k() * u.completionTokens() / 1000;
         long providerCostCents = (providerCostMicrocents + 5_000) / 10_000;
 
@@ -684,6 +838,7 @@ public class ChatCompletionService {
         r.setRequestId(requestId);
         r.setLatencyMs(latencyMs);
         r.setOutcome(outcome);
+        r.setByok(onCallerKey);
         attributeRoute(r, route);
         return r;
     }
