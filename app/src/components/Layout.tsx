@@ -3,6 +3,7 @@ import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import { useAuth, formatCents } from '../lib/auth';
 import { useAdmin } from '../lib/admin';
+import { useCommunity } from '../lib/community-context';
 import { useReferral } from '../lib/referral';
 import { carryDestination, destinationFrom } from '../lib/return-to';
 import { LogoLockup, ThemeToggle } from './Brand';
@@ -21,11 +22,14 @@ const NAV: { to: string; label: string }[] = [
 ];
 // Only while referrals are on (lib/referral); it sits after Billing.
 const INVITE = { to: '/referral', label: 'Invite' };
+// Only while the community is open (lib/community); it sits after Recipes.
+const FOLLOWING = { to: '/following', label: 'Following' };
 
 export default function Layout({ children }: Props) {
   const { user, logout } = useAuth();
   const { isAdmin, needsTwoFactor } = useAdmin();
   const { info: referral } = useReferral();
+  const { open: communityOpen } = useCommunity();
   const navigate = useNavigate();
   // On the sign-in and sign-up pages, the header's links keep where the
   // visitor was going too (lib/return-to).
@@ -51,9 +55,11 @@ export default function Layout({ children }: Props) {
 
   // A child's account waiting for consent reaches no page but the waiting screen.
   const showNav = user !== null && user.ageStatus !== 'CONSENT_PENDING';
-  const nav = referral?.enabled
-    ? NAV.flatMap((item) => (item.to === '/billing' ? [item, INVITE] : [item]))
-    : NAV;
+  const nav = NAV.flatMap((item) => {
+    if (item.to === '/billing' && referral?.enabled) return [item, INVITE];
+    if (item.to === '/recipes' && communityOpen) return [item, FOLLOWING];
+    return [item];
+  });
   const links = (
     <>
       {nav.map((item) => (item.to === '/recipes' && onBatches ? (

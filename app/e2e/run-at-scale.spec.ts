@@ -2,7 +2,7 @@ import type { Page } from '@playwright/test';
 import type { ApiKeySummary } from '../src/lib/api';
 import { API_ORIGIN } from './api-origin';
 import { batchId, makeBatch, makeRows, serveBatch } from './batches';
-import { accepted, inProgress, jobId, makeJob, MODELS, mockEstimates, serveJob, serveMedia } from './generation';
+import { accepted, inProgress, jobId, makeJob, MODELS, mockEstimates, outputsOf, serveJob, serveMedia } from './generation';
 import { chooseFile, fileId, openInputsStudio, serveUploads } from './inputs';
 import { expect, FAKE_KEY, makeUser, problem, serveKeys, test, type MockApi } from './mock-api';
 import { makeRecipe, makeVersion, MUG_TEMPLATE, recipeId, serveRecipes, versionId } from './user-recipes';
@@ -245,7 +245,7 @@ test.describe('Run at scale, on a recipe', () => {
       'This recipe works from an input image, and the image template sends a prompt alone.');
   });
 
-  test('a video recipe: always a job, on the video route, with the video template', async ({ page, api }) => {
+  test('a video recipe: always a job, on OpenAI\'s video route, with the video template', async ({ page, api }) => {
     await openRecipe(page, api, makeRecipe({
       title: 'Koi pond in the rain',
       modality: 'VIDEO',
@@ -258,21 +258,37 @@ test.describe('Run at scale, on a recipe', () => {
     }));
 
     const prompt = await promptOf(page);
-    expect(prompt).toContain(`POST ${API_ORIGIN}/v1/videos/generations`);
+    expect(prompt).toContain(`POST ${API_ORIGIN}/v1/videos\n`);
+    expect(prompt).toContain('3. A video request answers 200 with the video');
+    expect(prompt).toContain('client.videos.create_and_poll sends a form, in which "recipe" is JSON text');
+    expect(prompt).not.toContain('A video request always answers 202');
     expect(recipeIn(prompt)).toMatchObject({ modality: 'VIDEO', model: 'kling-3.0', params: { size: '1920x1080', seconds: 10 } });
 
     await tab(page, 'Code').click();
     // No choice of how it answers: a video never waits.
     await expect(panel(page).getByRole('group', { name: 'How it answers' })).toHaveCount(0);
     await expect(tabPanel(page, 'Code')).toContainText('A video is always a job');
-    const start = await codeOf(page, 'Start the job');
-    expect(start).toContain(`curl ${API_ORIGIN}/v1/videos/generations`);
-    expect(start).toContain('"seconds": 10');
+    const start = await codeOf(page, 'Start the video');
+    expect(start).toContain(`curl ${API_ORIGIN}/v1/videos \\`);
+    expect(start).toContain(`"version_id": "${versionId(1, 3)}"`);
+    expect(start).toContain('"weather": "falling rain"');
+    // OpenAI's shape: seconds as a string.
+    expect(start).toContain('"seconds": "10"');
     expect(start).not.toContain('"async"');
+    expect(start).not.toContain('"prompt"');
+    expect(await codeOf(page, 'Check on it')).toContain(`curl ${API_ORIGIN}/v1/videos/$VIDEO_ID`);
+    expect(await codeOf(page, 'Download it')).toContain(`curl -o "$VIDEO_ID.mp4" ${API_ORIGIN}/v1/videos/$VIDEO_ID/content`);
     await choice(page, 'Language', 'Python (OpenAI SDK)').click();
-    expect(await codeOf(page, 'Python script')).toContain('client.post(\n    "/videos/generations",');
+    const python = await codeOf(page, 'Python script');
+    expect(python).toContain('video = client.videos.create_and_poll(');
+    expect(python).toContain('    seconds="10",');
+    expect(python).toContain('        "recipe": json.dumps({');
+    expect(python).toContain('client.videos.download_content(video.id, variant="video")');
     await choice(page, 'Language', 'Java (Spring WebClient)').click();
-    expect(await codeOf(page, 'Java class')).toContain('godance.post().uri("/v1/videos/generations")');
+    const java = await codeOf(page, 'Java class');
+    expect(java).toContain('godance.post().uri("/v1/videos")');
+    expect(java).toContain('godance.get().uri("/v1/videos/{id}/content", id)');
+    for (const code of [start, python, java]) expectNoKey(code);
 
     await tab(page, 'No-code (n8n)').click();
     await expect(tabPanel(page, 'No-code (n8n)').getByRole('link', { name: 'Download the template' }))
@@ -632,23 +648,88 @@ test.describe('Run at scale, on a finished Studio result', () => {
 
     await openPanel(page);
     const prompt = await promptOf(page);
-    expect(prompt).toContain(`POST ${API_ORIGIN}/v1/videos/generations`);
+    expect(prompt).toContain(`POST ${API_ORIGIN}/v1/videos\n`);
     expect(recipeIn(prompt)).toMatchObject({ modality: 'VIDEO', template: 'Waves at dawn', model: 'kling-3.0' });
 
     await tab(page, 'Code').click();
     await expect(panel(page).getByRole('group', { name: 'How it answers' })).toHaveCount(0);
-    const sent = api.callsTo('POST', '/v1/videos/generations')[0].body;
-    const start = await codeOf(page, 'Start the job');
-    expect(start).toContain(`curl ${API_ORIGIN}/v1/videos/generations`);
-    expect(JSON.parse(/-d '([\s\S]*)'$/.exec(start)?.[1] ?? '')).toEqual(sent);
+    // The Studio sent it to Godance's own route; the code sends the same request in OpenAI's shape.
+    const { seconds, ...sent } = api.callsTo('POST', '/v1/videos/generations')[0].body as Record<string, unknown>;
+    expect(seconds).toBe(5);
+    const start = await codeOf(page, 'Start the video');
+    expect(start).toContain(`curl ${API_ORIGIN}/v1/videos \\`);
+    expect(JSON.parse(/-d '([\s\S]*)'$/.exec(start)?.[1] ?? '')).toEqual({ ...sent, seconds: '5' });
     await choice(page, 'Language', 'Python (OpenAI SDK)').click();
     const python = await codeOf(page, 'Python script');
-    expect(python).toContain('client.post(\n    "/videos/generations",');
-    expect(python).toContain('"seconds": 5,');
+    expect(python).toContain('video = client.videos.create_and_poll(');
+    expect(python).toContain('    prompt="Waves at dawn",');
+    expect(python).toContain('    seconds="5",');
     expect(python).not.toContain('"async"');
 
     await tab(page, 'No-code (n8n)').click();
     await expect(tabPanel(page, 'No-code (n8n)')).toContainText('godance-sheet-to-videos.json');
+  });
+
+  /** A seedance-2.0 run from the Studio with these frames chosen, done, and its panel open on Code. */
+  async function videoFromFrames(page: Page, api: MockApi, frames: string[]) {
+    await openInputsStudio(page, api, '/create/video?model=seedance-2.0');
+    serveUploads(api);
+    const done = makeJob({
+      id: jobId(10), modality: 'VIDEO', model: 'seedance-2.0', provider: 'VOLCENGINE', prompt: 'The boat drifts away',
+      params: { size: '1280x720', seconds: 5 }, outputs: outputsOf(1, 'video'),
+    });
+    api.on('POST', '/v1/videos/generations', accepted(done.id));
+    serveJob(api, done);
+
+    await page.getByLabel('Prompt').fill('The boat drifts away');
+    for (const frame of frames) await chooseFile(page, `Choose a file for the ${frame}`, `${frame.replace(' ', '-')}.png`);
+    await page.getByRole('button', { name: /^Generate/ }).click();
+    await expect(page.getByRole('status')).toContainText('Done');
+    await openPanel(page);
+    return api.callsTo('POST', '/v1/videos/generations')[0].body as Record<string, unknown>;
+  }
+
+  test('a video from a first frame: OpenAI\'s route, the frame as input_reference', async ({ page, api }) => {
+    const sent = await videoFromFrames(page, api, ['first frame']);
+    expect(sent.first_frame).toEqual({ file_id: fileId(1) });
+
+    // The prompt says where the frame goes, and names no file.
+    const prompt = await promptOf(page);
+    expect(prompt).toContain(`POST ${API_ORIGIN}/v1/videos\n`);
+    expect(prompt).toContain('The input is the video\'s first frame: send it as "input_reference": {"file_id": "..."}');
+    expect(prompt).not.toContain('Each input goes in the field its "role" names');
+    expect(prompt).not.toContain(fileId(1));
+
+    await tab(page, 'Code').click();
+    const { first_frame: frame, seconds, ...rest } = sent;
+    const start = await codeOf(page, 'Start the video');
+    expect(start).toContain(`curl ${API_ORIGIN}/v1/videos \\`);
+    expect(JSON.parse(/-d '([\s\S]*)'$/.exec(start)?.[1] ?? '')).toEqual({ ...rest, seconds: String(seconds), input_reference: frame });
+    expect(start).not.toContain('first_frame');
+    await choice(page, 'Language', 'Python (OpenAI SDK)').click();
+    expect(await codeOf(page, 'Python script'))
+      .toContain(`    extra_body={\n        "input_reference": {\n            "file_id": "${fileId(1)}",\n        },\n    },`);
+  });
+
+  test('a video from a first and a last frame: Godance\'s own route, as the Studio sent it, and the code says why', async ({ page, api }) => {
+    const sent = await videoFromFrames(page, api, ['first frame', 'last frame']);
+    expect(sent).toMatchObject({ first_frame: { file_id: fileId(1) }, last_frame: { file_id: fileId(2) } });
+
+    const prompt = await promptOf(page);
+    expect(prompt).toContain(`POST ${API_ORIGIN}/v1/videos/generations\n`);
+    expect(prompt).toContain('Each input goes in the field its "role" names');
+    expect(prompt).toContain('3. A video request always answers 202 with a "job_id"');
+    expect(prompt).not.toContain('input_reference');
+
+    await tab(page, 'Code').click();
+    const start = await codeOf(page, 'Start the job');
+    expect(start).toContain(`curl ${API_ORIGIN}/v1/videos/generations \\`);
+    expect(JSON.parse(/-d '([\s\S]*)'$/.exec(start)?.[1] ?? '')).toEqual(sent);
+    await expect(figure(page, 'Start the job')).toContainText('OpenAI\'s POST /v1/videos has no field for part of this request');
+    expect(await codeOf(page, 'Check on it')).toContain(`curl ${API_ORIGIN}/v1/jobs/$JOB_ID`);
+    await choice(page, 'Language', 'Python (OpenAI SDK)').click();
+    expect(await codeOf(page, 'Python script')).toContain('client.post(\n    "/videos/generations",');
+    await expect(figure(page, 'Python script')).toContainText('so it goes to Godance\'s own video route as it is');
   });
 
   test('a run of one of the user\'s recipes: by reference in the code, and a batch of it one click away', async ({ page, api }) => {

@@ -1,0 +1,94 @@
+---
+/**
+ * /u/<handle>: a community author. Their name and link as a moderator
+ * approved them, how many follow them (never who), and their public
+ * recipes, newest first. Following happens in the app, signed in.
+ *
+ * Built from GET /v1/public/profiles/{handle} and the public recipes
+ * (lib/community.ts), and only for authors whose profile could be read.
+ */
+import type { GetStaticPaths } from 'astro';
+import Layout from '../../layouts/Layout.astro';
+import RecipeCard from '../../components/community/RecipeCard.astro';
+import {
+  COMMUNITY_PATH,
+  authorName,
+  firstImage,
+  followUrl,
+  followersText,
+  loadCommunity,
+  profileJsonLd,
+  profilePath,
+  reportUrl,
+  scriptJson,
+  type PublicProfile,
+} from '../../lib/community';
+
+export const getStaticPaths = (async () => {
+  const community = await loadCommunity();
+  return community.profiles.map((profile) => ({ params: { handle: profile.handle }, props: { profile } }));
+}) satisfies GetStaticPaths;
+
+interface Props {
+  profile: PublicProfile;
+}
+
+const { profile } = Astro.props;
+const { recipes, appUrl } = await loadCommunity();
+const theirs = recipes.filter((recipe) => recipe.author.handle === profile.handle);
+const name = authorName(profile.handle, profile);
+const noun = (n: number) => `${n} recipe${n === 1 ? '' : 's'}`;
+
+const title = `${name} (@${profile.handle}) — community recipes | Godance`;
+const description =
+  `${noun(theirs.length)} for images and video published on Godance by ${name}, ` +
+  `each approved by a moderator. ${followersText(profile.followers)}.`;
+const ogImage = theirs.map(firstImage).find((example) => example !== null)?.url;
+
+const jsonLd = profileJsonLd(profile, theirs, Astro.site ?? Astro.url);
+
+// The link as the profile shows it: its host and path, without the scheme.
+const linkText = profile.link ? profile.link.replace(/^https:\/\//, '').replace(/\/$/, '') : null;
+const link = 'underline';
+const linkStyle = 'color: var(--color-primary)';
+---
+
+<Layout {title} {description} canonicalPath={profilePath(profile.handle)} {...(ogImage ? { ogImage } : {})}>
+  <section class="mx-auto max-w-6xl px-6 pt-12 pb-20" data-profile-page={profile.handle}>
+    <p class="text-sm text-fg-subtle">
+      <a href={COMMUNITY_PATH} class="underline hover:text-fg">Community</a>
+      <span aria-hidden="true"> / </span>Author
+    </p>
+
+    <div class="mt-2 flex flex-wrap items-start justify-between gap-4">
+      <div class="min-w-0">
+        <h1 class="text-3xl md:text-4xl font-bold tracking-tight text-fg break-words">{name}</h1>
+        <p class="mt-1 text-fg-muted">
+          <span data-handle>@{profile.handle}</span>
+          <span aria-hidden="true"> · </span><span data-followers>{followersText(profile.followers)}</span>
+          <span aria-hidden="true"> · </span><span data-recipe-count>{noun(theirs.length)}</span>
+        </p>
+        {profile.link && linkText && (
+          <p class="mt-1 text-sm">
+            <a href={profile.link} class={link} style={linkStyle} rel="ugc nofollow noopener noreferrer" data-profile-link>{linkText}</a>
+          </p>
+        )}
+      </div>
+      <a href={followUrl(appUrl, profile.handle)} class="btn btn-primary" rel="nofollow" data-follow>Follow</a>
+    </div>
+    <p class="mt-2 text-sm text-fg-subtle">Follow to see their new recipes in the Godance app.</p>
+
+    <h2 class="mt-10 text-2xl font-bold text-fg">Recipes</h2>
+    <div class="mt-6 columns-2 md:columns-3 lg:columns-4 gap-4 [&>a]:mb-4">
+      {theirs.map((recipe) => <RecipeCard {recipe} />)}
+    </div>
+
+    <p class="mt-14 text-sm text-fg-subtle" data-report>
+      Something about this profile that should not be?
+      <a href={reportUrl(appUrl, 'profile', profile.handle)} class={link} style={linkStyle} rel="nofollow" data-report-link>Report it</a>
+      and a moderator will look at it.
+    </p>
+  </section>
+
+  <script type="application/ld+json" set:html={scriptJson(jsonLd)} />
+</Layout>

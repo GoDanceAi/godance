@@ -1,0 +1,58 @@
+---
+/**
+ * One community recipe in a grid: its first example picture, its title, its
+ * author and model, and how often others ran it. A video recipe shows a
+ * marked tile instead of loading its video.
+ *
+ * Utilities only, no <style> block, as the gallery's card.
+ */
+import { firstImage, recipePath, runsText, type PublicRecipe } from '../../lib/community';
+
+interface Props {
+  recipe: PublicRecipe;
+}
+
+const { recipe } = Astro.props;
+const picture = firstImage(recipe);
+const isVideo = recipe.modality === 'video';
+---
+
+<a
+  href={recipePath(recipe.public_id)}
+  class="card card-hover block overflow-hidden p-0 break-inside-avoid"
+  data-community-recipe={recipe.public_id}
+  data-modality={recipe.modality}
+>
+  <div class="relative bg-bg-muted">
+    {picture ? (
+      <img src={picture.url} alt={recipe.title} loading="lazy" decoding="async" class="block w-full h-auto" />
+    ) : (
+      <div
+        class="flex w-full items-center justify-center text-fg-faint"
+        style="aspect-ratio: 16 / 9; background: linear-gradient(135deg, var(--color-bg-muted), var(--color-border))"
+        role="img"
+        aria-label={`${recipe.title} (${isVideo ? 'video' : 'image'})`}
+      >
+        <svg width="36" height="36" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z" /></svg>
+      </div>
+    )}
+    {isVideo && (
+      <span
+        class="absolute left-2 bottom-2 inline-flex items-center gap-1 rounded-full px-2 py-[3px] text-[11px] font-semibold text-white"
+        style="line-height: 1.2; background: rgba(17, 24, 39, 0.72)"
+        aria-hidden="true"
+        data-video-mark
+      >
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor"><path d="M2 1l7 4-7 4z" /></svg>
+        Video
+      </span>
+    )}
+  </div>
+  <div class="px-3 py-2.5">
+    <p class="text-sm font-semibold text-fg leading-snug">{recipe.title}</p>
+    <p class="mt-0.5 text-[11px] text-fg-subtle">
+      <span data-card-author>@{recipe.author.handle}</span> · <span class="font-mono">{recipe.model}</span>{isVideo && <span class="sr-only"> · video</span>}
+    </p>
+    <p class="mt-0.5 text-[11px] text-fg-subtle" data-card-runs>{runsText(recipe)}</p>
+  </div>
+</a>

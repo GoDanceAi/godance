@@ -1,0 +1,49 @@
+---
+/**
+ * A list page's body: the tag filter, how many recipes there are, and the
+ * grid. The filter is plain links, one page per tag, so it works without
+ * JavaScript and every filtered view can be read and linked.
+ */
+import RecipeCard from './RecipeCard.astro';
+import { COMMUNITY_PATH, communityTags, tagPath, type PublicRecipe } from '../../lib/community';
+
+interface Props {
+  /** The recipes this page lists, newest first. */
+  recipes: PublicRecipe[];
+  /** Every public recipe, for the tags to offer. */
+  all: PublicRecipe[];
+  /** The tag this page is for, when it is a tag page. */
+  activeTag?: string;
+}
+
+const { recipes, all, activeTag } = Astro.props;
+const tags = communityTags(all);
+const noun = (n: number) => `${n} recipe${n === 1 ? '' : 's'}`;
+---
+
+<div data-community-list>
+  {tags.length > 0 && (
+    <nav class="flex flex-wrap items-center gap-1.5" aria-label="Filter by tag" data-tag-filter>
+      <span class="mr-1 text-xs font-semibold text-fg-subtle">Tag</span>
+      <a
+        href={COMMUNITY_PATH}
+        class:list={['pill', { 'pill-violet': !activeTag }]}
+        aria-current={!activeTag ? 'page' : undefined}
+      >All</a>
+      {tags.map(({ tag, count }) => (
+        <a
+          href={tagPath(tag)}
+          class:list={['pill', { 'pill-violet': activeTag === tag }]}
+          aria-current={activeTag === tag ? 'page' : undefined}
+          data-tag={tag}
+        >{tag} <span class="font-normal opacity-70">{count}</span></a>
+      ))}
+    </nav>
+  )}
+
+  <p class="mt-6 text-sm text-fg-subtle" data-community-count>{noun(recipes.length)}</p>
+
+  <div class="mt-4 columns-2 md:columns-3 lg:columns-4 gap-4 [&>a]:mb-4">
+    {recipes.map((recipe) => <RecipeCard {recipe} />)}
+  </div>
+</div>

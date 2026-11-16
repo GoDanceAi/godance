@@ -2,14 +2,16 @@ package ai.godance.security;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 
 import org.springframework.http.ProblemDetail;
 import org.springframework.web.server.ServerWebExchange;
 
 /**
  * OpenAI's {@code error} object, added next to the problem+json members on
- * the routes that follow OpenAI's Videos API ({@code /v1/videos}, not
- * {@code /v1/videos/generations}).
+ * the routes that follow OpenAI's own API: its two image routes
+ * ({@code POST /v1/images/generations} and {@code POST /v1/images/edits})
+ * and its Videos API ({@code /v1/videos}, not {@code /v1/videos/generations}).
  *
  * <p>OpenAI's SDKs build an exception's text from {@code error.message}
  * alone, and its {@code code}, {@code param} and {@code type} from the same
@@ -24,12 +26,19 @@ public final class OpenAiError {
 
     private static final String VIDEOS = "/v1/videos";
     private static final String GENERATIONS = "/v1/videos/generations";
+    /** OpenAI's image routes that Godance serves, each path exactly: nothing else under /v1/images. */
+    private static final Set<String> IMAGES = Set.of("/v1/images/generations", "/v1/images/edits");
 
     private OpenAiError() { }
 
-    /** Whether this request is to one of the routes that follow OpenAI's Videos API. */
+    /** Whether this request is to one of the routes that follow OpenAI's API. */
     public static boolean appliesTo(ServerWebExchange exchange) {
-        String path = exchange.getRequest().getPath().value();
+        return appliesTo(exchange.getRequest().getPath().value());
+    }
+
+    /** {@link #appliesTo(ServerWebExchange)} for a request path. */
+    static boolean appliesTo(String path) {
+        if (IMAGES.contains(path)) return true;
         if (path.equals(GENERATIONS) || path.startsWith(GENERATIONS + "/")) return false;
         return path.equals(VIDEOS) || path.startsWith(VIDEOS + "/");
     }

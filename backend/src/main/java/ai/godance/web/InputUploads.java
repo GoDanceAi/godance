@@ -1,20 +1,42 @@
 package ai.godance.web;
 
+import java.util.function.Function;
+
+import org.springframework.core.codec.DecodingException;
 import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.core.io.buffer.DataBufferLimitException;
 import org.springframework.core.io.buffer.DataBufferUtils;
 import org.springframework.http.codec.multipart.Part;
+import org.springframework.util.MultiValueMap;
+import org.springframework.web.server.ServerWebExchange;
 
 import reactor.core.publisher.Mono;
 
 /**
- * Reads an uploaded part into memory, never past a limit (round 11 brief
- * 01). {@code /v1/files} uses it, and so does any route that takes images
- * as multipart parts (image edits, brief 03).
+ * Reads a multipart form, and an uploaded part into memory, never past a
+ * limit (round 11 brief 01). {@code /v1/files} uses it, and so does any
+ * route that takes images as multipart parts (image edits, brief 03;
+ * {@code POST /v1/videos}).
  */
 public final class InputUploads {
 
     private InputUploads() { }
+
+    /**
+     * The request's multipart form. A form the multipart reader cannot read
+     * at all ends in the refusal {@code unreadable} makes, given why,
+     * rather than in a 500. The likeliest cause is more parts than a form
+     * may have ({@code spring.webflux.multipart.max-parts}), which OpenAI's
+     * SDK reaches by writing a nested value as one field per value. A part
+     * that is too large is passed on as it is, for the route to answer
+     * {@code input_too_large} ({@link #isTooLarge}).
+     */
+    public static Mono<MultiValueMap<String, Part>> form(ServerWebExchange exchange,
+                                                         Function<String, ? extends RuntimeException> unreadable) {
+        return exchange.getMultipartData()
+                .onErrorMap(e -> e instanceof DecodingException && !isTooLarge(e),
+                        e -> unreadable.apply("The form could not be read (" + e.getMessage() + ")."));
+    }
 
     /**
      * The part's bytes. Errors with {@link DataBufferLimitException} as soon

@@ -133,6 +133,15 @@ public class GenerationJob {
     @Column(name = "batch_channel", updatable = false)
     private JobChannel batchChannel;
 
+    /**
+     * The published recipe the job ran (V39, round 14), or null. Set from
+     * {@code recipe.published_id}; the job then records no recipe version,
+     * since the version is the author's. Cleared by the database only if the
+     * published recipe's row is deleted, which nothing does.
+     */
+    @Column(name = "published_recipe_id", updatable = false)
+    private UUID publishedRecipeId;
+
     @PrePersist
     void onCreate() {
         if (createdAt == null) createdAt = Instant.now();
@@ -207,6 +216,9 @@ public class GenerationJob {
 
     public JobChannel getBatchChannel() { return batchChannel; }
     public void setBatchChannel(JobChannel batchChannel) { this.batchChannel = batchChannel; }
+
+    public UUID getPublishedRecipeId() { return publishedRecipeId; }
+    public void setPublishedRecipeId(UUID publishedRecipeId) { this.publishedRecipeId = publishedRecipeId; }
 
     @Override
     public boolean equals(Object o) {

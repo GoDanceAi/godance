@@ -72,6 +72,14 @@ public class RecipeBatchRow {
     @Column(name = "completed_at", insertable = false, updatable = false)
     private Instant completedAt;
 
+    /** The model of the row's job when a fallback replaced the batch's (V41); null otherwise. */
+    @Column(name = "model", insertable = false, updatable = false)
+    private String model;
+
+    /** The failed job a fallback replaced (V41); null when the row was not retried. */
+    @Column(name = "retried_job_id", insertable = false, updatable = false)
+    private UUID retriedJobId;
+
     protected RecipeBatchRow() { }
 
     public RecipeBatchRow(UUID batchId, int rowIndex, Map<String, String> variables, Map<String, Object> inputs) {
@@ -102,6 +110,10 @@ public class RecipeBatchRow {
     public Instant getStartedAt() { return startedAt; }
 
     public Instant getCompletedAt() { return completedAt; }
+
+    public String getModel() { return model; }
+
+    public UUID getRetriedJobId() { return retriedJobId; }
 
     @Override
     public boolean equals(Object o) {
