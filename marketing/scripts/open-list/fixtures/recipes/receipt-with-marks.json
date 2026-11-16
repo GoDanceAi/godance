@@ -1,0 +1,59 @@
+{
+  "slug": "receipt-with-marks",
+  "title": {
+    "en": "Receipt with *marks* & <tags>",
+    "zh": "带*记号*和<标签>的小票"
+  },
+  "modality": "IMAGE",
+  "tags": [
+    "still-life",
+    "text"
+  ],
+  "prompt": {
+    "en": "A shop receipt pinned to a corkboard.\nPrinted line: ```TOTAL | $12.00``` and $HOME in small type.\nHandwritten: \"see <b>back</b> *now*\" next to a stray </details> tag.\nA backslash at the very end \\",
+    "zh": "钉在软木板上的一张商店小票。\n打印的一行：```TOTAL | $12.00```，还有小字 $HOME。\n手写：“see <b>back</b> *now*”，旁边有一个多余的 </details> 标签。",
+    "zh_origin": "machine"
+  },
+  "runs": [
+    {
+      "model": "gpt-image-2",
+      "prompt_lang": "en",
+      "params": {
+        "size": "1024x1024",
+        "n": 2
+      },
+      "cost_cents": 12,
+      "generated_on": "2026-11-06",
+      "outputs": [
+        {
+          "file": "receipt-with-marks/gpt-image-2-0.webp",
+          "thumb": "receipt-with-marks/gpt-image-2-0-480.webp",
+          "content_type": "image/webp",
+          "width": 1024,
+          "height": 1024
+        },
+        {
+          "file": "receipt-with-marks/gpt-image-2-1.webp",
+          "thumb": "receipt-with-marks/gpt-image-2-1-480.webp",
+          "content_type": "image/webp",
+          "width": 1024,
+          "height": 1024
+        }
+      ]
+    }
+  ],
+  "source": {
+    "list": "example-org/invented-image-prompts",
+    "list_commit": "4f0c2a9e8b7d6c5f4e3d2c1b0a9f8e7d6c5b4a39",
+    "licence": "CC0-1.0",
+    "author": "fixture_[ren]",
+    "author_url": "https://example.com/@fixture_ren_(studio)",
+    "original_url": "https://example.com/@fixture_ren/posts/21005?ref=list&lang=en",
+    "changes": []
+  },
+  "review": {
+    "approved_on": "2026-11-07",
+    "standard_version": 1
+  },
+  "published_on": "2026-11-08"
+}
