@@ -1,0 +1,24 @@
+{
+  "about": [
+    "The China-hosted models that `rerun --china-hosted` chooses from, by modality.",
+    "Each is a model of the catalogue whose provider is in the Alicloud region's allowlist,",
+    "backend/src/main/java/ai/godance/gateway/AlicloudProviderAllowlist.java. The catalogue",
+    "rows are the ones the backend's migrations add (V11__model_catalog.sql); a test reads both",
+    "files and fails when this list and they disagree.",
+    "For each selected recipe with no run on one of these models, --china-hosted adds a run on",
+    "the cheapest one of its modality that today's catalogue (GET /v1/models) lists: the price",
+    "of one image, or one second of video, with the platform fee. When two cost the same, the",
+    "one listed first here is chosen. The models are listed in the order the catalogue was",
+    "seeded."
+  ],
+  "IMAGE": [
+    { "model": "seedream-5.0", "provider": "VOLCENGINE_ARK" },
+    { "model": "qwen-image-2.0", "provider": "ALIBABA_DASHSCOPE" },
+    { "model": "qwen-image-2.0-pro", "provider": "ALIBABA_DASHSCOPE" }
+  ],
+  "VIDEO": [
+    { "model": "seedance-2.0", "provider": "VOLCENGINE_ARK" },
+    { "model": "kling-3.0", "provider": "KLING" },
+    { "model": "minimax-hailuo-2.3", "provider": "MINIMAX" }
+  ]
+}

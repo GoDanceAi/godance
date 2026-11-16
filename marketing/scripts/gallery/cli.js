@@ -21,6 +21,7 @@ import { DEFAULT_CONFIG_DIR, DEFAULT_CONTENT_DIR, DEFAULT_WORK_DIR, MARKETING_RO
 import { createListReader, fetchEntries } from './stages/fetch.js';
 import { InputsUnavailable, checkInputsAccount, generate, heldByRuns, planRun } from './stages/generate.js';
 import { publish, remove } from './stages/publish.js';
+import { chinaHostedFor, heldByReruns, planRerun, publishReruns, rerunReviewItems, runReruns, selectRecipes, shownValue } from './stages/rerun.js';
 import { retemplate } from './stages/retemplate.js';
 import { heldBySamples, projectSample, recipeInputs, sampleEntries, samplePlan } from './stages/sample.js';
 import { checkDecisions, reviewItems, reviewSheet, standardVersionOf } from './stages/review.js';
@@ -39,8 +40,13 @@ const HELP = `Gallery import. Every command is a dry run unless --apply is given
   sample               For each entry that needs an input image: propose its
                        slots and generate a sample input for each, on Godance.
   generate             Run each candidate on Godance and save the output.
+  rerun                Add a run on other models to published recipes: one job
+                       per recipe and model, with the first run's parameters as
+                       far as the model takes them. Needs --max-spend-cents,
+                       even as a dry run, and one of --slugs, --tag or --all.
   review               Build the review sheet.
-  publish              Write the recipes the operator approved.
+  publish              Write the recipes the operator approved, and add the
+                       new runs the operator approved to their recipes.
   remove <slug>        Take a recipe down and keep it from coming back.
   retemplate <slug>    Give a published recipe its template, when the template
                        filled with its defaults is the published prompt exactly.
@@ -62,20 +68,25 @@ Options
                            the ones about a product or an object; people lets
                            the rest through too, and is refused unless the
                            content standard says person samples are allowed.
-  --retry-failed           generate: run failed entries again.
-  --retry-uncertain        generate: submit again entries whose first request got
+  --retry-failed           generate, rerun: run failed entries again.
+  --retry-uncertain        generate, rerun: submit again entries whose first request got
                            no clear answer. Check GET /v1/jobs first: this can pay twice.
   --offline                Use seed prices; do not ask the API for the catalogue.
   --reason <text>          remove: why, for the removal list.
-  --all                    retemplate: every recipe in the gallery folder.
+  --all                    retemplate, rerun: every recipe in the gallery folder.
+  --models <id,…>          rerun: the models to add a run on.
+  --slugs <slug,…>         rerun: these published recipes.
+  --tag <tag>              rerun: the published recipes with this tag.
+  --china-hosted           rerun: also add a run on the cheapest China-hosted model
+                           (config/china-hosted.json) to each recipe that has none.
   --work-dir, --config-dir, --content-dir <path>
 
 Environment
   GODANCE_API_KEY          Read from the environment only. Never written anywhere.
   GODANCE_API_BASE         Defaults to https://api.godance.ai`;
 
-const FLAGS_WITH_VALUE = new Set(['max-spend-cents', 'source', 'images', 'videos', 'video-seconds', 'max-video-seconds', 'reason', 'work-dir', 'config-dir', 'content-dir', 'inputs']);
-const FLAGS = new Set([...FLAGS_WITH_VALUE, 'apply', 'classify', 'retry-failed', 'retry-uncertain', 'offline', 'all', 'help']);
+const FLAGS_WITH_VALUE = new Set(['max-spend-cents', 'source', 'images', 'videos', 'video-seconds', 'max-video-seconds', 'reason', 'work-dir', 'config-dir', 'content-dir', 'inputs', 'models', 'slugs', 'tag']);
+const FLAGS = new Set([...FLAGS_WITH_VALUE, 'apply', 'classify', 'retry-failed', 'retry-uncertain', 'offline', 'all', 'china-hosted', 'help']);
 
 class Misuse extends Error {}
 
@@ -226,12 +237,13 @@ export async function main(argv, io = {}) {
       out(prices.source === 'live' ? `prices: the live catalogue at ${api.origin}` : 'prices: seed prices (the catalogue was not asked, or could not be reached)');
 
     /** A paid stage: needs the key and a cap, and gets a budget over everything spent so far. */
-    async function paidStage(runs = {}, samples = {}) {
+    async function paidStage(runs = {}, samples = {}, reruns = undefined) {
       if (cap === null) throw new Misuse('a run that spends money needs --max-spend-cents');
       if (!api.hasKey) throw new Error('GODANCE_API_KEY is not set');
       const ledger = await openLedger(work.ledger, { now });
       // Jobs an earlier run left in flight still hold their money, whichever stage started them.
-      const budget = createBudget({ cap, spent: ledger.spent, held: heldByRuns(runs) + heldBySamples(samples) });
+      const rerunState = reruns ?? await readJson(work.reruns, {});
+      const budget = createBudget({ cap, spent: ledger.spent, held: heldByRuns(runs) + heldBySamples(samples) + heldByReruns(rerunState) });
       return { ledger, budget };
     }
 
@@ -562,17 +574,161 @@ export async function main(argv, io = {}) {
         return 0;
       }
 
+      case 'rerun': {
+        // A paid stage: the cap is asked for even in a dry run, which says how much of the plan it leaves room for.
+        if (cap === null) throw new Misuse('a run that spends money needs --max-spend-cents');
+        const selectors = ['slugs', 'tag', 'all'].filter((name) => flags[name] !== undefined);
+        if (selectors.length !== 1) throw new Misuse('rerun takes one of --slugs <slug,…>, --tag <tag> or --all');
+        const models = flags.models === undefined ? [] : [...new Set(String(flags.models).split(',').map((id) => id.trim()).filter(Boolean))];
+        if (models.length === 0 && !flags['china-hosted']) throw new Misuse('rerun needs --models <id,…>, --china-hosted, or both');
+        header('rerun');
+
+        // Only valid, published recipes are rerun; a slug that names none stops everything before anything is asked.
+        const folder = await readRecipeFolder(contentDir);
+        if (folder.problems.length > 0) {
+          throw new Error(`the gallery folder ${shown(contentDir)} has ${plural(folder.problems.length, 'problem')}: run npm run validate. Nothing was planned or spent.`);
+        }
+        const slugs = flags.slugs === undefined ? null : String(flags.slugs).split(',').map((slug) => slug.trim()).filter(Boolean);
+        const { recipes: selected, unknown } = selectRecipes(folder.recipes.map((each) => each.data), { slugs, tag: flags.tag ?? null, all: Boolean(flags.all) });
+        if (unknown.length > 0) {
+          throw new Error(`there is no published recipe ${unknown.map((slug) => `"${slug}"`).join(', ')} in ${shown(contentDir)}. Nothing was planned or spent.`);
+        }
+        if (selected.length === 0) {
+          out(`no published recipe in ${shown(contentDir)} is selected${flags.tag ? `: none has the tag "${flags.tag}"` : ''}`);
+          return 0;
+        }
+
+        const prices = await loadPrices();
+        describePrices(prices);
+        const exceptions = await readJson(config.rerunParams, { allow: {}, map: {} });
+        const chinaList = flags['china-hosted'] ? await readJson(config.chinaHosted) : null;
+        const state = await readJson(work.reruns, {});
+        if (flags['retry-failed'] && apply) for (const [key, record] of Object.entries(state)) if (record.status === 'failed') delete state[key];
+        const retryUncertain = Boolean(flags['retry-uncertain']);
+        const already = (record) =>
+          record.status === 'done' ? 'run in this work folder: review it, then publish'
+          : record.status === 'failed' ? `failed: ${oneLine(record.error ?? 'the job failed', 120)}; --retry-failed runs it again`
+          : record.status === 'submitting' ? 'sent, and no clear answer came back: check GET /v1/jobs before using --retry-uncertain'
+          : `still running as job ${record.job_id}: resumed${apply ? '' : ' with --apply'}`;
+        const paramsText = (params) => Object.entries(params).map(([key, value]) => `${key} ${shownValue(value)}`).join(', ') || 'no parameters';
+
+        out(`${plural(selected.length, 'recipe')}, on ${[...models, ...(chinaList ? ['the cheapest China-hosted model each lacks'] : [])].join(', ')}`);
+        const planned = [];
+        for (const recipe of selected) {
+          const wanted = [...models];
+          if (chinaList) {
+            const choice = chinaHostedFor(recipe, { list: chinaList, prices });
+            if (choice.model === null) out(`  = ${recipe.slug}: no China-hosted run added: ${choice.why}`);
+            else if (!wanted.includes(choice.model)) wanted.push(choice.model);
+          }
+          for (const model of wanted) {
+            const plan = planRerun(recipe, model, { prices, exceptions });
+            const record = state[plan.key];
+            if (plan.skip === 'already') {
+              out(`  = ${recipe.slug} on ${model}: ${plan.why}`);
+              continue;
+            }
+            if (record && !(record.status === 'submitting' && retryUncertain)) {
+              out(`  = ${recipe.slug} on ${model}: ${already(record)}`);
+              continue;
+            }
+            if (plan.skip === 'cannot') {
+              out(`  - ${recipe.slug} on ${model}: cannot be run: ${plan.why}`);
+              continue;
+            }
+            out(`  + ${recipe.slug} on ${model}  ${paramsText(plan.params)}  holds ${cents(plan.hold)}` + (record ? ' (sent again: --retry-uncertain)' : ''));
+            for (const left of plan.left) out(`      ${left.param} ${shownValue(left.value)} left out: ${left.why}`);
+            if (plan.inputs) out(`      uploads its ${plural(plan.inputs.length, 'sample input')} first, which is free`);
+            planned.push(plan);
+          }
+        }
+
+        // What an earlier run left in flight is picked up by its job id, whatever this run selects.
+        const resume = Object.entries(state)
+          .filter(([, record]) => record.status === 'accepted' || record.status === 'downloading')
+          .map(([key, record]) => ({ key, slug: record.slug, model: record.model, modality: record.modality }));
+        const fresh = planned.filter((plan) => !state[plan.key]);
+        const projected = fresh.reduce((total, plan) => total + plan.hold, 0);
+        out(`${plural(fresh.length, 'new run')} would start, holding ${cents(projected)}` +
+          (resume.length > 0 ? `; ${plural(resume.length, 'unfinished run')} from an earlier run would be resumed` : '') +
+          (planned.length > fresh.length ? `; ${planned.length - fresh.length} uncertain would be sent again` : ''));
+
+        // The cap covers the whole work folder: what it has spent, and what its unfinished jobs hold.
+        const runs = await readJson(work.runs, {});
+        const samples = await readJson(work.samples, {});
+        const spentSoFar = (await openLedger(work.ledger, { now })).spent;
+        const heldNow = heldByRuns(runs) + heldBySamples(samples) + heldByReruns(state);
+        const trial = createBudget({ cap, spent: spentSoFar, held: heldNow });
+        let fit = 0;
+        for (const plan of fresh) {
+          if (!trial.canHold(plan.hold)) break;
+          trial.hold(plan.hold);
+          fit++;
+        }
+        out(`cap: ${cents(cap)}, against ${cents(roundUp(spentSoFar))} spent in this work folder and ${cents(heldNow)} held by unfinished jobs; ` +
+          (fresh.length === 0 ? 'nothing new to start' : fit === fresh.length ? `all ${fresh.length} fit under it` : `${fit} of the ${fresh.length} fit under it, and the run stops there`));
+        if (!apply) return 0;
+
+        const { ledger, budget } = await paidStage(runs, samples, state);
+        const before = budget.spent;
+        // Input recipes need an account that may use inputs. One free upload says so, before any job is submitted.
+        for (const plan of planned.filter((each) => each.inputs)) {
+          const slot = plan.inputs[0];
+          const bytes = await readFile(path.join(work.media, slot.sample.file)).catch(() => null);
+          if (!bytes) continue; // that run fails on its own, before anything is held
+          try {
+            await checkInputsAccount(api, { bytes, contentType: slot.sample.content_type });
+          } catch (error) {
+            if (!(error instanceof InputsUnavailable)) throw error;
+            out(`rerun: ${error.message}`);
+            spendLine(budget, before);
+            return 1;
+          }
+          out('inputs: this account can use inputs (checked with one upload, which is free)');
+          break;
+        }
+        const items = [...resume, ...planned];
+        const ffmpeg = await hasFfmpeg();
+        if (!ffmpeg && items.some((item) => item.modality === 'VIDEO')) out('warning: ffmpeg is not installed, so videos get no poster');
+        const result = await runReruns(items, state, {
+          api, budget, ledger, mediaDir: work.media, ffmpeg, retryUncertain,
+          save: () => writeJson(work.reruns, state),
+          sleep: io.sleep, now, log: out,
+        });
+        await writeJson(work.reruns, state);
+        out(`done ${result.done} · failed ${result.failed} · still running ${result.pending} · uncertain ${result.uncertain}` + (result.stoppedByBudget ? ' · stopped at the cap' : ''));
+        for (const [key, record] of Object.entries(state)) if (record.error) out(`  ${record.status} ${key}: ${oneLine(record.error, 160)}`);
+        if (result.uncertain > 0) out('uncertain: a request was sent and no clear answer came back. Check GET /v1/jobs before using --retry-uncertain.');
+        if (result.done > 0) out('next: "review --apply" shows each new run beside its recipe\'s first run; "publish --apply" adds the ones approved');
+        spendLine(budget, before);
+        return result.stoppedByBudget ? 1 : 0;
+      }
+
       case 'review': {
         header('review');
-        const entries = inSources((await needState(work.entries, 'fetch')).entries);
-        const items = reviewItems({ entries, screened: await needState(work.screened, 'screen'), translated: await needState(work.translated, 'translate'), runs: await needState(work.runs, 'generate'), samples: await readJson(work.samples, {}) });
+        // New runs on published recipes can be reviewed in a work folder that imported nothing.
+        const reruns = await readJson(work.reruns, {});
+        const rerunsDone = Object.values(reruns).some((record) => record.status === 'done');
+        let items = [];
+        if (!rerunsDone) {
+          const entries = inSources((await needState(work.entries, 'fetch')).entries);
+          items = reviewItems({ entries, screened: await needState(work.screened, 'screen'), translated: await needState(work.translated, 'translate'), runs: await needState(work.runs, 'generate'), samples: await readJson(work.samples, {}) });
+        } else {
+          const [fetched, screened, translated, runs] = await Promise.all([work.entries, work.screened, work.translated, work.runs].map((file) => readJson(file, null)));
+          if (fetched && screened && translated && runs) items = reviewItems({ entries: inSources(fetched.entries), screened, translated, runs, samples: await readJson(work.samples, {}) });
+        }
+        const rerunItems = rerunsDone ? rerunReviewItems({ state: reruns, recipes: (await readRecipeFolder(contentDir)).recipes.map((each) => each.data) }) : [];
         const version = standardVersionOf(standard);
         if (version === null) throw new Error('docs/gallery-content-standard.md is missing or states no version: the review needs one to record');
         const decisions = await readJson(work.decisions, null);
         out(`${plural(items.length, 'candidate')} with a finished run; content standard version ${version}` + (decisions ? `; carrying on from ${Object.keys(decisions.decisions ?? {}).length} earlier decisions` : ''));
+        if (rerunItems.length > 0) {
+          out(`${plural(rerunItems.length, 'new run')} on published recipes, each beside its recipe's first run` +
+            (decisions?.runs ? `; carrying on from ${plural(Object.keys(decisions.runs).length, 'earlier decision')} on runs` : ''));
+        }
         if (apply) {
           await mkdir(work.review, { recursive: true });
-          await writeFile(work.reviewSheet, reviewSheet({ items, standardVersion: version, decisions, builtAt: now().toISOString() }));
+          await writeFile(work.reviewSheet, reviewSheet({ items, reruns: rerunItems, standardVersion: version, decisions, builtAt: now().toISOString() }));
           out(`wrote ${shown(work.reviewSheet)}: open it in a browser, decide, and save decisions.json beside it`);
         }
         return 0;
@@ -584,25 +740,47 @@ export async function main(argv, io = {}) {
         if (!decisions) throw new Error(`there are no decisions yet: the operator saves ${shown(work.decisions)} from the review sheet`);
         const wrong = checkDecisions(decisions);
         if (wrong.length > 0) throw new Error(`the decisions file cannot be used:\n  ${wrong.join('\n  ')}`);
-        const result = await publish({
-          entries: (await needState(work.entries, 'fetch')).entries,
-          translated: await needState(work.translated, 'translate'),
-          runs: await needState(work.runs, 'generate'),
-          samples: await readJson(work.samples, {}),
-          decisions, contentDir, manifestFile: work.manifest, apply, now,
-        });
-        const made = Object.values(decisions.decisions);
-        out(`decisions: ${made.filter((d) => d.decision === 'approved').length} approved, ${made.filter((d) => d.decision === 'rejected').length} rejected`);
-        out(`${apply ? 'wrote' : 'would write'} ${plural(result.written.length, 'recipe')}; ${result.already.length} already published; ${result.refused.length} refused`);
-        for (const slug of result.written) out(`  + ${slug}.json`);
-        for (const { slug, why } of result.refused) out(`  refused ${slug}:\n    ${why.join('\n    ')}`);
-        if (apply) {
-          const folder = await readRecipeFolder(contentDir);
-          out(folder.problems.length === 0 ? `the gallery folder is valid: ${plural(folder.recipes.length, 'recipe')}` : `the gallery folder has ${plural(folder.problems.length, 'problem')}: run npm run validate`);
-          if (result.media.length > 0) out(`media to upload is listed in ${shown(work.manifest)} (${plural(result.media.length, 'file')}); media is never committed`);
-          if (folder.problems.length > 0) return 1;
+        // Decisions on new runs (rerun) are kept apart, by <slug>@<model>; a file may hold only those.
+        const runDecisions = decisions.runs ?? {};
+        const onlyRuns = Object.keys(decisions.decisions).length === 0 && Object.keys(runDecisions).length > 0;
+        let code = 0;
+        if (!onlyRuns) {
+          const result = await publish({
+            entries: (await needState(work.entries, 'fetch')).entries,
+            translated: await needState(work.translated, 'translate'),
+            runs: await needState(work.runs, 'generate'),
+            samples: await readJson(work.samples, {}),
+            decisions, contentDir, manifestFile: work.manifest, apply, now,
+          });
+          const made = Object.values(decisions.decisions);
+          out(`decisions: ${made.filter((d) => d.decision === 'approved').length} approved, ${made.filter((d) => d.decision === 'rejected').length} rejected`);
+          out(`${apply ? 'wrote' : 'would write'} ${plural(result.written.length, 'recipe')}; ${result.already.length} already published; ${result.refused.length} refused`);
+          for (const slug of result.written) out(`  + ${slug}.json`);
+          for (const { slug, why } of result.refused) out(`  refused ${slug}:\n    ${why.join('\n    ')}`);
+          if (apply) {
+            const folder = await readRecipeFolder(contentDir);
+            out(folder.problems.length === 0 ? `the gallery folder is valid: ${plural(folder.recipes.length, 'recipe')}` : `the gallery folder has ${plural(folder.problems.length, 'problem')}: run npm run validate`);
+            if (result.media.length > 0) out(`media to upload is listed in ${shown(work.manifest)} (${plural(result.media.length, 'file')}); media is never committed`);
+            if (folder.problems.length > 0) code = 1;
+          }
+          if (result.refused.length > 0) code = 1;
         }
-        return result.refused.length > 0 ? 1 : 0;
+        if (Object.keys(runDecisions).length > 0) {
+          const result = await publishReruns({ state: await readJson(work.reruns, {}), decisions: runDecisions, contentDir, manifestFile: work.manifest, apply });
+          const made = Object.values(runDecisions);
+          out(`decisions on new runs: ${made.filter((d) => d.decision === 'approved').length} approved, ${made.filter((d) => d.decision === 'rejected').length} rejected`);
+          out(`${apply ? 'added' : 'would add'} ${plural(result.appended.length, 'run')} to published recipes; ${result.already.length} already there; ${result.refused.length} refused`);
+          for (const key of result.appended) out(`  + ${key}`);
+          for (const { key, why } of result.refused) out(`  refused ${key}:\n    ${why.join('\n    ')}`);
+          if (apply && result.appended.length > 0) {
+            const folder = await readRecipeFolder(contentDir);
+            out(folder.problems.length === 0 ? `the gallery folder is valid: ${plural(folder.recipes.length, 'recipe')}` : `the gallery folder has ${plural(folder.problems.length, 'problem')}: run npm run validate`);
+            out(`media to upload is listed in ${shown(work.manifest)} (${plural(result.media.length, 'file')}); media is never committed`);
+            if (folder.problems.length > 0) code = 1;
+          }
+          if (result.refused.length > 0) code = 1;
+        }
+        return code;
       }
 
       case 'remove': {
@@ -652,7 +830,8 @@ export async function main(argv, io = {}) {
 
       case 'status': {
         const fetched = await readJson(work.entries, null);
-        if (!fetched) {
+        const reruns = await readJson(work.reruns, {});
+        if (!fetched && Object.keys(reruns).length === 0) {
           out('nothing has been fetched yet');
           return 0;
         }
@@ -662,7 +841,14 @@ export async function main(argv, io = {}) {
         const samples = await readJson(work.samples, {});
         const decisions = await readJson(work.decisions, { decisions: {} });
         const ledger = await openLedger(work.ledger, { now });
-        for (const source of fetched.sources) {
+        if (Object.keys(reruns).length > 0) {
+          const records = Object.entries(reruns);
+          const count = (test) => records.filter(([key, record]) => test(record, key)).length;
+          out(`rerun      ${count((r) => r.status === 'done')} done · ${count((r) => ['accepted', 'downloading'].includes(r.status))} unfinished · ` +
+            `${count((r) => r.status === 'submitting')} uncertain · ${count((r) => r.status === 'failed')} failed`);
+          out(`  review   ${count((r, key) => decisions.runs?.[key]?.decision === 'approved')} approved · ${count((r, key) => decisions.runs?.[key]?.decision === 'rejected')} rejected`);
+        }
+        for (const source of fetched?.sources ?? []) {
           const entries = fetched.entries.filter((entry) => entry.source === source.id);
           printFetch([source]);
           if (entries.some((entry) => screened[entry.id])) printScreen(entries.filter((entry) => screened[entry.id]), screened);
