@@ -393,10 +393,12 @@ test('saved-chat controls work with keyboard focus and announce persistence stat
   await expect.poll(() => history.messages.length).toBe(2);
   await expect(page.locator('[aria-live="polite"]')).toContainText('Saving is on');
   const list = page.getByRole('button', { name: 'Saved chats', exact: true });
+  await expect(list).toBeEnabled();
   await list.focus();
   await expect(list).toBeFocused();
   await page.keyboard.press('Enter');
   const item = page.getByRole('button', { name: 'Synthetic question', exact: true });
+  await expect(item).toBeEnabled();
   await item.focus();
   await expect(item).toBeFocused();
   await page.keyboard.press('Enter');
