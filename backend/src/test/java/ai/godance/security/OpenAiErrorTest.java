@@ -26,7 +26,7 @@ class OpenAiErrorTest {
     private static final JsonMapper JSON = JsonMapper.builderWithJackson2Defaults().build();
 
     @ParameterizedTest
-    @ValueSource(strings = {"/v1/images/generations", "/v1/images/edits",
+    @ValueSource(strings = {"/v1/images/generations", "/v1/images/edits", "/v1/images/variations",
             "/v1/videos", "/v1/videos/video_123", "/v1/videos/video_123/content", "/v1/videos/characters/c_1"})
     void appliesTo_givenOpenAisImageAndVideoRoutes_expectsTrue(String path) {
         assertThat(OpenAiError.appliesTo(path)).isTrue();
@@ -35,7 +35,7 @@ class OpenAiErrorTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"/v1/videos/generations", "/v1/videos/generations/x",
-            "/v1/images", "/v1/images/", "/v1/images/variations", "/v1/images/edits/", "/v1/images/edits/x",
+            "/v1/images", "/v1/images/", "/v1/images/variations/", "/v1/images/edits/", "/v1/images/edits/x",
             "/v1/images/generations/", "/v1/imagesx/edits", "/v1/videosx",
             "/v1/jobs", "/v1/jobs/abc", "/v1/files", "/v1/chat/completions", "/v1/models", "/v1/estimates"})
     void appliesTo_givenEveryOtherPath_expectsFalse(String path) {
