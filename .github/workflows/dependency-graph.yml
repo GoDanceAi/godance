@@ -33,11 +33,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # No `cache: maven` here. setup-java keys its Maven cache on the pom
+      # hash alone, so Backend CI/CD's test job (deploy.yml) uses the same
+      # key. This job takes about a minute and resolves far less than a
+      # build (~7 MB against ~176 MB), so after each pom change it saved its
+      # cache on main first. The test job then restored almost nothing, never
+      # saved its own cache, and fetched the rest from Maven Central on every
+      # run, where a 429 could fail it before any test ran.
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '21'
-          cache: maven
       - name: Submit dependency snapshot
         uses: advanced-security/maven-dependency-submission-action@v6
         with:
