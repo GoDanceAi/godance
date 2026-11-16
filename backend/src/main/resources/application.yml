@@ -444,6 +444,16 @@ godance:
       kling-3.0:                    [seedance-2.0, minimax-hailuo-2.3]
       seedance-2.0:                 [minimax-hailuo-2.3, kling-3.0]
       minimax-hailuo-2.3:           [seedance-2.0, kling-3.0]
+  routing:
+    # Users' own routing policies (round 4's Phase 3, round 14 brief 04):
+    # /v1/routing/policies, calling a policy by its id as a chat model, the
+    # X-Godance-Route hint's rules, and fallbacks for batches that ask for them.
+    # Off by default: the routes answer 404 routing_policies_disabled.
+    user-policies:
+      enabled:      ${ROUTING_USER_POLICIES_ENABLED:false}
+      # Email addresses that may use them once on, comma-separated; empty = every account.
+      allow-list:   ${ROUTING_USER_POLICIES_ALLOW_LIST:}
+      max-per-user: ${ROUTING_USER_POLICIES_MAX_PER_USER:20}   # past it, PUT answers 409 routing_policy_limit_reached
 
 logging:
   level:

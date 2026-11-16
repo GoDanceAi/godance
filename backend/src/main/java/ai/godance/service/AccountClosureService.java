@@ -31,6 +31,7 @@ import ai.godance.repository.ReportRepository;
 import ai.godance.repository.SavedRecipeRepository;
 import ai.godance.repository.UserRepository;
 import ai.godance.repository.UserTwoFactorRepository;
+import ai.godance.routing.RoutingPolicyRepository;
 
 /**
  * Closes an account on its owner's request. Operator-run, from
@@ -85,6 +86,7 @@ public class AccountClosureService {
     private final OAuthIdentityRepository identities;
     private final ConversationRepository conversations;
     private final SavedRecipeRepository savedRecipes;
+    private final RoutingPolicyRepository routingPolicies;
     private final RecipeRepository recipes;
     private final RecipeBatchRepository batches;
     private final GenerationJobRepository jobs;
@@ -104,7 +106,7 @@ public class AccountClosureService {
                                  UserRepository users, UserTwoFactorRepository twoFactors,
                                  ApiKeyRepository apiKeys,
                                  OAuthIdentityRepository identities, ConversationRepository conversations,
-                                 SavedRecipeRepository savedRecipes,
+                                 SavedRecipeRepository savedRecipes, RoutingPolicyRepository routingPolicies,
                                  RecipeRepository recipes, RecipeBatchRepository batches,
                                  GenerationJobRepository jobs, GenerationJobSettlement settlement,
                                  DataRetentionService retention, InputService inputs, AuditLogService audit,
@@ -121,6 +123,7 @@ public class AccountClosureService {
         this.identities = identities;
         this.conversations = conversations;
         this.savedRecipes = savedRecipes;
+        this.routingPolicies = routingPolicies;
         this.recipes = recipes;
         this.batches = batches;
         this.jobs = jobs;
@@ -252,6 +255,8 @@ public class AccountClosureService {
         reports.resolveForProfile(userId, actorId, java.time.Instant.now());
         // The owner's own recipes go, with their versions. Their jobs are purged below.
         recipes.deleteByUserId(userId);
+        // The owner's routing policies (round 14), presets untouched.
+        routingPolicies.deleteByUserId(userId);
 
         Map<String, Object> detail = new LinkedHashMap<>();
         detail.put("actorUserId", actorId == null ? null : actorId.toString());
