@@ -1,16 +1,22 @@
 package ai.godance.web;
 
+import java.util.UUID;
+
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import ai.godance.security.JwtService;
 import ai.godance.service.GenerationQuotes;
 import ai.godance.service.GenerationQuotes.Quote;
 import ai.godance.web.dto.EstimateDtos.EstimateRequest;
 import ai.godance.web.dto.EstimateDtos.EstimateResponse;
 import jakarta.validation.Valid;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 /**
  * {@code POST /v1/estimates}: the price of an image or video request before
@@ -32,12 +38,17 @@ public class EstimateController {
         this.quotes = quotes;
     }
 
+    /**
+     * On the caller's own provider key (round 14) the figure is Godance's
+     * fee, the request's actual hold, and the answer says {@code "byok": true}.
+     */
     @PostMapping("/estimates")
-    public Mono<EstimateResponse> estimate(@Valid @RequestBody EstimateRequest req) {
+    public Mono<EstimateResponse> estimate(@Valid @RequestBody EstimateRequest req, @AuthenticationPrincipal Jwt jwt) {
+        UUID userId = JwtService.userIdFromSubject(jwt.getSubject());
         return Mono.fromCallable(() -> {
-            Quote q = quotes.any(req.model(), req.n(), req.seconds(), req.inputImages());
+            Quote q = quotes.any(userId, req.model(), req.n(), req.seconds(), req.inputImages());
             return new EstimateResponse(q.model().modelName(), q.model().modality().name(),
-                    q.n(), q.seconds(), q.costCents(), CURRENCY, req.inputImages());
-        });
+                    q.n(), q.seconds(), q.costCents(), CURRENCY, req.inputImages(), q.byok() ? Boolean.TRUE : null);
+        }).subscribeOn(Schedulers.boundedElastic());
     }
 }

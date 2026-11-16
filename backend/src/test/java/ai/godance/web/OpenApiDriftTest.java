@@ -38,6 +38,7 @@ import ai.godance.web.dto.AttributionDtos;
 import ai.godance.web.dto.AuthDtos;
 import ai.godance.web.dto.BatchDtos;
 import ai.godance.web.dto.BillingDtos;
+import ai.godance.web.dto.ByokDtos;
 import ai.godance.web.dto.ChatCompletionDtos;
 import ai.godance.web.dto.CommunityDtos;
 import ai.godance.web.dto.ConversationDtos;
@@ -153,6 +154,8 @@ class OpenApiDriftTest {
         m.put("BatchRowOutput", BatchDtos.BatchRowOutput.class);
         m.put("EstimateRequest", EstimateDtos.EstimateRequest.class);
         m.put("Estimate", EstimateDtos.EstimateResponse.class);
+        m.put("ProviderCredentialRequest", ByokDtos.CredentialRequest.class);
+        m.put("ProviderCredential", ByokDtos.CredentialView.class);
         m.put("UsageRecord", UsageController.UsageView.class);
         m.put("ApiKeyCreateRequest", ApiKeyDtos.CreateApiKeyRequest.class);
         m.put("ApiKeyUpdateRequest", ApiKeyDtos.UpdateApiKeyRequest.class);
