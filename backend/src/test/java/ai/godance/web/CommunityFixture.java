@@ -140,7 +140,12 @@ final class CommunityFixture {
 
     /** An image recipe with one variable, as {@code POST /v1/recipes} makes it. */
     Map<String, Object> createRecipe(Signed u, String title) {
-        Map<String, Object> body = new HashMap<>();
+        return createRecipe(u, title, Map.of());
+    }
+
+    /** The same, with these fields added to the body: {@code source_gallery_recipe}, {@code inputs}, … */
+    Map<String, Object> createRecipe(Signed u, String title, Map<String, Object> extra) {
+        Map<String, Object> body = new HashMap<>(extra);
         body.put("title", title);
         body.put("modality", "image");
         body.put("template", "A {{thing}} on a wooden table, soft window light.");
@@ -159,7 +164,12 @@ final class CommunityFixture {
 
     /** A recipe and one finished run of its first version. The upstream must be stubbed. */
     Ran recipeWithRun(Signed u, String title) {
-        Map<String, Object> recipe = createRecipe(u, title);
+        return recipeWithRun(u, title, Map.of());
+    }
+
+    /** The same, with these fields added to the create body. */
+    Ran recipeWithRun(Signed u, String title, Map<String, Object> extra) {
+        Map<String, Object> recipe = createRecipe(u, title, extra);
         @SuppressWarnings("unchecked")
         String versionId = (String) ((Map<String, Object>) recipe.get("latest_version")).get("id");
         UUID jobId = runVersion(u, versionId, Map.of("thing", "teapot"));
@@ -232,6 +242,12 @@ final class CommunityFixture {
         return body;
     }
 
+    static Map<String, Object> publishBody(int version, String licence, List<UUID> jobIds, List<String> tags) {
+        Map<String, Object> body = publishBody(version, licence, jobIds);
+        body.put("tags", tags);
+        return body;
+    }
+
     WebTestClient.ResponseSpec postPublish(Signed u, String recipeId, Map<String, Object> body) {
         return http.post().uri("/v1/recipes/{id}/publish", recipeId)
                 .header("Authorization", u.bearer())
@@ -242,7 +258,12 @@ final class CommunityFixture {
 
     /** Publishes version 1 with these examples under CC-BY-4.0; returns the public id. */
     String publish(Signed u, Ran ran, List<UUID> jobIds) {
-        Map<String, Object> view = postPublish(u, ran.recipeId(), publishBody(1, "CC-BY-4.0", jobIds))
+        return publish(u, ran.recipeId(), publishBody(1, "CC-BY-4.0", jobIds));
+    }
+
+    /** Publishes with this body; expects 202 and PENDING, and returns the public id. */
+    String publish(Signed u, String recipeId, Map<String, Object> body) {
+        Map<String, Object> view = postPublish(u, recipeId, body)
                 .expectStatus().isAccepted()
                 .expectBody(new org.springframework.core.ParameterizedTypeReference<Map<String, Object>>() { })
                 .returnResult().getResponseBody();
@@ -261,5 +282,71 @@ final class CommunityFixture {
 
     void approve(Signed staff, String publicId) {
         moderate(staff, publicId, "approve", null).expectStatus().isOk();
+    }
+
+    /** An author, a profile, a recipe with a run, published and approved: a public recipe. */
+    Published publicRecipe(Signed moderator, String stem, List<String> tags) {
+        Signed author = author(100_00L);
+        String handle = profile(author, stem);
+        Ran ran = recipeWithRun(author, "Recipe " + stem);
+        String publicId = publish(author, ran.recipeId(), publishBody(1, "CC-BY-4.0", List.of(ran.jobId()), tags));
+        approve(moderator, publicId);
+        return new Published(author, handle, ran, publicId);
+    }
+
+    /** A public recipe and who made it. */
+    record Published(Signed author, String handle, Ran ran, String publicId) { }
+
+    /** The author's view of the recipe's latest submission. */
+    Map<String, Object> submission(Signed u, String recipeId) {
+        return http.get().uri("/v1/recipes/{id}/publish", recipeId)
+                .header("Authorization", u.bearer())
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody(new org.springframework.core.ParameterizedTypeReference<Map<String, Object>>() { })
+                .returnResult().getResponseBody();
+    }
+
+    WebTestClient.ResponseSpec follow(Signed u, String handle) {
+        return http.post().uri("/v1/follows/{handle}", handle).header("Authorization", u.bearer()).exchange();
+    }
+
+    WebTestClient.ResponseSpec report(Signed u, String kind, String id, String reason) {
+        Map<String, Object> body = new HashMap<>();
+        body.put("kind", kind);
+        body.put("id", id);
+        body.put("reason", reason);
+        return http.post().uri("/v1/reports")
+                .header("Authorization", u.bearer())
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(body)
+                .exchange();
+    }
+
+    /** The moderation queue, as a list of items. */
+    List<Map<String, Object>> queue(Signed staff) {
+        return http.get().uri("/v1/admin/community/queue")
+                .header("Authorization", staff.bearer())
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody(new org.springframework.core.ParameterizedTypeReference<List<Map<String, Object>>>() { })
+                .returnResult().getResponseBody();
+    }
+
+    /** The queue items about this recipe. */
+    @SuppressWarnings("unchecked")
+    List<Map<String, Object>> queueItemsFor(Signed staff, String publicId) {
+        return queue(staff).stream()
+                .filter(item -> item.get("recipe") instanceof Map<?, ?> r && publicId.equals(((Map<String, Object>) r).get("public_id")))
+                .toList();
+    }
+
+    /** A problem's {@code code}, read off a response that was refused. */
+    static String codeOf(WebTestClient.ResponseSpec response, int status) {
+        Map<String, Object> problem = response.expectStatus().isEqualTo(status)
+                .expectBody(new org.springframework.core.ParameterizedTypeReference<Map<String, Object>>() { })
+                .returnResult().getResponseBody();
+        assertThat(problem).isNotNull();
+        return (String) problem.get("code");
     }
 }
