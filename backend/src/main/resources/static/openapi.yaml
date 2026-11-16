@@ -70,6 +70,15 @@ tags:
   - name: Estimates
   - name: Usage
   - name: API keys
+  - name: Provider keys
+    description: |
+      Bring your own key. A key of your own for a provider: requests to that
+      provider's models then go out on it, and Godance charges only its fee
+      (`fee_basis_points` of the list price). Switched off by default: until a
+      provider is offered, every key answers 400 `byok_provider_not_supported`.
+      The regional rule still decides first: a key never makes a provider
+      that is not available in the region reachable. A signed-in session
+      only; an API key cannot read, set or remove one.
   - name: Account
   - name: Two-factor sign-in
   - name: Billing
@@ -1236,6 +1245,65 @@ paths:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
         "204": { description: Revoked. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /v1/provider-credentials:
+    get:
+      operationId: listProviderCredentials
+      tags: [Provider keys]
+      summary: Every provider a key may be stored for, and every key the caller holds. Never the key.
+      security: [{ session: [] }]
+      responses:
+        "200":
+          description: One entry per provider. Empty while no provider is offered.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/ProviderCredential" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /v1/provider-credentials/{provider}:
+    put:
+      operationId: setProviderCredential
+      tags: [Provider keys]
+      summary: Store your own key for a provider, once the provider accepts it.
+      description: |
+        The key is checked with the provider's model list first and stored
+        only if it is accepted, encrypted; it is never returned. Leave out
+        `api_key` to change only `fallback_to_platform` of a key already
+        stored. `byok_provider_not_supported` (400) for a provider not
+        offered, `byok_key_rejected` (400) when the provider refuses the key,
+        `byok_check_failed` (502) when it does not answer, and 503 when the
+        provider is not available in this region.
+      security: [{ session: [] }]
+      parameters:
+        - { name: provider, in: path, required: true, schema: { type: string, example: OPENAI } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ProviderCredentialRequest" }
+      responses:
+        "200":
+          description: The key's entry.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProviderCredential" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { description: The provider did not answer the key check; nothing was stored. }
+        "503": { $ref: "#/components/responses/Unavailable" }
+    delete:
+      operationId: deleteProviderCredential
+      tags: [Provider keys]
+      summary: Delete your key for a provider. Its requests go out on Godance's key from then on.
+      security: [{ session: [] }]
+      parameters:
+        - { name: provider, in: path, required: true, schema: { type: string, example: OPENAI } }
+      responses:
+        "204": { description: Deleted. }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -2894,6 +2962,22 @@ components:
         estimated_cost_cents: { type: integer }
         currency: { type: string }
         input_images: { type: integer }
+        byok: { type: boolean, description: "Present, and true, when the request would go out on your own provider key: the figure is then Godance's fee." }
+    ProviderCredentialRequest:
+      type: object
+      properties:
+        api_key: { type: string, description: "Your key. Leave it out to change only fallback_to_platform." }
+        fallback_to_platform: { type: boolean, description: "When the provider refuses your key, retry once on Godance's key at Godance's price." }
+    ProviderCredential:
+      type: object
+      properties:
+        provider: { type: string }
+        last4: { type: [string, "null"] }
+        status: { type: string, enum: [valid, invalid, unchecked, unsupported_adapter, not_supported, none] }
+        fallback_to_platform: { type: boolean }
+        used_for: { type: array, items: { type: string, enum: [chat, images] } }
+        checked_at: { type: [string, "null"], format: date-time }
+        fee_basis_points: { type: integer, description: "Godance's fee on a request on your key, in basis points of the list price." }
     UsageRecord:
       type: object
       properties:

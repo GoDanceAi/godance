@@ -14,6 +14,7 @@ import org.springframework.web.reactive.function.client.WebClient;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+import ai.godance.gateway.CallerKey;
 import ai.godance.config.OpenAIProperties;
 import ai.godance.domain.Provider;
 import ai.godance.gateway.ImageDtos.GeneratedImage;
@@ -40,9 +41,10 @@ public class OpenAIImageProvider implements ImageProviderAdapter {
 
     public OpenAIImageProvider(OpenAIProperties props) {
         this.props = props;
+        // The key goes on each request (round 14): the caller's own, when the
+        // call carries one, else the platform's.
         this.client = WebClient.builder()
                 .baseUrl(props.apiBase())
-                .defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + props.apiKey())
                 .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
                 // Image payloads can be ~1–4 MB per image at b64; bump the default 256 KB cap.
                 .codecs(c -> c.defaultCodecs().maxInMemorySize(32 * 1024 * 1024))
@@ -60,6 +62,15 @@ public class OpenAIImageProvider implements ImageProviderAdapter {
     }
 
     @Override
+    public boolean takesCallerKeys() {
+        return true;
+    }
+
+    private String bearer(reactor.util.context.ContextView context) {
+        return "Bearer " + CallerKey.or(context, Provider.OPENAI, props.apiKey());
+    }
+
+    @Override
     public Mono<List<GeneratedImage>> generate(ImageRequest request) {
         if (request.isEdit()) return edit(request);
         OpenAIImageRequest body = new OpenAIImageRequest(
@@ -69,11 +80,12 @@ public class OpenAIImageProvider implements ImageProviderAdapter {
                 request.size(),
                 request.quality());
 
-        return client.post()
-                .uri("/v1/images/generations")
-                .bodyValue(body)
-                .retrieve()
-                .bodyToMono(OpenAIImageResponse.class)
+        return Mono.deferContextual(context -> client.post()
+                        .uri("/v1/images/generations")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(context))
+                        .bodyValue(body)
+                        .retrieve()
+                        .bodyToMono(OpenAIImageResponse.class))
                 .map(OpenAIImageProvider::toDomain)
                 .timeout(props.timeout());
     }
@@ -103,12 +115,13 @@ public class OpenAIImageProvider implements ImageProviderAdapter {
         if (request.size() != null) form.part("size", request.size());
         if (request.quality() != null) form.part("quality", request.quality());
 
-        return client.post()
-                .uri("/v1/images/edits")
-                .contentType(MediaType.MULTIPART_FORM_DATA)
-                .body(BodyInserters.fromMultipartData(form.build()))
-                .retrieve()
-                .bodyToMono(OpenAIImageResponse.class)
+        return Mono.deferContextual(context -> client.post()
+                        .uri("/v1/images/edits")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(context))
+                        .contentType(MediaType.MULTIPART_FORM_DATA)
+                        .body(BodyInserters.fromMultipartData(form.build()))
+                        .retrieve()
+                        .bodyToMono(OpenAIImageResponse.class))
                 .map(OpenAIImageProvider::toDomain)
                 .timeout(props.timeout());
     }
