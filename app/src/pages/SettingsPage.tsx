@@ -64,9 +64,9 @@ export default function SettingsPage() {
 
       <TwoFactorSection />
 
-      <InputsSection />
-
       <ProviderKeysSection />
+
+      <InputsSection />
 
       <section className="mt-8 card">
         <h2 className="font-semibold text-fg">Webhook signing secret</h2>
