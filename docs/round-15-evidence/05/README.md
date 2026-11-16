@@ -3,6 +3,8 @@
 Base B0: `8219e0497cb12a7be48b80915601811e361726bf`.
 Planning reference: `3de1b9d8f1e6021825ca6435cedb06a8ac43c6e1`.
 Branch: `codex/r15-admin-features`, PR base `main`.
+Tested implementation head: `a32bb6116bbc0732b6f7c05f19e4b8cc2328619b` (subsequent evidence-only commits are identified in the PR).
+Review and final verification: [PR 65](https://github.com/GoDanceAi/godance/pull/65).
 Environment: Linux, Java 21.0.13, Node 22.23.5, npm 10.9.9; isolated data-volume worktree. No new dependency or production setting.
 
 ## Scope and derivation
@@ -28,7 +30,7 @@ The coordinator captured one detached B0 baseline (raw logs remain ignored under
 
 - App: `npm ci`, `npm run lint`, `npm run build`, `E2E_PORT=4180 npm run test:e2e -- --workers=2`: all passed; **1,340 browser cases**, desktop/mobile, no failures/skips.
 - Marketing: `npm ci`, `npm run lint`, `npm run build`, `npm test`: all passed; **752 tests / 94 suites**, lint 109 files with no diagnostics, 8-page / 22-path default build.
-- Backend: common `docker compose up -d` succeeded; B0 `mvn -B verify` is running at initial PR publication. Final result and this stream's full verification will be recorded before completion.
+- Backend: common `docker compose up -d`, then `mvn -B verify`: **2,297 passed**, zero failures/errors/skips, BUILD SUCCESS / exit 0 in 26:46. Maven completed packaging after a delayed Surefire fork-shutdown diagnostic; no test was disabled.
 
 ## Owned validation
 
@@ -38,8 +40,10 @@ The coordinator captured one detached B0 baseline (raw logs remain ignored under
 - `E2E_PORT=4185 R15_SCREENSHOTS=1 npm run test:e2e -- e2e/admin-features.spec.ts e2e/admin-roles.spec.ts e2e/admin-funnel.spec.ts e2e/admin-routing-margins.spec.ts`: **56 passed**, desktop/mobile, no failures/skips. This includes 24 new feature-status cases and 32 existing admin cases.
 - New cases cover ADMIN/current link, SUPPORT/FINANCE hidden link/direct route, unresolved role, loading, failed GET/retry, malformed schema, backend denial, 2FA waiting, expired session, sign-in return path and late old-account reads. Refresh was activated using keyboard focus/Enter; page width fits both viewports. No feature endpoint mutation is made.
 - Failing opening evidence: new schema test could not compile before the controller existed; new desktop/mobile feature case failed before the page/route existed. Raw red/green logs are ignored. A first green-attempt browser test incorrectly expected a query-string sign-in destination; it was corrected to the existing route-state auth contract and explicit return-path coverage was added.
-- Focused backend integration/role matrix and final full `mvn -B verify`: pending shared integration lock at initial publication. The existing route inventory is extended, never weakened; it covers ADMIN API keys and every role. Dedicated endpoint tests additionally cover unauthenticated/2FA/unverified accounts and denied POST/PUT/PATCH/DELETE.
-- Final latest-head PR CI remains mandatory, including all four named jobs and any additional required checks. Pending runs do not count as passed.
+- `mvn -B -Dtest=AdminFeaturesControllerTest,AdminFeaturesIntegrationTest,AdminRolesIntegrationTest test`: **150 passed** (4 schema, 12 endpoint, 134 exact-role inventory), zero failures/errors/skips, BUILD SUCCESS / exit 0. The route inventory covers ADMIN API keys and every role. Dedicated endpoint cases additionally cover unauthenticated/2FA/inactive/unverified accounts and denied POST/PUT/PATCH/DELETE.
+- `mvn -B -Dtest=AdminFeaturesControllerTest,OpenApiDriftTest test`: **12 passed** (4 schema + 8 drift), zero failures/errors/skips. Admin routes remain excluded from public OpenAPI as before.
+- The final full local `mvn -B verify` result and latest-head CI states are recorded in the [PR description and checks](https://github.com/GoDanceAi/godance/pull/65). The source under test is the implementation head above; the evidence update changes documentation only.
+- Final latest-head PR CI requires all four named jobs and any additional required checks. The PR description records the verified head and run link; pending/skipped/failed runs do not count as passed.
 
 ## Safe visual evidence
 
