@@ -33,7 +33,8 @@ API keys); the key is shown once. A key calls the model API: chat, images, video
 files, recipes, batches, estimates and usage. Creating and revoking keys, billing and the account
 itself need a signed-in session, so a key gets 403 on those routes.
 
-- No key, or an unknown, revoked or expired one: 401.
+- No key, or an unknown, revoked or expired one: 401. So is a bearer token that is not a
+  Godance key, such as an OpenAI key; the problem's `detail` says so.
 - A key on a route that needs a signed-in session: 403.
 - `GET /v1/models`, `GET /v1/status`, `GET /healthz` and `GET /v1/openapi.yaml` need no key.
 
@@ -294,6 +295,12 @@ credit; top up via /v1/billing/topup`, with `e.code` set to `insufficient_credit
 Price: the per-image price × `n`, reserved when the job is accepted. A model that returns
 fewer images than `n` is charged for the images it returned. `n` above the model's `max_n`
 answers 400. Too little credit answers 402 `insufficient_credit`.
+
+Not supported: variations of an image (`POST /v1/images/variations`, which is
+`client.images.create_variation` in OpenAI's SDK). The route answers 404
+`image_variations_not_supported` to a key and a session alike, with OpenAI's `error` object,
+and charges nothing. To work from an image, send it to `POST /v1/images/edits` with a prompt
+(see Edits).
 
 ## Edits
 
@@ -960,10 +967,15 @@ Every error is an RFC 7807 problem document, `Content-Type: application/problem+
 `status` repeats the HTTP status. `detail` is a sentence for a person. `code`, where
 present, is a stable string to branch on.
 
+A 401 is a problem document too. When a request has no credential, or a bearer token that
+is neither a Godance API key nor a session (an OpenAI key sent by mistake), the 401 also
+keeps its `WWW-Authenticate: Bearer` challenge, with RFC 6750's `error="invalid_token"`
+for a token that was sent.
+
 On the routes that follow OpenAI's own API, `POST /v1/images/generations`,
-`POST /v1/images/edits` and the `/v1/videos` routes (not `/v1/videos/generations`), the
-document also carries OpenAI's `error` object, which OpenAI's SDKs build their exceptions
-from. Every other member is still there:
+`POST /v1/images/edits`, `POST /v1/images/variations` and the `/v1/videos` routes (not
+`/v1/videos/generations`), the document also carries OpenAI's `error` object, which
+OpenAI's SDKs build their exceptions from. Every other member is still there:
 
 ```json
 {"title": "Payment Required", "status": 402,
@@ -981,10 +993,10 @@ none. `type` follows the status: `authentication_error` (401), `permission_error
 | Status | Meaning |
 |---|---|
 | 400 | The request is not valid. `detail` says which field. |
-| 401 | No key, or an unknown, revoked or expired one. |
+| 401 | No key, an unknown, revoked or expired one, or a bearer token that is not a Godance key at all. |
 | 402 | `insufficient_credit`: top up. Without a `code`: a spending cap was reached, and topping up does not lift it. |
 | 403 | A key on a route that needs a signed-in session, or a refusal named by `code` (`inputs_disabled`, …). |
-| 404 | No such model, job, file, recipe or video for this account. Another account's answers the same. |
+| 404 | No such model, job, file, recipe or video for this account. Another account's answers the same. A part of OpenAI's API that Godance does not offer has a `code` of its own (`image_variations_not_supported`, `video_remix_not_supported`, …). |
 | 409 | The request cannot be carried out as things stand (`job_not_saveable`, `saved_limit_reached`, `video_not_ready`, `batch_not_resumable`, `batch_limit_reached`, …). |
 | 413, 415, 422 | An input image that is too large, of the wrong type, or not accepted. A batch's `results.zip` over 500 MB is 413 `results_too_large`. |
 | 429 | Too many requests. `Retry-After` says how many seconds to wait. |
@@ -1035,6 +1047,11 @@ except openai.APIStatusError as e:
     print(e.status_code, e.code, e.param)  # 402 insufficient_credit None
     print(e.response.json()["instance"])   # /v1/images/generations
 ```
+
+A client left with an OpenAI key (OpenAI's SDK reads `OPENAI_API_KEY` when no `api_key`
+is given) gets `openai.AuthenticationError: Error code: 401 - The bearer token is not a
+Godance API key or a current session. Godance API keys start with gd_live_.` on the routes
+that carry the `error` object.
 
 ## Limits and retention
 

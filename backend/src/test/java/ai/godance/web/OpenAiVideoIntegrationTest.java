@@ -1312,14 +1312,45 @@ class OpenAiVideoIntegrationTest {
     }
 
     @Test
-    void everyRoute_givenNoCredentials_expects401() {
+    void everyRoute_givenNoCredentials_expects401ProblemWithOpenAisErrorObject() {
         UUID any = UUID.randomUUID();
-        http.post().uri("/v1/videos").contentType(MediaType.APPLICATION_JSON)
-                .bodyValue(body("seedance-2.0", "x")).exchange().expectStatus().isUnauthorized();
-        http.get().uri("/v1/videos").exchange().expectStatus().isUnauthorized();
-        http.get().uri("/v1/videos/{id}", any).exchange().expectStatus().isUnauthorized();
-        http.get().uri("/v1/videos/{id}/content", any).exchange().expectStatus().isUnauthorized();
-        http.delete().uri("/v1/videos/{id}", any).exchange().expectStatus().isUnauthorized();
+        List<JsonNode> refusals = List.of(
+                unauthorized(http.post().uri("/v1/videos").contentType(MediaType.APPLICATION_JSON)
+                        .bodyValue(body("seedance-2.0", "x")), "Bearer"),
+                unauthorized(http.get().uri("/v1/videos"), "Bearer"),
+                unauthorized(http.get().uri("/v1/videos/{id}", any), "Bearer"),
+                unauthorized(http.get().uri("/v1/videos/{id}/content", any), "Bearer"),
+                unauthorized(http.delete().uri("/v1/videos/{id}", any), "Bearer"));
+
+        for (JsonNode refused : refusals) {
+            assertThat(refused.get("detail").asString()).isEqualTo("This request has no API key or session. "
+                    + "Send a Godance API key as Authorization: Bearer gd_live_…, or sign in.");
+            assertThat(refused.get("error").get("message").asString()).isEqualTo(refused.get("detail").asString());
+            assertThat(refused.get("error").get("type").asString()).isEqualTo("authentication_error");
+            assertThat(refused.get("error").get("code").isNull()).isTrue();
+        }
+    }
+
+    @Test
+    void everyRoute_givenABearerThatIsNotGodances_expects401ProblemWithOpenAisErrorObject() {
+        // The shape of an OpenAI key left in OPENAI_API_KEY (not a real key), and a JWT that is not a session.
+        for (String bearer : List.of("Bearer sk-proj-not-a-real-key-0000000000000000", "Bearer not.a.jwt")) {
+            List<JsonNode> refusals = List.of(
+                    unauthorized(http.post().uri("/v1/videos").header("Authorization", bearer)
+                            .contentType(MediaType.APPLICATION_JSON).bodyValue(body("seedance-2.0", "x")),
+                            "Bearer error=\"invalid_token\".*"),
+                    unauthorized(http.get().uri("/v1/videos").header("Authorization", bearer),
+                            "Bearer error=\"invalid_token\".*"));
+
+            for (JsonNode refused : refusals) {
+                assertThat(refused.get("detail").asString()).as(bearer).isEqualTo("The bearer token is not a "
+                        + "Godance API key or a current session. Godance API keys start with gd_live_.");
+                assertThat(refused.toString()).doesNotContain("decode");
+                assertThat(refused.get("error").get("message").asString()).isEqualTo(refused.get("detail").asString());
+                assertThat(refused.get("error").get("type").asString()).isEqualTo("authentication_error");
+            }
+        }
+        assertThat(ark.getAllServeEvents()).isEmpty();
     }
 
     @Test
@@ -1531,6 +1562,15 @@ class OpenAiVideoIntegrationTest {
         assertThat(problem.get("error").get("message").asString()).contains("is not supported");
         assertThat(problem.get("error").get("code").asString()).isEqualTo(problem.get("code").asString());
         return problem.get("code").asString();
+    }
+
+    /** Sends a request that does not authenticate and returns its 401 problem, once Spring's challenge matches. */
+    private JsonNode unauthorized(WebTestClient.RequestHeadersSpec<?> request, String challenge) {
+        return json.readTree(request.exchange()
+                .expectStatus().isUnauthorized()
+                .expectHeader().valueMatches(HttpHeaders.WWW_AUTHENTICATE, challenge)
+                .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON)
+                .expectBody(String.class).returnResult().getResponseBody());
     }
 
     private long ledgerCount(UUID userId) {

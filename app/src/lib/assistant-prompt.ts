@@ -53,16 +53,15 @@ export interface PromptApi {
 //   NOT_SAVED        anything else: the script fills the template in itself
 //   GALLERY          a recipe from the public gallery
 //   OPENAI_VIDEO     a video the script sends to OpenAI's route, POST /v1/videos
-//   NOT_OPENAI_VIDEO anything else: an image, or a video with what POST /v1/videos
-//                    has no field for (a last frame, reference images), which goes
-//                    to POST /v1/videos/generations
+//   NOT_OPENAI_VIDEO anything else: an image, or a video POST /v1/videos refuses
+//                    (more than one clip, "n"), which goes to POST /v1/videos/generations
 // Several words on one line mean all of them, as in "[[IF INPUTS SAVED]]".
 // Blocks do not nest.
 //
 // {{name}} below is not a marker: it is how a recipe writes a variable, and
 // the prompt explains it to the assistant.
 // =============================================================================
-export const ASSISTANT_PROMPT_VERSION = '2026-11-15.3';
+export const ASSISTANT_PROMPT_VERSION = '2026-11-16.1';
 
 export const ASSISTANT_PROMPT = `I want to run a Godance recipe at scale. Write me a Python script that runs the recipe below once for every row of a CSV file I give it, and writes the results to a new CSV file.
 
@@ -101,7 +100,7 @@ How to read it:
 - Each input goes in the field its "role" names: "image" in "images" (a list of {"file_id": "..."}), "mask" in "mask", "first_frame" in "first_frame", "last_frame" in "last_frame", "reference_image" in "reference_images" (a list).
 [[END]]
 [[IF INPUTS NOT_SAVED OPENAI_VIDEO]]
-- The input is the video's first frame: send it as "input_reference": {"file_id": "..."}, which client.videos.create_and_poll takes in extra_body.
+- Each input goes in extra_body, in the field its "role" names: "first_frame" in "input_reference" ({"file_id": "..."}), "last_frame" in "last_frame" ({"file_id": "..."}), "reference_image" in "reference_images" (a list). client.videos.create_and_poll sends a form, in which the list is JSON text: "reference_images": json.dumps([...]).
 [[END]]
 
 Rules the script must follow:

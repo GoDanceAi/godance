@@ -696,7 +696,7 @@ test.describe('Run at scale, on a finished Studio result', () => {
     // The prompt says where the frame goes, and names no file.
     const prompt = await promptOf(page);
     expect(prompt).toContain(`POST ${API_ORIGIN}/v1/videos\n`);
-    expect(prompt).toContain('The input is the video\'s first frame: send it as "input_reference": {"file_id": "..."}');
+    expect(prompt).toContain('Each input goes in extra_body, in the field its "role" names: "first_frame" in "input_reference" ({"file_id": "..."})');
     expect(prompt).not.toContain('Each input goes in the field its "role" names');
     expect(prompt).not.toContain(fileId(1));
 
@@ -711,25 +711,73 @@ test.describe('Run at scale, on a finished Studio result', () => {
       .toContain(`    extra_body={\n        "input_reference": {\n            "file_id": "${fileId(1)}",\n        },\n    },`);
   });
 
-  test('a video from a first and a last frame: Godance\'s own route, as the Studio sent it, and the code says why', async ({ page, api }) => {
+  test('a video from a first and a last frame: OpenAI\'s route too, each frame by its name there', async ({ page, api }) => {
     const sent = await videoFromFrames(page, api, ['first frame', 'last frame']);
     expect(sent).toMatchObject({ first_frame: { file_id: fileId(1) }, last_frame: { file_id: fileId(2) } });
 
     const prompt = await promptOf(page);
-    expect(prompt).toContain(`POST ${API_ORIGIN}/v1/videos/generations\n`);
-    expect(prompt).toContain('Each input goes in the field its "role" names');
-    expect(prompt).toContain('3. A video request always answers 202 with a "job_id"');
-    expect(prompt).not.toContain('input_reference');
+    expect(prompt).toContain(`POST ${API_ORIGIN}/v1/videos\n`);
+    expect(prompt).toContain('"first_frame" in "input_reference" ({"file_id": "..."}), "last_frame" in "last_frame" ({"file_id": "..."})');
+    expect(prompt).toContain('3. A video request answers 200 with the video');
+    expect(prompt).not.toContain('Each input goes in the field its "role" names');
+    expect(prompt).not.toContain('A video request always answers 202');
 
     await tab(page, 'Code').click();
-    const start = await codeOf(page, 'Start the job');
-    expect(start).toContain(`curl ${API_ORIGIN}/v1/videos/generations \\`);
-    expect(JSON.parse(/-d '([\s\S]*)'$/.exec(start)?.[1] ?? '')).toEqual(sent);
-    await expect(figure(page, 'Start the job')).toContainText('OpenAI\'s POST /v1/videos has no field for part of this request');
-    expect(await codeOf(page, 'Check on it')).toContain(`curl ${API_ORIGIN}/v1/jobs/$JOB_ID`);
+    // The request the Studio sent, in OpenAI's shape: the first frame is input_reference there.
+    const { first_frame: first, seconds, ...rest } = sent;
+    const start = await codeOf(page, 'Start the video');
+    expect(start).toContain(`curl ${API_ORIGIN}/v1/videos \\`);
+    expect(JSON.parse(/-d '([\s\S]*)'$/.exec(start)?.[1] ?? '')).toEqual({ ...rest, seconds: String(seconds), input_reference: first });
+    await expect(figure(page, 'Start the video')).not.toContainText('Godance\'s own video route');
+    expect(await codeOf(page, 'Check on it')).toContain(`curl ${API_ORIGIN}/v1/videos/$VIDEO_ID`);
+
+    // The SDK writes a single image as fields of its own, which the route reads back.
     await choice(page, 'Language', 'Python (OpenAI SDK)').click();
-    expect(await codeOf(page, 'Python script')).toContain('client.post(\n    "/videos/generations",');
-    await expect(figure(page, 'Python script')).toContainText('so it goes to Godance\'s own video route as it is');
+    const python = await codeOf(page, 'Python script');
+    expect(python).toContain('video = client.videos.create_and_poll(');
+    expect(python).toContain(`        "last_frame": {\n            "file_id": "${fileId(2)}",\n        },`);
+    expect(python).not.toContain('json.dumps');
+    expect(python).not.toContain('client.post(');
+    await expect(figure(page, 'Python script')).not.toContainText('Godance\'s own video route');
+
+    await choice(page, 'Language', 'Java (Spring WebClient)').click();
+    expect(await codeOf(page, 'Java class')).toContain('godance.post().uri("/v1/videos")');
+  });
+
+  test('a video from reference images: OpenAI\'s route, and the Python sends the list as JSON text', async ({ page, api }) => {
+    const sent = await videoFromFrames(page, api, ['reference image 1', 'reference image 2']);
+    expect(sent.reference_images).toEqual([{ file_id: fileId(1) }, { file_id: fileId(2) }]);
+
+    const prompt = await promptOf(page);
+    expect(prompt).toContain(`POST ${API_ORIGIN}/v1/videos\n`);
+    expect(prompt).toContain('"reference_image" in "reference_images" (a list). client.videos.create_and_poll sends a form, '
+      + 'in which the list is JSON text: "reference_images": json.dumps([...]).');
+
+    await tab(page, 'Code').click();
+    const { seconds, ...rest } = sent;
+    const start = await codeOf(page, 'Start the video');
+    expect(start).toContain(`curl ${API_ORIGIN}/v1/videos \\`);
+    expect(JSON.parse(/-d '([\s\S]*)'$/.exec(start)?.[1] ?? '')).toEqual({ ...rest, seconds: String(seconds) });
+
+    // The SDK sends a form, in which a list's fields are grouped by name: as JSON text, it keeps its order.
+    await choice(page, 'Language', 'Python (OpenAI SDK)').click();
+    const python = await codeOf(page, 'Python script');
+    expect(python).toMatch(/^import json\nimport os\n/);
+    expect(python).toContain([
+      '        # The SDK sends a form: as JSON text, the images keep their order.',
+      '        "reference_images": json.dumps([',
+      '            {',
+      `                "file_id": "${fileId(1)}",`,
+      '            },',
+      '            {',
+      `                "file_id": "${fileId(2)}",`,
+      '            },',
+      '        ]),',
+    ].join('\n'));
+    expect(python).not.toContain('client.post(');
+
+    await choice(page, 'Language', 'Java (Spring WebClient)').click();
+    expect(await codeOf(page, 'Java class')).toContain('godance.post().uri("/v1/videos")');
   });
 
   test('a run of one of the user\'s recipes: by reference in the code, and a batch of it one click away', async ({ page, api }) => {
