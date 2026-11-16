@@ -3,6 +3,7 @@ import {
   ASSISTANT_PROMPT,
   ASSISTANT_PROMPT_VERSION,
   assistantPrompt,
+  OPENAI_VIDEO_PATH,
   PROMPT_CONDITIONS,
   promptConditions,
   promptRecipeJson,
@@ -16,9 +17,12 @@ import {
   codeFor,
   createPath,
   fileIdPlaceholder,
+  openAiVideoBody,
   pythonLiteral,
   uploadCode,
   VIDEO_CREATE,
+  VIDEO_GENERATIONS,
+  VIDEO_GENERATIONS_NOTE,
   type CodeLanguage,
   type CodeRequest,
 } from '../src/lib/run-code';
@@ -50,6 +54,17 @@ const EDIT = {
   images: [{ file_id: 'f11e0000-0000-4000-8000-000000000001' }],
 };
 const VIDEO = { model: 'seedance-2.0', prompt: 'Waves at dawn', size: '1280x720', seconds: 5 };
+/** The same video as OpenAI's shape has it: `seconds` is a string there. */
+const OPENAI_VIDEO = { ...VIDEO, seconds: '5' };
+const VIDEO_RECIPE = {
+  model: 'kling-3.0',
+  recipe: { version_id: '5ec10003-0000-4000-8000-000000000002', variables: { weather: 'falling rain' } },
+  size: '1920x1080',
+  seconds: 10,
+};
+const FIRST_FRAME = { file_id: 'f11e0000-0000-4000-8000-000000000002' };
+const LAST_FRAME = { file_id: 'f11e0000-0000-4000-8000-000000000003' };
+const REFERENCE = { job_output: { job_id: '0b5e0000-0000-4000-8000-000000000004', index: 0 } };
 
 const only = (language: CodeLanguage, request: CodeRequest): string => {
   const snippets = codeFor(language, request);
@@ -101,6 +116,18 @@ function pythonBody(code: string): unknown {
   const literal = /body=(\{[\s\S]*?\n {4}\}),\n {4}cast_to=/.exec(code)?.[1];
   expect(literal, 'the script posts a body').toBeDefined();
   return pythonValue(literal as string);
+}
+
+/**
+ * The `extra_body` a Python script gives the SDK, as a value: its comment
+ * lines left out, and `json.dumps(x)` read as the x it is made from.
+ */
+function pythonExtraBody(code: string): unknown {
+  const literal = /\n {4}extra_body=(\{[\s\S]*?\n {4}\}),\n\)/.exec(code)?.[1];
+  expect(literal, 'the call has an extra_body').toBeDefined();
+  return pythonValue((literal as string)
+    .replace(/\n *#[^\n]*/g, '')
+    .replace(/json\.dumps\((\{[\s\S]*?\n {8}\})\)/, '$1'));
 }
 
 test.describe('the request as code', () => {
@@ -173,26 +200,163 @@ test.describe('the request as code', () => {
     expect(python).toContain('    extra_body={\n        "gallery_recipe": "koi-pond",\n        "webhook_url": "https://example.test/hook",\n    },');
   });
 
-  test('a video is always a job, on the video route, whatever was asked', () => {
+  test('a video goes to OpenAI\'s POST /v1/videos: started, read until it ends, and saved, whatever was asked', () => {
     for (const mode of ['poll', 'wait'] as const) {
       const request: CodeRequest = { ...video(VIDEO), mode };
       const curl = codeFor('curl', request);
-      expect(curl.map((snippet) => snippet.title)).toEqual(['Start the job', 'Check on it']);
-      expect(curl[0].code).toContain(`curl ${API}${VIDEO_CREATE.path} \\`);
-      expect(curlBody(curl[0].code)).toEqual(VIDEO);
+      expect(curl.map((snippet) => snippet.title)).toEqual(['Start the video', 'Check on it', 'Download it']);
+      expect(curl[0].code).toContain(`curl ${API}/v1/videos \\`);
+      // OpenAI's shape, in which `seconds` is a string.
+      expect(curlBody(curl[0].code)).toEqual(OPENAI_VIDEO);
+      expect(curl[1].code).toBe(`curl ${API}/v1/videos/$VIDEO_ID \\\n  -H "Authorization: Bearer $GODANCE_API_KEY"`);
+      expect(curl[1].note).toContain('VIDEO_ID is the "id" the first request answers with');
+      expect(curl[1].note).toContain('"status" is completed or failed');
+      expect(curl[2].code).toBe(
+        `curl -o "$VIDEO_ID.mp4" ${API}/v1/videos/$VIDEO_ID/content \\\n  -H "Authorization: Bearer $GODANCE_API_KEY"`);
 
+      // Python: the SDK's own call, which polls, then its download.
       const python = only('python', request);
-      expect(python).toContain('client.post(\n    "/videos/generations",');
-      expect(pythonBody(python)).toEqual(VIDEO);
-      expect(python).toContain(`started['${VIDEO_CREATE.jobIdField}']`);
+      expect(python).toContain([
+        'video = client.videos.create_and_poll(',
+        '    model="seedance-2.0",',
+        '    prompt="Waves at dawn",',
+        '    seconds="5",',
+        '    size="1280x720",',
+        ')',
+      ].join('\n'));
+      expect(python).toContain('if video.status != "completed":');
+      expect(python).toContain('client.videos.download_content(video.id, variant="video").write_to_file(f"{video.id}.mp4")');
+      expect(python).toContain('max_retries=0');
+      // openai-python prints a DeprecationWarning for these calls (OpenAI shut Sora down): the script says why.
+      expect(python).toContain('# The SDK warns that OpenAI shut its own video API (Sora) down: these calls go to Godance.');
+      expect(python).not.toContain('client.post(');
+      expect(python).not.toContain('/jobs/');
+      expect(python).not.toContain('extra_body');
+      expect(python).not.toContain('import json');
 
+      // Java: the same three steps with WebClient, the file streamed to disk.
       const java = only('java', request);
-      expect(java).toContain(`godance.post().uri("${VIDEO_CREATE.path}")`);
-      expect(javaBody(java)).toEqual(VIDEO);
+      expect(java).toContain('godance.post().uri("/v1/videos")');
+      expect(javaBody(java)).toEqual(OPENAI_VIDEO);
+      expect(java).toContain('while (List.of("queued", "in_progress").contains(String.valueOf(video.get("status")))) {');
+      expect(java).toContain('video = godance.get().uri("/v1/videos/{id}", id)');
+      expect(java).toContain('if (!"completed".equals(video.get("status"))) {');
+      // A clip is larger than WebClient holds in memory by default, so it is never read whole.
+      expect(java).toContain('DataBufferUtils.write(godance.get().uri("/v1/videos/{id}/content", id)');
+      expect(java).toContain('.bodyToFlux(DataBuffer.class), file)');
+      expect(java).toContain('import org.springframework.core.io.buffer.DataBufferUtils;');
+      expect(java).toContain('throws InterruptedException');
+      expect(java).not.toContain('/v1/jobs');
+      expect(java).not.toContain('maxInMemorySize');
     }
-    // The one constant to change when POST /v1/videos is live.
-    expect(VIDEO_CREATE).toEqual({ path: '/v1/videos/generations', jobIdField: 'job_id' });
+    expect(VIDEO_CREATE).toEqual({ path: '/v1/videos', idField: 'id' });
     expect(createPath('video', VIDEO)).toBe(VIDEO_CREATE.path);
+    // The prompt for an AI assistant tells the two routes apart by the same path.
+    expect(OPENAI_VIDEO_PATH).toBe(VIDEO_CREATE.path);
+  });
+
+  test('a video recipe run sends `recipe` and no prompt; the SDK gets it as JSON text, with an empty prompt', () => {
+    const request = video(VIDEO_RECIPE);
+    const sent = { ...VIDEO_RECIPE, seconds: '10' };
+    expect(createPath('video', VIDEO_RECIPE)).toBe('/v1/videos');
+
+    const curl = codeFor('curl', request)[0].code;
+    expect(curl).toContain(`curl ${API}/v1/videos \\`);
+    expect(curlBody(curl)).toEqual(sent);
+    expect(javaBody(only('java', request))).toEqual(sent);
+
+    // The SDK sends a form, and a form's "recipe" is read as JSON text.
+    const python = only('python', request);
+    expect(python).toMatch(/^import json\nimport os\n/);
+    expect(python).toContain([
+      'video = client.videos.create_and_poll(',
+      '    model="kling-3.0",',
+      '    prompt="",  # the recipe is the prompt: Godance fills its template in',
+      '    seconds="10",',
+      '    size="1920x1080",',
+      '    extra_body={',
+      '        # The SDK sends a form, in which "recipe" is JSON text.',
+      '        "recipe": json.dumps({',
+    ].join('\n'));
+    expect(pythonExtraBody(python)).toEqual({ recipe: VIDEO_RECIPE.recipe });
+
+    // A recipe with input slots brings its own images, so it goes to the same route.
+    const withSlots = { ...VIDEO_RECIPE, recipe: { ...VIDEO_RECIPE.recipe, inputs: { 'first frame': { file_id: 'FILE_ID' } } } };
+    expect(createPath('video', withSlots)).toBe('/v1/videos');
+    expect(curlBody(codeFor('curl', video(withSlots))[0].code)).toEqual({ ...withSlots, seconds: '10' });
+    expect(pythonExtraBody(only('python', video(withSlots)))).toEqual({ recipe: withSlots.recipe });
+  });
+
+  test('a first frame is OpenAI\'s input_reference; the SDK gets it in extra_body', () => {
+    for (const frame of [FIRST_FRAME, REFERENCE]) {
+      const body = { ...VIDEO, first_frame: frame, gallery_recipe: 'paper-boat-sets-off' };
+      const sent = { ...OPENAI_VIDEO, input_reference: frame, gallery_recipe: 'paper-boat-sets-off' };
+      const request = video(body);
+      expect(createPath('video', body)).toBe('/v1/videos');
+
+      expect(curlBody(codeFor('curl', request)[0].code)).toEqual(sent);
+      expect(javaBody(only('java', request))).toEqual(sent);
+      const python = only('python', request);
+      expect(python).toContain('    size="1280x720",\n    extra_body={\n        "input_reference": {');
+      expect(pythonExtraBody(python)).toEqual({ input_reference: frame, gallery_recipe: 'paper-boat-sets-off' });
+      expect(python).not.toContain('first_frame');
+      expect(python).not.toContain('import json');
+    }
+  });
+
+  test('a last frame, reference images or a count go to Godance\'s own video route, as sent, and say why', () => {
+    for (const more of [{ last_frame: LAST_FRAME }, { reference_images: [REFERENCE] }, { n: 2 }]) {
+      const body = { ...VIDEO, first_frame: FIRST_FRAME, ...more };
+      const request = video(body);
+      expect(openAiVideoBody(body)).toBeNull();
+      expect(createPath('video', body)).toBe(VIDEO_GENERATIONS.path);
+
+      const curl = codeFor('curl', request);
+      expect(curl.map((snippet) => snippet.title)).toEqual(['Start the job', 'Check on it']);
+      expect(curl[0].code).toContain(`curl ${API}/v1/videos/generations \\`);
+      // Unchanged: a number of seconds, and each image in the field its role names.
+      expect(curlBody(curl[0].code)).toEqual(body);
+      expect(curl[0].note).toBe(VIDEO_GENERATIONS_NOTE);
+      expect(curl[1].code).toBe(`curl ${API}/v1/jobs/$JOB_ID \\\n  -H "Authorization: Bearer $GODANCE_API_KEY"`);
+
+      const [python] = codeFor('python', request);
+      expect(python.note).toBe(VIDEO_GENERATIONS_NOTE);
+      expect(python.code).toContain('client.post(\n    "/videos/generations",');
+      expect(pythonBody(python.code)).toEqual(body);
+      expect(python.code).toContain(`job = client.get(f"/jobs/{started['job_id']}", cast_to=object)`);
+      expect(python.code).not.toContain('client.videos');
+
+      const [java] = codeFor('java', request);
+      expect(java.note).toBe(VIDEO_GENERATIONS_NOTE);
+      expect(java.code).toContain('godance.post().uri("/v1/videos/generations")');
+      expect(javaBody(java.code)).toEqual(body);
+      expect(java.code).toContain('godance.get().uri("/v1/jobs/{id}", started.get("job_id"))');
+      expect(java.code).not.toContain('DataBufferUtils');
+    }
+    expect(VIDEO_GENERATIONS).toEqual({ path: '/v1/videos/generations', jobIdField: 'job_id' });
+    // An image never says it.
+    for (const language of LANGUAGES) {
+      for (const snippet of codeFor(language, image(PLAIN))) expect(snippet.note ?? '').not.toContain('/v1/videos');
+    }
+  });
+
+  test('OpenAI\'s video shape is used only when it carries the whole request', () => {
+    // A count of one goes without saying, `async` is never a video's, and seconds become a string.
+    expect(openAiVideoBody({ model: 'm', prompt: 'p', seconds: 8, size: '1280x720', n: 1, async: true }))
+      .toEqual({ model: 'm', prompt: 'p', seconds: '8', size: '1280x720' });
+    expect(openAiVideoBody({ model: 'm', prompt: 'p', seconds: '8' })).toEqual({ model: 'm', prompt: 'p', seconds: '8' });
+    // The Godance extensions it takes are carried as they are, the first frame by its own name there.
+    expect(openAiVideoBody({ model: 'm', prompt: 'p', first_frame: FIRST_FRAME, webhook_url: 'https://example.test/hook', gallery_recipe: 'koi-pond' }))
+      .toEqual({ model: 'm', prompt: 'p', input_reference: FIRST_FRAME, webhook_url: 'https://example.test/hook', gallery_recipe: 'koi-pond' });
+    expect(Object.keys(openAiVideoBody({ model: 'm', first_frame: FIRST_FRAME, prompt: 'p' }) ?? {}))
+      .toEqual(['model', 'input_reference', 'prompt']);
+    // POST /v1/videos answers 200 to a field it does not know, and makes the video without it:
+    // a request with one is never sent there.
+    for (const more of [{ last_frame: LAST_FRAME }, { reference_images: [REFERENCE] }, { n: 2 }, { style: 'vivid' }]) {
+      expect(openAiVideoBody({ model: 'm', prompt: 'p', ...more }), Object.keys(more)[0]).toBeNull();
+    }
+    // A field left undefined is not there at all.
+    expect(openAiVideoBody({ model: 'm', prompt: 'p', last_frame: undefined })).toEqual({ model: 'm', prompt: 'p' });
   });
 
   test('a recipe run carries `recipe` and its variables, and no prompt', () => {
@@ -253,6 +417,13 @@ test.describe('the request as code', () => {
     // The plain call takes the same prompt as a Python string.
     const plain = only('python', image({ model: 'gpt-image-2', prompt: AWKWARD }, 'wait'));
     expect(pythonValue(/prompt=(".*"),\n/.exec(plain)?.[1] ?? '')).toBe(AWKWARD);
+
+    // So does a video, in OpenAI's shape.
+    const clip = video({ model: 'seedance-2.0', prompt: AWKWARD, seconds: 5 });
+    expect(curlBody(codeFor('curl', clip)[0].code)).toEqual({ model: 'seedance-2.0', prompt: AWKWARD, seconds: '5' });
+    expect(javaBody(only('java', clip))).toEqual({ model: 'seedance-2.0', prompt: AWKWARD, seconds: '5' });
+    expect(only('java', clip).match(/"""/g)).toHaveLength(2);
+    expect(pythonValue(/prompt=(".*"),\n/.exec(only('python', clip))?.[1] ?? '')).toBe(AWKWARD);
   });
 
   test('a Python literal is JSON with Python\'s own words for true, false and null', () => {
@@ -267,8 +438,11 @@ test.describe('the request as code', () => {
   });
 
   test('no code ever holds a key: only the variable it is read from', () => {
+    const videos = [
+      video(VIDEO), video(VIDEO_RECIPE), video({ ...VIDEO, first_frame: FIRST_FRAME }), video({ ...VIDEO, last_frame: LAST_FRAME }),
+    ];
     for (const language of LANGUAGES) {
-      for (const request of [image(PLAIN, 'poll'), image(PLAIN, 'wait'), image(RECIPE), image(EDIT), video(VIDEO)]) {
+      for (const request of [image(PLAIN, 'poll'), image(PLAIN, 'wait'), image(RECIPE), image(EDIT), ...videos]) {
         for (const snippet of codeFor(language, request)) {
           expect(snippet.code).not.toMatch(/gd_live_/);
           expect(snippet.code).toContain('GODANCE_API_KEY');
@@ -300,7 +474,8 @@ test.describe('the request as code', () => {
     // every version of the SDK. Seen failing against a local build on 2026-11-15.
     const requests: CodeRequest[] = [
       image(PLAIN, 'poll'), image(PLAIN, 'wait'), image(RECIPE, 'poll'), image(RECIPE, 'wait'),
-      image(EDIT, 'poll'), image(EDIT, 'wait'), video(VIDEO),
+      image(EDIT, 'poll'), image(EDIT, 'wait'), video(VIDEO), video(VIDEO_RECIPE),
+      video({ ...VIDEO, first_frame: FIRST_FRAME }), video({ ...VIDEO, reference_images: [REFERENCE] }),
     ];
     for (const request of requests) {
       const python = codeFor('python', request).map((snippet) => snippet.code).join('\n');
@@ -333,7 +508,7 @@ test.describe('the prompt for an AI assistant', () => {
   test('is the one constant: its blocks settled for the recipe, its three markers filled in, nothing else changed', () => {
     const prompt = assistantPrompt(recipe, api);
 
-    expect(prompt).toBe(promptWording(promptConditions(recipe))
+    expect(prompt).toBe(promptWording(promptConditions(recipe, api))
       .replaceAll('[[API_BASE]]', API)
       .replace('[[CREATE_PATH]]', '/v1/images/generations')
       .replace('[[RECIPE_JSON]]', () => promptRecipeJson(recipe)));
@@ -378,24 +553,63 @@ test.describe('the prompt for an AI assistant', () => {
     expect(withSlot).toContain('Give each slot its file inside "recipe"');
     expect(withSlot).not.toContain('Each input goes in the field its "role" names');
 
-    // A gallery video recipe with a first frame: the script fills the template in and places the file by its role.
-    const gallery = assistantPrompt(
-      { ...recipe, modality: 'VIDEO', version_id: undefined, gallery_recipe: 'paper-boat', inputs: [{ ...slot, role: 'first_frame' }] },
-      { base: API, createPath: '/v1/videos/generations' });
+    // A gallery video recipe with a first frame, sent to OpenAI's route: the script fills the
+    // template in, sends the file as input_reference, and reads the video until it ends.
+    const galleryRecipe: PromptRecipe = {
+      ...recipe, modality: 'VIDEO', version_id: undefined, gallery_recipe: 'paper-boat', inputs: [{ ...slot, role: 'first_frame' }],
+    };
+    const gallery = assistantPrompt(galleryRecipe, { base: API, createPath: '/v1/videos' });
+    expect(gallery).toContain(`POST ${API}/v1/videos\n`);
     expect(gallery).toContain('Fill the template in yourself, and send the result as "prompt".');
     expect(gallery).toContain('Send "gallery_recipe" unchanged with every request.');
     expect(gallery).toContain('Upload each file with POST /v1/files');
-    expect(gallery).toContain('Each input goes in the field its "role" names');
+    expect(gallery).toContain('The input is the video\'s first frame: send it as "input_reference": {"file_id": "..."}');
+    expect(gallery).not.toContain('Each input goes in the field its "role" names');
     expect(gallery).not.toContain('inside "recipe"');
     expect(gallery).not.toContain('"version_id" names this recipe');
-    expect(gallery).toContain('3. A video request always answers 202');
+    expect(gallery).not.toContain('"recipe" is JSON text');
+    expect(gallery).toContain('3. A video request answers 200 with the video');
+    expect(gallery).toContain('client.videos.create_and_poll(...) sends it and reads GET /v1/videos/{id}');
+    expect(gallery).toContain('client.videos.download_content(id, variant="video")');
+    expect(gallery).not.toContain('A video request always answers 202');
+    expect(gallery).not.toContain('GET /v1/jobs/{id}');
     expect(gallery).not.toContain('An image request answers in one of two ways');
 
-    for (const prompt of [saved, withSlot, gallery]) {
+    // The same recipe with a last frame too goes to Godance's own route, which takes each image by its role.
+    const framed = assistantPrompt(
+      { ...galleryRecipe, inputs: [{ ...slot, role: 'first_frame' }, { ...slot, slot: 'end', role: 'last_frame' }] },
+      { base: API, createPath: '/v1/videos/generations' });
+    expect(framed).toContain(`POST ${API}/v1/videos/generations\n`);
+    expect(framed).toContain('Each input goes in the field its "role" names');
+    expect(framed).toContain('3. A video request always answers 202 with a "job_id". Poll GET /v1/jobs/{id}');
+    expect(framed).not.toContain('input_reference');
+    expect(framed).not.toContain('client.videos');
+
+    // One of the user's own video recipes, on OpenAI's route: the SDK sends its recipe as JSON text.
+    const savedVideo = assistantPrompt({ ...recipe, modality: 'VIDEO', model: 'kling-3.0' }, { base: API, createPath: '/v1/videos' });
+    expect(savedVideo).toContain('"version_id" names this recipe on Godance. Send "recipe"');
+    expect(savedVideo).toContain('client.videos.create_and_poll sends a form, in which "recipe" is JSON text: pass prompt="" and extra_body={"recipe": json.dumps({...})}.');
+    expect(savedVideo).toContain('3. A video request answers 200 with the video');
+    expect(savedVideo).not.toContain('input_reference');
+    // An image recipe is never told about it.
+    expect(saved).not.toContain('client.videos');
+
+    for (const prompt of [saved, withSlot, gallery, framed, savedVideo]) {
       // The rules are numbered 1 to 8 whichever blocks were kept, and no block leaves a gap behind.
       expect(prompt.match(/^\d+\. /gm)).toEqual(['1. ', '2. ', '3. ', '4. ', '5. ', '6. ', '7. ', '8. ']);
       expect(prompt).not.toMatch(/\n\n\n/);
       expect(prompt).not.toContain('[[');
+    }
+  });
+
+  test('a video\'s prompt names the route its code uses, and rule 3 is about that route', () => {
+    const clip: PromptRecipe = { ...recipe, modality: 'VIDEO', model: 'seedance-2.0', version_id: undefined };
+    for (const body of [VIDEO, VIDEO_RECIPE, { ...VIDEO, first_frame: FIRST_FRAME }, { ...VIDEO, reference_images: [REFERENCE] }]) {
+      const path = createPath('video', body);
+      const prompt = assistantPrompt(clip, { base: API, createPath: path });
+      expect(prompt).toContain(`POST ${API}${path}\n`);
+      expect(prompt.includes('3. A video request answers 200 with the video'), path).toBe(path === VIDEO_CREATE.path);
+      expect(prompt.includes('3. A video request always answers 202'), path).toBe(path === VIDEO_GENERATIONS.path);
     }
   });
 
@@ -411,6 +625,9 @@ test.describe('the prompt for an AI assistant', () => {
     expect(ASSISTANT_PROMPT).not.toContain('cast_to=httpx');
     expect(ASSISTANT_PROMPT).toContain('synchronous image responses');
     expect(ASSISTANT_PROMPT).toContain('poll GET /v1/jobs/{id}');
+    // A video on OpenAI's route is the SDK's own call, read until it ends, then downloaded.
+    expect(ASSISTANT_PROMPT).toContain('client.videos.create_and_poll');
+    expect(ASSISTANT_PROMPT).toContain('client.videos.download_content');
     expect(ASSISTANT_PROMPT).toContain('Estimate the cost first. Call POST /v1/estimates');
     expect(ASSISTANT_PROMPT).toContain('Stop at once on HTTP 402');
     expect(ASSISTANT_PROMPT).toContain('to the results CSV');

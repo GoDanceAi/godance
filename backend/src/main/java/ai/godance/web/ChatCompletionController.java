@@ -51,6 +51,13 @@ public class ChatCompletionController {
 
     private static final String DONE_SENTINEL = "[DONE]";
 
+    /**
+     * A per-request routing hint (round 4's Phase 3): a routing policy's rules
+     * may match on it with {@code hint_equals}. The header wins over the
+     * {@code route_hint} body field; a direct model call ignores both.
+     */
+    public static final String ROUTE_HINT_HEADER = "X-Godance-Route";
+
     private final ChatCompletionService chat;
     private final ChatImages images;
     private final InputService inputs;
@@ -71,12 +78,14 @@ public class ChatCompletionController {
             ServerWebExchange exchange) {
         UUID userId = JwtService.userIdFromSubject(jwt.getSubject());
         UUID apiKeyId = apiKeyId(jwt);
+        String headerHint = exchange.getRequest().getHeaders().getFirst(ROUTE_HINT_HEADER);
+        String routeHint = headerHint != null ? headerHint : req.routeHint();
 
         // Everything about the request's shape and its images is settled here,
         // before the service prices or charges anything.
         return toDomain(req, userId, exchange.getRequest().getURI()).flatMap(domain -> {
             if (Boolean.TRUE.equals(req.stream())) {
-                Flux<ServerSentEvent<String>> stream = chat.executeStreaming(userId, apiKeyId, domain)
+                Flux<ServerSentEvent<String>> stream = chat.executeStreaming(userId, apiKeyId, domain, routeHint)
                         .map(ChatCompletionChunk::from)
                         .map(this::asSse)
                         .concatWith(Mono.just(ServerSentEvent.<String>builder()
@@ -85,7 +94,7 @@ public class ChatCompletionController {
                         .contentType(MediaType.TEXT_EVENT_STREAM)
                         .<Object>body(stream));
             }
-            return Mono.fromCallable(() -> chat.execute(userId, apiKeyId, domain))
+            return Mono.fromCallable(() -> chat.execute(userId, apiKeyId, domain, routeHint))
                     .subscribeOn(Schedulers.boundedElastic())
                     .map(r -> ResponseEntity.ok().<Object>body(ChatCompletionResponse.from(r)));
         });

@@ -12,6 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import ai.godance.domain.Modality;
+import ai.godance.domain.PublishedRecipe;
 import ai.godance.domain.Recipe;
 import ai.godance.domain.RecipeVersion;
 import ai.godance.repository.RecipeRepository;
@@ -39,10 +40,12 @@ public class RecipeRunService {
 
     private final RecipeRepository recipes;
     private final RecipeVersionRepository versions;
+    private final PublishService published;
 
-    public RecipeRunService(RecipeRepository recipes, RecipeVersionRepository versions) {
+    public RecipeRunService(RecipeRepository recipes, RecipeVersionRepository versions, PublishService published) {
         this.recipes = recipes;
         this.versions = versions;
+        this.published = published;
     }
 
     /**
@@ -51,11 +54,16 @@ public class RecipeRunService {
      * every variable ended up with, given or default.
      */
     public record RunPrompt(String prompt, UUID recipeVersionId, Map<String, String> variables,
-                            List<SlotInput> inputs) {
+                            List<SlotInput> inputs, UUID publishedRecipeId) {
 
         /** A prompt with no recipe inputs. */
         public RunPrompt(String prompt, UUID recipeVersionId, Map<String, String> variables) {
-            this(prompt, recipeVersionId, variables, List.of());
+            this(prompt, recipeVersionId, variables, List.of(), null);
+        }
+
+        /** A run of the caller's own recipe, or a plain prompt. */
+        public RunPrompt(String prompt, UUID recipeVersionId, Map<String, String> variables, List<SlotInput> inputs) {
+            this(prompt, recipeVersionId, variables, inputs, null);
         }
 
         /** Whether the recipe names its own inputs: it then runs with them and no others. */
@@ -68,8 +76,12 @@ public class RecipeRunService {
             return inputs.stream().filter(input -> input.role().equals(role)).map(SlotInput::ref).toList();
         }
 
-        /** The origin of a job that runs this: what it already was, and the recipe version when there is one. */
+        /**
+         * The origin of a job that runs this: what it already was, and the
+         * recipe version, or the published recipe, when there is one.
+         */
         public JobOrigin origin(JobOrigin base) {
+            if (publishedRecipeId != null) return base.withPublishedRecipe(publishedRecipeId, variables);
             return recipeVersionId == null ? base : base.withRecipe(recipeVersionId, variables);
         }
     }
@@ -94,6 +106,18 @@ public class RecipeRunService {
             return new RunPrompt(prompt, null, null);
         }
         if (prompt != null) throw RecipeRefusedException.promptAndRecipe();
+        if (recipe.publishedId() != null) {
+            if (recipe.versionId() != null) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "send recipe.version_id or recipe.published_id, not both");
+            }
+            // A published recipe: anyone may run one that is public, with the version its author published.
+            PublishedRecipe pub = published.runnable(recipe.publishedId());
+            requireModality(pub.getModality(), modality);
+            Rendered done = render(pub.getTemplate(), pub.getVariables(), recipe.variables());
+            return new RunPrompt(done.prompt(), null, done.used(), slotInputs(pub.getInputs(), recipe.inputs()),
+                    pub.getId());
+        }
         if (recipe.versionId() == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "recipe.version_id is required");
         }
@@ -102,16 +126,27 @@ public class RecipeRunService {
         Recipe owner = recipes.findById(version.getRecipeId())
                 .filter(r -> r.getUserId().equals(userId))
                 .orElseThrow(RecipeRefusedException::notFound);
-        if (owner.getModality() != modality) {
-            throw RecipeRefusedException.modalityMismatch("this recipe makes "
-                    + (owner.getModality() == Modality.VIDEO ? "video" : "images") + "; send it to /v1/"
-                    + (owner.getModality() == Modality.VIDEO ? "videos" : "images") + "/generations");
-        }
+        requireModality(owner.getModality(), modality);
+        Rendered done = render(version.getTemplate(), version.getVariables(), recipe.variables());
+        return new RunPrompt(done.prompt(), version.getId(), done.used(), slotInputs(version.getInputs(), recipe.inputs()));
+    }
 
-        List<Variable> declared = version.getVariables().stream()
+    private static void requireModality(Modality makes, Modality route) {
+        if (makes != route) {
+            throw RecipeRefusedException.modalityMismatch("this recipe makes "
+                    + (makes == Modality.VIDEO ? "video" : "images") + "; send it to /v1/"
+                    + (makes == Modality.VIDEO ? "videos" : "images") + "/generations");
+        }
+    }
+
+    /** A rendered template, and the value every variable ended up with, given or default. */
+    private record Rendered(String prompt, Map<String, String> used) { }
+
+    private static Rendered render(String template, List<Map<String, String>> variables, Map<String, String> values) {
+        List<Variable> declared = variables.stream()
                 .map(v -> new Variable(v.get("name"), v.get("default")))
                 .toList();
-        Map<String, String> given = recipe.variables() == null ? Map.of() : recipe.variables();
+        Map<String, String> given = values == null ? Map.of() : values;
         for (Map.Entry<String, String> value : given.entrySet()) {
             if (declared.stream().noneMatch(v -> v.name().equals(value.getKey()))) {
                 throw RecipeRefusedException.variableUnknown(value.getKey());
@@ -121,14 +156,14 @@ public class RecipeRunService {
             }
         }
 
-        String rendered = RecipeTemplate.render(version.getTemplate(), declared, given);
+        String rendered = RecipeTemplate.render(template, declared, given);
         if (rendered.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "the recipe renders to an empty prompt");
         }
         // What each variable ended up as, in the order the version declares them.
         Map<String, String> used = new LinkedHashMap<>();
         for (Variable v : declared) used.put(v.name(), given.get(v.name()) != null ? given.get(v.name()) : v.defaultValue());
-        return new RunPrompt(rendered, version.getId(), used, slotInputs(version, recipe.inputs()));
+        return new Rendered(rendered, used);
     }
 
     /**
@@ -137,9 +172,8 @@ public class RecipeRunService {
      * for is refused. Whether each input may be used, and is the caller's,
      * is checked later, by the route that places it.
      */
-    private static List<SlotInput> slotInputs(RecipeVersion version, Map<String, InputRef> given) {
+    private static List<SlotInput> slotInputs(List<Map<String, String>> slots, Map<String, InputRef> given) {
         Map<String, InputRef> named = given == null ? Map.of() : given;
-        List<Map<String, String>> slots = version.getInputs();
         for (String name : named.keySet()) {
             if (slots.stream().noneMatch(slot -> slot.get("slot").equals(name))) {
                 throw RecipeRefusedException.inputUnknown(name);

@@ -213,6 +213,8 @@ export class MockApi {
       .on('GET', '/v1/saved-recipes', { json: [] })
       // A recipe page lists the recipe's batches; an account has none until a test says so.
       .on('GET', '/v1/recipe-batches', { json: [] })
+      // Settings lists provider keys. Bring your own key ships with no provider offered.
+      .on('GET', '/v1/provider-credentials', { json: [] })
       // Handed in once after a sign-in that follows a signed-out page load (lib/first-touch).
       .on('POST', '/v1/attribution/first-touch', { status: 204 });
   }

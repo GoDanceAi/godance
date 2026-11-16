@@ -4,18 +4,17 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.UUID;
 
+import org.springframework.core.codec.DecodingException;
 import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.core.io.buffer.DataBufferUtils;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.http.codec.multipart.FormFieldPart;
 import org.springframework.http.codec.multipart.Part;
 import org.springframework.http.server.reactive.ServerHttpResponse;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
-import org.springframework.util.MultiValueMap;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -36,19 +35,16 @@ import ai.godance.service.OpenAiVideos.Variant;
 import ai.godance.service.RecipeRefusedException;
 import ai.godance.service.RecipeRunService;
 import ai.godance.service.VideoInputs;
+import ai.godance.web.OpenAiVideoRequests.Fields;
 import ai.godance.web.dto.InputDtos.InputRef;
-import ai.godance.web.dto.InputDtos.JobOutputRef;
-import ai.godance.web.dto.OpenAiVideoDtos.CreateRequest;
 import ai.godance.web.dto.OpenAiVideoDtos.Deleted;
 import ai.godance.web.dto.OpenAiVideoDtos.InputReference;
 import ai.godance.web.dto.OpenAiVideoDtos.Video;
 import ai.godance.web.dto.OpenAiVideoDtos.VideoPage;
-import ai.godance.web.dto.RecipeDtos.RecipeRef;
 import ai.godance.web.dto.VideoDtos.VideoGenerationRequest;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
-import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -80,7 +76,15 @@ import tools.jackson.databind.ObjectMapper;
  * job's first frame under round 11's input rules: a file part is stored as
  * an upload to {@code POST /v1/files} is, and {@code file_id} (or the
  * Godance extension {@code job_output}) names an image already stored.
- * {@code image_url} is refused: Godance does not fetch input images.
+ * {@code image_url} is refused: Godance does not fetch input images. The
+ * Godance extensions {@code last_frame} and {@code reference_images} are
+ * input references, as on {@code POST /v1/videos/generations}.
+ *
+ * <p><b>Nothing is dropped without a word.</b> A field the route does not
+ * read, {@code n} included, answers 400 {@code invalid_parameter} naming
+ * it. In a form, the bracketed fields OpenAI's SDK writes a nested value as
+ * ({@code recipe[version_id]}, {@code recipe[variables][subject]}) are
+ * read back into that value ({@link OpenAiVideoRequests}).
  *
  * <p><b>Content is streamed, not redirected.</b> OpenAI's own client
  * follows redirects, but a caller who passes their own HTTP client, or
@@ -108,16 +112,19 @@ public class OpenAiVideoController {
 
     private static final int STREAM_CHUNK_BYTES = 64 * 1024;
 
-    /** The fields both forms share, parsed; the input reference travels beside them. */
-    private record Fields(String model, String prompt, Integer seconds, String size, String webhookUrl,
-                          String galleryRecipe, RecipeRef recipe) { }
+    /**
+     * Stands in for the first frame a form brings as a file, which is not
+     * stored yet, in the checks of which inputs a model takes: those look
+     * at which inputs a request has, never at what they point to.
+     */
+    private static final InputRef FIRST_FRAME_TO_STORE = InputRef.file(new UUID(0L, 0L));
 
     private final VideoController generations;
     private final OpenAiVideos videos;
     private final VideoInputs videoInputs;
     private final RecipeRunService recipes;
     private final InputUploadIntake intake;
-    private final ObjectMapper json;
+    private final OpenAiVideoRequests requests;
 
     public OpenAiVideoController(VideoController generations, OpenAiVideos videos, VideoInputs videoInputs,
                                  RecipeRunService recipes, InputUploadIntake intake, ObjectMapper json) {
@@ -126,17 +133,17 @@ public class OpenAiVideoController {
         this.videoInputs = videoInputs;
         this.recipes = recipes;
         this.intake = intake;
-        this.json = json;
+        this.requests = new OpenAiVideoRequests(json);
     }
 
     // ===== Create =====================================================
 
+    /** The body is read here rather than bound, so that a field the route does not read is refused, not skipped. */
     @PostMapping(value = "/videos", consumes = MediaType.APPLICATION_JSON_VALUE)
-    public Mono<Video> createJson(@RequestBody CreateRequest req, @AuthenticationPrincipal Jwt jwt) {
-        Fields fields = new Fields(req.model(), req.prompt(), seconds(req.seconds()), req.size(),
-                req.webhookUrl(), req.galleryRecipe(), req.recipe());
+    public Mono<Video> createJson(@RequestBody JsonNode body, @AuthenticationPrincipal Jwt jwt) {
+        Fields fields = requests.json(body);
         requireWellFormed(fields);
-        return create(jwt, fields, firstFrame(req.inputReference()));
+        return create(jwt, fields, firstFrame(fields.inputReference()));
     }
 
     @PostMapping(value = "/videos", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -145,10 +152,10 @@ public class OpenAiVideoController {
         String ip = InputUploadIntake.clientIp(exchange);
         return exchange.getMultipartData()
                 .flatMap(form -> {
-                    Fields fields = fieldsOf(form);
+                    Fields fields = requests.form(form);
                     requireWellFormed(fields);
-                    Part file = form.getFirst("input_reference");
-                    InputRef named = firstFrame(referenceOf(form));
+                    Part file = form.getFirst(OpenAiVideoRequests.INPUT_REFERENCE);
+                    InputRef named = firstFrame(fields.inputReference());
                     if (file == null) return create(jwt, fields, named);
                     if (named != null) {
                         throw OpenAiVideoRefusedException.invalid("input_reference",
@@ -163,7 +170,9 @@ public class OpenAiVideoController {
                                         fields.recipe()).hasInputs()) {
                                     throw RecipeRefusedException.inputsOutsideRecipe();
                                 }
-                                videoInputs.requireTakesFirstFrame(fields.model());
+                                // The model takes a first frame, and whatever else the form names beside it.
+                                videoInputs.requireTakes(fields.model(), new VideoInputs.Refs(
+                                        FIRST_FRAME_TO_STORE, fields.lastFrame(), fields.referenceImages()));
                             })
                             .subscribeOn(Schedulers.boundedElastic())
                             // The image is taken in exactly as an upload to POST /v1/files is.
@@ -171,7 +180,18 @@ public class OpenAiVideoController {
                             .then(Mono.defer(() -> intake.store(userId, ip, file)))
                             .flatMap(stored -> create(jwt, fields, InputRef.file(stored.getId())));
                 })
-                .onErrorMap(InputUploads::isTooLarge, e -> intake.tooLarge(userId, ip));
+                .onErrorMap(InputUploads::isTooLarge, e -> intake.tooLarge(userId, ip))
+                .onErrorMap(DecodingException.class, OpenAiVideoController::unreadableForm);
+    }
+
+    /**
+     * A form that cannot be read at all. The likeliest: more fields than a
+     * form may have ({@code spring.webflux.multipart.max-parts}), which a
+     * recipe of many variables reaches as bracketed fields, one per value.
+     */
+    private static OpenAiVideoRefusedException unreadableForm(DecodingException e) {
+        return OpenAiVideoRefusedException.invalid(null, "The form could not be read (" + e.getMessage() + "). "
+                + "Send recipe or reference_images as JSON text, one field each, or send the request as JSON.");
     }
 
     /**
@@ -182,7 +202,7 @@ public class OpenAiVideoController {
         UUID userId = JwtService.userIdFromSubject(jwt.getSubject());
         VideoGenerationRequest request = new VideoGenerationRequest(fields.model(), fields.prompt(), fields.size(),
                 fields.seconds(), null, fields.webhookUrl(), fields.galleryRecipe(), fields.recipe(),
-                firstFrame, null, null);
+                firstFrame, fields.lastFrame(), fields.referenceImages());
         return generations.generate(request, jwt)
                 .flatMap(accepted -> Mono.fromCallable(() -> videos.accepted(userId, accepted.getBody().jobId()))
                         .subscribeOn(Schedulers.boundedElastic()));
@@ -197,28 +217,6 @@ public class OpenAiVideoController {
         if (fields.seconds() != null && fields.seconds() < 1) {
             throw OpenAiVideoRefusedException.invalid("seconds", "seconds must be at least 1");
         }
-    }
-
-    /** {@code seconds} in JSON: OpenAI's string ({@code "8"}) or a whole number. Null when left out. */
-    private static Integer seconds(JsonNode node) {
-        if (node == null || node.isNull()) return null;
-        if (node.isString()) return seconds(node.asString());
-        if (node.isIntegralNumber() && node.canConvertToInt()) return node.asInt();
-        throw invalidSeconds();
-    }
-
-    private static Integer seconds(String text) {
-        if (text == null || text.isBlank()) return null;
-        try {
-            return Integer.valueOf(text.trim());
-        } catch (NumberFormatException e) {
-            throw invalidSeconds();
-        }
-    }
-
-    private static OpenAiVideoRefusedException invalidSeconds() {
-        return OpenAiVideoRefusedException.invalid("seconds",
-                "seconds must be a whole number of seconds, as a string (\"8\") or a number (8)");
     }
 
     /**
@@ -239,61 +237,6 @@ public class OpenAiVideoController {
             return UUID.fromString(raw.trim());
         } catch (IllegalArgumentException e) {
             throw InputRefusedException.fileNotFound();
-        }
-    }
-
-    // ===== The multipart form =========================================
-
-    private Fields fieldsOf(MultiValueMap<String, Part> form) {
-        return new Fields(text(form, "model"), text(form, "prompt"), seconds(text(form, "seconds")),
-                text(form, "size"), text(form, "webhook_url"), text(form, "gallery_recipe"), recipe(form));
-    }
-
-    /**
-     * {@code input_reference} as an object arrives in a form the way
-     * OpenAI's SDK writes it: {@code input_reference[file_id]},
-     * {@code input_reference[image_url]}, and for the Godance extension
-     * {@code input_reference[job_output][job_id]} and {@code […][index]}.
-     * Null when the form has none of them.
-     */
-    private static InputReference referenceOf(MultiValueMap<String, Part> form) {
-        String fileId = text(form, "input_reference[file_id]");
-        String imageUrl = text(form, "input_reference[image_url]");
-        String jobId = text(form, "input_reference[job_output][job_id]");
-        String index = text(form, "input_reference[job_output][index]");
-        if (fileId == null && imageUrl == null && jobId == null && index == null) return null;
-        JobOutputRef jobOutput = null;
-        if (jobId != null || index != null) {
-            try {
-                jobOutput = new JobOutputRef(jobId == null ? null : UUID.fromString(jobId.trim()),
-                        index == null ? null : Integer.valueOf(index.trim()));
-            } catch (IllegalArgumentException e) {
-                throw InputRefusedException.jobOutputNotFound();
-            }
-        }
-        return new InputReference(fileId, imageUrl, jobOutput);
-    }
-
-    /** A text field's value, or null when the form has no such field or it is empty. */
-    private static String text(MultiValueMap<String, Part> form, String name) {
-        Part part = form.getFirst(name);
-        if (part == null) return null;
-        if (!(part instanceof FormFieldPart field)) {
-            throw OpenAiVideoRefusedException.invalid(name, name + " must be a text field");
-        }
-        String value = field.value();
-        return value == null || value.isBlank() ? null : value;
-    }
-
-    /** {@code recipe} in a form is the JSON object a JSON request would carry, as text. */
-    private RecipeRef recipe(MultiValueMap<String, Part> form) {
-        String value = text(form, "recipe");
-        if (value == null) return null;
-        try {
-            return json.readValue(value, RecipeRef.class);
-        } catch (JacksonException e) {
-            throw OpenAiVideoRefusedException.invalid("recipe",
-                    "recipe must be a JSON object: {\"version_id\": …, \"variables\": {…}}");
         }
     }
 
