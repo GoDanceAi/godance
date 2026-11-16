@@ -30,10 +30,13 @@ export interface StudioValues {
 
 /**
  * `recipe` on a generation request: a version of one of the caller's
- * recipes, values for its variables, and an input for each of its slots.
+ * recipes (`version_id`), or a published recipe anyone may run
+ * (`published_id`, round 14); values for its variables, and an input for each
+ * of its slots. One of the two ids, never both.
  */
 export interface RecipeRef {
-  version_id: string;
+  version_id?: string;
+  published_id?: string;
   variables: Record<string, string>;
   inputs?: Record<string, InputRef>;
 }
@@ -153,6 +156,30 @@ export function recipeRefOf(
     && template.variables.length === names.length
     && template.variables.every((v) => names.includes(v.name));
   return same ? { version_id: version.id, variables: { ...template.values } } : null;
+}
+
+/**
+ * What to send as `recipe` for a published recipe in the form: its public id,
+ * with the form's values, for as long as the form's text is still the
+ * template its author published. Null once the template was edited or turned
+ * off: the run is then a plain prompt. The model and settings may change.
+ */
+export function publishedRefOf(
+  published: { public_id: string; template: string; variables: { name: string }[] } | null,
+  template: FormTemplate | null,
+  prompt: string,
+): RecipeRef | null {
+  if (!published) return null;
+  if (!template) {
+    return published.variables.length === 0 && prompt === published.template
+      ? { published_id: published.public_id, variables: {} }
+      : null;
+  }
+  const names = published.variables.map((v) => v.name);
+  const same = template.text === published.template
+    && template.variables.length === names.length
+    && template.variables.every((v) => names.includes(v.name));
+  return same ? { published_id: published.public_id, variables: { ...template.values } } : null;
 }
 
 function positiveInt(value: unknown): value is number {

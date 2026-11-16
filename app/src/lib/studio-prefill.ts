@@ -1,4 +1,5 @@
 import type { JobView, MediaModality, ModelEntry, UserRecipe, UserRecipeVersion } from './api';
+import { isPublicId, loadPublishedRecipe, publishedSlots, toMediaModality, type PublicRecipe } from './community';
 import { loadRecipe } from './gallery';
 import { slotKey, type Slot } from './inputs';
 import { fetchJob, isJobId, mediaModality, outputItems } from './jobs';
@@ -19,9 +20,12 @@ import { fetchRecipe, fetchVersions, isRecipeId } from './user-recipes';
  *                                            recipe back, with its values
  *   2. ?recipe=<id>                          one of the caller's own recipes,
  *                                            at its latest version
- *   3. ?example=<slug>                       a recipe from the gallery, the
+ *   3. ?published=<public id>                a community recipe someone
+ *                                            published, the "Run this" link
+ *                                            of its public page (round 14)
+ *   4. ?example=<slug>                       a recipe from the gallery, the
  *                                            "Run this" link (lib/gallery)
- *   4. ?model=&prompt=&size=&n=&seconds=     loose values
+ *   5. ?model=&prompt=&size=&n=&seconds=     loose values
  *
  * Loading never generates. A link can fill the form; only the Generate
  * button spends credit.
@@ -39,6 +43,7 @@ export interface PrefillValues {
 export type PrefillRequest =
   | { kind: 'job'; jobId: string }
   | { kind: 'recipe'; recipeId: string }
+  | { kind: 'published'; publicId: string }
   | { kind: 'example'; slug: string }
   // "Animate this": an image output as a video's first frame, on the model the link names, if any.
   | { kind: 'animate'; jobId: string; index: number; model?: string }
@@ -73,6 +78,10 @@ export function readPrefill(params: URLSearchParams): PrefillRequest {
   const recipe = params.get('recipe');
   if (recipe && isRecipeId(recipe)) return { kind: 'recipe', recipeId: recipe };
 
+  // Checked before any request is made, as a slug is: anything but a public id is ignored.
+  const published = params.get('published');
+  if (published && isPublicId(published)) return { kind: 'published', publicId: published };
+
   // Checked before any request is made: anything but a valid slug is ignored.
   const example = params.get('example');
   if (example !== null && isRecipeSlug(example)) return { kind: 'example', slug: example };
@@ -96,6 +105,7 @@ export interface Prefill {
   job?: JobView;                     // ?job=: shown as the result, and polled while it runs
   recipe?: GalleryRecipe;            // ?example=: the recipe the form was filled from
   own?: OwnRecipe;                   // ?recipe=: the caller's recipe, and the version the form holds
+  published?: PublicRecipe;          // ?published=: the community recipe the form was filled from
   template?: FormTemplate;           // the template the form holds, when what was loaded has variables
   otherModality?: MediaModality;     // what was asked for is the other kind; the Studio moves to that page
   note?: string;                     // what the link asked for that could not be loaded
@@ -113,6 +123,7 @@ const JOB_NOT_LOADED = "That generation couldn't be loaded, so the form starts e
 const RECIPE_NOT_LOADED = "That recipe couldn't be loaded from the gallery, so the form starts empty.";
 const OWN_RECIPE_NOT_LOADED = "That recipe of yours couldn't be loaded, so the form starts empty.";
 const FRAME_NOT_LOADED = "That image couldn't be loaded as a first frame, so the form starts empty.";
+const PUBLISHED_NOT_LOADED = "That community recipe couldn't be loaded, so the form starts empty.";
 
 /** The empty slots of one of the user's recipes: each with its name and its hint, and no file. */
 function slotsOfVersion(version: UserRecipeVersion): Slot[] {
@@ -153,6 +164,28 @@ export function valuesFromVersion(version: UserRecipeVersion): PrefillValues {
   const values: PrefillValues = {
     model: version.model,
     prompt: ((template ? renderForm(template) : version.template) ?? '').slice(0, PROMPT_MAX_LENGTH),
+  };
+  if (typeof p.size === 'string' && p.size) values.size = p.size;
+  if (Number.isInteger(p.n) && (p.n as number) > 0) values.n = p.n as number;
+  if (Number.isInteger(p.seconds) && (p.seconds as number) > 0) values.seconds = p.seconds as number;
+  return values;
+}
+
+/** A published recipe's template, each variable at its default. Null when it has no variables. */
+export function templateFromPublished(recipe: PublicRecipe): FormTemplate | null {
+  return recipe.variables.length > 0 ? formTemplate(recipe.template, recipe.variables) : null;
+}
+
+/**
+ * The form values from a published recipe: the model and params it was
+ * published with, and its template filled with the defaults as the prompt.
+ */
+export function valuesFromPublished(recipe: PublicRecipe): PrefillValues {
+  const template = templateFromPublished(recipe);
+  const p = recipe.params ?? {};
+  const values: PrefillValues = {
+    model: recipe.model,
+    prompt: ((template ? renderForm(template) : recipe.template) ?? '').slice(0, PROMPT_MAX_LENGTH),
   };
   if (typeof p.size === 'string' && p.size) values.size = p.size;
   if (Number.isInteger(p.n) && (p.n as number) > 0) values.n = p.n as number;
@@ -215,6 +248,25 @@ export async function resolvePrefill(request: PrefillRequest, modality: MediaMod
         };
       } catch {
         return { values: {}, note: OWN_RECIPE_NOT_LOADED };
+      }
+    }
+    case 'published': {
+      try {
+        // A recipe that is not public, or a community that is closed, answers 404.
+        const recipe = await loadPublishedRecipe(request.publicId);
+        const kind = toMediaModality(recipe.modality);
+        if (kind !== modality) return { values: {}, otherModality: kind };
+        return {
+          values: valuesFromPublished(recipe),
+          published: recipe,
+          template: templateFromPublished(recipe) ?? undefined,
+          // Its slots, empty: the author's images are never published.
+          slots: publishedSlots(recipe).map((slot) => ({
+            key: slotKey(), role: slot.role, name: slot.slot, hint: slot.hint, input: null,
+          })),
+        };
+      } catch {
+        return { values: {}, note: PUBLISHED_NOT_LOADED };
       }
     }
     case 'example': {
