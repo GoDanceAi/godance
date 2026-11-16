@@ -1,7 +1,7 @@
 # Round 15 / 01 — App navigation evidence
 
 Base B0: `8219e0497cb12a7be48b80915601811e361726bf`.
-Reviewed implementation: `ad9457b` (plus this evidence-only commit).
+Reviewed implementation steps: `c7402e0` and `ad9457b`, plus the coordinated canonical-community redirect guard and evidence commits.
 Planning pack: `3de1b9d8f1e6021825ca6435cedb06a8ac43c6e1`, read from the original checkout; planning files are not duplicated on this branch.
 
 ## Result and ownership
@@ -24,6 +24,7 @@ Same toolchain and locked dependencies, isolated app/gallery/API origins and syn
 - Focused navigation/library checks: **100 passed**, desktop/mobile. An earlier focused run caught unequal Dashboard link height after grouping; the implementation was corrected and the original no-wrap assertion retained.
 - Final `E2E_PORT=4181 R15_CAPTURE_EVIDENCE=1 npm run test:e2e -- --workers=2`: **1,358 passed**, no failed or skipped tests, 5.7 minutes. The 18 added cases cover core destinations, optional loading/denied/error/shown states, late same/different-account results, keyboard menu focus, 320px layout, verified/unavailable/empty/unreadable community output, bookmarks/reload/errors/removal and signed-out batch return.
 - Existing full-suite input age/terms, pending-consent, auth/social return, first-touch, compare selection, saved-output, Studio, BYOK/profile/Publish and batch flows pass unchanged in behavior.
+- After the coordinated public-community header integration: **18 focused navigation/library cases passed**, including canonical final-URL acceptance and wrong-path rejection. The complete suite above predates only that narrow redirect guard; final latest-head remote CI remains mandatory. Stream 04 separately exercised this exact helper through real cross-origin Chromium fetches against its emitted headers: direct and canonical 308 indexes visible; discovery-off, empty and API-failed output hidden.
 - `git diff --check`: passed. Required latest-head remote CI is reported separately in the PR; local browser success is not a backend or remote-CI claim.
 
 Browser tests verify Enter/Space opening and closing Menu, focus retention and keyboard progression, current-page indication, and no side scrolling. Core and optional link states cause no generation/payment/configuration write. Public discovery uses a no-credentials read and fails closed on content/site/CORS failure.
@@ -41,6 +42,6 @@ All accounts, balances, prompts and bookmarks below are synthetic. No real provi
 
 ## Limits and operator decisions
 
-The public site's current headers do not grant cross-origin reads of `/community`. Consequently the empty-state public-discovery CTA remains hidden on such deployments, even when the backend community is open. A readable same-origin deployment or an independently reviewed operator CORS decision is needed to show it. This branch deliberately does not alter site headers, defaults or production settings. The existing Following route and account profile/publishing controls retain their own backend gates. An empty/error/unreadable public site is never advertised as available.
+B0 site headers do not grant cross-origin reads of `/community`. The coordinated stream 04 change adds a public, no-credentials CORS header only when discovery is explicitly enabled and approved public community content actually emits its index. After operator integration/activation of that build, this CTA can become visible; an unchanged/default deployment remains hidden. This branch accepts only the same site's canonical `/community` or `/community/` final URL, successful readable HTML and actual published-recipe links. It changes no headers, flags or production settings itself. Backend community eligibility and public-site output remain independent gates; an empty/error/unreadable site is never advertised as available.
 
 Suggested eventual integration order: 05/04, then 01, then 02/03. All five PRs target main from the common B0; merging, deployment and activation remain operator actions.

@@ -99,6 +99,32 @@ test('Following offers public discovery only after readable published content is
     body: '<main><h1>Community</h1><a href="/community/example-recipe">Example recipe</a></main>' }));
   await page.goto('/following');
   await expect(page.getByRole('link', { name: 'Explore community recipes' })).toHaveAttribute('href', `${GALLERY_ORIGIN}/community`);
+  // Check the final-URL guard directly; 04 also checks real cross-origin
+  // canonical redirects against emitted headers using this exact helper.
+  await page.addInitScript(({ origin }) => {
+    const original = window.fetch;
+    window.fetch = async (...args) => {
+      const request = args[0];
+      const url = typeof request === 'string' ? request : request instanceof URL ? request.href : request.url;
+      const final = sessionStorage.getItem('synthetic-community-final-url');
+      if (url === `${origin}/community` && final) {
+        const response = new Response('<main><a href="/community/example-recipe">Example recipe</a></main>', {
+          status: 200, headers: { 'content-type': 'text/html' },
+        });
+        Object.defineProperty(response, 'url', { value: final });
+        return response;
+      }
+      return original(...args);
+    };
+  }, { origin: GALLERY_ORIGIN });
+  await page.evaluate((final) => sessionStorage.setItem('synthetic-community-final-url', final), `${GALLERY_ORIGIN}/community/`);
+  await page.reload();
+  await expect(page.getByRole('link', { name: 'Explore community recipes' })).toBeVisible();
+  await page.evaluate((final) => sessionStorage.setItem('synthetic-community-final-url', final), `${GALLERY_ORIGIN}/other-page`);
+  await page.reload();
+  await expect(page.getByText("You don't follow anyone yet.")).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Explore community recipes' })).toHaveCount(0);
+  await page.evaluate(() => sessionStorage.removeItem('synthetic-community-final-url'));
   await page.route(`${GALLERY_ORIGIN}/community`, (route) => route.fulfill({ status: 404 }));
   await page.reload();
   await expect(page.getByText("You don't follow anyone yet.")).toBeVisible();
