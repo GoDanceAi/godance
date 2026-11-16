@@ -28,9 +28,9 @@ info:
     (`application/problem+json`) with `title`, `status` and `detail`, a 401
     included. Many carry `code`, a stable string to branch on. On the routes
     that follow OpenAI's own API (`POST /v1/images/generations`,
-    `POST /v1/images/edits`, and `/v1/videos`, not `/v1/videos/generations`)
-    the same document also carries OpenAI's `error` object, which is where
-    OpenAI's SDKs read a message from.
+    `POST /v1/images/edits`, `POST /v1/images/variations`, and `/v1/videos`,
+    not `/v1/videos/generations`) the same document also carries OpenAI's
+    `error` object, which is where OpenAI's SDKs read a message from.
 
     **Money.** Every amount is integer cents of US dollars, never a decimal.
     A generation reserves its price when it is accepted and returns the
@@ -309,6 +309,19 @@ paths:
         "413": { $ref: "#/components/responses/OpenAiProblem" }
         "415": { $ref: "#/components/responses/OpenAiProblem" }
         "502": { $ref: "#/components/responses/OpenAiProblem", description: "The job a request waited for failed: `code` `generation_failed`, with `job_id`. The reservation is returned." }
+  /v1/images/variations:
+    post:
+      operationId: createImageVariation
+      tags: [Images]
+      summary: "Not supported: variations of an image."
+      description: |
+        Part of OpenAI's Images API that Godance does not offer. Always 404
+        `image_variations_not_supported`, to an API key and a session alike. The form is not read
+        and nothing is charged. To work from an image, send it to `POST /v1/images/edits` with a
+        prompt.
+      security: [{ apiKey: [] }, { session: [] }]
+      responses:
+        "404": { $ref: "#/components/responses/OpenAiProblem" }
   /v1/videos/generations:
     post:
       operationId: createVideoGeneration
@@ -2032,10 +2045,10 @@ components:
     OpenAiProblem:
       description: |
         A problem document on the routes that follow OpenAI's own API: its
-        image routes (`/v1/images/generations`, `/v1/images/edits`) and its
-        video routes (`/v1/videos`). Every member of the problem is there,
-        and OpenAI's `error` object beside them, which OpenAI's SDKs build an
-        exception from.
+        image routes (`/v1/images/generations`, `/v1/images/edits`,
+        `/v1/images/variations`) and its video routes (`/v1/videos`). Every
+        member of the problem is there, and OpenAI's `error` object beside
+        them, which OpenAI's SDKs build an exception from.
       allOf:
         - { $ref: "#/components/schemas/Problem" }
         - type: object

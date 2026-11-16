@@ -22,9 +22,11 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.MultipartBodyBuilder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.reactive.server.WebTestClient;
+import org.springframework.web.reactive.function.BodyInserters;
 import org.testcontainers.containers.MinIOContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -526,6 +528,64 @@ class ImageGenerationIntegrationTest {
         assertThat(none.get("error").get("type").asString()).isEqualTo("authentication_error");
 
         assertThat(openAiMock.getAllServeEvents()).isEmpty();
+    }
+
+    // ===== Variations: OpenAI has them, Godance does not ==============
+
+    @Test
+    void variations_givenAnApiKeyOrASession_expect404ImageVariationsNotSupportedAndNothingCharged() {
+        Signed u = signupWithBalance(100_00L);
+        String key = apiKey(u);
+        long balance = ledger.authoritativeBalance(u.id());
+
+        for (String bearer : List.of(key, u.bearer())) {
+            JsonNode refused = problem(postVariation(bearer), 404);
+            assertThat(refused.get("code").asString()).isEqualTo("image_variations_not_supported");
+            assertThat(refused.get("detail").asString()).isEqualTo("Creating a variation of an image is not "
+                    + "supported. Godance serves generations and edits of OpenAI's Images API: to work from an "
+                    + "image, send it to POST /v1/images/edits with a prompt.");
+            assertThat(refused.get("instance").asString()).isEqualTo("/v1/images/variations");
+            JsonNode error = refused.get("error");
+            assertThat(error.get("message").asString()).isEqualTo(refused.get("detail").asString());
+            assertThat(error.get("type").asString()).isEqualTo("not_found_error");
+            assertThat(error.get("code").asString()).isEqualTo("image_variations_not_supported");
+            assertThat(error.get("param").isNull()).isTrue();
+        }
+
+        // Before the route, the filters' 401s carry OpenAI's error object there too.
+        JsonNode none = problem(postVariation(null), 401);
+        assertThat(none.get("error").get("type").asString()).isEqualTo("authentication_error");
+        JsonNode unknownKey = problem(postVariation("Bearer gd_live_this_key_does_not_exist_0000000000"), 401);
+        assertThat(unknownKey.get("detail").asString()).isEqualTo("invalid API key");
+        assertThat(unknownKey.get("error").get("message").asString()).isEqualTo("invalid API key");
+
+        assertThat(jobs.findByUserIdOrderByCreatedAtDesc(u.id())).isEmpty();
+        assertThat(ledger.authoritativeBalance(u.id())).isEqualTo(balance);
+        assertThat(openAiMock.getAllServeEvents()).isEmpty();
+    }
+
+    /** What OpenAI's SDK sends for {@code client.images.create_variation(image=…, n=1, size=…)}: a form with the image. */
+    private WebTestClient.ResponseSpec postVariation(String bearer) {
+        MultipartBodyBuilder form = new MultipartBodyBuilder();
+        form.part("image", InputFixtures.named(TINY_PNG, "cat.png")).contentType(MediaType.IMAGE_PNG);
+        form.part("n", "1");
+        form.part("size", "1024x1024");
+        WebTestClient.RequestBodySpec request = http.post().uri("/v1/images/variations");
+        if (bearer != null) request = request.header("Authorization", bearer);
+        return request.contentType(MediaType.MULTIPART_FORM_DATA)
+                .body(BodyInserters.fromMultipartData(form.build()))
+                .exchange();
+    }
+
+    private String apiKey(Signed u) {
+        CreateApiKeyResponse key = http.post().uri("/v1/keys")
+                .header("Authorization", u.bearer())
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("name", "variations-key"))
+                .exchange()
+                .expectStatus().isCreated()
+                .expectBody(CreateApiKeyResponse.class).returnResult().getResponseBody();
+        return "Bearer " + key.plaintext();
     }
 
     /** The problem a refused request answered with, once its status and type are checked. */

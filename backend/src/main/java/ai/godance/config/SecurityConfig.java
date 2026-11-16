@@ -227,6 +227,11 @@ public class SecurityConfig {
                         .pathMatchers(HttpMethod.POST, "/v1/chat/completions",
                                 "/v1/images/generations", "/v1/images/edits", "/v1/videos/generations")
                                 .hasAnyAuthority(sessionOr(ApiKeyAuthFilter.API_KEY_AUTHORITY))
+                        // OpenAI's image variations: the route exists only to say that Godance
+                        // does not offer them, to an API key as to a session, as the video routes
+                        // below do for theirs.
+                        .pathMatchers(HttpMethod.POST, "/v1/images/variations")
+                                .hasAnyAuthority(sessionOr(ApiKeyAuthFilter.API_KEY_AUTHORITY))
                         .pathMatchers(HttpMethod.GET, "/v1/jobs", "/v1/jobs/*", "/v1/usage")
                                 .hasAnyAuthority(sessionOr(ApiKeyAuthFilter.API_KEY_AUTHORITY))
                         // OpenAI's video routes (round 12): the same video jobs in OpenAI's shape,

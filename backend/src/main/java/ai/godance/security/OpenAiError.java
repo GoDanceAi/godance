@@ -9,9 +9,11 @@ import org.springframework.web.server.ServerWebExchange;
 
 /**
  * OpenAI's {@code error} object, added next to the problem+json members on
- * the routes that follow OpenAI's own API: its two image routes
- * ({@code POST /v1/images/generations} and {@code POST /v1/images/edits})
- * and its Videos API ({@code /v1/videos}, not {@code /v1/videos/generations}).
+ * the routes that follow OpenAI's own API: its image routes
+ * ({@code POST /v1/images/generations} and {@code POST /v1/images/edits},
+ * and {@code POST /v1/images/variations}, which answers only that Godance
+ * does not offer it) and its Videos API ({@code /v1/videos}, not
+ * {@code /v1/videos/generations}).
  *
  * <p>OpenAI's SDKs build an exception's text from {@code error.message}
  * alone, and its {@code code}, {@code param} and {@code type} from the same
@@ -26,8 +28,9 @@ public final class OpenAiError {
 
     private static final String VIDEOS = "/v1/videos";
     private static final String GENERATIONS = "/v1/videos/generations";
-    /** OpenAI's image routes that Godance serves, each path exactly: nothing else under /v1/images. */
-    private static final Set<String> IMAGES = Set.of("/v1/images/generations", "/v1/images/edits");
+    /** OpenAI's image routes that Godance answers, each path exactly: nothing else under /v1/images. */
+    private static final Set<String> IMAGES = Set.of(
+            "/v1/images/generations", "/v1/images/edits", "/v1/images/variations");
 
     private OpenAiError() { }
 
