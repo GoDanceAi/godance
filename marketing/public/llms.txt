@@ -117,7 +117,11 @@ returned). GET /v1/videos/{id}/content streams the file (variant=video; thumbnai
 404 because no model stores one). GET /v1/videos lists {data, first_id, last_id, has_more}
 (limit, after, order). DELETE /v1/videos/{id} deletes the files now and refunds nothing.
 input_reference (an image to start from) is a file part or {"file_id": "..."}; it is part
-of image inputs, which answer 403 inputs_disabled until they are switched on. Remix,
+of image inputs, which answer 403 inputs_disabled until they are switched on. The Godance
+extensions last_frame, reference_images, recipe and webhook_url go in extra_body; the
+SDK's form carries a nested value as bracketed fields (recipe[version_id]), which Godance
+reads back. With a recipe, pass prompt="". A field Godance does not read (n, a typo) is
+never dropped: it answers 400 invalid_parameter, and e.param names it. Remix,
 edits, extensions and characters are not supported and answer 404 with a code of their
 own. Errors on these routes are problem JSON that also carries OpenAI's error object, so
 the SDK's exceptions carry the message.
