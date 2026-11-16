@@ -1,0 +1,179 @@
+# What each setting does, for the configuration reference in
+# docs/self-hosting.md. ConfigurationReferenceTest fails while a setting has
+# no line here, or a line here names no setting; then
+# backend/scripts/config-reference.sh rewrites the guide from these lines and
+# the code.
+#
+# Format: one setting per line, `<setting>: What it does.` Everything after
+# the first ": " is the text, as written (Markdown). A line that starts with
+# spaces continues the one above. `*` in a name stands for one segment
+# (godance.providers.*.timeout covers every provider); the most specific line
+# wins. Say what a self-hoster needs to know: what it changes and when to
+# change it. Variable names and defaults come from the code, not from here.
+
+GODANCE_GIT_SHA: The commit `/healthz` reports as `git_sha`. The image takes it from the `GIT_SHA` build argument.
+
+godance.region: Where this deployment runs, any case: `digitalocean`, `alicloud` or `local`; anything else stops startup. `alicloud` dispatches only to providers on the fixed Alicloud allowlist and answers 503 for the rest. `digitalocean` also runs the daily pricing check. See "The regional allowlist".
+
+godance.admin.emails: Comma-separated addresses promoted to ADMIN at startup, only while no active, verified account is an admin. Each must already be signed up and verified. After that, roles are changed in the admin console.
+
+godance.attribution.first-touch-window-hours: How long after sign-up the app may record where an account came from (campaign tags, landing page); 0 never records it.
+godance.attribution.first-touch-limit-per-account: Recording calls one account may make per hour.
+
+godance.batches.max-rows: The most rows one recipe batch may have; more answers 400 `batch_too_large`.
+godance.batches.default-concurrency: Rows a batch runs at once when the request names no number.
+godance.batches.max-concurrency: The most rows a batch may run at once.
+godance.batches.max-unfinished-per-account: Batches one account may have queued, running or paused.
+godance.batches.results-zip-max: The largest `results.zip`; past it the route answers 413 and points to the CSV.
+godance.batches.tick-cron: How often the batch runner starts rows (Quartz cron, with seconds). A cron that never fires, such as `0 0 0 1 1 ? 2099`, stops new rows; running jobs still finish.
+
+godance.billing.topup-min-cents: The smallest top-up, in cents; at least 50 (Stripe's card minimum).
+godance.billing.topup-max-cents: The largest single top-up, in cents.
+godance.billing.currency: The currency of top-ups and the ledger, three letters as Stripe writes it (`usd`).
+godance.billing.text-markup-percent: Platform fee on text models, in percent of the provider's cost. A model's own markup, set in the admin console's catalog, wins; `GET /v1/models` shows each model's fee as `markup_percent`.
+godance.billing.image-markup-percent: Platform fee on image models, in percent, for models with no markup of their own in the catalog.
+godance.billing.video-markup-percent: Platform fee on video models, in percent, for models with no markup of their own in the catalog.
+
+godance.binancepay.enabled: The Binance Pay rail, which is scaffolded and not live. Leave it false.
+
+godance.gateway.fallback-chains.*: For a model, the models tried in order when it answers 5xx or 429 or times out. Each one passes the regional allowlist again. Set in `application.yml`.
+
+godance.images.new-key-response: What a new API key gets when its creation names nothing: `async` (a job to poll) or `sync` (image requests wait and answer like OpenAI's API). Existing keys never change.
+godance.images.sync-wait: The longest a `sync` image request waits before answering 202 with the job; at most 300s, the proxy's limit.
+godance.images.sync-poll-interval: How often a waiting `sync` request reads its job.
+godance.images.max-inline-bytes: The most image data one response carries as `b64_json`; larger results answer with links.
+
+godance.inputs.enabled: Input files: images an account uploads to use in a generation. Off: no upload, no terms acceptance and no request that names an input is accepted (`inputs_disabled`).
+godance.inputs.allow-people: Whether an upload may show a person. False: every upload is checked, and one that shows a person or cannot be checked is refused.
+godance.inputs.check-model: The vision chat model that runs the person check. Empty: no check, so with `allow-people` false every upload answers 503 `input_check_unavailable`.
+godance.inputs.terms-version: The version of the input terms; raise it when the text changes, and every account accepts again.
+godance.inputs.unused-ttl-hours: How long an uploaded file that nothing uses is kept.
+godance.inputs.max-bytes: The largest input file; keep `spring.webflux.multipart.max-disk-usage-per-part` just above it.
+godance.inputs.max-megapixels: The most pixels an input image may have, in millions.
+godance.inputs.max-files-per-account: Files one account may have stored at once, used or not.
+godance.inputs.signed-url-ttl: How long a link lasts when an input's owner reads it.
+godance.inputs.provider-url-ttl: How long a link lasts when it is handed to a provider that fetches inputs by URL.
+godance.inputs.upload-limit-per-account: Uploads one account may try per hour.
+godance.inputs.upload-limit-per-ip: Uploads one client address may try per hour.
+
+godance.jwt.secret: Signs session tokens (HS256); at least 32 bytes. Changing it signs everyone out.
+godance.jwt.expiry-minutes: How long a session lasts, in minutes.
+godance.jwt.issuer: The `iss` claim of session tokens; a URI. The self-host compose file sets it to `GODANCE_URL`.
+
+godance.key-vault.key: Encrypts the secrets kept in the database (authenticator secrets for two-factor sign-in) with AES-256: 32 random bytes in Base64. Never change or lose it: without it nobody with two-factor sign-in on can sign in. Back it up apart from the database.
+
+godance.mail.api-key: Resend API key. Empty or the dummy default: nothing is sent, and each message's first line (verification and password-reset links included) is written to the API's log.
+godance.mail.from: The sender of every email, on a domain verified in Resend.
+godance.mail.api-base: Resend's API address.
+godance.mail.app-base-url: The app's origin, for links in emails. The self-host compose file sets it to `GODANCE_URL`.
+
+godance.mcp.enabled: The MCP server at `/mcp`, which needs an API key. False takes the route away (404).
+godance.mcp.rate-limit.requests: MCP requests one API key may make per window; off with `godance.rate-limit.enabled`.
+godance.mcp.rate-limit.window: The window MCP requests are counted over.
+godance.mcp.gallery-url: Where the MCP tools `search_recipes` and `get_recipe` read the gallery (`<url>/index.json`, `<url>/<slug>.json`).
+godance.mcp.gallery-cache-ttl: How long the gallery index is kept before it is read again.
+godance.mcp.gallery-timeout: How long one read of the gallery may take.
+
+godance.nowpayments.api-key: NOWPayments API key, for USDT top-ups. Empty: USDT top-ups fail.
+godance.nowpayments.ipn-secret: Verifies NOWPayments' payment notifications (IPN). An empty secret refuses every notification. The handler credits whatever a validly signed notification says: use the secret NOWPayments issued, never a made-up value.
+godance.nowpayments.api-base: NOWPayments' API address (`https://api-sandbox.nowpayments.io` for its sandbox).
+godance.nowpayments.success-url: Where NOWPayments sends the user after paying. The self-host compose file derives it from `GODANCE_URL`.
+godance.nowpayments.cancel-url: Where NOWPayments sends the user who cancels. The self-host compose file derives it from `GODANCE_URL`.
+
+godance.oauth.post-login-redirect-uri: Where the app receives the session after a social sign-in. The self-host compose file sets `<GODANCE_URL>/oauth/callback`.
+godance.oauth.google.client-id: Sign-in with Google. Offered only when the id and secret are real (not blank, not a placeholder such as `oauth-not-configured` or one starting `dev-`). Its redirect URI is `<GODANCE_URL>/login/oauth2/code/google`.
+godance.oauth.google.client-secret: Google's client secret; see `client-id`.
+godance.oauth.x.client-id: Sign-in with X, on the same rule as Google's. Its redirect URI is `<GODANCE_URL>/login/oauth2/code/x`.
+godance.oauth.x.client-secret: X's client secret; see `client-id`.
+godance.oauth.apple.client-id: Sign in with Apple's Services ID. Apple is offered only with all four Apple settings real. Its redirect URI is `<GODANCE_URL>/login/oauth2/code/apple`.
+godance.oauth.apple.team-id: Your Apple developer team id.
+godance.oauth.apple.key-id: The id of your Sign in with Apple key.
+godance.oauth.apple.private-key: The PEM body of that key's `.p8` file; the API signs Apple's client secret with it.
+
+godance.object-storage.endpoint: The S3-compatible storage endpoint. The API stores files there and signs links to them with this address, so people's browsers must reach it too. `docker-compose.minio.yml` sets it to `GODANCE_FILES_URL`.
+godance.object-storage.region: The region the S3 request signer names; MinIO accepts any.
+godance.object-storage.access-key: The storage access key id.
+godance.object-storage.secret-key: The storage secret key.
+godance.object-storage.bucket: The bucket for every stored file; the API creates it at startup if it is missing.
+godance.object-storage.presign-ttl: How long links to generated files last; at most 7d.
+godance.object-storage.path-style-access: True puts the bucket in the path (MinIO); false in the host name (AWS S3, DigitalOcean Spaces).
+
+godance.pricing.refresh-cron: When the daily pricing check runs (Quartz cron, UTC). It runs only with `REGION=digitalocean`: it reads the price feeds below and stages each change for an admin to approve in the admin console.
+godance.pricing.noise-threshold-pct: A price change smaller than this, in percent, is logged and not proposed.
+godance.pricing.min-microcents: A new price at or below this, in microcents (1 cent is 10,000), is an anomaly, not a change.
+godance.pricing.max-multiplier: A new price more than this many times the old one is an anomaly, not a change.
+godance.pricing.feeds.openrouter-url: Where the pricing check reads OpenRouter's model prices.
+godance.pricing.feeds.litellm-url: Where the pricing check reads LiteLLM's price list.
+godance.pricing.alias-map.openrouter.*: Maps an OpenRouter model id to Godance's model name, for the pricing check. Set in `application.yml`.
+godance.pricing.alias-map.litellm.*: Maps a LiteLLM model id to Godance's model name, for the pricing check. Set in `application.yml`.
+godance.pricing.llm-fallback-model-id: For reading providers' pricing pages with a model. The reader in this build does nothing, so this has no effect.
+godance.pricing.llm-fallback-max-pages-per-run: As `llm-fallback-model-id`: no effect in this build.
+godance.pricing.llm-fallback-fetch-timeout: As `llm-fallback-model-id`: no effect in this build.
+godance.pricing.page-allowlist-regex: As `llm-fallback-model-id`: no effect in this build.
+godance.pricing.fallback-pages[*].url: As `llm-fallback-model-id`: no effect in this build.
+godance.pricing.fallback-pages[*].provider: As `llm-fallback-model-id`: no effect in this build.
+
+godance.promo.signup-credit-cents: A one-time credit, in cents, when an account's email is first verified. Real provider spend; 0 turns it off.
+godance.promo.signup-credit-daily-limit: The most signup credits granted in one UTC day.
+godance.promo.referral.referrer-reward-cents: Credit, in cents, to an account whose invitee makes a first qualifying top-up. With both rewards 0 referrals are off: no code is made and every claim is refused.
+godance.promo.referral.referee-reward-cents: Credit, in cents, to the invited account on that top-up.
+godance.promo.referral.min-topup-cents: The smallest top-up, in cents, that earns the rewards.
+godance.promo.referral.monthly-reward-limit: The most rewards one referrer earns in a UTC month; past it only the invitee is credited.
+godance.promo.referral.claim-window-hours: How long after signing up an account may claim a code.
+godance.promo.referral.qualifying-sources: The top-up rails that earn a reward, comma-separated: `STRIPE` (card) and `NOWPAYMENTS` (USDT).
+godance.promo.referral.claim-limit-per-account: Claims one account may try per hour.
+godance.promo.referral.claim-limit-per-ip: Claims one client address may try per hour.
+
+godance.providers.*.api-key: The platform's key for this provider, used for every account's requests. Empty: the provider's models are still listed, and requests to them fail at the provider.
+godance.providers.*.api-base: The provider's API address. Change it only to go through a proxy, or to a stand-in when testing.
+godance.providers.*.timeout: How long one request to the provider may take.
+godance.providers.*.poll-interval: How often a running image or video job is checked at the provider.
+godance.providers.*.poll-timeout: How long Godance waits for a job at the provider before giving up on it.
+godance.providers.anthropic.api-version: The `anthropic-version` header sent with every request to Anthropic.
+
+godance.rate-limit.enabled: Switches every limit in this group, and the MCP limit, on or off. The limits count in Redis; past one the API answers 429 with `Retry-After`, and if Redis cannot be reached requests pass.
+godance.rate-limit.*.window: The window this limit counts over.
+godance.rate-limit.login-per-ip.requests: Sign-in attempts per client address.
+godance.rate-limit.login-per-email.requests: Sign-in attempts per email address.
+godance.rate-limit.signup-per-ip.requests: Sign-ups per client address (each sends a verification email).
+godance.rate-limit.verify-per-ip.requests: Email-verification attempts per client address.
+godance.rate-limit.forgot-per-ip.requests: Password-reset requests per client address.
+godance.rate-limit.forgot-per-email.requests: Password-reset emails per address.
+godance.rate-limit.resend-per-ip.requests: Verification resends per client address.
+godance.rate-limit.resend-per-account.requests: Verification resends per account.
+godance.rate-limit.release-link-per-ip.requests: Requests for a link that releases an email address from an account, per client address.
+godance.rate-limit.release-link-per-email.requests: Release links per email address.
+godance.rate-limit.two-factor-per-ip.requests: Two-factor codes tried, and changes to two-factor sign-in, per client address.
+godance.rate-limit.two-factor-per-account.requests: Two-factor codes tried, and changes to two-factor sign-in, per account.
+
+godance.recipes.max-per-account: The most recipes one account can have; past it saving answers 409 `recipe_limit_reached`.
+godance.recipes.max-versions: The most versions one recipe can have.
+
+godance.retention.saved-limit: The most generations one account can save. Saved generations are kept past the 90-day deletion for as long as the account exists; 0 means nothing can be saved.
+
+godance.scheduling.auto-recharge-cron: When the auto-recharge sweep runs (Quartz cron, UTC). It charges saved cards of accounts below their threshold that the per-request check missed; it needs Stripe.
+godance.scheduling.data-retention-cron: When the retention job runs (Quartz cron, UTC). It deletes generated media and job prompts 90 days after the job, except saved generations.
+godance.scheduling.job-sweep-cron: How often image and video jobs whose worker stopped (a restart ends them) are failed and refunded.
+godance.scheduling.referral-sweep-cron: When referral rewards the top-up path missed are paid; nothing happens while referrals are off.
+
+godance.security.cors-allowed-origins: Browser origins, comma-separated, that may call `/v1/**` from script; at least one, each an absolute http(s) URL. The self-host compose file sets it to `GODANCE_URL`.
+godance.security.session-cookie-secure: Marks the session cookie Secure (it is then named `__Host-godance_session`; always `HttpOnly`, `SameSite=Strict`). The prod profile sets true.
+
+godance.stripe.secret-key: Stripe secret key, for card top-ups and auto-recharge. Empty: those fail, and an admin funds accounts instead.
+godance.stripe.webhook-secret: Verifies Stripe's webhook signatures. An empty secret refuses every webhook. The handler credits whatever a validly signed event says: use the `whsec_` secret Stripe shows for your endpoint, never a made-up value.
+godance.stripe.success-url: Where Stripe Checkout sends the user after paying. The self-host compose file derives it from `GODANCE_URL`.
+godance.stripe.cancel-url: Where Stripe Checkout sends the user who cancels. The self-host compose file derives it from `GODANCE_URL`.
+godance.stripe.api-base: Empty: Stripe's API. Set it only to point tests at a stand-in.
+
+godance.webhooks.allow-private-destinations: True lets job-completion webhooks go to private addresses and plain http. For tests with a local receiver; leave it false.
+
+server.port: The API's port inside its container. Leave 8080: the image's health check and Caddy expect it.
+spring.data.redis.host: Redis's host name. The compose file sets `redis`.
+spring.data.redis.port: Redis's port.
+spring.data.redis.password: Redis's password. The bundled Redis has none and sits on a network only the API reaches.
+spring.datasource.url: The JDBC URL of the database. The compose file sets the bundled Postgres.
+spring.datasource.username: The database user. The compose file also gives it to Postgres as its owner.
+spring.datasource.password: The database password. The compose file also gives it to Postgres.
+spring.datasource.hikari.maximum-pool-size: The most database connections the API opens.
+spring.datasource.hikari.minimum-idle: Database connections kept open when idle.
+spring.webflux.multipart.max-disk-usage-per-part: The largest part of a multipart upload; keep it just above `godance.inputs.max-bytes`.
