@@ -20,6 +20,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webtestclient.autoconfigure.AutoConfigureWebTestClient;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -480,6 +481,51 @@ class ImageGenerationIntegrationTest {
             assertThat(problem.get("detail").asString()).as(route).isNotBlank();
             assertThat(problem.has("error")).as(route + " carries no OpenAI error object").isFalse();
         });
+    }
+
+    // ===== Not authenticated: Spring's 401, as a problem ==============
+
+    /** The shape of an OpenAI key, as OpenAI's SDK sends one left in OPENAI_API_KEY. Not a real key. */
+    private static final String OPENAI_STYLE_KEY = "Bearer sk-proj-not-a-real-key-0000000000000000";
+    /** Three dot-separated parts, none of them a Godance session's. */
+    private static final String MALFORMED_JWT = "Bearer eyJhbGciOiJIUzI1NiJ9.bm90IGpzb24.bm90IGEgc2lnbmF0dXJl";
+    private static final String NOT_A_CREDENTIAL =
+            "The bearer token is not a Godance API key or a current session. Godance API keys start with gd_live_.";
+
+    @Test
+    void errors_givenABearerThatIsNotGodancesOrNone_expect401ProblemWithOpenAisErrorObject() {
+        // Spring's challenge, as it was: RFC 6750's error code, and the decoder's words.
+        postImage(OPENAI_STYLE_KEY, Map.of("model", "gpt-image-2", "prompt", "x"))
+                .expectHeader().valueEquals(HttpHeaders.WWW_AUTHENTICATE, "Bearer error=\"invalid_token\", "
+                        + "error_description=\"An error occurred while attempting to decode the Jwt: Invalid JWT "
+                        + "serialization: Missing dot delimiter(s)\", "
+                        + "error_uri=\"https://tools.ietf.org/html/rfc6750#section-3.1\"");
+
+        for (String bearer : List.of(OPENAI_STYLE_KEY, MALFORMED_JWT)) {
+            JsonNode refused = problem(postImage(bearer, Map.of("model", "gpt-image-2", "prompt", "x"))
+                    .expectHeader().valueMatches(HttpHeaders.WWW_AUTHENTICATE, "Bearer error=\"invalid_token\".*"), 401);
+            assertThat(refused.get("title").asString()).as(bearer).isEqualTo("Unauthorized");
+            assertThat(refused.get("detail").asString()).as(bearer).isEqualTo(NOT_A_CREDENTIAL);
+            assertThat(refused.toString()).as("the decoder's words stay in the header")
+                    .doesNotContain("decode").doesNotContain("Jwt");
+            JsonNode error = refused.get("error");
+            assertThat(error.get("message").asString()).isEqualTo(NOT_A_CREDENTIAL);
+            assertThat(error.get("type").asString()).isEqualTo("authentication_error");
+            assertThat(error.get("param").isNull()).isTrue();
+            assertThat(error.get("code").isNull()).isTrue();
+        }
+
+        JsonNode none = problem(http.post().uri("/v1/images/generations")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(Map.of("model", "gpt-image-2", "prompt", "x"))
+                .exchange()
+                .expectHeader().valueEquals(HttpHeaders.WWW_AUTHENTICATE, "Bearer"), 401);
+        assertThat(none.get("detail").asString()).isEqualTo("This request has no API key or session. "
+                + "Send a Godance API key as Authorization: Bearer gd_live_…, or sign in.");
+        assertThat(none.get("error").get("message").asString()).isEqualTo(none.get("detail").asString());
+        assertThat(none.get("error").get("type").asString()).isEqualTo("authentication_error");
+
+        assertThat(openAiMock.getAllServeEvents()).isEmpty();
     }
 
     /** The problem a refused request answered with, once its status and type are checked. */

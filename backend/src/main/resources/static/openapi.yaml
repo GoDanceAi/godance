@@ -25,12 +25,12 @@ info:
     account) needs a signed-in session, and answers an API key with 403.
 
     **Errors.** Every error is an RFC 7807 problem document
-    (`application/problem+json`) with `title`, `status` and `detail`. Many
-    carry `code`, a stable string to branch on. On the routes that follow
-    OpenAI's own API (`POST /v1/images/generations`, `POST /v1/images/edits`,
-    and `/v1/videos`, not `/v1/videos/generations`) the same document also
-    carries OpenAI's `error` object, which is where OpenAI's SDKs read a
-    message from.
+    (`application/problem+json`) with `title`, `status` and `detail`, a 401
+    included. Many carry `code`, a stable string to branch on. On the routes
+    that follow OpenAI's own API (`POST /v1/images/generations`,
+    `POST /v1/images/edits`, and `/v1/videos`, not `/v1/videos/generations`)
+    the same document also carries OpenAI's `error` object, which is where
+    OpenAI's SDKs read a message from.
 
     **Money.** Every amount is integer cents of US dollars, never a decimal.
     A generation reserves its price when it is accepted and returns the

@@ -44,6 +44,7 @@ import ai.godance.security.JwtService;
 import ai.godance.security.OAuthLoginFailureHandler;
 import ai.godance.security.OAuthLoginNonce;
 import ai.godance.security.OAuthLoginSuccessHandler;
+import ai.godance.security.ProblemAuthenticationEntryPoint;
 import ai.godance.security.SessionCookieFilter;
 import ai.godance.security.SessionCookies;
 import ai.godance.security.SessionVersionJwtDecoder;
@@ -166,6 +167,7 @@ public class SecurityConfig {
             ApiKeyAuthFilter apiKeyAuthFilter, SessionCookieFilter sessionCookieFilter,
             SpendingLimitFilter spendingLimitFilter,
             ai.godance.security.AdminAuthorizationFilter adminAuthorizationFilter) {
+        ProblemAuthenticationEntryPoint unauthenticated = new ProblemAuthenticationEntryPoint();
         return http
                 // CORS is handled by the standalone CorsWebFilter bean above.
                 // Spring's CSRF tokens are off: SessionCookieFilter guards the
@@ -269,7 +271,14 @@ public class SecurityConfig {
                         // leaked key can't mint a key that outlives it, read the webhook
                         // secret or turn on auto-recharge (spec risk R-01).
                         .anyExchange().hasAnyAuthority(SESSION))
-                .exceptionHandling(e -> e.accessDeniedHandler(ApiKeyAuthFilter::accessDenied))
+                // No credential, or a bearer token that is neither an API key nor a
+                // current session: 401 as a problem document, WWW-Authenticate kept
+                // (ProblemAuthenticationEntryPoint). The resource server below answers a
+                // bearer token it cannot decode through its own entry point, so the same
+                // one is named there too.
+                .exceptionHandling(e -> e
+                        .authenticationEntryPoint(unauthenticated)
+                        .accessDeniedHandler(ApiKeyAuthFilter::accessDenied))
                 // API-key auth runs before the JWT bearer filter; on success it
                 // installs a Jwt-principal so downstream controllers stay agnostic
                 // to whether the caller used a JWT or an API key.
@@ -284,6 +293,7 @@ public class SecurityConfig {
                 // Spending caps are checked after authorization, before the controller.
                 .addFilterAfter(spendingLimitFilter::filter, SecurityWebFiltersOrder.AUTHORIZATION)
                 .oauth2ResourceServer(oauth -> oauth
+                        .authenticationEntryPoint(unauthenticated)
                         .bearerTokenConverter(resourceServerBearerConverter())
                         .jwt(Customizer.withDefaults()))
                 .build();
