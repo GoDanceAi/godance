@@ -42,13 +42,25 @@ node marketing/scripts/discovery/output-parity.mjs BASE_DIST CANDIDATE_DIST
 ## Acceptance checks
 
 - Failing opening tests: 1 passed / 2 failed before implementation (missing enabled
-  discovery and malformed-flag rejection). Focused implementation suite: 8/8 passed.
-- Default and enabled lint: 119 files, zero errors/warnings/hints.
-- Full default and enabled Node suites each passed **760 tests / 94 suites**,
-  with zero failures/skips (116.81 seconds default; 106.90 seconds enabled).
+  discovery and malformed-flag rejection). Focused implementation suite: 9/9 passed after the Community read integration.
+  The added header case failed before the hook (8 passed / 1 failed) and passed after it.
+- Default and enabled lint: 121 files, zero errors/warnings/hints.
+- Full default and enabled Node suites each passed **761 tests / 94 suites**,
+  with zero failures/skips (88.87 seconds default; 79.11 seconds enabled).
   They include the original gallery schema,
   malformed configuration/content, empty gallery, comparison threshold, Run this,
   approved community/public profile, empty/error community, API and llms checks.
+- The Community build-output integration appends public `Access-Control-Allow-Origin: *`
+  only for `/community` and `/community/`, only when the strict discovery flag
+  emitted `/create` + `/integrations` and the existing Community loader emitted
+  its actual index. The static `public/_headers` is untouched. Real emitted-header
+  parsing verifies no extra CORS in rollout-off, empty-content or failed-API builds,
+  and no credentials header or recipe/profile wildcard.
+- A local Chromium integration check transpiles the actual 01 app probe and serves
+  real built headers across separate origins. Available content passes both direct
+  and canonical-redirect reads; rollout-off, empty and API-failed cases return false.
+  Reproduce with `marketing/scripts/discovery/public-index-cors.mjs`, passing the
+  01 probe source and an existing app Playwright core module (no new dependency).
 - New enabled-shell cases verify available/empty Gallery, comparison threshold,
   Run this off/on, and available/empty/API-failed Community. The discovery flag
   never creates content or bypasses the loaders.

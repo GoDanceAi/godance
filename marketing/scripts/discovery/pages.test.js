@@ -30,6 +30,7 @@ test('discovery off emits the legacy shell and no product pages', async () => {
   assert.equal(existsSync(path.join(b.dir, 'create/index.html')), false);
   assert.equal(existsSync(path.join(b.dir, 'integrations/index.html')), false);
   assert.doesNotMatch(read(b.dir, 'index.html'), /data-discovery-nav/);
+  assert.equal(read(b.dir, '_headers'), read(ROOT, 'public/_headers'));
 });
 test('discovery on emits the workflow and accessible groups, using configured app destinations', async () => {
   const b = await build('true'); assert.equal(b.status, 0, b.output);
@@ -100,6 +101,11 @@ test('enabled shell shows only readable approved Community content', async () =>
       const home=read(b.dir,'index.html');
       assert.equal(home.includes('href="/community"'),state==='available');
       assert.equal(existsSync(path.join(b.dir,'community/index.html')),state==='available');
+      const headers=read(b.dir,'_headers');
+      const expected=state==='available'?'*':undefined;
+      for(const url of ['/community','/community/']) assert.equal(headersFor(headers,url)['access-control-allow-origin'],expected);
+      for(const url of ['/','/community/example-id','/u/example-author','/docs']) assert.equal(headersFor(headers,url)['access-control-allow-origin'],undefined);
+      assert.equal(headersFor(headers,'/community')['access-control-allow-credentials'],undefined);
     } finally {await api.close();}
   }
 });
@@ -110,4 +116,21 @@ test('documentation contents point at implemented subjects without rollout activ
   }
   assert.match(docs,/Audio and embeddings have no live endpoints/);
   assert.match(docs,/There is no app routing-policy editor/);
+});
+
+// Interpret the actual emitted Cloudflare header rules rather than assuming CORS.
+function headersFor(text, pathname) {
+  let pattern='';const result={};
+  for(const line of text.split('\n')) {
+    if(!line.trim()||line.trimStart().startsWith('#')) continue;
+    if(!/^\s/.test(line)) {pattern=line.trim();continue;}
+    const star=pattern.indexOf('*');
+    const match=star===-1?pathname===pattern:pathname.startsWith(pattern.slice(0,star))&&pathname.endsWith(pattern.slice(star+1));
+    if(match){const colon=line.indexOf(':');result[line.slice(0,colon).trim().toLowerCase()]=line.slice(colon+1).trim();}
+  }
+  return result;
+}
+test('community emitted with discovery off retains the original header bytes', async()=>{
+  const api=await startPublicApi();
+  try{const b=await build('false',{COMMUNITY_ENABLED:'true',PUBLIC_API_BASE:api.url});assert.equal(b.status,0,b.output);assert.ok(existsSync(path.join(b.dir,'community/index.html')));assert.equal(read(b.dir,'_headers'),read(ROOT,'public/_headers'));}finally{await api.close();}
 });

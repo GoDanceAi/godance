@@ -1,0 +1,36 @@
+{
+  "probeStream": "01",
+  "probeSourceSha256": "741ff3e345787534dd5b235f5b602c63de87b0cf6c057f2d7589d00c0682f0c0",
+  "headersSource": "actual emitted _headers parsed by Cloudflare path rules",
+  "browser": "Chromium, two different local origins",
+  "results": [
+    {
+      "state": "available",
+      "direct": true,
+      "canonical": true,
+      "actualBuiltHeader": "*",
+      "credentialsHeader": null
+    },
+    {
+      "state": "off",
+      "direct": false,
+      "canonical": false,
+      "actualBuiltHeader": null,
+      "credentialsHeader": null
+    },
+    {
+      "state": "empty",
+      "direct": false,
+      "canonical": false,
+      "actualBuiltHeader": null,
+      "credentialsHeader": null
+    },
+    {
+      "state": "failed",
+      "direct": false,
+      "canonical": false,
+      "actualBuiltHeader": null,
+      "credentialsHeader": null
+    }
+  ]
+}

@@ -2,6 +2,7 @@
 import { defineConfig } from 'astro/config';
 import tailwindcss from '@tailwindcss/vite';
 import sitemap from '@astrojs/sitemap';
+import { publicCommunityReadHeaders } from './scripts/discovery/community-headers.mjs';
 
 // Site URL is used by @astrojs/sitemap and by structured-data canonical URLs.
 // Override at build time via SITE_URL env var when deploying to staging / preview.
@@ -12,7 +13,7 @@ export default defineConfig({
   output: 'static',
   // /legal/* are noindex placeholders until the real policies are published;
   // drop this filter (and their noindex) when they are.
-  integrations: [sitemap({ filter: (page) => !page.includes('/legal/') })],
+  integrations: [sitemap({ filter: (page) => !page.includes('/legal/') }), publicCommunityReadHeaders()],
   // Astro 7 defaults to 'jsx', which also strips whitespace inside inline
   // elements; true keeps the Astro 5 output.
   compressHTML: true,

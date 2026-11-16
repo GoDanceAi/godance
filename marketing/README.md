@@ -98,7 +98,11 @@ links still depend on `loadGallery().on`, comparisons require actual emitted pai
 at the existing shared-run threshold, and Community requires
 `loadCommunity().on`. Run this remains independently gated. The two new product
 pages explain existing workflows, with no fabricated results or activation claims.
-Documentation updates are independent of the rollout flag.
+Documentation updates are independent of the rollout flag. When discovery is enabled and
+approved Community output was actually emitted, a post-build hook adds public,
+credential-free CORS read access to `/community` and `/community/` only. No
+credentials header or recipe/profile wildcard is added. Off/empty/failed builds
+retain the original `_headers` bytes.
 
 Required local checks (CI currently does not run the marketing Node suite):
 
@@ -156,3 +160,17 @@ local response. Compare the complete sorted path sets and SHA-256 of every file,
 including hashed CSS/JS/assets, headers, redirects and sitemap files. Only
 `docs/index.html`, `llms.txt` and `llms-full.txt` may differ; there are no new-doc
 route or sitemap exceptions. See the reviewed evidence in `docs/round-15-evidence/04/`.
+
+The optional cross-origin integration check uses the actual 01 app probe source,
+real generated headers and the app's existing Chromium tooling, with local
+synthetic public API data only:
+
+```bash
+node scripts/discovery/public-index-cors.mjs \
+  PATH_TO_01_APP/src/lib/community-discovery.ts \
+  PATH_TO_APP/node_modules/playwright-core/index.mjs
+```
+
+It tests direct/canonical index reads across separate browser origins for
+available, rollout-off, empty-content and failed-API builds. This extra local
+check does not add a marketing browser dependency or change CI prerequisites.
