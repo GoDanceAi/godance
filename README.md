@@ -3,8 +3,8 @@
 > Multimodal AI aggregator: text, image, and video behind one
 > OpenAI-compatible API. Stripe card billing + NOWPayments (USDT)
 > top-ups. Single credit ledger. Drop-in for OpenAI SDK chat calls —
-> point `base_url` at `https://api.godance.ai/v1`; image and video
-> run as async jobs.
+> point `base_url` at `https://api.godance.ai/v1`. Image calls can wait
+> for results with a sync API key; video calls create jobs to poll.
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
@@ -20,7 +20,7 @@ godance/
 │               Chat UI, dashboard, billing surface. Deploys as a static SPA
 │               to Cloudflare Pages → app.godance.ai.
 │
-└── marketing/  Astro 5 · Tailwind
+└── marketing/  Astro 7 · Tailwind
                 SSG marketing site → godance.ai. SEO + GEO optimized.
 ```
 
@@ -28,14 +28,17 @@ Each subdirectory has its own README with a quickstart.
 
 ## Design philosophy
 
-- **OpenAI-compatible HTTP contract.** Existing OpenAI SDKs work with no
-  code changes — just swap `base_url`. Routes served today:
-  `/v1/chat/completions`, `/v1/images/generations`,
-  `/v1/videos/generations`, `/v1/models` (plus `/v1/jobs/{id}` to
-  poll async generations). Image and video generation take OpenAI's
-  request shape but run as async jobs (`202` + `job_id`), so those
-  calls poll `/v1/jobs/{id}` or use a webhook instead of getting the
-  result inline. `/v1/audio/speech`,
+- **OpenAI-compatible HTTP contract.** Point OpenAI SDKs at Godance's
+  `base_url`. Routes include `/v1/chat/completions`,
+  `/v1/images/generations`, `/v1/images/edits`, `/v1/videos` and
+  `/v1/models`. Image generation and edits return `202` with a job by
+  default; an API key with `image_response: "sync"` waits and returns
+  `200` in OpenAI's image response shape. `async: true`,
+  `Prefer: respond-async`, or a sync wait timeout returns the job for
+  polling at `/v1/jobs/{id}` or delivery through a webhook.
+  `POST /v1/videos` returns a queued video for OpenAI SDK creation,
+  polling and download; `/v1/videos/generations` returns `202` with a
+  job to poll or follow through a webhook. `/v1/audio/speech`,
   `/v1/audio/transcriptions` and `/v1/embeddings` are planned but not
   yet implemented.
 - **Regional provider allowlist is code, not config.** The provider
