@@ -249,7 +249,7 @@ function AccountChat({ adult }: { adult: boolean }) {
             {history.selected && <button type="button" className="btn btn-ghost btn-sm" onClick={() => void history.archive()}
               disabled={streaming || history.busy || history.readOnly}>Archive chat</button>}
           </div>
-          <p aria-live="polite" className="text-xs text-fg-muted">
+          <p aria-live="polite" className="break-words text-xs text-fg-muted">
             {history.selected ? history.archiveUncertain ? 'Archival is unconfirmed. This chat is read-only until its status is checked.'
               : history.readOnly ? 'Archived chat · Read-only. It leaves the active list and is removed for good after 30 days.'
               : history.problem ? `Saving paused for “${history.selected.title}”. Your current messages remain visible here.`
@@ -273,7 +273,7 @@ function AccountChat({ adult }: { adult: boolean }) {
             {!history.listLoading && history.list?.length === 0 && <p className="mt-2 text-sm text-fg-muted">No active saved chats yet.</p>}
             {history.list && <ul className="mt-2 space-y-2">
               {history.list.map((conversation) => <li key={conversation.id}>
-                <button type="button" className="text-left text-sm font-medium text-brand-600 hover:underline break-words"
+                <button type="button" className="max-w-full text-left text-sm font-medium text-brand-600 hover:underline break-words"
                   aria-pressed={history.selected?.id === conversation.id} disabled={streaming || history.busy || history.listLoading}
                   onClick={() => void openChat(conversation.id)}>{conversation.title}</button>
                 <span className="ml-2 text-xs text-fg-faint">{formatDateTime(conversation.updatedAt)}</span>

@@ -405,3 +405,20 @@ test('saved-chat controls work with keyboard focus and announce persistence stat
   await expect(page.getByText('Synthetic completed answer.', { exact: true })).toBeVisible();
   expect(api.callsTo('POST', '/v1/chat/completions')).toHaveLength(1);
 });
+
+test('maximum-length saved titles wrap in the list and selected status without page overflow', async ({ page, api }) => {
+  const history = serveChatHistory(api); history.seed();
+  const title = 'x'.repeat(255);
+  api.on('GET', '/v1/conversations', { json: [savedChat({ title })] });
+  api.on('GET', `/v1/conversations/${CONVERSATION}`, { json: savedChat({ title }) });
+  await setup(page, api);
+  await page.getByRole('button', { name: 'Saved chats', exact: true }).click();
+  const item = page.getByRole('button', { name: title, exact: true });
+  await expect(item).toBeEnabled();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await item.click();
+  await expect(page.locator('[aria-live="polite"]')).toContainText(title);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.setViewportSize({ width: 320, height: 740 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
