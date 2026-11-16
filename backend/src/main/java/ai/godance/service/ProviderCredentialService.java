@@ -144,7 +144,8 @@ public class ProviderCredentialService {
         ProviderKeyCheck.Verdict verdict = keyCheck.check(provider, key, props.checkTimeout());
         String last4 = CallerKey.last4(key);
         if (verdict == ProviderKeyCheck.Verdict.REJECTED) {
-            audit.record(AUDIT_REJECTED, AuditOutcome.FAILURE, userId, ip,
+            // Its own transaction: the refusal below rolls this one back.
+            audit.recordInNewTransaction(AUDIT_REJECTED, AuditOutcome.FAILURE, userId, ip,
                     Map.of("provider", provider.name(), "last4", last4, "when", "save"));
             throw ByokRefusedException.keyRejected(provider);
         }
