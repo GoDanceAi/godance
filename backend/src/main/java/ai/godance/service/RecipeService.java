@@ -80,13 +80,15 @@ public class RecipeService {
     private final RecipeVersionRepository versions;
     private final AuditLogService audit;
     private final RecipesProperties props;
+    private final PublishService publishing;
 
     public RecipeService(RecipeRepository recipes, RecipeVersionRepository versions, AuditLogService audit,
-                         RecipesProperties props) {
+                         RecipesProperties props, PublishService publishing) {
         this.recipes = recipes;
         this.versions = versions;
         this.audit = audit;
         this.props = props;
+        this.publishing = publishing;
     }
 
     /** What a version holds, checked and ready to store. */
@@ -112,6 +114,14 @@ public class RecipeService {
         Modality modality = modality(req.modality());
         Content content = content(req.template(), req.variables(), req.model(), req.params(), modality, req.inputs());
         String source = GalleryRecipeSlug.requireValidOrNull(req.sourceGalleryRecipe());
+        // Started from a published recipe (round 14): remembered, so publishing this one records made_from.
+        UUID sourcePublished = null;
+        if (req.sourcePublishedRecipe() != null && !req.sourcePublishedRecipe().isBlank()) {
+            if (source != null) {
+                throw RecipeRefusedException.invalid("name source_gallery_recipe or source_published_recipe, not both");
+            }
+            sourcePublished = publishing.sourceOf(req.sourcePublishedRecipe());
+        }
 
         // Counted and written one request at a time, so two cannot both take the last place.
         recipes.lockRecipesOf(RECIPES_LOCK_SPACE, userId.hashCode());
@@ -125,6 +135,7 @@ public class RecipeService {
         recipe.setTitle(title);
         recipe.setModality(modality);
         recipe.setSourceGalleryRecipe(source);
+        recipe.setSourcePublishedRecipeId(sourcePublished);
         recipes.save(recipe);
         RecipeVersion first = versions.save(version(recipe.getId(), 1, content));
 
@@ -226,11 +237,16 @@ public class RecipeService {
         return new SavedVersion(RecipeVersionView.from(next), true);
     }
 
-    /** Deletes the caller's recipe and its versions. Its jobs stay, no longer linked to a recipe. */
+    /**
+     * Deletes the caller's recipe and its versions. Its jobs stay, no longer
+     * linked to a recipe. A pending or public submission of it is unpublished
+     * first (round 14): its author could not otherwise take it down.
+     */
     @Transactional
     public void delete(UUID userId, UUID recipeId, String ip) {
         Recipe recipe = requireOwned(userId, recipeId);
         String title = recipe.getTitle();
+        publishing.unpublishForDeletedRecipe(userId, recipeId, ip);
         if (recipes.deleteOwned(recipeId, userId) == 0) throw RecipeRefusedException.notFound();
         audit.record(AuditLogService.EVT_RECIPE_DELETED, AuditOutcome.SUCCESS, userId, ip,
                 Map.of("recipeId", recipeId.toString(), "title", title));
