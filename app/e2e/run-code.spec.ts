@@ -120,15 +120,19 @@ function pythonBody(code: string): unknown {
 
 /**
  * The `extra_body` a Python script gives the SDK, as a value: its comment
- * lines left out, and `json.dumps(x)` read as the x it is made from.
+ * lines left out, and each `json.dumps(x)` read as the x it is made from.
  */
 function pythonExtraBody(code: string): unknown {
   const literal = /\n {4}extra_body=(\{[\s\S]*?\n {4}\}),\n\)/.exec(code)?.[1];
   expect(literal, 'the call has an extra_body').toBeDefined();
   return pythonValue((literal as string)
     .replace(/\n *#[^\n]*/g, '')
-    .replace(/json\.dumps\((\{[\s\S]*?\n {8}\})\)/, '$1'));
+    .replace(/json\.dumps\(([[{][\s\S]*?\n {8}[\]}])\)/g, '$1'));
 }
+
+/** The keys of `extra_body` a Python script sends as JSON text, in order. */
+const pythonJsonText = (code: string): string[] =>
+  [...code.matchAll(/\n {8}"([a-z_]+)": json\.dumps\(/g)].map((match) => match[1]);
 
 test.describe('the request as code', () => {
   test('an image request that polls asks for a job in all three languages, and reads it until it ends', () => {
@@ -304,8 +308,58 @@ test.describe('the request as code', () => {
     }
   });
 
-  test('a last frame, reference images or a count go to Godance\'s own video route, as sent, and say why', () => {
-    for (const more of [{ last_frame: LAST_FRAME }, { reference_images: [REFERENCE] }, { n: 2 }]) {
+  test('a last frame and reference images go to OpenAI\'s POST /v1/videos too; the SDK gets the list as JSON text', () => {
+    // A list of images named two ways, a stored file and a job's output: the order is the request's.
+    const mixed = [{ file_id: 'f11e0000-0000-4000-8000-000000000005' }, REFERENCE];
+    // Frames, or reference images: the video models take one or the other, never both at once.
+    for (const { images, shaped } of [
+      { images: { first_frame: FIRST_FRAME, last_frame: LAST_FRAME }, shaped: { input_reference: FIRST_FRAME, last_frame: LAST_FRAME } },
+      { images: { first_frame: FIRST_FRAME, last_frame: REFERENCE }, shaped: { input_reference: FIRST_FRAME, last_frame: REFERENCE } },
+      { images: { reference_images: [REFERENCE] }, shaped: { reference_images: [REFERENCE] } },
+      { images: { reference_images: mixed }, shaped: { reference_images: mixed } },
+    ]) {
+      const label = JSON.stringify(images);
+      const body = { ...VIDEO, ...images, gallery_recipe: 'paper-boat-sets-off' };
+      const sent = { ...OPENAI_VIDEO, ...shaped, gallery_recipe: 'paper-boat-sets-off' };
+      const request = video(body);
+      expect(openAiVideoBody(body), label).toEqual(sent);
+      expect(createPath('video', body), label).toBe(VIDEO_CREATE.path);
+
+      const curl = codeFor('curl', request);
+      expect(curl.map((snippet) => snippet.title), label).toEqual(['Start the video', 'Check on it', 'Download it']);
+      expect(curl[0].code, label).toContain(`curl ${API}/v1/videos \\`);
+      expect(curlBody(curl[0].code), label).toEqual(sent);
+      expect(curl[0].note, label).not.toBe(VIDEO_GENERATIONS_NOTE);
+
+      // Python: each image in extra_body, by the name the route reads; the list as JSON text.
+      const [python] = codeFor('python', request);
+      expect(python.note, label).toBeUndefined();
+      expect(python.code, label).toContain('video = client.videos.create_and_poll(');
+      expect(pythonExtraBody(python.code), label).toEqual({ ...shaped, gallery_recipe: 'paper-boat-sets-off' });
+      const list = 'reference_images' in images;
+      expect(pythonJsonText(python.code), label).toEqual(list ? ['reference_images'] : []);
+      expect(python.code.startsWith('import json\nimport os\n'), label).toBe(list);
+      if (list) {
+        expect(python.code, label).toContain([
+          '        # The SDK sends a form: as JSON text, the images keep their order.',
+          '        "reference_images": json.dumps([',
+        ].join('\n'));
+      }
+      // A single image is a value of its own, which the SDK writes as fields: last_frame[file_id].
+      if ('last_frame' in images) expect(python.code, label).toContain('        "last_frame": {\n');
+      expect(python.code, label).not.toContain('first_frame');
+      expect(python.code, label).not.toContain('client.post(');
+
+      const [java] = codeFor('java', request);
+      expect(java.note, label).toBeUndefined();
+      expect(java.code, label).toContain('godance.post().uri("/v1/videos")');
+      expect(javaBody(java.code), label).toEqual(sent);
+      expect(java.code, label).not.toContain('/v1/jobs');
+    }
+  });
+
+  test('a count of clips goes to Godance\'s own video route, as sent, and says why', () => {
+    for (const more of [{ n: 2 }, { n: 2, last_frame: LAST_FRAME }]) {
       const body = { ...VIDEO, first_frame: FIRST_FRAME, ...more };
       const request = video(body);
       expect(openAiVideoBody(body)).toBeNull();
@@ -340,7 +394,7 @@ test.describe('the request as code', () => {
     }
   });
 
-  test('OpenAI\'s video shape is used only when it carries the whole request', () => {
+  test('OpenAI\'s video shape is used only when that route takes the whole request', () => {
     // A count of one goes without saying, `async` is never a video's, and seconds become a string.
     expect(openAiVideoBody({ model: 'm', prompt: 'p', seconds: 8, size: '1280x720', n: 1, async: true }))
       .toEqual({ model: 'm', prompt: 'p', seconds: '8', size: '1280x720' });
@@ -348,11 +402,15 @@ test.describe('the request as code', () => {
     // The Godance extensions it takes are carried as they are, the first frame by its own name there.
     expect(openAiVideoBody({ model: 'm', prompt: 'p', first_frame: FIRST_FRAME, webhook_url: 'https://example.test/hook', gallery_recipe: 'koi-pond' }))
       .toEqual({ model: 'm', prompt: 'p', input_reference: FIRST_FRAME, webhook_url: 'https://example.test/hook', gallery_recipe: 'koi-pond' });
+    expect(openAiVideoBody({ model: 'm', prompt: 'p', first_frame: FIRST_FRAME, last_frame: LAST_FRAME }))
+      .toEqual({ model: 'm', prompt: 'p', input_reference: FIRST_FRAME, last_frame: LAST_FRAME });
+    expect(openAiVideoBody({ model: 'm', prompt: 'p', reference_images: [FIRST_FRAME, REFERENCE] }))
+      .toEqual({ model: 'm', prompt: 'p', reference_images: [FIRST_FRAME, REFERENCE] });
     expect(Object.keys(openAiVideoBody({ model: 'm', first_frame: FIRST_FRAME, prompt: 'p' }) ?? {}))
       .toEqual(['model', 'input_reference', 'prompt']);
-    // POST /v1/videos answers 200 to a field it does not know, and makes the video without it:
-    // a request with one is never sent there.
-    for (const more of [{ last_frame: LAST_FRAME }, { reference_images: [REFERENCE] }, { n: 2 }, { style: 'vivid' }]) {
+    // POST /v1/videos answers 400 to a field it does not read, and has no `n`: a request with
+    // either goes to Godance's own route.
+    for (const more of [{ n: 2 }, { style: 'vivid' }, { images: [FIRST_FRAME] }]) {
       expect(openAiVideoBody({ model: 'm', prompt: 'p', ...more }), Object.keys(more)[0]).toBeNull();
     }
     // A field left undefined is not there at all.
@@ -440,6 +498,7 @@ test.describe('the request as code', () => {
   test('no code ever holds a key: only the variable it is read from', () => {
     const videos = [
       video(VIDEO), video(VIDEO_RECIPE), video({ ...VIDEO, first_frame: FIRST_FRAME }), video({ ...VIDEO, last_frame: LAST_FRAME }),
+      video({ ...VIDEO, reference_images: [REFERENCE] }), video({ ...VIDEO, n: 2 }),
     ];
     for (const language of LANGUAGES) {
       for (const request of [image(PLAIN, 'poll'), image(PLAIN, 'wait'), image(RECIPE), image(EDIT), ...videos]) {
@@ -476,6 +535,7 @@ test.describe('the request as code', () => {
       image(PLAIN, 'poll'), image(PLAIN, 'wait'), image(RECIPE, 'poll'), image(RECIPE, 'wait'),
       image(EDIT, 'poll'), image(EDIT, 'wait'), video(VIDEO), video(VIDEO_RECIPE),
       video({ ...VIDEO, first_frame: FIRST_FRAME }), video({ ...VIDEO, reference_images: [REFERENCE] }),
+      video({ ...VIDEO, first_frame: FIRST_FRAME, last_frame: LAST_FRAME }), video({ ...VIDEO, n: 2 }),
     ];
     for (const request of requests) {
       const python = codeFor('python', request).map((snippet) => snippet.code).join('\n');
@@ -563,7 +623,8 @@ test.describe('the prompt for an AI assistant', () => {
     expect(gallery).toContain('Fill the template in yourself, and send the result as "prompt".');
     expect(gallery).toContain('Send "gallery_recipe" unchanged with every request.');
     expect(gallery).toContain('Upload each file with POST /v1/files');
-    expect(gallery).toContain('The input is the video\'s first frame: send it as "input_reference": {"file_id": "..."}');
+    expect(gallery).toContain('Each input goes in extra_body, in the field its "role" names: "first_frame" in "input_reference" ({"file_id": "..."})');
+    expect(gallery).toContain('client.videos.create_and_poll sends a form, in which the list is JSON text: "reference_images": json.dumps([...])');
     expect(gallery).not.toContain('Each input goes in the field its "role" names');
     expect(gallery).not.toContain('inside "recipe"');
     expect(gallery).not.toContain('"version_id" names this recipe');
@@ -575,15 +636,26 @@ test.describe('the prompt for an AI assistant', () => {
     expect(gallery).not.toContain('GET /v1/jobs/{id}');
     expect(gallery).not.toContain('An image request answers in one of two ways');
 
-    // The same recipe with a last frame too goes to Godance's own route, which takes each image by its role.
-    const framed = assistantPrompt(
-      { ...galleryRecipe, inputs: [{ ...slot, role: 'first_frame' }, { ...slot, slot: 'end', role: 'last_frame' }] },
-      { base: API, createPath: '/v1/videos/generations' });
-    expect(framed).toContain(`POST ${API}/v1/videos/generations\n`);
-    expect(framed).toContain('Each input goes in the field its "role" names');
-    expect(framed).toContain('3. A video request always answers 202 with a "job_id". Poll GET /v1/jobs/{id}');
-    expect(framed).not.toContain('input_reference');
-    expect(framed).not.toContain('client.videos');
+    // The same recipe with a last frame too: still OpenAI's route, the route the code for that
+    // request uses, with each image in the field its role names there.
+    const framedInputs = [{ ...slot, role: 'first_frame' }, { ...slot, slot: 'end', role: 'last_frame' }];
+    const framedBody = { ...VIDEO, first_frame: FIRST_FRAME, last_frame: LAST_FRAME };
+    const framed = assistantPrompt({ ...galleryRecipe, inputs: framedInputs }, { base: API, createPath: createPath('video', framedBody) });
+    expect(framed).toContain(`POST ${API}/v1/videos\n`);
+    expect(framed).toContain('Each input goes in extra_body, in the field its "role" names');
+    expect(framed).toContain('3. A video request answers 200 with the video');
+    expect(framed).not.toContain('Each input goes in the field its "role" names');
+    expect(framed).not.toContain('GET /v1/jobs/{id}');
+
+    // Several clips from one request go to Godance's own route, which takes each image by its role.
+    const clips = assistantPrompt(
+      { ...galleryRecipe, params: { ...galleryRecipe.params, n: 2 }, inputs: framedInputs },
+      { base: API, createPath: createPath('video', { ...framedBody, n: 2 }) });
+    expect(clips).toContain(`POST ${API}/v1/videos/generations\n`);
+    expect(clips).toContain('Each input goes in the field its "role" names');
+    expect(clips).toContain('3. A video request always answers 202 with a "job_id". Poll GET /v1/jobs/{id}');
+    expect(clips).not.toContain('input_reference');
+    expect(clips).not.toContain('client.videos');
 
     // One of the user's own video recipes, on OpenAI's route: the SDK sends its recipe as JSON text.
     const savedVideo = assistantPrompt({ ...recipe, modality: 'VIDEO', model: 'kling-3.0' }, { base: API, createPath: '/v1/videos' });
@@ -594,7 +666,7 @@ test.describe('the prompt for an AI assistant', () => {
     // An image recipe is never told about it.
     expect(saved).not.toContain('client.videos');
 
-    for (const prompt of [saved, withSlot, gallery, framed, savedVideo]) {
+    for (const prompt of [saved, withSlot, gallery, framed, clips, savedVideo]) {
       // The rules are numbered 1 to 8 whichever blocks were kept, and no block leaves a gap behind.
       expect(prompt.match(/^\d+\. /gm)).toEqual(['1. ', '2. ', '3. ', '4. ', '5. ', '6. ', '7. ', '8. ']);
       expect(prompt).not.toMatch(/\n\n\n/);
@@ -604,13 +676,19 @@ test.describe('the prompt for an AI assistant', () => {
 
   test('a video\'s prompt names the route its code uses, and rule 3 is about that route', () => {
     const clip: PromptRecipe = { ...recipe, modality: 'VIDEO', model: 'seedance-2.0', version_id: undefined };
-    for (const body of [VIDEO, VIDEO_RECIPE, { ...VIDEO, first_frame: FIRST_FRAME }, { ...VIDEO, reference_images: [REFERENCE] }]) {
+    const paths = new Set<string>();
+    for (const body of [
+      VIDEO, VIDEO_RECIPE, { ...VIDEO, first_frame: FIRST_FRAME }, { ...VIDEO, last_frame: LAST_FRAME },
+      { ...VIDEO, reference_images: [REFERENCE] }, { ...VIDEO, n: 2 },
+    ]) {
       const path = createPath('video', body);
+      paths.add(path);
       const prompt = assistantPrompt(clip, { base: API, createPath: path });
       expect(prompt).toContain(`POST ${API}${path}\n`);
       expect(prompt.includes('3. A video request answers 200 with the video'), path).toBe(path === VIDEO_CREATE.path);
       expect(prompt.includes('3. A video request always answers 202'), path).toBe(path === VIDEO_GENERATIONS.path);
     }
+    expect([...paths].sort()).toEqual([VIDEO_CREATE.path, VIDEO_GENERATIONS.path]);
   });
 
   test('the wording holds what the brief asks of it', () => {
