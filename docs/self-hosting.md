@@ -375,7 +375,7 @@ Generated from the code by `backend/scripts/config-reference.sh`: every `@Config
 
 | Setting | Environment variable | Default | What it does |
 |---|---|---|---|
-| `godance.key-vault.key` | `KEY_VAULT_KEY` | **required** | Encrypts the secrets kept in the database (authenticator secrets for two-factor sign-in) with AES-256: 32 random bytes in Base64. Never change or lose it: without it nobody with two-factor sign-in on can sign in. Back it up apart from the database. |
+| `godance.key-vault.key` | `KEY_VAULT_KEY` | **required** | Encrypts the secrets kept in the database (authenticator secrets for two-factor sign-in, webhook signing secrets and the provider keys users bring) with AES-256: 32 random bytes in Base64. Never change or lose it: without it nobody with two-factor sign-in on can sign in, webhook deliveries stop until each account rotates its signing secret, and requests go out on the platform's provider keys until users save theirs again. Back it up apart from the database. |
 
 #### godance.mail
 
@@ -771,11 +771,14 @@ until you give them an amount (`godance.promo.*`).
   `preflight` refuses placeholders and unusable values before the API starts.
 - [ ] **`KEY_VAULT_KEY` is backed up apart from the database, and never
   changes.** The API encrypts the secrets it keeps in the database (each
-  account's authenticator secret for two-factor sign-in) with it, using
+  account's authenticator secret for two-factor sign-in, its signing secret
+  for job webhooks, and the provider keys users bring) with it, using
   AES-256-GCM. Lose or change it and nobody with two-factor sign-in on can
-  sign in. Passwords are stored as BCrypt hashes and API keys as SHA-256
-  hashes. The rest of the database is stored as it is, including each
-  account's signing secret for job webhooks: protect the disk.
+  sign in, webhook deliveries stop until each account rotates its signing
+  secret, and requests go out on the platform's provider keys until users
+  save theirs again. Passwords are stored as BCrypt hashes and API keys as
+  SHA-256 hashes. The rest of the database is stored as it is: protect the
+  disk.
 - [ ] **The disk is encrypted at rest**, if your data needs it. Docker's
   volumes are ordinary directories on the server's disk. The operator's notes
   for DigitalOcean are in

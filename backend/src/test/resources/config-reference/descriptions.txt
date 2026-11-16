@@ -72,7 +72,7 @@ godance.jwt.secret: Signs session tokens (HS256); at least 32 bytes. Changing it
 godance.jwt.expiry-minutes: How long a session lasts, in minutes.
 godance.jwt.issuer: The `iss` claim of session tokens; a URI. The self-host compose file sets it to `GODANCE_URL`.
 
-godance.key-vault.key: Encrypts the secrets kept in the database (authenticator secrets for two-factor sign-in) with AES-256: 32 random bytes in Base64. Never change or lose it: without it nobody with two-factor sign-in on can sign in. Back it up apart from the database.
+godance.key-vault.key: Encrypts the secrets kept in the database (authenticator secrets for two-factor sign-in, webhook signing secrets and the provider keys users bring) with AES-256: 32 random bytes in Base64. Never change or lose it: without it nobody with two-factor sign-in on can sign in, webhook deliveries stop until each account rotates its signing secret, and requests go out on the platform's provider keys until users save theirs again. Back it up apart from the database.
 
 godance.mail.api-key: Resend API key. Empty or the dummy default: nothing is sent, and each message's first line (verification and password-reset links included) is written to the API's log.
 godance.mail.from: The sender of every email, on a domain verified in Resend.
