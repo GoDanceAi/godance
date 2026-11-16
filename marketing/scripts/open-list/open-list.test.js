@@ -672,7 +672,9 @@ describe('what stays out of the output', () => {
   test('no absolute local path, environment value or key appears in the output', async (t) => {
     const secrets = {
       GODANCE_API_KEY: 'gd_live_test_openlist_not_a_real_key',
-      OPEN_LIST_DEPLOY_KEY: '-----BEGIN OPENSSH PRIVATE KEY-----\nopen-list-test-not-a-real-key\n-----END OPENSSH PRIVATE KEY-----',
+      // Shaped like a key, and assembled here so that no file in this public
+      // repository holds a private-key block, even a fake one.
+      OPEN_LIST_DEPLOY_KEY: ['BEGIN', 'END'].map((edge) => `-----${edge} OPENSSH ${'PRIVATE'} KEY-----`).join('\nopen-list-test-not-a-real-key\n'),
       GITHUB_TOKEN: 'ghs_openListTestNotARealToken0000',
       OPEN_LIST_REPO: 'example-org/open-list-test-target',
       HOME: '/home/open-list-test-user',

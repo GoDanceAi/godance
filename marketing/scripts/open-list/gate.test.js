@@ -74,7 +74,9 @@ describe('the gate', () => {
   });
 
   test('a value that is set but wrong fails the run instead of skipping it, and the secret is never echoed', async () => {
-    const fakeKey = '-----BEGIN OPENSSH PRIVATE KEY-----\nopen-list-test-not-a-real-key\n-----END OPENSSH PRIVATE KEY-----';
+    // Shaped like a key, and assembled here so that no file in this public
+    // repository holds a private-key block, even a fake one.
+    const fakeKey = ['BEGIN', 'END'].map((edge) => `-----${edge} OPENSSH ${'PRIVATE'} KEY-----`).join('\nopen-list-test-not-a-real-key\n');
     const wrong = {
       'not owner/name': { ...UNSET, OPEN_LIST_REPO: 'not a repository' },
       'this repository': { ...UNSET, OPEN_LIST_REPO: 'godanceai/GODANCE' },

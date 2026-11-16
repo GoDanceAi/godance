@@ -113,8 +113,10 @@ async function writeList({ env, out, removalList, log }) {
     app: originFrom(env, 'PUBLIC_APP_URL', 'https://app.godance.ai'),
   };
 
-  // As the site does it: the recipes are read only once the switch is set.
-  const unset = galleryOffReasons(config, 1);
+  // As the site does it, the recipes are read only once the switch is set:
+  // first the two settings (the count stands in until there are recipes to
+  // count), then whether there is a recipe at all.
+  const unset = galleryOffReasons(config, /* recipes, counted below */ 1);
   if (unset.length > 0) {
     throw new Refusal(
       `the gallery is off (${unset.join(', ')}), so there is no list to write. ` +
