@@ -50,6 +50,8 @@ test.describe('a recipe', () => {
       // Round 10: a recipe's template and variables, null for one that has none (template.spec.ts).
       template: null,
       run: { model: 'gpt-image-2', promptLang: 'en', params: { size: '1024x1024', n: 1 } },
+      // Round 13: every run; a recipe whose JSON lists none has its one run.
+      runs: [{ model: 'gpt-image-2', promptLang: 'en', params: { size: '1024x1024', n: 1 } }],
       url: `${GALLERY}/gallery/${SLUG}`,
       // Round 11: a recipe's input slots, empty for one that takes no input.
       inputs: [],
@@ -74,6 +76,28 @@ test.describe('a recipe', () => {
     expect(parse(video)?.inputs.map((slot) => [slot.slot, slot.role, slot.hint])).toEqual([
       ['opening', 'first_frame', ''], ['style', 'reference_image', ''],
     ]);
+  });
+
+  test('keeps every run of runs it can read, in order, as the round 13 contract has them', () => {
+    const runs = [
+      { model: 'gpt-image-2', prompt_lang: 'en', params: { size: '1024x1024', n: 1 }, cost_cents: 6 },
+      { model: 'seedream-5.0', prompt_lang: 'zh', params: { n: 1, quality: 'high' }, cost_cents: 4 },
+      { model: 'not a model id', prompt_lang: 'en', params: {}, cost_cents: 4 },
+      { model: 'flux-2-pro', prompt_lang: 'fr', params: {}, cost_cents: 4 },
+      'qwen-image-2.0',
+      { model: 'qwen-image-2.0', prompt_lang: 'en', cost_cents: 4 },
+    ];
+    expect(parse(recipe({ runs }))?.runs).toEqual([
+      { model: 'gpt-image-2', promptLang: 'en', params: { size: '1024x1024', n: 1 } },
+      { model: 'seedream-5.0', promptLang: 'zh', params: { n: 1 } },
+      { model: 'qwen-image-2.0', promptLang: 'en', params: {} },
+    ]);
+    // A run in a language the recipe has no prompt in can't be opened, so it is left out.
+    expect(parse(recipe({ prompt: { en: PROMPT_EN }, runs: runs.slice(0, 2) }))?.runs.map((run) => run.model)).toEqual(['gpt-image-2']);
+    // runs that are not a list, or hold nothing the app can read, leave the recipe its one run.
+    for (const odd of ['gpt-image-2', {}, [], [{ model: '' }]]) {
+      expect(parse(recipe({ runs: odd }))?.runs).toEqual([{ model: 'gpt-image-2', promptLang: 'en', params: { size: '1024x1024', n: 1 } }]);
+    }
   });
 
   test('drops input slots it cannot read, whole, and keeps the recipe', () => {

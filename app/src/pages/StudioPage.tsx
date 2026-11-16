@@ -40,6 +40,7 @@ import {
 } from '../lib/studio';
 import {
   fitValues,
+  onAvailableRun,
   readPrefill,
   resolvePrefill,
   templateFromRecipe,
@@ -203,19 +204,21 @@ export default function StudioPage({ modality }: { modality: MediaModality }) {
   // The form's starting values, once both the URL's and the catalog are in.
   useEffect(() => {
     if (!prefill || !models) return;
+    // A gallery recipe opens on the first of its runs whose model the catalog lists.
+    const start = onAvailableRun(prefill, models);
     // "Animate this" picks the cheapest model that starts from a frame, unless the link names one that does.
     const startsFromFrame = models.filter((m) => m.godance.capabilities?.inputs?.first_frame);
     const animate = inputsOn && prefill.animate === true && startsFromFrame.length > 0;
     const asked = animate && startsFromFrame.some((m) => m.id === prefill.values.model);
     const fitted = fitValues(
-      animate && !asked ? { ...prefill.values, model: cheapest(startsFromFrame)!.id } : prefill.values,
+      animate && !asked ? { ...prefill.values, model: cheapest(startsFromFrame)!.id } : start.values,
       models, modality);
     setSlots(inputsOn ? prefill.slots ?? [] : []);
     setAnimating(animate);
     setValues(fitted.values);
     setNote(prefill.note ?? fitted.note ?? null);
-    setRecipe(prefill.recipe ? { recipe: prefill.recipe, lang: prefill.recipe.run.promptLang } : null);
-    setTemplate(prefill.template ?? null);
+    setRecipe(start.recipe ? { recipe: start.recipe, lang: start.recipe.run.promptLang } : null);
+    setTemplate(start.template ?? null);
     setTemplateOpen(false);
     setOwn(prefill.own ?? null);
     setStartedEmpty(!prefill.job && !prefill.recipe && !prefill.own && !prefill.animate
