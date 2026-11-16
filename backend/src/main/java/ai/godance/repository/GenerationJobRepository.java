@@ -128,8 +128,14 @@ public interface GenerationJobRepository extends JpaRepository<GenerationJob, UU
 
     List<GenerationJob> findByStatus(JobStatus status);
 
-    /** The job made for a batch row (V36), if one was: the database allows at most one. */
-    Optional<GenerationJob> findByBatchRowId(UUID batchRowId);
+    /**
+     * The live job of a batch row: the one that is not FAILED or CANCELLED.
+     * The database allows at most one (V41); a row retried on a fallback
+     * (round 14) also has the failed job it replaced, which this is not.
+     */
+    @Query("SELECT j FROM GenerationJob j WHERE j.batchRowId = :batchRowId "
+            + "AND j.status NOT IN (ai.godance.domain.JobStatus.FAILED, ai.godance.domain.JobStatus.CANCELLED)")
+    Optional<GenerationJob> findLiveByBatchRowId(@Param("batchRowId") UUID batchRowId);
 
     // Status changes are conditional updates, so a worker and the sweep can
     // race without either overwriting the other's outcome: whichever ends an

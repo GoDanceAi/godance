@@ -32,6 +32,7 @@ import org.yaml.snakeyaml.Yaml;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+import ai.godance.routing.RoutingPolicyDocuments;
 import ai.godance.service.ParentalNotice;
 import ai.godance.web.dto.ApiKeyDtos;
 import ai.godance.web.dto.AttributionDtos;
@@ -105,6 +106,14 @@ class OpenApiDriftTest {
         m.put("ChatCompletionChunk", ChatCompletionDtos.ChatCompletionChunk.class);
         m.put("ChatChunkChoice", ChatCompletionDtos.ChunkChoice.class);
         m.put("ChatChunkDelta", ChatCompletionDtos.ChunkDeltaBlock.class);
+        m.put("RoutingPolicyRequest", RoutingPolicyDocuments.PolicyBody.class);
+        m.put("RoutingRule", RoutingPolicyDocuments.RuleBody.class);
+        m.put("RoutingCondition", RoutingPolicyDocuments.ConditionBody.class);
+        m.put("RoutingLimits", RoutingPolicyDocuments.LimitsBody.class);
+        m.put("MediaFallback", RoutingPolicyDocuments.FallbackBody.class);
+        m.put("MediaFallbackAlternative", RoutingPolicyDocuments.AlternativeBody.class);
+        m.put("RoutingPolicy", RoutingPolicyDocuments.PolicyView.class);
+        m.put("RoutingPolicyList", RoutingPolicyDocuments.PolicyList.class);
         m.put("ImageGenerationRequest", ImageDtos.ImageGenerationRequest.class);
         m.put("ImageResponse", ImageDtos.ImageGenerationResponse.class);
         m.put("ImageData", ImageDtos.ImageData.class);

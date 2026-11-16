@@ -33,6 +33,7 @@ import ai.godance.repository.ApiKeyRepository;
 import ai.godance.repository.GenerationJobRepository;
 import ai.godance.repository.RecipeBatchRepository;
 import ai.godance.repository.RecipeBatchRowRepository;
+import ai.godance.routing.MediaFallbacks;
 import ai.godance.security.WebhookSigner;
 import ai.godance.service.RecipeRuns.ImageRun;
 import ai.godance.service.RecipeRuns.VideoRun;
@@ -122,6 +123,7 @@ public class RecipeBatchRunner {
     private final WebhookDestinations webhookDestinations;
     private final WebClient webhookClient;
     private final ObjectMapper json;
+    private final MediaFallbacks fallbacks;
     private final TransactionTemplate tx;
 
     public RecipeBatchRunner(RecipeBatchRepository batches, RecipeBatchRowRepository rows,
@@ -130,7 +132,7 @@ public class RecipeBatchRunner {
                              ImageGenerationService images, VideoGenerationService videos,
                              InputService inputs, AuditLogService audit, RecipeBatchViews views,
                              WebhookSigner webhookSigner, WebhookDestinations webhookDestinations,
-                             ObjectMapper json, PlatformTransactionManager txManager) {
+                             ObjectMapper json, MediaFallbacks fallbacks, PlatformTransactionManager txManager) {
         this.batches = batches;
         this.rows = rows;
         this.jobs = jobs;
@@ -146,6 +148,7 @@ public class RecipeBatchRunner {
         this.webhookDestinations = webhookDestinations;
         this.webhookClient = webhookDestinations.client();
         this.json = json;
+        this.fallbacks = fallbacks;
         this.tx = new TransactionTemplate(txManager);
     }
 
@@ -205,11 +208,38 @@ public class RecipeBatchRunner {
                 case DONE -> finish(row, BatchRowStatus.DONE,
                         job.getActualCostCents() == null ? 0 : job.getActualCostCents(), null);
                 // A failed job's estimate went back through the job's own refund: the row cost nothing.
-                case FAILED, CANCELLED -> finish(row, BatchRowStatus.FAILED, 0,
+                // A batch with fallbacks may give the row one more try on another model first.
+                case FAILED -> {
+                    if (!retryOnFallback(batch, row, job)) {
+                        finish(row, BatchRowStatus.FAILED, 0,
+                                job.getErrorMessage() == null ? "the job failed" : job.getErrorMessage());
+                    }
+                }
+                case CANCELLED -> finish(row, BatchRowStatus.FAILED, 0,
                         job.getErrorMessage() == null ? "the job failed" : job.getErrorMessage());
                 default -> { }
             }
         }
+    }
+
+    /**
+     * Round 14: a batch created with {@code "fallbacks": true} retries a row
+     * once when its job failed on what one of the owner's policies covers for
+     * that model (a provider error, a timeout, low health; never a content
+     * refusal). The row goes back to PENDING on the alternative and is started
+     * again through the normal path, so the new job takes its own pre-debit;
+     * the failed one was refunded when it failed. False when the row ends now.
+     */
+    private boolean retryOnFallback(RecipeBatch batch, RecipeBatchRow row, GenerationJob failed) {
+        if (!batch.isFallbacks() || row.getRetriedJobId() != null) return false;
+        String next = fallbacks.alternativeFor(batch.getUserId(), failed.getModel(), failed.getErrorMessage())
+                .orElse(null);
+        if (next == null) return false;
+        Integer rearmed = tx.execute(s -> rows.rearmForFallback(row.getId(), failed.getId(), next));
+        if (rearmed == null || rearmed == 0) return false;
+        log.info("RecipeBatchRunner: row {} of batch {} retried on {} after job {} on {} failed",
+                row.getRowIndex(), batch.getId(), next, failed.getId(), failed.getModel());
+        return true;
     }
 
     private void finish(RecipeBatchRow row, BatchRowStatus status, long costCents, String error) {
@@ -224,7 +254,7 @@ public class RecipeBatchRunner {
      * the batch was cancelled, and put back if it was paused.
      */
     private void recoverClaimed(RecipeBatch batch, RecipeBatchRow row) {
-        GenerationJob made = jobs.findByBatchRowId(row.getId()).orElse(null);
+        GenerationJob made = jobs.findLiveByBatchRowId(row.getId()).orElse(null);
         if (made != null) {
             // Cannot happen while a job and its row's job id are one transaction; never start a second job.
             tx.executeWithoutResult(s -> rows.attachJob(row.getId(), made.getId()));
@@ -312,15 +342,17 @@ public class RecipeBatchRunner {
         // A batch with a ceiling (V38) gives the row's job only what is left of it: the job's own price
         // check refuses it before the pre-debit, and the row fails without a charge.
         Long left = leftOfCeiling(batch);
+        // A row retried on a fallback (round 14) runs on its own model; every other on the batch's.
+        String model = row.getModel() != null ? row.getModel() : batch.getModel();
         try {
             if (batch.getModality() == Modality.IMAGE) {
-                ImageRequest domain = new ImageRequest(batch.getModel(), null, settings.size(), settings.n(),
+                ImageRequest domain = new ImageRequest(model, null, settings.size(), settings.n(),
                         settings.style(), settings.quality());
                 ImageRun run = runs.image(userId, domain, null, recipe, origin);
                 images.executeAsync(userId, batch.getApiKeyId(), run.request(), null, run.origin(), run.inputs(),
                         left);
             } else {
-                VideoRequest domain = new VideoRequest(batch.getModel(), null, settings.size(), settings.seconds(),
+                VideoRequest domain = new VideoRequest(model, null, settings.size(), settings.seconds(),
                         settings.n());
                 VideoRun run = runs.video(userId, domain, null, recipe, VideoInputs.Refs.NONE, origin);
                 videos.submit(userId, batch.getApiKeyId(), run.request(), null, run.origin(), run.inputs(), left);
