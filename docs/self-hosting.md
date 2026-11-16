@@ -54,11 +54,13 @@ of that run is summarised in [the last section](#how-this-guide-was-tested).
 ## 2. Requirements
 
 - **A server** running Linux with Docker Engine and Docker Compose v2.
-  Production runs on 4 GB of RAM; the stack's Java heap is set for that
-  (`JAVA_OPTS`). The trial below used about 1.1 GB once running. Use 2 vCPUs
-  or more: the images are built on the server.
-- **Disk:** about 1.3 GB for the images (the API's is 615 MB), more for
-  build caches while building, plus your data. Start with 20 GB and watch it.
+  Production runs on 4 GB of RAM; the API's Java heap is capped for that
+  (`JAVA_OPTS`, 768 MB). The tested trial used about 0.85 GB once running,
+  most of it the API. Use 2 vCPUs or more: the images are built on the
+  server, which took about 4 minutes there with no build cache.
+- **Disk:** about 1.4 GB for the images (the API's is 615 MB, Postgres's
+  420 MB), about 2 GB more of build cache, plus your data. Start with 20 GB
+  and watch it.
 - **Two host names** pointing at the server: one for the app and API (say
   `godance.example.test`), one for files (say `files.godance.example.test`),
   with TCP ports 80 and 443 open (UDP 443 too, for HTTP/3). Caddy obtains
@@ -238,6 +240,11 @@ list and delete objects in the bucket; the API creates the bucket at startup
 if it is missing and the key may. Objects stay private: every link is
 signed, for `OBJECT_STORAGE_PRESIGN_TTL` (7 days at most). Production uses
 this mode, with DigitalOcean Spaces.
+
+Switching keeps the bundled MinIO's files: its volume `godance_minio_data`
+and the network `godance_storage` stay, even through `docker compose down -v`,
+until you copy what you need and remove them (`docker volume rm`,
+`docker network rm`).
 
 ## 4. Configuration reference
 
@@ -918,12 +925,21 @@ Fonts, and (as above) the gallery list, so people's browsers contact
 
 On 2026-11-16, from a fresh clone of the branch that added this guide, on a
 Linux machine with Docker Engine 29.1.3 and Compose 2.40.3, following the
-quick start's trial variant (on port 18080, because 8080 was taken). A
-WireMock server stood in for the providers. Checked: `/healthz` green, sign-up
-in the app, verification from the log, the admin bootstrap, two-factor
-sign-in, an admin credit adjustment, a chat completion, an image job stored
-in the bundled MinIO and fetched through the files host, the files host
-refusing writes from outside, forged payment webhooks refused, a model
-switched off, and the Studio loading. A server with a domain and Let's
-Encrypt was not part of that run: there, only the four address values
-differ, and CI checks that Caddy accepts that configuration.
+quick start's trial variant on port 18080 (the machine's 8080 is kept for
+other work). A WireMock server stood in for the providers: OpenAI answered,
+the others refused as a provider refuses a request without a key.
+
+Checked: `/healthz` green 38 seconds after `up`; sign-up in the app;
+verification from the log; the admin bootstrap; two-factor sign-in; an admin
+credit adjustment; a chat completion; an image job stored in the bundled
+MinIO and fetched through the files host; the files host refusing writes and
+MinIO's routes from outside; forged payment webhooks refused; a model with no
+key answered by its fallback, and a chain with no keys failing; a model
+switched off; the Studio loading; a backup, the stack wiped, and the restore
+(the admin signing in with two-factor, the balance and the stored image
+back); and the switch to external S3-compatible storage. Three steps of this
+guide were corrected along the way.
+
+A server with a domain and Let's Encrypt was not part of that run: there,
+only the address values differ, and CI checks that Caddy accepts that
+configuration.
