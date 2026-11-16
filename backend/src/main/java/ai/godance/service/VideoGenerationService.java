@@ -105,12 +105,24 @@ public class VideoGenerationService {
      */
     public UUID submit(UUID userId, UUID apiKeyId, VideoRequest submitted, String webhookUrl,
                        JobOrigin origin, VideoInputs.Refs inputs) {
+        return submit(userId, apiKeyId, submitted, webhookUrl, origin, inputs, null);
+    }
+
+    /**
+     * {@link #submit(UUID, UUID, VideoRequest, String, JobOrigin, VideoInputs.Refs)}
+     * with the most the request may cost: a price above {@code maxCostCents} is
+     * refused ({@link MaxCostExceededException}) before any input is loaded or
+     * anything is charged. Null is no ceiling.
+     */
+    public UUID submit(UUID userId, UUID apiKeyId, VideoRequest submitted, String webhookUrl,
+                       JobOrigin origin, VideoInputs.Refs inputs, Long maxCostCents) {
         webhookDestinations.requireAllowed(webhookUrl);   // before any charge (spec risk R-02)
         // With inputs switched off, a request that names one answers inputs_disabled and nothing else.
         videoInputs.requireEnabledFor(inputs);
         // 404 / 400 (including an n the model cannot return) before any charge.
         // The quote is the pre-debit, the same figure POST /v1/estimates returns.
         Quote quote = quotes.video(submitted.model(), submitted.n(), submitted.durationSeconds());
+        MaxCostExceededException.requireWithin(quote.costCents(), maxCostCents);
         ModelInfo model = quote.model();
         // The length that is priced is the length the provider is asked for:
         // the adapter never falls back to a default of its own.

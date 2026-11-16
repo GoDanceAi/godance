@@ -47,7 +47,10 @@ scaffold and entity-porting plan.
 4. **No agent orchestration in v1.** No HITL gates, no tool-calling, no
    agent runtime. Model in, content out. Architect the
    Provider/Gateway/Router so an orchestrator could be added later, but do
-   not ship it.
+   not ship it. The MCP server at `/mcp` (round 13) is within this: it
+   exposes the existing API as tools to agents that run elsewhere, and
+   Godance runs no agent and makes no tool calls of its own (operator
+   decision, 2026-11-15).
 5. **OpenAI-compatible REST contract.** The target contract is
    `/v1/chat/completions`, `/v1/images/generations`, `/v1/videos/generations`,
    `/v1/audio/speech`, `/v1/audio/transcriptions`, `/v1/embeddings`,

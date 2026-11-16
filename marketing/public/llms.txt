@@ -22,6 +22,9 @@
 - OpenAPI 3.1 description of every route, for tools — https://api.godance.ai/v1/openapi.yaml
 - Without code: two n8n templates that run a Google Sheet's rows as Godance image or video
   jobs — https://github.com/GoDanceAi/godance/tree/main/integrations/n8n
+- From inside an AI assistant (Claude Code, Cursor, any MCP client): the same API as MCP tools
+  at https://api.godance.ai/mcp, with the same key and caps; every tool that spends takes
+  max_cost_cents — https://godance.ai/docs/#mcp
 
 ## API surface (OpenAI-compatible)
 

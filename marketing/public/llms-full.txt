@@ -6,6 +6,8 @@
 > providers, with one balance. The summary is https://godance.ai/llms.txt; the machine
 > description (OpenAPI 3.1) is https://api.godance.ai/v1/openapi.yaml.
 
+An MCP client (Claude Code, Cursor, …) can call this API as tools at https://api.godance.ai/mcp, with the same key, caps and max_cost_cents on every tool that spends: https://godance.ai/docs/#mcp.
+
 Contents: Authentication · Models and capabilities · Estimates · Chat · Images · Edits ·
 Files and inputs · Video · Jobs · Recipes · Batches · Errors · Limits and retention · Regions
 

@@ -261,6 +261,9 @@ public class SecurityConfig {
                         // Price of an image or video request before it is sent; charges nothing.
                         .pathMatchers(HttpMethod.POST, "/v1/estimates")
                                 .hasAnyAuthority(sessionOr(ApiKeyAuthFilter.API_KEY_AUTHORITY))
+                        // The MCP server (round 13): the API above as tools for an agent's MCP client.
+                        // An API key only: never public, and a browser session cannot call it.
+                        .pathMatchers("/mcp").hasAuthority(ApiKeyAuthFilter.API_KEY_AUTHORITY)
                         // Everything else (keys, billing, webhook secret, conversations,
                         // account) needs a signed-in session. Deny by default, so a
                         // leaked key can't mint a key that outlives it, read the webhook

@@ -101,6 +101,14 @@ public class RecipeBatch {
     @Column(name = "estimated_total_cents", nullable = false, updatable = false)
     private long estimatedTotalCents;
 
+    /**
+     * The most the whole batch may cost (V38), or null for no ceiling. Set
+     * when the batch is made, never changed: each row's job is priced against
+     * what is left of it.
+     */
+    @Column(name = "max_cost_cents", updatable = false)
+    private Long maxCostCents;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -164,6 +172,9 @@ public class RecipeBatch {
 
     public int getRowsTotal() { return rowsTotal; }
     public void setRowsTotal(int rowsTotal) { this.rowsTotal = rowsTotal; }
+
+    public Long getMaxCostCents() { return maxCostCents; }
+    public void setMaxCostCents(Long maxCostCents) { this.maxCostCents = maxCostCents; }
 
     public long getEstimatedTotalCents() { return estimatedTotalCents; }
     public void setEstimatedTotalCents(long estimatedTotalCents) { this.estimatedTotalCents = estimatedTotalCents; }

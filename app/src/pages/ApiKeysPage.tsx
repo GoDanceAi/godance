@@ -1,7 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { ApiError, type ApiKeySummary, type ImageResponse } from '../lib/api';
+import { API_BASE, ApiError, type ApiKeySummary, type ImageResponse } from '../lib/api';
 import { formatCents } from '../lib/auth';
+import { API_KEY_ENV, API_KEY_VAR } from '../lib/run-code';
+import CodeFigure from '../components/CodeFigure';
+import Dialog from '../components/Dialog';
 import {
   capState,
   DEFAULT_DAILY_CAP,
@@ -39,6 +42,8 @@ export default function ApiKeysPage() {
   const [savingId, setSavingId] = useState<string | null>(null);
   // The key whose limits are open in the dialog.
   const [editing, setEditing] = useState<ApiKeySummary | null>(null);
+  // The key whose MCP setup is open.
+  const [mcpFor, setMcpFor] = useState<ApiKeySummary | null>(null);
 
   const load = async () => {
     try {
@@ -140,6 +145,8 @@ export default function ApiKeysPage() {
                 <td className="px-3 py-3">
                   <p className="min-w-[9rem] break-words font-medium text-fg">{k.name}</p>
                   <p className="mt-0.5 whitespace-nowrap font-mono text-xs text-fg-muted">gd_live_{k.prefix}…</p>
+                  <button type="button" onClick={() => setMcpFor(k)} aria-label={`Use ${k.name} with MCP`}
+                          className="mt-1 text-xs font-medium text-brand-600 hover:underline">Use with MCP</button>
                 </td>
                 <td className="px-3 py-3 text-fg-muted">
                   {k.image_response ? (
@@ -206,7 +213,50 @@ export default function ApiKeysPage() {
           onSaved={(updated) => setKeys((cur) => cur && cur.map((k) => (k.id === updated.id ? { ...k, ...updated } : k)))}
         />
       )}
+
+      {mcpFor && <McpSetup apiKey={mcpFor} onClose={() => setMcpFor(null)} />}
     </div>
+  );
+}
+
+/**
+ * How to connect an AI assistant to Godance's MCP server with a key: the
+ * setup for Claude Code, for Cursor and for any other MCP client. Every
+ * snippet reads the key from GODANCE_API_KEY; none of them holds it, and the
+ * page never had it to give (the plaintext is shown once, when the key is
+ * made). Claude Code's line is its documented `claude mcp add` with a
+ * header, which the shell fills in; Cursor's is its documented mcp.json,
+ * which reads `${env:…}` itself.
+ */
+function McpSetup({ apiKey, onClose }: { apiKey: ApiKeySummary; onClose: () => void }) {
+  const url = `${API_BASE.replace(/\/+$/, '')}/mcp`;
+  const cursor = JSON.stringify({
+    mcpServers: { godance: { url, headers: { Authorization: 'Bearer ${env:' + API_KEY_ENV + '}' } } },
+  }, null, 2);
+  return (
+    <Dialog title={`Use “${apiKey.name}” with MCP`} onClose={onClose}>
+      <p className="text-sm text-fg-muted">
+        An AI assistant that speaks MCP can search recipes, price a request, generate images and video, and follow
+        the jobs, as this key and within its caps. Every tool that spends takes{' '}
+        <code className="code-chip">max_cost_cents</code> and charges nothing above it.
+      </p>
+      <p className="mt-2 text-sm text-fg-muted">
+        Set <code className="code-chip">{API_KEY_ENV}</code> to this key (<span className="font-mono">gd_live_{apiKey.prefix}…</span>,
+        as you saved it when you made it). These read it from there and never contain it.
+      </p>
+      <div className="mt-4 space-y-4">
+        <CodeFigure title="Claude Code"
+                    code={`claude mcp add --transport http godance ${url} --header "Authorization: Bearer ${API_KEY_VAR}"`}
+                    note={`Run it where ${API_KEY_ENV} is set.`} />
+        <CodeFigure title="Cursor" code={cursor} note="In ~/.cursor/mcp.json, or .cursor/mcp.json in a project." />
+        <CodeFigure title="Another MCP client"
+                    code={`URL: ${url}\nTransport: Streamable HTTP\nHeader: Authorization: Bearer ${API_KEY_VAR}`} />
+      </div>
+      <p className="mt-4 text-xs text-fg-faint">
+        The tools and their rules: <a className="text-brand-600 hover:underline" href="https://godance.ai/docs/#mcp">Use
+        from an AI assistant (MCP)</a>.
+      </p>
+    </Dialog>
   );
 }
 

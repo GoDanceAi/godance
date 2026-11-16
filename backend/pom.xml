@@ -28,6 +28,8 @@
         <stripe-java.version>28.4.0</stripe-java.version>
         <aws-sdk.version>2.30.7</aws-sdk.version>
         <git-commit-id-plugin.version>9.0.1</git-commit-id-plugin.version>
+        <!-- 2.1.0 (2026-10-15): the release Spring AI 2.0.2 GA builds its MCP transports on. -->
+        <mcp-sdk.version>2.1.0</mcp-sdk.version>
 
         <!-- CVE override on top of the Spring Boot 4.1.1 BOM. Same-line patch bump;
              drop it once the BOM manages a fixed version. Checked against OSV
@@ -151,6 +153,17 @@
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>s3</artifactId>
+        </dependency>
+
+        <!-- MCP server at /mcp (round 13 brief 01): the official MCP Java SDK. `mcp` is
+             mcp-core plus its Jackson 3 binding (mcp-json-jackson3, tools.jackson), so it
+             brings no Jackson 2. Godance serves it over its own WebFlux transport
+             (ai.godance.mcp): the SDK's Spring transports moved to Spring AI, whose 2.0 line
+             is built for Boot 4.0. Tests use the SDK's own client. -->
+        <dependency>
+            <groupId>io.modelcontextprotocol.sdk</groupId>
+            <artifactId>mcp</artifactId>
+            <version>${mcp-sdk.version}</version>
         </dependency>
 
         <!-- Test -->

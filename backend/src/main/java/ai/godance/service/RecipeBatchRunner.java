@@ -82,6 +82,12 @@ import reactor.core.scheduler.Schedulers;
  * it. Any other refusal of a row (an input deleted since the batch was
  * made, say) fails that row alone.
  *
+ * <p><b>A batch with a ceiling</b> ({@code max_cost_cents}, V38) gives each
+ * row's job only what is left of it. Rows are priced when they start, so a
+ * price that rose since the batch was made can make a row cost more than is
+ * left: that row fails before its pre-debit, and the batch never costs more
+ * than its ceiling.
+ *
  * <p>Every change of state is a conditional update, so a cancel, a resume
  * and a pass can overlap and none undoes another.
  */
@@ -303,17 +309,49 @@ public class RecipeBatchRunner {
                 BatchRowInputs.fromStored(row.getInputs()));
         JobOrigin origin = JobOrigin.ofBatchRow(row.getId(), batch.getCreatedByChannel());
         BatchSettings settings = BatchSettings.of(batch.getParams());
-        if (batch.getModality() == Modality.IMAGE) {
-            ImageRequest domain = new ImageRequest(batch.getModel(), null, settings.size(), settings.n(),
-                    settings.style(), settings.quality());
-            ImageRun run = runs.image(userId, domain, null, recipe, origin);
-            images.executeAsync(userId, batch.getApiKeyId(), run.request(), null, run.origin(), run.inputs());
-        } else {
-            VideoRequest domain = new VideoRequest(batch.getModel(), null, settings.size(), settings.seconds(),
-                    settings.n());
-            VideoRun run = runs.video(userId, domain, null, recipe, VideoInputs.Refs.NONE, origin);
-            videos.submit(userId, batch.getApiKeyId(), run.request(), null, run.origin(), run.inputs());
+        // A batch with a ceiling (V38) gives the row's job only what is left of it: the job's own price
+        // check refuses it before the pre-debit, and the row fails without a charge.
+        Long left = leftOfCeiling(batch);
+        try {
+            if (batch.getModality() == Modality.IMAGE) {
+                ImageRequest domain = new ImageRequest(batch.getModel(), null, settings.size(), settings.n(),
+                        settings.style(), settings.quality());
+                ImageRun run = runs.image(userId, domain, null, recipe, origin);
+                images.executeAsync(userId, batch.getApiKeyId(), run.request(), null, run.origin(), run.inputs(),
+                        left);
+            } else {
+                VideoRequest domain = new VideoRequest(batch.getModel(), null, settings.size(), settings.seconds(),
+                        settings.n());
+                VideoRun run = runs.video(userId, domain, null, recipe, VideoInputs.Refs.NONE, origin);
+                videos.submit(userId, batch.getApiKeyId(), run.request(), null, run.origin(), run.inputs(), left);
+            }
+        } catch (MaxCostExceededException over) {
+            throw new ResponseStatusException(over.getStatusCode(), "this row would cost "
+                    + over.estimatedCostCents() + " cents, more than the " + left + " cents left of the batch's "
+                    + "max_cost_cents (" + batch.getMaxCostCents() + "); nothing was charged");
         }
+    }
+
+    /**
+     * What is left of a batch's ceiling ({@code max_cost_cents}, V38) for its
+     * next row's job, or null for a batch without one. Counted against it:
+     * what the DONE rows were charged, and the pre-debit of every job of a row
+     * still running, which is never less than what that job is charged.
+     */
+    private Long leftOfCeiling(RecipeBatch batch) {
+        Long ceiling = batch.getMaxCostCents();
+        if (ceiling == null) return null;
+        long committed = 0;
+        for (RecipeBatchRowRepository.StatusCount count : rows.countByStatus(List.of(batch.getId()))) {
+            committed += count.getCostCents();
+        }
+        for (RecipeBatchRow running : rows.findRunning(batch.getId())) {
+            if (running.getJobId() == null) continue;   // the row being started now: it has no job yet
+            committed += jobs.findById(running.getJobId())
+                    .map(job -> job.getEstimatedCostCents() == null ? 0L : job.getEstimatedCostCents())
+                    .orElse(0L);
+        }
+        return Math.max(0L, ceiling - committed);
     }
 
     /** The row goes back to PENDING and the batch pauses, together. Nothing was charged for the row. */
