@@ -295,6 +295,10 @@ const runOf = (params, output) =>
     // The job's actualCostCents at the time it was generated.
     cost_cents: wholeNumber(0, tag('run-cost', 'every run states its cost, a whole number of cents')),
     generated_on: isoDate(),
+    // The day the operator approved this run, for a run added to a recipe that
+    // was already published (the import tool's rerun stage). A run published
+    // with its recipe has none: review.approved_on covers it.
+    approved_on: isoDate().optional(),
     outputs: z
       .array(output, { error: tag('run-outputs', 'every run has at least one output') })
       .min(1, tag('run-outputs', 'every run has at least one output')),
