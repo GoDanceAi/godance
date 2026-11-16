@@ -9,7 +9,16 @@ export function parseUsdCents(text: string): number | null {
 }
 
 export function centsInput(cents: number): string {
-  return `${Math.floor(cents / 100)}.${String(cents % 100).padStart(2, '0')}`;
+  const integer = BigInt(cents);
+  return `${integer / 100n}.${String(integer % 100n).padStart(2, '0')}`;
+}
+
+/** Preserve the last cent even at the safe-integer boundary in review copy. */
+export function formatUsdCents(cents: number): string {
+  if (!Number.isSafeInteger(cents)) return 'Unavailable';
+  const integer = BigInt(cents);
+  const positive = integer < 0n ? -integer : integer;
+  return `${integer < 0n ? '-' : ''}$${(positive / 100n).toLocaleString('en-US')}.${String(positive % 100n).padStart(2, '0')}`;
 }
 
 export interface AutoRecharge {

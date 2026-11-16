@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { apiFetch, ApiError } from '../lib/api';
-import { useAuth, formatCents } from '../lib/auth';
+import { useAuth } from '../lib/auth';
 import { useReferral } from '../lib/referral';
-import { centsInput, parseUsdCents } from '../lib/billing';
+import { centsInput, parseUsdCents, formatUsdCents as formatCents } from '../lib/billing';
 import AutoRechargePanel from '../components/billing/AutoRechargePanel';
 import RecentUsagePanel from '../components/billing/RecentUsagePanel';
 

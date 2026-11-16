@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { ApiError } from '../../lib/api';
-import { formatCents } from '../../lib/auth';
-import { centsInput, DRAFT_AUTO_RECHARGE_CONSENT, getAutoRecharge, parseUsdCents, setAutoRecharge, type AutoRecharge } from '../../lib/billing';
+import { centsInput, DRAFT_AUTO_RECHARGE_CONSENT, formatUsdCents as formatCents, getAutoRecharge, parseUsdCents, setAutoRecharge, type AutoRecharge } from '../../lib/billing';
 
 const describe = (error: unknown) => error instanceof Error ? error.message : 'Could not load auto-recharge.';
 
@@ -110,7 +109,14 @@ function RechargeReview({ threshold, amount, busy, onCancel, onConfirm }: { thre
     dialog.current?.showModal();
     return () => { dialog.current?.close(); before?.focus(); };
   }, []);
-  return <dialog ref={dialog} aria-labelledby="recharge-review-title" onCancel={(event) => { event.preventDefault(); onCancel(); }} className="m-auto w-full max-w-lg rounded-md border border-border bg-surface p-6 text-fg shadow-xl backdrop:bg-black/40">
+  return <dialog ref={dialog} aria-labelledby="recharge-review-title" onCancel={(event) => { event.preventDefault(); onCancel(); }} onKeyDown={(event) => {
+    if (event.key !== 'Tab') return;
+    const buttons = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')];
+    const first = buttons[0];
+    const last = buttons.at(-1);
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+    if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+  }} className="m-auto w-full max-w-lg rounded-md border border-border bg-surface p-6 text-fg shadow-xl backdrop:bg-black/40">
     <h2 id="recharge-review-title" className="text-lg font-semibold">Review auto-recharge</h2>
     <p className="mt-4">When your balance falls below <strong>{formatCents(threshold)} USD</strong>, charge your saved card <strong>{formatCents(amount)} USD</strong> to add credits.</p>
     <p className="mt-4 text-sm text-fg-muted">{DRAFT_AUTO_RECHARGE_CONSENT}</p>

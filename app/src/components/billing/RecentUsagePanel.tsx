@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { formatCents } from '../../lib/auth';
-import { getRecentUsage, type CustomerUsage } from '../../lib/billing';
+import { formatUsdCents as formatCents, getRecentUsage, type CustomerUsage } from '../../lib/billing';
 
 export default function RecentUsagePanel() {
   const [rows, setRows] = useState<CustomerUsage[]>([]);
