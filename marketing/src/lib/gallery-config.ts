@@ -24,14 +24,27 @@ export interface GalleryConfig {
    * Turn it on only once the app side is live.
    */
   runThis: boolean;
+  /**
+   * How many published recipes two models must both have a run on before the
+   * gallery builds a page comparing them (round 13). Below it there is no
+   * page and no link.
+   */
+  compareMin: number;
 }
 
-/** The operator edits these four values to switch the gallery on. */
+/** The fewest recipes a comparison page is built from, unless GALLERY_COMPARE_MIN says otherwise. */
+export const DEFAULT_COMPARE_MIN = 8;
+
+/**
+ * The operator edits the first four values to switch the gallery on.
+ * compareMin has a default and needs no edit.
+ */
 export const galleryConfig: GalleryConfig = {
   mediaBaseUrl: '',
   removalContact: '',
   outputLicence: '',
   runThis: false,
+  compareMin: DEFAULT_COMPARE_MIN,
 };
 
 /**
@@ -44,6 +57,7 @@ export const GALLERY_ENV = {
   removalContact: 'GALLERY_REMOVAL_CONTACT',
   outputLicence: 'GALLERY_OUTPUT_LICENCE',
   runThis: 'GALLERY_RUN_THIS',
+  compareMin: 'GALLERY_COMPARE_MIN',
 } as const;
 
 type Env = Record<string, string | undefined>;
@@ -74,6 +88,14 @@ function mediaBase(value: string): string {
   return url.href.endsWith('/') ? url.href : `${url.href}/`;
 }
 
+/** A number of recipes: a whole number, at least 1. Empty means the default. */
+function recipeCount(value: string, name: string): number {
+  const v = value.trim();
+  if (v === '') return DEFAULT_COMPARE_MIN;
+  if (/^\d+$/.test(v) && Number(v) >= 1) return Number(v);
+  throw new Error(`gallery: ${name} must be a whole number of recipes, at least 1, not "${value}"`);
+}
+
 /** The removal contact as an email address or an http(s) URL, or '' when unset. */
 function contact(value: string): string {
   const trimmed = value.trim();
@@ -94,5 +116,6 @@ export function resolveGalleryConfig(env: Env = globalThis.process?.env ?? {}): 
     removalContact: contact(pick('removalContact', galleryConfig.removalContact)),
     outputLicence: pick('outputLicence', galleryConfig.outputLicence).trim(),
     runThis: flag(pick('runThis', String(galleryConfig.runThis)), GALLERY_ENV.runThis),
+    compareMin: recipeCount(pick('compareMin', String(galleryConfig.compareMin)), GALLERY_ENV.compareMin),
   };
 }

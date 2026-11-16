@@ -1,0 +1,70 @@
+{
+  "slug": "salt-marsh-heron",
+  "title": {
+    "en": "Salt marsh heron",
+    "zh": "盐沼里的鹭"
+  },
+  "modality": "IMAGE",
+  "tags": [
+    "wildlife"
+  ],
+  "prompt": {
+    "en": "A grey heron standing in a salt marsh at dawn, mist over the reeds, telephoto wildlife photograph.",
+    "zh": "黎明时分，一只苍鹭站在盐沼中，芦苇上笼罩着薄雾，长焦野生动物摄影。",
+    "zh_origin": "list"
+  },
+  "runs": [
+    {
+      "model": "gpt-image-2",
+      "prompt_lang": "en",
+      "params": {
+        "size": "1536x1024",
+        "n": 1
+      },
+      "cost_cents": 6,
+      "generated_on": "2026-11-17",
+      "outputs": [
+        {
+          "file": "salt-marsh-heron/gpt-image-2-0.webp",
+          "thumb": "salt-marsh-heron/gpt-image-2-0-480.webp",
+          "content_type": "image/webp",
+          "width": 1536,
+          "height": 1024
+        }
+      ]
+    },
+    {
+      "model": "seedream-5.0",
+      "prompt_lang": "en",
+      "params": {
+        "n": 1
+      },
+      "cost_cents": 4,
+      "generated_on": "2026-11-22",
+      "approved_on": "2026-11-23",
+      "outputs": [
+        {
+          "file": "salt-marsh-heron/seedream-5.0-0.webp",
+          "thumb": "salt-marsh-heron/seedream-5.0-0-480.webp",
+          "content_type": "image/webp",
+          "width": 1024,
+          "height": 1024
+        }
+      ]
+    }
+  ],
+  "source": {
+    "list": "example-org/invented-image-prompts",
+    "list_commit": "0000000000000000000000000000000000000000",
+    "licence": "CC0-1.0",
+    "author": "fixture_salt",
+    "author_url": "https://example.com/@fixture_salt",
+    "original_url": "https://example.com/@fixture_salt/posts/12008",
+    "changes": []
+  },
+  "review": {
+    "approved_on": "2026-11-18",
+    "standard_version": 2
+  },
+  "published_on": "2026-11-18"
+}

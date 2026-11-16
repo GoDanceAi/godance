@@ -1,0 +1,70 @@
+{
+  "slug": "quiet-library-stairwell",
+  "title": {
+    "en": "Quiet library stairwell",
+    "zh": "安静的图书馆楼梯间"
+  },
+  "modality": "IMAGE",
+  "tags": [
+    "interior"
+  ],
+  "prompt": {
+    "en": "A spiral stairwell in an old library, oak handrail, dust in a beam of light, looking down.",
+    "zh": "老图书馆里的旋转楼梯间，橡木扶手，一束光中的浮尘，俯视角度。",
+    "zh_origin": "list"
+  },
+  "runs": [
+    {
+      "model": "gpt-image-2",
+      "prompt_lang": "en",
+      "params": {
+        "size": "1024x1536",
+        "n": 1
+      },
+      "cost_cents": 6,
+      "generated_on": "2026-11-16",
+      "outputs": [
+        {
+          "file": "quiet-library-stairwell/gpt-image-2-0.webp",
+          "thumb": "quiet-library-stairwell/gpt-image-2-0-480.webp",
+          "content_type": "image/webp",
+          "width": 1024,
+          "height": 1536
+        }
+      ]
+    },
+    {
+      "model": "seedream-5.0",
+      "prompt_lang": "en",
+      "params": {
+        "n": 1
+      },
+      "cost_cents": 4,
+      "generated_on": "2026-11-22",
+      "approved_on": "2026-11-23",
+      "outputs": [
+        {
+          "file": "quiet-library-stairwell/seedream-5.0-0.webp",
+          "thumb": "quiet-library-stairwell/seedream-5.0-0-480.webp",
+          "content_type": "image/webp",
+          "width": 1024,
+          "height": 1024
+        }
+      ]
+    }
+  ],
+  "source": {
+    "list": "example-org/invented-image-prompts",
+    "list_commit": "0000000000000000000000000000000000000000",
+    "licence": "CC0-1.0",
+    "author": "fixture_quiet",
+    "author_url": "https://example.com/@fixture_quiet",
+    "original_url": "https://example.com/@fixture_quiet/posts/12007",
+    "changes": []
+  },
+  "review": {
+    "approved_on": "2026-11-17",
+    "standard_version": 2
+  },
+  "published_on": "2026-11-17"
+}

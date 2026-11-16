@@ -1,0 +1,89 @@
+{
+  "slug": "neon-stall-poster",
+  "title": {
+    "en": "Neon stall poster, \"Open | Late\"",
+    "zh": "霓虹小吃摊海报“Open | Late”"
+  },
+  "modality": "IMAGE",
+  "tags": [
+    "poster",
+    "street"
+  ],
+  "prompt": {
+    "en": "A poster of a street food stall under a pink neon sign that reads \"Open | Late\", rain on the pavement, bold flat shapes.",
+    "zh": "一张街边小吃摊的海报，粉色霓虹招牌上写着“Open | Late”，雨落在人行道上，大块平涂造型。",
+    "zh_origin": "machine",
+    "template": {
+      "en": "A poster of a street food stall under a {{sign colour}} neon sign that reads \"{{sign text}}\", rain on the pavement, bold flat shapes.",
+      "zh": "一张街边小吃摊的海报，{{sign colour}}霓虹招牌上写着“{{sign text}}”，雨落在人行道上，大块平涂造型。"
+    },
+    "variables": [
+      {
+        "name": "sign colour",
+        "default": "pink",
+        "zh_default": "粉色"
+      },
+      {
+        "name": "sign text",
+        "default": "Open | Late"
+      }
+    ]
+  },
+  "runs": [
+    {
+      "model": "gpt-image-2",
+      "prompt_lang": "zh",
+      "params": {
+        "size": "1024x1536",
+        "n": 1
+      },
+      "cost_cents": 9,
+      "generated_on": "2026-11-09",
+      "outputs": [
+        {
+          "file": "neon-stall-poster/gpt-image-2-0.webp",
+          "thumb": "neon-stall-poster/gpt-image-2-0-480.webp",
+          "content_type": "image/webp",
+          "width": 1024,
+          "height": 1536
+        }
+      ]
+    },
+    {
+      "model": "flux-2-pro",
+      "prompt_lang": "en",
+      "params": {
+        "size": "1024x1536",
+        "n": 1
+      },
+      "cost_cents": 4,
+      "generated_on": "2026-11-10",
+      "outputs": [
+        {
+          "file": "neon-stall-poster/flux-2-pro-0.webp",
+          "thumb": "neon-stall-poster/flux-2-pro-0-480.webp",
+          "content_type": "image/webp",
+          "width": 1024,
+          "height": 1536
+        }
+      ]
+    }
+  ],
+  "source": {
+    "list": "example-org/invented-image-prompts",
+    "list_commit": "4f0c2a9e8b7d6c5f4e3d2c1b0a9f8e7d6c5b4a39",
+    "licence": "MIT",
+    "author": "fixture_noor",
+    "author_url": "https://example.com/@fixture_noor",
+    "original_url": "https://example.com/@fixture_noor/posts/21003",
+    "changes": [
+      "placeholders rewritten as {{name}}",
+      "translated to Chinese"
+    ]
+  },
+  "review": {
+    "approved_on": "2026-11-11",
+    "standard_version": 2
+  },
+  "published_on": "2026-11-11"
+}

@@ -1,0 +1,72 @@
+{
+  "slug": "amber-tram-in-snow",
+  "title": {
+    "en": "Amber tram in snow",
+    "zh": "雪中的琥珀色电车"
+  },
+  "modality": "IMAGE",
+  "tags": [
+    "street",
+    "winter"
+  ],
+  "prompt": {
+    "en": "An amber tram crossing a snowy square at blue hour, warm window light, falling snow, wide street photograph.",
+    "zh": "蓝调时刻，一辆琥珀色电车穿过积雪的广场，温暖的车窗灯光，飘落的雪，广角街头摄影。",
+    "zh_origin": "list"
+  },
+  "runs": [
+    {
+      "model": "gpt-image-2",
+      "prompt_lang": "en",
+      "params": {
+        "size": "1024x1024",
+        "n": 1
+      },
+      "cost_cents": 6,
+      "generated_on": "2026-11-10",
+      "outputs": [
+        {
+          "file": "amber-tram-in-snow/gpt-image-2-0.webp",
+          "thumb": "amber-tram-in-snow/gpt-image-2-0-480.webp",
+          "content_type": "image/webp",
+          "width": 1024,
+          "height": 1024
+        }
+      ]
+    },
+    {
+      "model": "seedream-5.0",
+      "prompt_lang": "en",
+      "params": {
+        "size": "1024x1024",
+        "n": 1
+      },
+      "cost_cents": 4,
+      "generated_on": "2026-11-22",
+      "approved_on": "2026-11-23",
+      "outputs": [
+        {
+          "file": "amber-tram-in-snow/seedream-5.0-0.webp",
+          "thumb": "amber-tram-in-snow/seedream-5.0-0-480.webp",
+          "content_type": "image/webp",
+          "width": 1024,
+          "height": 1024
+        }
+      ]
+    }
+  ],
+  "source": {
+    "list": "example-org/invented-image-prompts",
+    "list_commit": "0000000000000000000000000000000000000000",
+    "licence": "CC0-1.0",
+    "author": "fixture_amber",
+    "author_url": "https://example.com/@fixture_amber",
+    "original_url": "https://example.com/@fixture_amber/posts/12001",
+    "changes": []
+  },
+  "review": {
+    "approved_on": "2026-11-11",
+    "standard_version": 2
+  },
+  "published_on": "2026-11-11"
+}

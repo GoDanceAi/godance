@@ -1,0 +1,34 @@
+---
+/**
+ * On a model's page: the comparison pages it has, each with the other model
+ * and how many recipes it holds, and a link to all of them. Nothing at all
+ * when the model has none, as below the threshold there is no page to link.
+ */
+import { COMPARE_PATH, comparePath, comparisons } from '../../lib/gallery-compare';
+import { loadGallery } from '../../lib/gallery-recipes';
+
+interface Props {
+  model: string;
+}
+
+const { model } = Astro.props;
+const gallery = await loadGallery();
+const theirs = comparisons(gallery.recipes, gallery.config.compareMin).filter((each) => each.a === model || each.b === model);
+const link = 'underline';
+const linkStyle = 'color: var(--color-primary)';
+---
+
+{theirs.length > 0 && (
+  <section class="mt-8" data-model-comparisons>
+    <h2 class="text-lg font-semibold text-fg">Compared on the same prompts</h2>
+    <ul class="mt-2 flex flex-wrap gap-x-6 gap-y-1 text-sm">
+      {theirs.map((each) => (
+        <li>
+          <a href={comparePath(each.a, each.b)} class:list={['font-mono', link]} style={linkStyle}>{`${model} vs ${each.a === model ? each.b : each.a}`}</a>
+          <span class="text-fg-muted"> · {each.recipes.length} recipes</span>
+        </li>
+      ))}
+      <li><a href={COMPARE_PATH} class={link} style={linkStyle}>All comparisons</a></li>
+    </ul>
+  </section>
+)}

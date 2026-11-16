@@ -43,6 +43,21 @@ export function priceBook(models) {
     source: live ? 'live' : 'seed',
     has: (id) => byId.has(id),
     modality: (id) => byId.get(id)?.godance?.modality ?? null,
+    /**
+     * What the catalogue says the model takes: sizes, default_size, max_n,
+     * durations, default_seconds, inputs (V24, V33, V34). An absent key means
+     * unknown, not unlimited; {} when the catalogue says nothing.
+     */
+    capabilities: (id) => byId.get(id)?.godance?.capabilities ?? {},
+    /**
+     * One image, or one second of video, in cents with the fee and not
+     * rounded: what models are compared by when choosing the cheapest.
+     */
+    unitCents(id) {
+      const model = find(id);
+      const pricing = model.godance.pricing;
+      return withFee(model, (model.godance.modality === 'VIDEO' ? pricing.per_second_microcents : pricing.per_image_microcents) ?? 0);
+    },
     /** Whole cents an image job holds. */
     image(id, n = 1) {
       const model = find(id);
