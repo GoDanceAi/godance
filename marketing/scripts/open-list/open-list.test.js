@@ -726,7 +726,7 @@ describe('the command line', () => {
     for (const file of FILES) assert.equal(await readFile(path.join(out, file), 'utf8'), await inProcess.read(file), file);
   });
 
-  test('--out is required, and an unknown option is refused', async (t) => {
+  test('--out is required, and an unknown option is refused', async () => {
     const { main } = await import('./cli.js');
     for (const argv of [[], ['--out'], ['--out', 'x', '--force'], ['stray']]) {
       const lines = [];

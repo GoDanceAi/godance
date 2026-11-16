@@ -1,0 +1,119 @@
+# Open recipe list — generate the gallery's open list and push it to its own
+# repository (round 13, brief 02).
+#
+# It ships doing nothing. It publishes only when all three of these hold, and
+# on any other run it ends green, its log saying in one line each which do not:
+#   - the repository variable OPEN_LIST_REPO names the list's repository as
+#     "owner/name" (Settings → Secrets and variables → Actions → Variables)
+#   - the secret OPEN_LIST_DEPLOY_KEY holds the private half of a deploy key
+#     with write access to that repository (its Settings → Deploy keys)
+#   - the gallery is on: a media base URL and a removal contact in
+#     marketing/src/lib/gallery-config.ts, and at least one recipe
+#
+# The gate is marketing/scripts/open-list/gate.js, the first step after the
+# setup. It runs the same way on a laptop, to see what a run would do:
+#   cd marketing && OPEN_LIST_REPO= OPEN_LIST_DEPLOY_KEY_SET=false node scripts/open-list/gate.js
+#
+# Safety:
+#   - Never for forks: there is no pull_request trigger, and the job runs only
+#     in GoDanceAi/godance.
+#   - GITHUB_TOKEN is read-only and is not kept in the checkout.
+#   - Only the push step gets the deploy key. It goes into an ssh-agent
+#     through a pipe, is never written to a file, and the agent stops when the
+#     step ends.
+#   - GitHub's SSH host keys are pinned.
+#   - It commits only when the list changed, and never force-pushes: if the
+#     list's repository moved on meanwhile, the push is refused and the run
+#     fails.
+
+name: Open recipe list
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'marketing/src/content/gallery/**'
+      - 'marketing/scripts/open-list/**'
+      - 'marketing/src/lib/gallery-config.ts'
+      - 'marketing/scripts/gallery/config/removal-list.json'
+      - '.github/workflows/open-list.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: open-list
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: generate and push the open list
+    if: github.repository == 'GoDanceAi/godance'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: marketing/package-lock.json
+      # Publish only when the variable, the secret and the gallery are all
+      # there; otherwise every later step is skipped and the run succeeds.
+      # The step is told whether the secret is set, never what it is.
+      - name: Gate
+        id: gate
+        working-directory: marketing
+        env:
+          OPEN_LIST_REPO: ${{ vars.OPEN_LIST_REPO }}
+          OPEN_LIST_DEPLOY_KEY_SET: ${{ secrets.OPEN_LIST_DEPLOY_KEY != '' }}
+        run: node scripts/open-list/gate.js
+      - name: Install
+        if: steps.gate.outputs.publish == 'true'
+        working-directory: marketing
+        run: npm ci
+      # ci.yml does not run the marketing tests, so the generator's own run
+      # here before it publishes anything.
+      - name: Test the generator
+        if: steps.gate.outputs.publish == 'true'
+        working-directory: marketing
+        run: node --test --test-concurrency=1 "scripts/open-list/*.test.js"
+      - name: Generate the list
+        if: steps.gate.outputs.publish == 'true'
+        working-directory: marketing
+        run: npm run open-list -- --out "$RUNNER_TEMP/open-list"
+      - name: Push the list to its repository
+        if: steps.gate.outputs.publish == 'true'
+        working-directory: marketing
+        env:
+          OPEN_LIST_REPO: ${{ vars.OPEN_LIST_REPO }}
+          OPEN_LIST_DEPLOY_KEY: ${{ secrets.OPEN_LIST_DEPLOY_KEY }}
+        run: |
+          # The deploy key goes into an ssh-agent through a pipe: it is never
+          # written to a file, and the agent stops when this step ends.
+          eval "$(ssh-agent -s)" > /dev/null
+          trap 'ssh-agent -k > /dev/null' EXIT
+          printf '%s\n' "$OPEN_LIST_DEPLOY_KEY" | ssh-add -q -
+          unset OPEN_LIST_DEPLOY_KEY
+
+          # GitHub's SSH host keys, as GitHub publishes them at
+          # https://api.github.com/meta (ssh_keys). Their SHA256 fingerprints,
+          # checked against these on 2026-11-15, are listed at
+          # https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints
+          #   Ed25519 SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU
+          #   ECDSA   SHA256:p2QAMXNIC1TJYWeIOttrVc98/R1BUFWu3/LiyKgUfQM
+          #   RSA     SHA256:uNiVztksCsDhcc0u9e8BujQXVUpKZIDTMczCvj3tD2s
+          known_hosts="$RUNNER_TEMP/open-list-known-hosts"
+          printf '%s\n' \
+            'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' \
+            'github.com ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBEmKSENjQEezOmxkZMy7opKgwFB9nkt5YRrYMjNuG5N87uRgg6CLrbo5wAdT/y6v0mKV0U2w0WZ2YB/++Tpockg=' \
+            'github.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCj7ndNxQowgcQnjshcLrqPEiiphnt+VTTvDP6mHBL9j1aNUkY4Ue1gvwnGLVlOhGeYrnZaMgRK6+PKCUXaDbC7qtbW8gIkhL7aGCsOr/C56SJMy/BCZfxd1nWzAOxSDPgVsmerOBYfNqltV9/hWCqBywINIR+5dIg6JTJ72pcEpEjcYgXkE2YEFXV1JHnsKgbLWNlhScqb2UmyRkQyytRLtL+38TGxkxCflmO+5Z8CSSNY7GidjMIZ7Q4zMjA2n1nGrlTDkzwDCsw+wqFPGQA179cnfGWOWRVruj16z6XyvxvjJwbz0wQZ75XK5tKSb7FNyeIEs4TT4jk+S4dhPeAUC5y+bDYirYgM4GC7uEnztnZyaVWQ7B381AK4Qdrwt51ZqExKbQpTUNn+EjqoTwvqNj4kqx5QUCI0ThS/YkOxJCXmPUWZbhjpCg56i+2aB6CmK2JGhn57K5mj0MNdBXA4/WnwH6XoPWJzK5Nyu2zB3nAZp+S5hpQs+p1vN1/wsjk=' \
+            > "$known_hosts"
+          export GIT_SSH_COMMAND="ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$known_hosts"
+
+          node scripts/open-list/publish.js \
+            --from "$RUNNER_TEMP/open-list" \
+            --to "git@github.com:$OPEN_LIST_REPO.git" \
+            --source "$GITHUB_REPOSITORY@$GITHUB_SHA"
