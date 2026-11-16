@@ -105,8 +105,8 @@ sed -i \
 - `REGION` (see [The regional allowlist](#6-the-regional-allowlist)), and the
   provider keys you have.
 
-`grep -n change-me .env` must print nothing: the stack refuses to start while
-any placeholder is left. Back up `KEY_VAULT_KEY` somewhere other than the
+`grep -n '=change-me' .env` must print nothing: the stack refuses to start
+while any placeholder is left. Back up `KEY_VAULT_KEY` somewhere other than the
 server now (see [Security checklist](#8-security-checklist)).
 
 > **A trial on one machine**, with no domain and no TLS: use these instead,
@@ -815,13 +815,22 @@ With your own storage, use your provider's versioning or replication instead.
 Generated files are deleted 90 days after their job anyway, except the ones
 people save (`godance.retention.*`).
 
-To restore the database onto a fresh stack, before the API has ever started:
+To restore onto a fresh stack (same `.env`, empty volumes), before the API
+has ever started:
 
 ```bash
-docker compose up -d postgres
-gunzip -c godance-<date>.sql.gz | docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d godance'
+cd godance/deploy/self-host
+docker compose up -d --wait postgres
+gunzip -c godance-<date>.sql.gz \
+  | docker compose exec -T postgres sh -c 'psql -q -U "$POSTGRES_USER" -d godance'
+# The bundled MinIO's files, into its new volume before MinIO first starts:
+docker compose up --no-start minio
+docker run --rm -v godance_minio_data:/data -v "$PWD":/backup alpine:3.22 \
+  tar xzf "/backup/godance-files-<date>.tgz" -C /data
 docker compose up -d
 ```
+
+The volume names start with the Compose project's name, `godance`.
 
 The operator's own daily backup, `backend/deploy/backup.sh`, is written for
 production's stack and uploads to Spaces; it is an example, not part of this
