@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useAfterSignIn, useSignedInAccountId } from './after-sign-in';
 import { follow, getProfile, listFollowing, unfollow, type OwnProfile } from './community';
@@ -43,6 +43,15 @@ export function CommunityProvider({ children }: { children: ReactNode }) {
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [following, setFollowingList] = useState<{ userId: string; handles: string[] } | null>(null);
   const asked = useRef<string | null>(null);
+  const session = useRef({ userId });
+  if (session.current.userId !== userId) session.current = { userId };
+  const currentSession = session.current;
+
+  useEffect(() => {
+    setLoaded(null);
+    setFollowingList(null);
+    asked.current = null;
+  }, [userId]);
 
   useAfterSignIn((account) => {
     let current = true;
@@ -59,27 +68,27 @@ export function CommunityProvider({ children }: { children: ReactNode }) {
   const loading = userId !== null && loaded?.userId !== userId;
 
   const setProfile = useCallback((next: OwnProfile) => {
-    if (userId) setLoaded({ userId, profile: next });
-  }, [userId]);
+    if (userId && session.current === currentSession) setLoaded({ userId, profile: next });
+  }, [userId, currentSession]);
 
   const loadFollowing = useCallback(() => {
     if (!userId || asked.current === userId) return;
     asked.current = userId;
     listFollowing().then(
-      (handles) => setFollowingList({ userId, handles }),
-      () => { asked.current = null; },
+      (handles) => { if (session.current === currentSession) setFollowingList({ userId, handles }); },
+      () => { if (session.current === currentSession) asked.current = null; },
     );
-  }, [userId]);
+  }, [userId, currentSession]);
 
   const setFollowing = useCallback(async (handle: string, on: boolean) => {
     if (on) await follow(handle);
     else await unfollow(handle);
-    if (!userId) return;
+    if (!userId || session.current !== currentSession) return;
     setFollowingList((cur) => {
       const handles = cur?.userId === userId ? cur.handles.filter((each) => each !== handle) : [];
       return { userId, handles: on ? [handle, ...handles] : handles };
     });
-  }, [userId]);
+  }, [userId, currentSession]);
 
   const value = useMemo<CommunityValue>(() => ({
     open: profile !== null,

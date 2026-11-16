@@ -44,7 +44,17 @@ export default function DashboardPage() {
         </Link>
       </div>
 
-      <RecentGenerations />
+      <RecentGenerations key={user.id} />
+
+      <section aria-labelledby="workflow-heading" className="mt-12 card">
+        <h2 id="workflow-heading" className="text-lg font-semibold text-fg">From a first run to a repeatable workflow</h2>
+        <ol className="mt-3 list-decimal space-y-2 pl-5 text-sm text-fg-muted">
+          <li>Create an image or video in the Studio. Available inputs and model settings appear there when your account can use them.</li>
+          <li>Open <Link to="/history" className="text-brand-600 hover:underline">History</Link>, choose Select, and pick two to four compatible generations to compare. Save generated outputs there to keep their files.</li>
+          <li>Choose Save as recipe in the Studio to keep a versioned setup. Find it, or your gallery bookmarks, in <Link to="/recipes" className="text-brand-600 hover:underline">Recipes</Link>.</li>
+          <li>Run a recipe as a batch and follow it in <Link to="/batches" className="text-brand-600 hover:underline">Batches</Link>. The existing Run at scale panel also offers code, an assistant prompt and n8n options.</li>
+        </ol>
+      </section>
 
       {/* Quick links */}
       <h2 className="mt-12 text-lg font-semibold text-fg">Get going</h2>
@@ -62,7 +72,7 @@ export default function DashboardPage() {
         <DashboardCard
           to="/keys"
           title="Manage API keys"
-          body="Create, list, and revoke keys for your apps. Plaintext returned once at creation."
+          body="Create and manage capped keys for your apps. Choose Use with MCP on an existing key for assistant setup."
         />
         <DashboardCard
           to="/billing"
@@ -71,15 +81,12 @@ export default function DashboardPage() {
         />
         <DashboardCard
           to="/settings"
-          title="Webhook secret"
-          body="Fetch or rotate your signing secret for verifying async-job callbacks."
+          title="Account and integration settings"
+          body="Manage your account and webhook signing secret. Provider-key and community profile controls appear here when available to your account."
           className="sm:col-span-2"
         />
       </div>
 
-      <p className="mt-12 text-xs text-fg-faint">
-        Usage history and per-model spend lands with the observability work in the next release.
-      </p>
     </div>
   );
 }

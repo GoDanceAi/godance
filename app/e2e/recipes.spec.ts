@@ -437,14 +437,14 @@ test.describe('compare', () => {
 });
 
 test.describe('navigation', () => {
-  test('Recipes is in the navigation, between History and API keys, and opens the list', async ({ page, api }) => {
+  test('Recipes is in Library navigation and opens the list', async ({ page, api }) => {
     serveRecipes(api, []);
     await open(page, api, '/dashboard');
 
     // The header's row or, on a phone, the row below it: whichever is shown.
     const nav = page.getByRole('navigation', { name: 'Main' });
     await expect(nav.getByRole('link')).toHaveText(
-      ['Dashboard', 'Chat', 'Create', 'History', 'Recipes', 'API keys', 'Billing', 'Settings']);
+      ['Dashboard', 'Image Studio', 'Video Studio', 'Chat', 'History', 'Recipes', 'Batches', 'API keys', 'MCP documentation', 'Billing', 'Settings']);
     // On a phone the links are one row that scrolls sideways: the page itself never does.
     expect(await noOverflow(page)).toBe(true);
     await nav.getByRole('link', { name: 'Recipes' }).click();
@@ -465,7 +465,7 @@ test.describe('navigation', () => {
 
     const nav = page.getByRole('navigation', { name: 'Main' });
     await expect(nav.getByRole('link')).toHaveText(
-      ['Dashboard', 'Chat', 'Create', 'History', 'Recipes', 'API keys', 'Billing', 'Invite', 'Settings', 'Admin']);
+      ['Dashboard', 'Image Studio', 'Video Studio', 'Chat', 'History', 'Recipes', 'Batches', 'API keys', 'MCP documentation', 'Billing', 'Settings', 'Invite', 'Admin']);
     // One line each: every link is as tall as the shortest label's.
     const heights = await nav.getByRole('link').evaluateAll((links) => links.map((link) => (link as HTMLElement).offsetHeight));
     expect(new Set(heights).size).toBe(1);

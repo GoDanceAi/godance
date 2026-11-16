@@ -11,6 +11,8 @@ import {
   type PublicRecipe,
 } from '../lib/community';
 import { useCommunity } from '../lib/community-context';
+import { useSignedInAccountId } from '../lib/after-sign-in';
+import { COMMUNITY_DESTINATION, publicCommunityAvailable } from '../lib/community-discovery';
 import FollowButton from '../components/community/FollowButton';
 import PublicRecipeCard from '../components/community/PublicRecipeCard';
 
@@ -23,6 +25,11 @@ const PAGE_SIZE = 24;
  * Only while the community is open; otherwise it leads back to the dashboard.
  */
 export default function FollowingPage() {
+  const account = useSignedInAccountId();
+  return <AccountFollowing key={account} />;
+}
+
+function AccountFollowing() {
   const { open, loading } = useCommunity();
   const [params] = useSearchParams();
   const asked = params.get('follow')?.trim().toLowerCase() ?? '';
@@ -165,13 +172,25 @@ function Feed() {
 /** Who the user follows, most recently followed first, each with a way to stop. */
 function Followed() {
   const { following, loadFollowing } = useCommunity();
+  const [discovery, setDiscovery] = useState(false);
   useEffect(() => { loadFollowing(); }, [loadFollowing]);
+  const empty = following?.length === 0;
+  useEffect(() => {
+    setDiscovery(false);
+    if (!empty) return;
+    let active = true;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10_000);
+    void publicCommunityAvailable(controller.signal).then((available) => { if (active) setDiscovery(available); });
+    return () => { active = false; clearTimeout(timeout); controller.abort(); };
+  }, [empty]);
 
   return (
     <section aria-labelledby="following-authors" className="mt-10">
       <h2 id="following-authors" className="text-sm font-semibold text-fg">Authors you follow</h2>
       {following === null && <p className="mt-3 text-sm text-fg-faint">Loading…</p>}
       {following?.length === 0 && <p className="mt-3 text-sm text-fg-muted">You don't follow anyone yet.</p>}
+      {empty && discovery && <a href={COMMUNITY_DESTINATION} className="btn btn-secondary btn-sm mt-3">Explore community recipes</a>}
       {following !== null && following.length > 0 && (
         <ul className="mt-3 card divide-y divide-border p-0">
           {following.map((handle) => (

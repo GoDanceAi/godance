@@ -10,20 +10,12 @@ import { LogoLockup, ThemeToggle } from './Brand';
 
 interface Props { children: ReactNode }
 
-const NAV: { to: string; label: string }[] = [
-  { to: '/dashboard', label: 'Dashboard' },
-  { to: '/chat', label: 'Chat' },
-  { to: '/create', label: 'Create' },
-  { to: '/history', label: 'History' },
-  { to: '/recipes', label: 'Recipes' },
-  { to: '/keys', label: 'API keys' },
-  { to: '/billing', label: 'Billing' },
-  { to: '/settings', label: 'Settings' },
+const GROUPS = [
+  { label: 'Create', links: [{ to: '/create/image', label: 'Image Studio' }, { to: '/create/video', label: 'Video Studio' }, { to: '/chat', label: 'Chat' }] },
+  { label: 'Library', links: [{ to: '/history', label: 'History' }, { to: '/recipes', label: 'Recipes' }, { to: '/batches', label: 'Batches' }] },
+  { label: 'Developer tools', links: [{ to: '/keys', label: 'API keys' }] },
+  { label: 'Account', links: [{ to: '/billing', label: 'Billing' }, { to: '/settings', label: 'Settings' }] },
 ];
-// Only while referrals are on (lib/referral); it sits after Billing.
-const INVITE = { to: '/referral', label: 'Invite' };
-// Only while the community is open (lib/community); it sits after Recipes.
-const FOLLOWING = { to: '/following', label: 'Following' };
 
 export default function Layout({ children }: Props) {
   const { user, logout } = useAuth();
@@ -35,9 +27,6 @@ export default function Layout({ children }: Props) {
   // visitor was going too (lib/return-to).
   const location = useLocation();
   const from = destinationFrom(location.state);
-  // Batches sit under Recipes (the "Recipes | Batches" strip), so on a batch page Recipes is the current link.
-  const onBatches = location.pathname === '/batches' || location.pathname.startsWith('/batches/');
-
   const [logoutFailed, setLogoutFailed] = useState(false);
 
   const handleLogout = async () => {
@@ -51,25 +40,10 @@ export default function Layout({ children }: Props) {
   };
 
   const linkClass = ({ isActive }: { isActive: boolean }) =>
-    `nav-link ${isActive ? 'active' : ''}`;
+    `nav-link inline-flex ${isActive ? 'active' : ''}`;
 
   // A child's account waiting for consent reaches no page but the waiting screen.
   const showNav = user !== null && user.ageStatus !== 'CONSENT_PENDING';
-  const nav = NAV.flatMap((item) => {
-    if (item.to === '/billing' && referral?.enabled) return [item, INVITE];
-    if (item.to === '/recipes' && communityOpen) return [item, FOLLOWING];
-    return [item];
-  });
-  const links = (
-    <>
-      {nav.map((item) => (item.to === '/recipes' && onBatches ? (
-        <Link key={item.to} to={item.to} className="nav-link active" aria-current="page">{item.label}</Link>
-      ) : (
-        <NavLink key={item.to} to={item.to} className={linkClass}>{item.label}</NavLink>
-      )))}
-      {(isAdmin || needsTwoFactor) && <NavLink to="/admin" className={linkClass}>Admin</NavLink>}
-    </>
-  );
 
   return (
     <div className="min-h-screen flex flex-col bg-bg">
@@ -78,13 +52,6 @@ export default function Layout({ children }: Props) {
           <Link to="/" aria-label="Godance" className="shrink-0">
             <LogoLockup size={18} />
           </Link>
-
-          {/* In the header row where every link fits on one line; below that width, its own scrolling row. */}
-          {showNav && (
-            <nav aria-label="Main" className="hidden xl:flex shrink-0 items-center gap-1">
-              {links}
-            </nav>
-          )}
 
           {user ? (
             // The links keep their room; a long address is the part that gives way.
@@ -120,10 +87,27 @@ export default function Layout({ children }: Props) {
         </div>
 
         {showNav && (
-          <nav aria-label="Main" className="xl:hidden border-t border-border">
-            <div className="mx-auto max-w-6xl px-4 py-1.5 flex items-center gap-1 overflow-x-auto whitespace-nowrap [scrollbar-width:none]">
-              {links}
-            </div>
+          <nav aria-label="Main" className="border-t border-border">
+            <details open className="mx-auto max-w-6xl px-6 py-2">
+              <summary className="cursor-pointer py-1 text-sm font-semibold text-fg">Menu</summary>
+              <div className="pt-2 pb-3">
+                <NavLink to="/dashboard" className={linkClass}>Dashboard</NavLink>
+                <div className="mt-3 grid grid-cols-1 gap-4 min-[360px]:grid-cols-2 md:grid-cols-4">
+                  {GROUPS.map((group) => (
+                    <div key={group.label} role="group" aria-label={group.label}>
+                      <p className="mb-1 text-xs font-semibold text-fg-subtle">{group.label}</p>
+                      <div className="flex flex-col items-start gap-1">
+                        {group.links.map((item) => <NavLink key={item.to} to={item.to} className={linkClass}>{item.label}</NavLink>)}
+                        {group.label === 'Library' && communityOpen && <NavLink to="/following" className={linkClass}>Following</NavLink>}
+                        {group.label === 'Developer tools' && <a href="https://godance.ai/docs/#mcp" className="nav-link">MCP documentation</a>}
+                        {group.label === 'Account' && referral?.enabled && <NavLink to="/referral" className={linkClass}>Invite</NavLink>}
+                        {group.label === 'Account' && (isAdmin || needsTwoFactor) && <NavLink to="/admin" className={linkClass}>Admin</NavLink>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </details>
           </nav>
         )}
       </header>

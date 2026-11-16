@@ -123,6 +123,9 @@ export function ReferralProvider({ children }: { children: ReactNode }) {
   // its very first render, before the request below has even started.
   const [loaded, setLoaded] = useState<{ userId: string; info: ReferralInfo | null } | null>(null);
 
+  // A later session for the same account must discover its permissions afresh.
+  useEffect(() => { setLoaded(null); }, [userId]);
+
   useAfterSignIn((account) => {
     let current = true;
     void (async () => {
