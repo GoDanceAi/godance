@@ -1,0 +1,52 @@
+{
+  "slug": "glass-lighthouse-at-night",
+  "title": {
+    "en": "Glass lighthouse at night",
+    "zh": "夜色中的玻璃灯塔"
+  },
+  "modality": "IMAGE",
+  "tags": [
+    "night",
+    "still-life"
+  ],
+  "prompt": {
+    "en": "A lighthouse made of clear glass on a rocky shore at night, its lamp glowing through the walls, long exposure.",
+    "zh": "夜晚岩石海岸上一座透明玻璃做的灯塔，灯光透过塔壁发亮，长曝光。",
+    "zh_origin": "list"
+  },
+  "runs": [
+    {
+      "model": "gpt-image-2",
+      "prompt_lang": "en",
+      "params": {
+        "size": "1024x1536",
+        "n": 1
+      },
+      "cost_cents": 9,
+      "generated_on": "2026-11-12",
+      "outputs": [
+        {
+          "file": "glass-lighthouse-at-night/gpt-image-2-0.webp",
+          "thumb": "glass-lighthouse-at-night/gpt-image-2-0-480.webp",
+          "content_type": "image/webp",
+          "width": 1024,
+          "height": 1536
+        }
+      ]
+    }
+  ],
+  "source": {
+    "list": "example-org/invented-image-prompts",
+    "list_commit": "4f0c2a9e8b7d6c5f4e3d2c1b0a9f8e7d6c5b4a39",
+    "licence": "CC0-1.0",
+    "author": "fixture_sol",
+    "author_url": "https://example.com/@fixture_sol",
+    "original_url": "https://example.com/@fixture_sol/posts/21007",
+    "changes": []
+  },
+  "review": {
+    "approved_on": "2026-11-13",
+    "standard_version": 1
+  },
+  "published_on": "2026-11-15"
+}
