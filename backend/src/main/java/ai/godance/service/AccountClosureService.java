@@ -214,8 +214,8 @@ public class AccountClosureService {
         u.setEmailVerificationSentAt(null);
         u.setPasswordResetTokenHash(null);
         u.setPasswordResetSentAt(null);
-        u.setWebhookSigningSecret(null);
-        u.setWebhookSigningSecretPrevious(null);
+        u.setWebhookSigningSecretEncrypted(null);
+        u.setWebhookSigningSecretPreviousEncrypted(null);
         u.setWebhookSigningSecretRotatedAt(null);
         // A child's account: the birth month and the parent's email go too.
         u.setBirthMonth(null);
