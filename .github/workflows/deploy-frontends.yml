@@ -27,6 +27,11 @@ on:
       - 'app/**'
       - 'marketing/**'
       - '.github/workflows/deploy-frontends.yml'
+  # Daily as well, so the community pages (round 14), which the marketing
+  # build reads from the public API, show newly approved recipes within a
+  # day. GitHub runs scheduled workflows from the default branch only.
+  schedule:
+    - cron: '17 5 * * *'
   workflow_dispatch:
 
 concurrency:

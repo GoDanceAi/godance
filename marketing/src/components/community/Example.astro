@@ -1,0 +1,41 @@
+---
+/**
+ * One example output of a community recipe, from its public copy: a picture,
+ * or a video with controls that never plays by itself.
+ */
+import type { PublicExample } from '../../lib/community';
+
+interface Props {
+  example: PublicExample;
+  /** What it is an example of, for the picture's alt text. */
+  title: string;
+  /** Its place among the recipe's examples, from 1. */
+  position: number;
+  /** The first picture on the page loads at once; the others when scrolled to. */
+  eager?: boolean;
+}
+
+const { example, title, position, eager = false } = Astro.props;
+const isVideo = example.content_type.startsWith('video/');
+const label = `${title}, example ${position}`;
+---
+
+<figure class="card p-0 overflow-hidden" data-example={position} data-example-kind={isVideo ? 'video' : 'image'}>
+  <div class="bg-bg-muted">
+    {isVideo ? (
+      <video controls preload="metadata" playsinline class="block w-full h-auto" aria-label={label}>
+        <source src={example.url} type={example.content_type} />
+        <a href={example.url}>Open the example video</a>
+      </video>
+    ) : (
+      <img
+        src={example.url}
+        alt={label}
+        loading={eager ? 'eager' : 'lazy'}
+        decoding="async"
+        class="block w-full h-auto"
+      />
+    )}
+  </div>
+  <figcaption class="px-3 py-2 text-xs text-fg-subtle">Example {position}</figcaption>
+</figure>
