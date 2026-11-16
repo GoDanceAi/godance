@@ -17,6 +17,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webtestclient.autoconfigure.AutoConfigureWebTestClient;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.reactive.server.WebTestClient;
@@ -405,9 +406,10 @@ class AuthAndApiKeyIntegrationTest {
         // An API key reaches the model API only, so probe it there.
         http.get().uri("/v1/usage").header("Authorization", "Bearer " + oldApiKey)
                 .exchange().expectStatus().isOk();
-        http.get().uri("/v1/webhooks/secret").header("Authorization", oldBearer)
-                .exchange().expectStatus().isOk();
-        String oldSecret = users.findByEmail(email).orElseThrow().getWebhookSigningSecret();
+        // A webhook secret, rotated once, so the first one still signs in its grace window.
+        String firstSecret = webhookSecret(oldBearer);
+        String oldSecret = rotateWebhookSecret(oldBearer);
+        assertThat(users.findByEmail(email).orElseThrow().getWebhookSigningSecretPreviousEncrypted()).isNotNull();
 
         // The owner resets the password from the emailed link.
         String token = requestResetToken(email);
@@ -431,11 +433,12 @@ class AuthAndApiKeyIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(Map.of("email", email, "password", "correct-horse-battery-staple"))
                 .exchange().expectStatus().isUnauthorized();
-        assertThat(users.findByEmail(email).orElseThrow().getWebhookSigningSecret())
-                .isNotEqualTo(oldSecret);
+        // No grace window after a reset: neither webhook secret they knew signs any more.
+        assertThat(users.findByEmail(email).orElseThrow().getWebhookSigningSecretPreviousEncrypted()).isNull();
 
-        // ... and the owner holds a verified account with no keys.
+        // ... and the owner holds a verified account with no keys, and a new webhook secret.
         String newBearer = "Bearer " + reset.accessToken();
+        assertThat(webhookSecret(newBearer)).startsWith("whsec_").isNotIn(oldSecret, firstSecret);
         MeResponse me = http.get().uri("/v1/auth/me").header("Authorization", newBearer)
                 .exchange().expectStatus().isOk()
                 .expectBody(MeResponse.class).returnResult().getResponseBody();
@@ -466,6 +469,21 @@ class AuthAndApiKeyIntegrationTest {
                 .exchange()
                 .expectStatus().isOk()
                 .expectBody(MeResponse.class).returnResult().getResponseBody();
+    }
+
+    /** The webhook signing secret, as its owner sees it. */
+    private String webhookSecret(String bearer) {
+        return secretIn(http.get().uri("/v1/webhooks/secret").header("Authorization", bearer).exchange());
+    }
+
+    private String rotateWebhookSecret(String bearer) {
+        return secretIn(http.post().uri("/v1/webhooks/secret/rotate").header("Authorization", bearer).exchange());
+    }
+
+    private static String secretIn(WebTestClient.ResponseSpec response) {
+        return response.expectStatus().isOk()
+                .expectBody(new ParameterizedTypeReference<Map<String, String>>() { })
+                .returnResult().getResponseBody().get("secret");
     }
 
     private WebTestClient.ResponseSpec changeEmail(String bearer, String email, String currentPassword) {
