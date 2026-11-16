@@ -27,9 +27,10 @@ info:
     **Errors.** Every error is an RFC 7807 problem document
     (`application/problem+json`) with `title`, `status` and `detail`. Many
     carry `code`, a stable string to branch on. On the routes that follow
-    OpenAI's Videos API (`/v1/videos`, not `/v1/videos/generations`) the same
-    document also carries OpenAI's `error` object, which is where OpenAI's
-    SDKs read a message from.
+    OpenAI's own API (`POST /v1/images/generations`, `POST /v1/images/edits`,
+    and `/v1/videos`, not `/v1/videos/generations`) the same document also
+    carries OpenAI's `error` object, which is where OpenAI's SDKs read a
+    message from.
 
     **Money.** Every amount is integer cents of US dollars, never a decimal.
     A generation reserves its price when it is accepted and returns the
@@ -216,11 +217,11 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/JobAccepted" }
-        "400": { $ref: "#/components/responses/BadRequest" }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "402": { $ref: "#/components/responses/PaymentRequired" }
-        "404": { $ref: "#/components/responses/NotFound" }
-        "502": { $ref: "#/components/responses/GenerationFailed" }
+        "400": { $ref: "#/components/responses/OpenAiProblem" }
+        "401": { $ref: "#/components/responses/OpenAiProblem" }
+        "402": { $ref: "#/components/responses/OpenAiProblem", description: "`insufficient_credit` (top up to go on), or a spending cap was reached (no `code`; topping up does not lift a cap)." }
+        "404": { $ref: "#/components/responses/OpenAiProblem" }
+        "502": { $ref: "#/components/responses/OpenAiProblem", description: "The job a request waited for failed: `code` `generation_failed`, with `job_id`. The reservation is returned." }
   /v1/images/edits:
     post:
       operationId: createImageEdit
@@ -300,14 +301,14 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/JobAccepted" }
-        "400": { $ref: "#/components/responses/BadRequest" }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "402": { $ref: "#/components/responses/PaymentRequired" }
-        "403": { $ref: "#/components/responses/Forbidden" }
-        "404": { $ref: "#/components/responses/NotFound" }
-        "413": { $ref: "#/components/responses/TooLarge" }
-        "415": { $ref: "#/components/responses/UnsupportedType" }
-        "502": { $ref: "#/components/responses/GenerationFailed" }
+        "400": { $ref: "#/components/responses/OpenAiProblem" }
+        "401": { $ref: "#/components/responses/OpenAiProblem" }
+        "402": { $ref: "#/components/responses/OpenAiProblem", description: "`insufficient_credit` (top up to go on), or a spending cap was reached (no `code`; topping up does not lift a cap)." }
+        "403": { $ref: "#/components/responses/OpenAiProblem" }
+        "404": { $ref: "#/components/responses/OpenAiProblem" }
+        "413": { $ref: "#/components/responses/OpenAiProblem" }
+        "415": { $ref: "#/components/responses/OpenAiProblem" }
+        "502": { $ref: "#/components/responses/OpenAiProblem", description: "The job a request waited for failed: `code` `generation_failed`, with `job_id`. The reservation is returned." }
   /v1/videos/generations:
     post:
       operationId: createVideoGeneration
@@ -437,13 +438,13 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Video" }
-        "400": { $ref: "#/components/responses/VideoError" }
-        "401": { $ref: "#/components/responses/VideoError" }
-        "402": { $ref: "#/components/responses/VideoError" }
-        "403": { $ref: "#/components/responses/VideoError" }
-        "404": { $ref: "#/components/responses/VideoError" }
-        "413": { $ref: "#/components/responses/VideoError" }
-        "415": { $ref: "#/components/responses/VideoError" }
+        "400": { $ref: "#/components/responses/OpenAiProblem" }
+        "401": { $ref: "#/components/responses/OpenAiProblem" }
+        "402": { $ref: "#/components/responses/OpenAiProblem" }
+        "403": { $ref: "#/components/responses/OpenAiProblem" }
+        "404": { $ref: "#/components/responses/OpenAiProblem" }
+        "413": { $ref: "#/components/responses/OpenAiProblem" }
+        "415": { $ref: "#/components/responses/OpenAiProblem" }
     get:
       operationId: listVideos
       tags: [Video (OpenAI shape)]
@@ -463,8 +464,8 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/VideoList" }
-        "400": { $ref: "#/components/responses/VideoError" }
-        "401": { $ref: "#/components/responses/VideoError" }
+        "400": { $ref: "#/components/responses/OpenAiProblem" }
+        "401": { $ref: "#/components/responses/OpenAiProblem" }
   /v1/videos/{id}:
     get:
       operationId: getVideo
@@ -488,8 +489,8 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Video" }
-        "401": { $ref: "#/components/responses/VideoError" }
-        "404": { $ref: "#/components/responses/VideoError" }
+        "401": { $ref: "#/components/responses/OpenAiProblem" }
+        "404": { $ref: "#/components/responses/OpenAiProblem" }
     delete:
       operationId: deleteVideo
       tags: [Video (OpenAI shape)]
@@ -508,10 +509,10 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/VideoDeleted" }
-        "401": { $ref: "#/components/responses/VideoError" }
-        "404": { $ref: "#/components/responses/VideoError" }
-        "409": { $ref: "#/components/responses/VideoError" }
-        "503": { $ref: "#/components/responses/VideoError" }
+        "401": { $ref: "#/components/responses/OpenAiProblem" }
+        "404": { $ref: "#/components/responses/OpenAiProblem" }
+        "409": { $ref: "#/components/responses/OpenAiProblem" }
+        "503": { $ref: "#/components/responses/OpenAiProblem" }
   /v1/videos/{id}/content:
     get:
       operationId: downloadVideoContent
@@ -537,11 +538,11 @@ paths:
               schema: { type: string, format: binary }
             application/octet-stream:
               schema: { type: string, format: binary }
-        "400": { $ref: "#/components/responses/VideoError" }
-        "401": { $ref: "#/components/responses/VideoError" }
-        "404": { $ref: "#/components/responses/VideoError" }
-        "409": { $ref: "#/components/responses/VideoError" }
-        "503": { $ref: "#/components/responses/VideoError" }
+        "400": { $ref: "#/components/responses/OpenAiProblem" }
+        "401": { $ref: "#/components/responses/OpenAiProblem" }
+        "404": { $ref: "#/components/responses/OpenAiProblem" }
+        "409": { $ref: "#/components/responses/OpenAiProblem" }
+        "503": { $ref: "#/components/responses/OpenAiProblem" }
   /v1/videos/{id}/remix:
     post:
       operationId: remixVideo
@@ -552,7 +553,7 @@ paths:
       parameters:
         - { $ref: "#/components/parameters/VideoId" }
       responses:
-        "404": { $ref: "#/components/responses/VideoError" }
+        "404": { $ref: "#/components/responses/OpenAiProblem" }
   /v1/videos/edits:
     post:
       operationId: editVideo
@@ -561,7 +562,7 @@ paths:
       description: Part of OpenAI's Videos API that Godance does not offer. Always 404 `video_edits_not_supported`.
       security: [{ apiKey: [] }, { session: [] }]
       responses:
-        "404": { $ref: "#/components/responses/VideoError" }
+        "404": { $ref: "#/components/responses/OpenAiProblem" }
   /v1/videos/extensions:
     post:
       operationId: extendVideo
@@ -570,7 +571,7 @@ paths:
       description: Part of OpenAI's Videos API that Godance does not offer. Always 404 `video_extensions_not_supported`.
       security: [{ apiKey: [] }, { session: [] }]
       responses:
-        "404": { $ref: "#/components/responses/VideoError" }
+        "404": { $ref: "#/components/responses/OpenAiProblem" }
   /v1/videos/characters:
     post:
       operationId: createVideoCharacter
@@ -579,7 +580,7 @@ paths:
       description: Part of OpenAI's Videos API that Godance does not offer. Always 404 `video_characters_not_supported`.
       security: [{ apiKey: [] }, { session: [] }]
       responses:
-        "404": { $ref: "#/components/responses/VideoError" }
+        "404": { $ref: "#/components/responses/OpenAiProblem" }
   /v1/videos/characters/{id}:
     get:
       operationId: getVideoCharacter
@@ -590,7 +591,7 @@ paths:
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
       responses:
-        "404": { $ref: "#/components/responses/VideoError" }
+        "404": { $ref: "#/components/responses/OpenAiProblem" }
   /v1/jobs:
     get:
       operationId: listJobs
@@ -2001,11 +2002,6 @@ components:
       content:
         application/problem+json:
           schema: { $ref: "#/components/schemas/Problem" }
-    GenerationFailed:
-      description: "The job a request waited for failed: `code` `generation_failed`, with `job_id`. The reservation is returned."
-      content:
-        application/problem+json:
-          schema: { $ref: "#/components/schemas/Problem" }
     BatchRefused:
       description: |
         The batch request is refused and nothing is written: `batch_too_large`,
@@ -2015,11 +2011,11 @@ components:
       content:
         application/problem+json:
           schema: { $ref: "#/components/schemas/BatchProblem" }
-    VideoError:
+    OpenAiProblem:
       description: A problem document that also carries OpenAI's `error` object. `code` says which refusal.
       content:
         application/problem+json:
-          schema: { $ref: "#/components/schemas/VideoProblem" }
+          schema: { $ref: "#/components/schemas/OpenAiProblem" }
   schemas:
     Problem:
       type: object
@@ -2033,8 +2029,13 @@ components:
         instance: { type: string, description: The path of the request. }
         code: { type: string, description: "A stable string to branch on, where the refusal has one." }
       additionalProperties: true
-    VideoProblem:
-      description: A problem document on OpenAI's video routes.
+    OpenAiProblem:
+      description: |
+        A problem document on the routes that follow OpenAI's own API: its
+        image routes (`/v1/images/generations`, `/v1/images/edits`) and its
+        video routes (`/v1/videos`). Every member of the problem is there,
+        and OpenAI's `error` object beside them, which OpenAI's SDKs build an
+        exception from.
       allOf:
         - { $ref: "#/components/schemas/Problem" }
         - type: object
@@ -2044,7 +2045,7 @@ components:
             error: { $ref: "#/components/schemas/OpenAiError" }
     OpenAiError:
       type: object
-      description: OpenAI's error object. `message` repeats the problem's `detail`, and `code` its `code`.
+      description: OpenAI's error object. `message` repeats the problem's `detail`, `code` its `code` and `param` its `param`, each null where the problem has none.
       required: [message, type]
       properties:
         message: { type: string }
