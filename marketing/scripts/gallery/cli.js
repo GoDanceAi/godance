@@ -846,7 +846,8 @@ export async function main(argv, io = {}) {
           const count = (test) => records.filter(([key, record]) => test(record, key)).length;
           out(`rerun      ${count((r) => r.status === 'done')} done · ${count((r) => ['accepted', 'downloading'].includes(r.status))} unfinished · ` +
             `${count((r) => r.status === 'submitting')} uncertain · ${count((r) => r.status === 'failed')} failed`);
-          out(`  review   ${count((r, key) => decisions.runs?.[key]?.decision === 'approved')} approved · ${count((r, key) => decisions.runs?.[key]?.decision === 'rejected')} rejected`);
+          const decided = (decision) => count((_record, key) => decisions.runs?.[key]?.decision === decision);
+          out(`  review   ${decided('approved')} approved · ${decided('rejected')} rejected`);
         }
         for (const source of fetched?.sources ?? []) {
           const entries = fetched.entries.filter((entry) => entry.source === source.id);
