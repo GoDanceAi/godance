@@ -36,7 +36,9 @@ public final class BatchDtos {
             Map<String, Object> params,
             List<BatchRowRequest> rows,
             @JsonProperty("max_concurrency") Integer maxConcurrency,
-            @JsonProperty("webhook_url") String webhookUrl
+            @JsonProperty("webhook_url") String webhookUrl,
+            // Round 14: retry a row once on another model, as the caller's routing policies' fallbacks say.
+            Boolean fallbacks
     ) { }
 
     /** What the server allows a batch: for a client that offers the choice. */
@@ -87,7 +89,9 @@ public final class BatchDtos {
             @JsonProperty("spent_cents") long spentCents,
             @JsonProperty("created_at") Instant createdAt,
             @JsonInclude(JsonInclude.Include.ALWAYS) @JsonProperty("started_at") Instant startedAt,
-            @JsonInclude(JsonInclude.Include.ALWAYS) @JsonProperty("completed_at") Instant completedAt
+            @JsonInclude(JsonInclude.Include.ALWAYS) @JsonProperty("completed_at") Instant completedAt,
+            // True for a batch created with "fallbacks": true; left out otherwise, as it always was.
+            @JsonInclude(JsonInclude.Include.NON_NULL) Boolean fallbacks
     ) { }
 
     /** One stored output of a row's job, with a link signed when the row is read. */
@@ -110,6 +114,10 @@ public final class BatchDtos {
             @JsonInclude(JsonInclude.Include.ALWAYS) @JsonProperty("job_id") UUID jobId,
             @JsonInclude(JsonInclude.Include.ALWAYS) @JsonProperty("cost_cents") Long costCents,
             @JsonInclude(JsonInclude.Include.ALWAYS) String error,
-            List<BatchRowOutput> outputs
+            List<BatchRowOutput> outputs,
+            // A row retried on a fallback: the model its job ran on, and the failed job it replaced.
+            // Left out for every other row, whose model is the batch's.
+            @JsonInclude(JsonInclude.Include.NON_NULL) String model,
+            @JsonInclude(JsonInclude.Include.NON_NULL) @JsonProperty("retried_job_id") UUID retriedJobId
     ) { }
 }

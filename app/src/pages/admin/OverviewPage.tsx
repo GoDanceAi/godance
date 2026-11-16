@@ -2,16 +2,18 @@ import { useEffect, useState } from 'react';
 import { apiFetch, ApiError, type AdminUsageSummary } from '../../lib/api';
 import { formatCents } from '../../lib/auth';
 import FunnelSection from './FunnelSection';
+import RoutingMarginsSection from './RoutingMarginsSection';
 
 // Revenue vs provider cost, last 30 days, plus top models/users by spend,
-// then the funnel from sign-up to the API. Each loads on its own, so one
-// failing does not hide the other.
+// then what routed requests earned (finance and admins), then the funnel from
+// sign-up to the API. Each loads on its own, so one failing does not hide another.
 // Chart is hand-rolled SVG — no chart dependency for four bars and a legend.
 
 export default function OverviewPage() {
   return (
     <div>
       <UsageSummary />
+      <RoutingMarginsSection />
       <FunnelSection />
     </div>
   );

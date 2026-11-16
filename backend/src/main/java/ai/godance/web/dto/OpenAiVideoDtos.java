@@ -6,6 +6,7 @@ import java.util.UUID;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+import ai.godance.web.dto.InputDtos.InputRef;
 import ai.godance.web.dto.InputDtos.JobOutputRef;
 import ai.godance.web.dto.RecipeDtos.RecipeRef;
 import tools.jackson.databind.JsonNode;
@@ -27,11 +28,14 @@ public final class OpenAiVideoDtos {
      * {@code POST /v1/videos} as JSON. OpenAI's fields are {@code model},
      * {@code prompt}, {@code seconds}, {@code size} and
      * {@code input_reference}; the rest are the Godance extensions
-     * {@code POST /v1/videos/generations} takes.
+     * {@code POST /v1/videos/generations} takes. A field that is not one of
+     * these is refused, not ignored: the route reads this record strictly.
      *
      * <p>{@code seconds} is a string in OpenAI's API ({@code "8"}); a number
      * is taken too. {@code model} is a Godance video model and has no
-     * default.
+     * default. {@code input_reference} is the first frame;
+     * {@code last_frame} and {@code reference_images} are input references
+     * as on {@code POST /v1/videos/generations}.
      */
     public record CreateRequest(
             String model,
@@ -39,6 +43,8 @@ public final class OpenAiVideoDtos {
             JsonNode seconds,
             String size,
             @JsonProperty("input_reference") InputReference inputReference,
+            @JsonProperty("last_frame") InputRef lastFrame,                    // Godance extension
+            @JsonProperty("reference_images") List<InputRef> referenceImages,  // Godance extension
             @JsonProperty("webhook_url") String webhookUrl,        // Godance extension
             @JsonProperty("gallery_recipe") String galleryRecipe,  // Godance extension
             RecipeRef recipe                                        // Godance extension, in place of prompt

@@ -130,10 +130,31 @@ public interface RecipeBatchRowRepository extends JpaRepository<RecipeBatchRow, 
             """, nativeQuery = true)
     int skipPending(@Param("batchId") UUID batchId, @Param("now") Instant now);
 
-    /** The purge of a job: the values its row held go with the job's prompt. */
+    /**
+     * The purge of a job: the values its row held go with the job's prompt.
+     * A row retried on a fallback (V41) holds two jobs; either one's purge
+     * takes them.
+     */
     @Modifying(flushAutomatically = true, clearAutomatically = true)
-    @Query(value = "UPDATE recipe_batch_rows SET variables = NULL WHERE job_id = :jobId", nativeQuery = true)
+    @Query(value = "UPDATE recipe_batch_rows SET variables = NULL WHERE job_id = :jobId OR retried_job_id = :jobId",
+            nativeQuery = true)
     int redactForJob(@Param("jobId") UUID jobId);
+
+    /**
+     * A row whose job failed on a failure its batch's fallbacks cover (V41)
+     * goes back to PENDING, to run once more on {@code model} through the
+     * normal path: claimed, priced, pre-debited. Only once: 0 when the row
+     * has been retried before, or no longer runs {@code failedJobId}.
+     */
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query(value = """
+            UPDATE recipe_batch_rows
+               SET status = 'PENDING', job_id = NULL, started_at = NULL,
+                   model = :model, retried_job_id = :failedJobId
+             WHERE id = :id AND status = 'RUNNING' AND job_id = :failedJobId AND retried_job_id IS NULL
+            """, nativeQuery = true)
+    int rearmForFallback(@Param("id") UUID id, @Param("failedJobId") UUID failedJobId,
+                         @Param("model") String model);
 
     /** How many rows of a batch are in each status, and what the DONE ones cost. */
     interface StatusCount {

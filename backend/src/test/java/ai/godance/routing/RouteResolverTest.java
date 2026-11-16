@@ -34,9 +34,11 @@ class RouteResolverTest {
 
     private final RouteResolver resolver = new RouteResolver(
             new RoutingPolicyRegistry(new RoutingPresets()),
-            new RuleBasedRoutingEngine(catalog),
+            new RuleBasedRoutingEngine(catalog, TestCost.CALCULATOR),
             new HeuristicTaskClassifier(),
-            props);
+            props,
+            catalog,
+            UserPolicySource.NONE);
 
     private static ChatRequest req(String model, String content) {
         return new ChatRequest(model, List.of(new ChatMessage("user", content)), null, null, null);

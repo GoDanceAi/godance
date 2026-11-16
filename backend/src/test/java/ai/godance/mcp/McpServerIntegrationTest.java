@@ -587,6 +587,22 @@ class McpServerIntegrationTest {
                 account.id())).isZero();
     }
 
+    /** Round 14: start_batch passes fallbacks on, and they need routing policies, off here as they ship. */
+    @Test
+    void startBatch_givenFallbacksWhileRoutingPoliciesAreOff_expectsFallbacksUnavailableAndNoBatch() {
+        Account account = fx.account(10_00L);
+        McpFixture.Recipe recipe = fx.recipe(account, "IMAGE", "A {{thing}}",
+                List.of(Map.of("name", "thing", "default", "kite")), "gpt-image-2", Map.of(), List.of());
+        try (McpSyncClient client = fx.client(fx.key(account))) {
+            Map<String, Object> refused = problem(call(client, "start_batch", Map.of("version_id", recipe.versionId(),
+                    "rows", List.of(Map.of()), "fallbacks", true)));
+
+            assertThat(refused).containsEntry("code", "fallbacks_unavailable");
+        }
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM recipe_batches WHERE user_id = ?", Long.class,
+                account.id())).isZero();
+    }
+
     /**
      * A batch prices each row when it starts. When the model's price rises
      * after the batch was made, a row that would take the batch past its

@@ -244,8 +244,8 @@ class AccountClosureIntegrationTest {
         assertThat(closed.getPendingEmail()).isNull();
         assertThat(closed.getEmailVerificationToken()).isNull();
         assertThat(closed.getPasswordResetTokenHash()).isNull();
-        assertThat(closed.getWebhookSigningSecret()).isNull();
-        assertThat(closed.getWebhookSigningSecretPrevious()).isNull();
+        assertThat(closed.getWebhookSigningSecretEncrypted()).isNull();
+        assertThat(closed.getWebhookSigningSecretPreviousEncrypted()).isNull();
         assertThat(closed.isActive()).isFalse();
         assertThat(users.findByEmail(email)).isEmpty();
         assertThat(identities.findByProviderAndSubject(OAuthProvider.GOOGLE, googleSubject)).isEmpty();

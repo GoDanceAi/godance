@@ -788,14 +788,15 @@ class TwoFactorIntegrationTest {
             enable(p.bearer, code).expectStatus().isOk();
             requiresNew.executeWithoutResult(inner -> jdbc.update(
                     "UPDATE users SET credit_balance_cents = credit_balance_cents + 500 WHERE id = ?", p.id));
-            stale.setWebhookSigningSecret("whsec_saved_by_the_stale_copy");
+            // Any value of the key vault's form; the database refuses a secret in clear.
+            stale.setWebhookSigningSecretEncrypted("v1:saved-by-the-stale-copy");
             users.save(stale);
         });
 
         me(p.bearer).expectStatus().isUnauthorized();
         User row = users.findById(p.id).orElseThrow();
         assertThat(row.getCreditBalanceCents()).isEqualTo(500);
-        assertThat(row.getWebhookSigningSecret()).isEqualTo("whsec_saved_by_the_stale_copy");
+        assertThat(row.getWebhookSigningSecretEncrypted()).isEqualTo("v1:saved-by-the-stale-copy");
     }
 
     // ===== The web app's cookie ==========================================

@@ -44,7 +44,7 @@ export default function CodeTab({ handOver }: { handOver: HandOver }) {
       </div>
 
       <p className="text-xs text-fg-muted">
-        {!image && 'A video is always a job: the request answers 202, and the code reads the job until it is done. '}
+        {!image && 'A video is always a job: the code starts it, and reads it until it is done. '}
         {image && mode === 'poll'
           && 'Works with any key: the request asks for a job ("async": true) and reads it until it is done. '}
         {image && mode === 'wait' && (

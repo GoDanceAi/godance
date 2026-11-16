@@ -46,6 +46,8 @@ import ai.godance.web.dto.ApiKeyDtos.CreateApiKeyResponse;
 import ai.godance.web.dto.AuthDtos.AuthResponse;
 import ai.godance.web.dto.ImageDtos.AsyncJobAcknowledged;
 import ai.godance.web.dto.ImageDtos.JobView;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * End-to-end image-gen path: signup → seed balance → POST
@@ -124,6 +126,7 @@ class ImageGenerationIntegrationTest {
     @Autowired CostCalculator costs;
     @Autowired ModelCatalog catalog;
     @Autowired ai.godance.repository.CreditLedgerRepository ledgerRows;
+    @Autowired ObjectMapper json;
 
     @BeforeEach
     void reset() {
@@ -410,6 +413,92 @@ class ImageGenerationIntegrationTest {
                 .header("Authorization", thief.bearer())
                 .exchange()
                 .expectStatus().isNotFound();
+    }
+
+    // ===== Errors: the problem, with OpenAI's error object beside it ===
+
+    @Test
+    void errors_givenRefusals_expectOpenAisErrorObjectBesideEveryProblemMember() {
+        Signed u = signupWithBalance(100_00L);
+
+        // 400, with neither a code nor a param: the object says what the problem says.
+        JsonNode badFormat = problem(postImage(u.bearer(),
+                Map.of("model", "gpt-image-2", "prompt", "x", "response_format", "png")), 400);
+        assertThat(badFormat.get("title").asString()).isEqualTo("Bad Request");
+        assertThat(badFormat.get("status").asInt()).isEqualTo(400);
+        assertThat(badFormat.get("instance").asString()).isEqualTo("/v1/images/generations");
+        assertThat(badFormat.get("detail").asString()).isEqualTo("response_format must be \"url\" or \"b64_json\"");
+        JsonNode error = badFormat.get("error");
+        assertThat(error.get("message").asString()).isEqualTo(badFormat.get("detail").asString());
+        assertThat(error.get("type").asString()).isEqualTo("invalid_request_error");
+        assertThat(error.get("code").isNull()).isTrue();
+        assertThat(error.get("param").isNull()).isTrue();
+
+        // 404: an unknown model.
+        JsonNode unknown = problem(postImage(u.bearer(), Map.of("model", "no-such-model", "prompt", "x")), 404);
+        assertThat(unknown.get("error").get("message").asString()).isEqualTo("unknown model: no-such-model");
+        assertThat(unknown.get("error").get("type").asString()).isEqualTo("not_found_error");
+
+        // 402 with a code: the problem's code is the object's code.
+        Signed broke = signupWithBalance(0L);
+        JsonNode noCredit = problem(postImage(broke.bearer(), Map.of("model", "gpt-image-2", "prompt", "x")), 402);
+        assertThat(noCredit.get("code").asString()).isEqualTo("insufficient_credit");
+        assertThat(noCredit.get("error").get("code").asString()).isEqualTo("insufficient_credit");
+        assertThat(noCredit.get("error").get("message").asString()).isEqualTo(noCredit.get("detail").asString());
+        assertThat(noCredit.get("error").get("type").asString()).isEqualTo("invalid_request_error");
+
+        // 401 from the API key filter, before the route is reached.
+        JsonNode badKey = problem(postImage("Bearer gd_live_this_key_does_not_exist_0000000000",
+                Map.of("model", "gpt-image-2", "prompt", "x")), 401);
+        assertThat(badKey.get("detail").asString()).isEqualTo("invalid API key");
+        assertThat(badKey.get("error").get("message").asString()).isEqualTo("invalid API key");
+        assertThat(badKey.get("error").get("type").asString()).isEqualTo("authentication_error");
+        assertThat(badKey.get("error").get("code").isNull()).isTrue();
+
+        assertThat(openAiMock.getAllServeEvents()).isEmpty();
+    }
+
+    @Test
+    void errors_givenTheRoutesBesideTheImageRoutes_expectTheirProblemsUnchanged() {
+        Signed u = signupWithBalance(100_00L);
+
+        // OpenAI's chat route, the price of an image request, and the job an image request makes.
+        Map<String, JsonNode> problems = Map.of(
+                "/v1/chat/completions", problem(http.post().uri("/v1/chat/completions")
+                        .header("Authorization", u.bearer())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .bodyValue(Map.of("model", "no-such-model",
+                                "messages", List.of(Map.of("role", "user", "content", "Hello"))))
+                        .exchange(), 404),
+                "/v1/estimates", problem(http.post().uri("/v1/estimates")
+                        .header("Authorization", u.bearer())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .bodyValue(Map.of("model", "no-such-model"))
+                        .exchange(), 404),
+                "/v1/jobs/{id}", problem(http.get().uri("/v1/jobs/{id}", UUID.randomUUID())
+                        .header("Authorization", u.bearer())
+                        .exchange(), 404));
+
+        problems.forEach((route, problem) -> {
+            assertThat(problem.get("detail").asString()).as(route).isNotBlank();
+            assertThat(problem.has("error")).as(route + " carries no OpenAI error object").isFalse();
+        });
+    }
+
+    /** The problem a refused request answered with, once its status and type are checked. */
+    private JsonNode problem(WebTestClient.ResponseSpec response, int status) {
+        return json.readTree(response
+                .expectStatus().isEqualTo(status)
+                .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON)
+                .expectBody(String.class).returnResult().getResponseBody());
+    }
+
+    private WebTestClient.ResponseSpec postImage(String bearer, Map<String, Object> body) {
+        return http.post().uri("/v1/images/generations")
+                .header("Authorization", bearer)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(body)
+                .exchange();
     }
 
     // ===== Catalog — GET /v1/models ===================================

@@ -32,7 +32,7 @@ class RuleBasedRoutingEngineTest {
             "an-image", Provider.OPENAI, 40_000, null);
 
     private final RuleBasedRoutingEngine engine =
-            new RuleBasedRoutingEngine(TestCatalog.of(CHEAP_A, CHEAP_B, PREMIUM, AN_IMAGE));
+            new RuleBasedRoutingEngine(TestCatalog.of(CHEAP_A, CHEAP_B, PREMIUM, AN_IMAGE), TestCost.CALCULATOR);
 
     private static RoutingContext ctx(TaskType task, int inTokens) {
         return new RoutingContext("godance-test", Modality.TEXT, inTokens, 1, task, null, Region.LOCAL);

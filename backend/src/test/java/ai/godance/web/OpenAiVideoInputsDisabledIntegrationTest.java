@@ -189,6 +189,40 @@ class OpenAiVideoInputsDisabledIntegrationTest {
         assertThat(storage.list("inputs/")).isEmpty();
     }
 
+    @Test
+    void create_givenInputsDisabledAndALastFrameOrReferenceImages_expects403InputsDisabledAndNothingElse() {
+        assertThat(inputsProperties.enabled()).isFalse();
+        Signed me = signedUp();
+        Map<String, Object> aFile = Map.of("file_id", UUID.randomUUID().toString());
+
+        for (String field : List.of("last_frame", "reference_images")) {
+            // As JSON, on a model that takes the field and on one that does not.
+            for (String model : List.of("seedance-2.0", "sora-2")) {
+                Map<String, Object> body = new LinkedHashMap<>(Map.of("model", model, "prompt", "From an image."));
+                body.put(field, field.equals("last_frame") ? aFile : List.of(aFile));
+                refused(http.post().uri("/v1/videos")
+                        .header("Authorization", me.bearer())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .bodyValue(body));
+            }
+
+            // As OpenAI's SDK writes it into a form, from extra_body.
+            MultipartBodyBuilder form = new MultipartBodyBuilder();
+            form.part("model", "seedance-2.0");
+            form.part("prompt", "From an image.");
+            form.part(field.equals("last_frame") ? "last_frame[file_id]" : "reference_images[][file_id]",
+                    UUID.randomUUID().toString());
+            refused(http.post().uri("/v1/videos")
+                    .header("Authorization", me.bearer())
+                    .contentType(MediaType.MULTIPART_FORM_DATA)
+                    .body(BodyInserters.fromMultipartData(form.build())));
+        }
+
+        assertThat(users.findById(me.id()).orElseThrow().getCreditBalanceCents()).isEqualTo(100_00L);
+        assertThat(jobs.findByUserIdOrderByCreatedAtDesc(me.id())).isEmpty();
+        assertThat(ark.findAll(anyRequestedFor(anyUrl()))).isEmpty();
+    }
+
     private void refused(WebTestClient.RequestHeadersSpec<?> request) {
         request.exchange()
                 .expectStatus().isForbidden()
