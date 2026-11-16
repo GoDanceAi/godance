@@ -44,23 +44,28 @@ export const FILES_PATH = '/v1/files';
 export const VIDEO_CREATE = { path: '/v1/videos', idField: 'id' } as const;
 
 /**
- * Godance's own video route, for a request OpenAI's shape cannot carry:
- * a last frame, reference images, more than one clip. POST /v1/videos takes
- * one image, the first frame, and answers 200 to a field it does not know
- * without using it, so such a request is sent here as it is and read as a job.
+ * Godance's own video route, for a request POST /v1/videos refuses: more than
+ * one clip. POST /v1/videos makes one video per request, takes no `n`, and
+ * answers 400 to any field it does not read, so such a request is sent here
+ * as it is and read as a job.
  */
 export const VIDEO_GENERATIONS = { path: '/v1/videos/generations', jobIdField: 'job_id' } as const;
 
-/** What POST /v1/videos takes as it is: OpenAI's fields, and the Godance extensions it shares with /v1/videos/generations. */
-const OPENAI_VIDEO_FIELDS = ['model', 'prompt', 'recipe', 'size', 'gallery_recipe', 'webhook_url'];
+/**
+ * What POST /v1/videos takes as it is: OpenAI's fields, and the Godance
+ * extensions it shares with /v1/videos/generations, the last frame and the
+ * reference images among them.
+ */
+const OPENAI_VIDEO_FIELDS = [
+  'model', 'prompt', 'recipe', 'size', 'gallery_recipe', 'webhook_url', 'last_frame', 'reference_images',
+];
 
 /**
  * A video request in OpenAI's shape, for POST /v1/videos: the first frame
  * is `input_reference` there, and `seconds` is a string ("8"). One request
- * makes one video, so a count of 1 goes without saying. Null when the shape
- * cannot carry the whole request: a last frame, reference images, a larger
- * count or any other field would be dropped without a word, so that request
- * goes to Godance's own route instead (VIDEO_GENERATIONS).
+ * makes one video, so a count of 1 goes without saying. Null when that route
+ * would refuse the request: a larger count, or any other field it does not
+ * read, so that request goes to Godance's own route instead (VIDEO_GENERATIONS).
  */
 export function openAiVideoBody(body: Record<string, unknown>): Record<string, unknown> | null {
   const out: Record<string, unknown> = {};
@@ -156,8 +161,9 @@ const WAIT_NOTE = 'With a key set to synchronous image responses, the answer hol
   + 'Any other key answers 202 with a job to poll.';
 
 /** Said with a video that goes to Godance's own route rather than to OpenAI's. */
-export const VIDEO_GENERATIONS_NOTE = 'OpenAI\'s POST /v1/videos has no field for part of this request (such as a '
-  + 'last frame or reference images), so it goes to Godance\'s own video route as it is, and answers 202 with a job to poll.';
+export const VIDEO_GENERATIONS_NOTE = 'OpenAI\'s POST /v1/videos makes one video per request and refuses a field it does '
+  + 'not read, such as a count of clips ("n"), so this request goes to Godance\'s own video route as it is, and answers '
+  + '202 with a job to poll.';
 
 /** The note for the request itself: a video says why it is not in OpenAI's shape. */
 const jobNote = (request: CodeRequest) => (request.kind === 'video' ? { note: VIDEO_GENERATIONS_NOTE } : {});
@@ -277,11 +283,20 @@ function pythonPlainImage(request: CodeRequest, body: Record<string, unknown>): 
 /** What `client.videos.create_and_poll` takes by name, in this order; anything else a body holds goes in `extra_body`. */
 const SDK_VIDEO_ARGUMENTS = ['model', 'prompt', 'seconds', 'size'];
 
+/** The fields of `extra_body` a video script sends as JSON text, each with the line said above it. */
+const SDK_VIDEO_JSON_TEXT = new Map([
+  ['recipe', '# The SDK sends a form, in which "recipe" is JSON text.'],
+  ['reference_images', '# The SDK sends a form: as JSON text, the images keep their order.'],
+]);
+
 /**
  * A video in OpenAI's shape is the SDK's own call. It sends a multipart
- * form, so what goes in `extra_body` becomes form fields: a reference such as
- * {"file_id": …} is written the way the API reads it, but `recipe` has to be
- * JSON text. The SDK requires a prompt, which a recipe run leaves empty.
+ * form, so what goes in `extra_body` becomes form fields. A single
+ * reference such as {"file_id": …} is written as bracketed fields, which
+ * the API reads back; `recipe` goes as JSON text, and so does
+ * `reference_images`: the SDK writes a list's fields grouped by name, so
+ * images named in two ways (a file, a job's output) would arrive out of
+ * order. The SDK requires a prompt, which a recipe run leaves empty.
  */
 function pythonVideo(apiBase: string, body: Record<string, unknown>): string {
   const recipe = body.recipe !== undefined;
@@ -292,17 +307,19 @@ function pythonVideo(apiBase: string, body: Record<string, unknown>): string {
   if (body.seconds !== undefined) args.push(`    seconds=${pythonLiteral(body.seconds, 1)},`);
   if (body.size !== undefined) args.push(`    size=${pythonLiteral(body.size, 1)},`);
   const extra = Object.entries(body).filter(([key]) => !SDK_VIDEO_ARGUMENTS.includes(key));
+  const jsonText = extra.some(([key]) => SDK_VIDEO_JSON_TEXT.has(key));
   if (extra.length > 0) {
     args.push('    extra_body={');
-    if (recipe) args.push('        # The SDK sends a form, in which "recipe" is JSON text.');
     for (const [key, value] of extra) {
       const literal = pythonLiteral(value, 2);
-      args.push(`        ${JSON.stringify(key)}: ${key === 'recipe' ? `json.dumps(${literal})` : literal},`);
+      const said = SDK_VIDEO_JSON_TEXT.get(key);
+      if (said) args.push(`        ${said}`);
+      args.push(`        ${JSON.stringify(key)}: ${said ? `json.dumps(${literal})` : literal},`);
     }
     args.push('    },');
   }
   return [
-    ...(recipe ? ['import json'] : []),
+    ...(jsonText ? ['import json'] : []),
     'import os',
     '',
     'from openai import OpenAI',

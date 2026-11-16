@@ -24,6 +24,7 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -52,6 +53,7 @@ import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
 import io.modelcontextprotocol.spec.McpSchema.InitializeResult;
 import io.modelcontextprotocol.spec.McpSchema.Tool;
 
+import ai.godance.OpenJobsGuard;
 import ai.godance.domain.CallOutcome;
 import ai.godance.domain.Modality;
 import ai.godance.domain.Provider;
@@ -92,6 +94,7 @@ import ai.godance.web.dto.AuthDtos.AuthResponse;
         "godance.inputs.max-megapixels=1"})
 @AutoConfigureWebTestClient(timeout = "30s")
 @Testcontainers
+@ExtendWith(OpenJobsGuard.class)
 class McpServerIntegrationTest {
 
     static final int TERMS = 1;
