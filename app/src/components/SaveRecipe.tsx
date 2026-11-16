@@ -24,12 +24,13 @@ function refusal(err: unknown, fallback: string): string {
  * `setup` is what would be saved, or null while the form can't be (no model
  * yet, an empty prompt, a template that can't be rendered).
  */
-export default function SaveRecipe({ own, setup, modality, suggestedTitle, galleryRecipe, onSaved }: {
+export default function SaveRecipe({ own, setup, modality, suggestedTitle, galleryRecipe, publishedRecipe = null, onSaved }: {
   own: OwnRecipe | null;
   setup: RecipeSetup | null;
   modality: MediaModality;
   suggestedTitle: string;
   galleryRecipe: string | null;            // the gallery recipe the form came from, by slug
+  publishedRecipe?: string | null;         // the community recipe the form came from, by public id
   onSaved: (own: OwnRecipe) => void;
 }) {
   const [naming, setNaming] = useState(false);
@@ -54,7 +55,10 @@ export default function SaveRecipe({ own, setup, modality, suggestedTitle, galle
         ...setup,
         title: title.trim(),
         modality,
-        ...(galleryRecipe ? { source_gallery_recipe: galleryRecipe } : {}),
+        // Publishing the new recipe then names what it was made from.
+        ...(publishedRecipe
+          ? { source_published_recipe: publishedRecipe }
+          : galleryRecipe ? { source_gallery_recipe: galleryRecipe } : {}),
       });
       setNaming(false);
       setSaved({ kind: 'created', id: recipe.id });

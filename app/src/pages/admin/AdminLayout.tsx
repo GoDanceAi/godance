@@ -1,5 +1,6 @@
 import { Link, Navigate, NavLink, Outlet } from 'react-router-dom';
 import { useAdmin } from '../../lib/admin';
+import { MODERATOR_ROLES } from './CommunityPage';
 
 // Shell for /admin/*: sub-nav tabs + client-side guard. Plain users are
 // bounced to the dashboard (the backend role gate 403s them regardless).
@@ -42,6 +43,10 @@ export default function AdminLayout() {
         <NavLink to="/admin/catalog" className={tabClass}>Catalog</NavLink>
         <NavLink to="/admin/users" className={tabClass}>Users</NavLink>
         <NavLink to="/admin/overview" className={tabClass}>Overview</NavLink>
+        {/* Moderation is for the roles the API lets moderate. */}
+        {MODERATOR_ROLES.some((each) => each === role) && (
+          <NavLink to="/admin/community" className={tabClass}>Community</NavLink>
+        )}
       </nav>
       <div className="mt-6">
         <Outlet />

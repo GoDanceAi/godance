@@ -336,6 +336,23 @@ test.describe('a job\'s inputs', () => {
     expect(api.callsTo('POST', '/v1/images/generations')).toHaveLength(0);
   });
 
+  test('go without a style when it is run again as an edit, which refuses one', async ({ page, api }) => {
+    // A generation whose recipe brought its own images can have both.
+    const job = makeJob({ ...withInputs(), params: { size: '1024x1024', style: 'vivid' } });
+    await openInputsStudio(page, api);
+    serveJob(api, job);
+    api.on('POST', '/v1/images/edits', accepted(jobId(8)));
+    serveJob(api, makeJob({ id: jobId(8) }));
+    await page.goto(`/history/${job.id}`);
+
+    await page.getByRole('button', { name: /^Run again/ }).click();
+    await expect.poll(() => api.callsTo('POST', '/v1/images/edits').length).toBe(1);
+    expect(api.callsTo('POST', '/v1/images/edits')[0].body).toEqual({
+      model: 'flux-2-pro', prompt: 'The mug on a marble counter', size: '1024x1024', async: true,
+      images: [{ file_id: fileId(1) }], mask: { file_id: fileId(2) },
+    });
+  });
+
   test('are shown in History, in compare and in the Studio\'s result', async ({ page, api }) => {
     const job = withInputs();
     const other = makeJob({ id: jobId(6), prompt: 'A lighthouse' });

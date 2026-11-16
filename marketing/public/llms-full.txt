@@ -297,10 +297,16 @@ answers 400. Too little credit answers 402 `insufficient_credit`.
 
 - Multipart, OpenAI's own form, which `client.images.edit(…)` sends: `model`, `prompt`, one
   or more `image` parts (also `image[]`), and optionally `mask`, `n`, `size`, `quality`,
-  `response_format`. Each image is checked as an upload to `POST /v1/files` is and becomes
-  one of your files.
+  `response_format`, and the Godance extensions `async`, `webhook_url` and `recipe`. Each
+  image is checked as an upload to `POST /v1/files` is and becomes one of your files.
 - JSON, naming images that are already stored: `images` (a list) and `mask`, each an input
-  reference (see Files and inputs).
+  reference (see Files and inputs), with the same other fields.
+
+Any other field answers 400 `invalid_parameter` with `param` naming it, at any depth
+(`output_format`, `recipe.variable`, `images[1].url`); nothing is ignored. That includes
+OpenAI's own fields that Godance does not act on, such as `background`, `output_format`,
+`input_fidelity`, `stream` and `user`, and `style`, which only a generation takes. In JSON
+a field set to `null` passes. A form field sent twice is refused too, except `image`.
 
 The answer follows the key exactly as for a generation: a job to poll, or the images with
 a sync key. Edits are part of inputs, which are being rolled out: until they are switched
@@ -330,6 +336,44 @@ result = client.images.edit(
 image_b64 = result.data[0].b64_json
 ```
 
+A recipe in place of the prompt goes in `extra_body`. The SDK requires `prompt`, so it is
+empty; it requires `image` too, and a recipe whose input slots name its images takes
+`image=[]`, which sends no image part:
+
+```python
+# The recipe's template, filled in with this value, edits the image sent.
+result = client.images.edit(
+    model="gpt-image-2",
+    image=open("mug.png", "rb"),
+    prompt="",
+    extra_body={"recipe": {"version_id": version_id, "variables": {"surface": "marble counter"}}},
+)
+
+# A recipe whose slots name its own images: a stored file, by its id.
+result = client.images.edit(
+    model="gpt-image-2",
+    image=[],
+    prompt="",
+    extra_body={"recipe": {"version_id": version_id, "inputs": {"product": {"file_id": file_id}}}},
+)
+```
+
+Notes for OpenAI SDK users:
+
+- The SDK always sends a multipart form, and writes a nested value from `extra_body` into
+  it as bracketed fields: `{"recipe": {"version_id": "…", "variables": {"surface": "…"}}}`
+  arrives as `recipe[version_id]` and `recipe[variables][surface]`, and a slot's image as
+  `recipe[inputs][product][file_id]`. Godance reads them back into the recipe. `recipe`
+  may be JSON text too: `extra_body={"recipe": json.dumps({...})}`.
+- A form has at most 24 parts, counting each image and each bracketed field. Past that it
+  answers 400 `invalid_parameter` ("The form could not be read (Too many parts …)"): send
+  `recipe` as JSON text, or upload the images with `POST /v1/files` and send JSON.
+- In the form the images are file parts. To edit images that are already stored, send
+  JSON with `images`; `extra_body={"images": [...]}` answers 400 in a form.
+- Errors on this route are problem documents without OpenAI's `error` object, so the
+  SDK's exception reads `Error code: 400`; `e.code` and `e.param` are set, and the sentence
+  is in `e.response.json()["detail"]`.
+
 The JSON form, editing an output of one of your own jobs with no upload at all:
 
 ```json
@@ -342,8 +386,8 @@ The JSON form, editing an output of one of your own jobs with no upload at all:
   one request may carry and `mask` whether a mask is taken.
 - Price: the images made, plus `per_input_image_microcents` for each input image where the
   model has one. Send `input_images` to `POST /v1/estimates` to see it first.
-- Refusals before anything is stored or charged: 400 `input_not_supported`, and everything
-  an upload can answer.
+- Refusals before anything is stored or charged: 400 `input_not_supported`, 400
+  `invalid_parameter` (`param` names the field), and everything an upload can answer.
 
 ## Files and inputs
 
@@ -402,7 +446,8 @@ your own DONE jobs whose files still exist; it needs no upload. Anything else an
 Upload refusals, in the order they are checked: 403 `inputs_disabled`, 403
 `inputs_not_allowed_for_account`, 403 `inputs_terms_required`, 413 `input_too_large`, 415
 `input_type_unsupported`, 409 `input_limit_reached`, 422 `input_person_not_allowed`, 503
-`input_check_unavailable`, and 429 for too many uploads in an hour.
+`input_check_unavailable`, and 429 for too many uploads in an hour. A form that cannot be
+read, such as one of more than 24 parts, answers 400 `invalid_parameter`.
 
 ## Video
 
