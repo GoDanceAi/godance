@@ -38,11 +38,12 @@ export default function AdminLayout() {
         <h1 className="text-2xl font-bold tracking-tight text-fg">Admin</h1>
         <span className="pill pill-violet">{role?.toLowerCase()} console</span>
       </div>
-      <nav className="mt-4 flex items-center gap-1 border-b border-border pb-2">
+      <nav aria-label="Admin navigation" className="mt-4 flex flex-wrap items-center gap-1 border-b border-border pb-2">
         <NavLink to="/admin/proposals" className={tabClass}>Proposals</NavLink>
         <NavLink to="/admin/catalog" className={tabClass}>Catalog</NavLink>
         <NavLink to="/admin/users" className={tabClass}>Users</NavLink>
         <NavLink to="/admin/overview" className={tabClass}>Overview</NavLink>
+        {role === 'ADMIN' && <NavLink to="/admin/features" className={tabClass}>Feature status</NavLink>}
         {/* Moderation is for the roles the API lets moderate. */}
         {MODERATOR_ROLES.some((each) => each === role) && (
           <NavLink to="/admin/community" className={tabClass}>Community</NavLink>
