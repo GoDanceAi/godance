@@ -1,0 +1,98 @@
+# Round 15 / 04 — Site discovery evidence
+
+Base B0: `8219e0497cb12a7be48b80915601811e361726bf`. All five streams start
+there and target main. The PR records its exact final head SHA and latest CI run.
+No production setting or content was activated; no paid operation was used.
+
+## Shared B0 baseline
+
+Node v22.23.5 / npm 10.9.9, original lockfile. `npm ci` passed;
+`npm run lint` inspected 109 files with zero diagnostics; `npm run build` emitted
+8 pages / 22 complete paths; `npm test` passed **752 tests / 94 suites**, with
+zero failed or skipped tests. Restricted subprocess streams initially prevented
+Node tests from running; the approved normal-process rerun passed unchanged.
+Raw local evidence remains ignored.
+
+## Default output parity
+
+B0 and candidate use Node 22, the same lockfile, UTC, `C.UTF-8`, footer year 2026,
+all optional `PUBLIC_*`, `GALLERY_*`, `COMMUNITY_*` and `SITE_URL` variables unset,
+and a fetch preload enforcing the existing offline catalog fallback by answering
+`/v1/models` with 503. No external catalog/provider operation is performed.
+
+`default-output-parity.json` contains every B0/candidate SHA-256, not a filtered
+HTML comparison. Both builds have **22 paths**. No added or removed output;
+the only changed bytes are exactly:
+
+- `docs/index.html`
+- `llms.txt`
+- `llms-full.txt`
+
+All shared CSS, hash filenames, assets, legacy pages, headers, redirects,
+robots and sitemap bytes match. No documentation routes or sitemap exemptions
+were added. New discovery styling is emitted inline only in enabled markup;
+the legacy home component preserves the original output.
+
+Recheck complete prepared build trees without any normalization:
+
+```bash
+node marketing/scripts/discovery/output-parity.mjs BASE_DIST CANDIDATE_DIST
+```
+
+## Acceptance checks
+
+- Failing opening tests: 1 passed / 2 failed before implementation (missing enabled
+  discovery and malformed-flag rejection). Focused implementation suite: 9/9 passed after the Community read integration.
+  The added header case failed before the hook (8 passed / 1 failed) and passed after it.
+- Default and enabled lint: 121 files, zero errors/warnings/hints.
+- Full default and enabled Node suites each passed **761 tests / 94 suites**,
+  with zero failures/skips (88.87 seconds default; 79.11 seconds enabled).
+  They include the original gallery schema,
+  malformed configuration/content, empty gallery, comparison threshold, Run this,
+  approved community/public profile, empty/error community, API and llms checks.
+- The Community build-output integration appends public `Access-Control-Allow-Origin: *`
+  only for `/community` and `/community/`, only when the strict discovery flag
+  emitted `/create` + `/integrations` and the existing Community loader emitted
+  its actual index. The static `public/_headers` is untouched. Real emitted-header
+  parsing verifies no extra CORS in rollout-off, empty-content or failed-API builds,
+  and no credentials header or recipe/profile wildcard.
+- A local Chromium integration check transpiles the actual 01 app probe and serves
+  real built headers across separate origins. Available content passes both direct
+  and canonical-redirect reads; rollout-off, empty and API-failed cases return false
+  in this emitted-rule-only fixture. The local server does not model Cloudflare's
+  default response headers or redirect processing. Cloudflare Pages normally adds
+  [`Access-Control-Allow-Origin: *` to static responses](https://developers.cloudflare.com/pages/configuration/serving-pages/#headers),
+  so the fixture's rollout-off result is not a deployed availability or security
+  guarantee. Community remains independently gated by backend/account permission,
+  its build setting and approved readable content; it does not require discovery
+  rollout activation. Other hosts may need their own CORS configuration. See
+  [Cloudflare header and redirect rules](https://developers.cloudflare.com/pages/configuration/headers/#match-a-path).
+  Reproduce with `marketing/scripts/discovery/public-index-cors.mjs`, passing the
+  01 probe source and an existing app Playwright core module (no new dependency).
+- New enabled-shell cases verify available/empty Gallery, comparison threshold,
+  Run this off/on, and available/empty/API-failed Community. The discovery flag
+  never creates content or bypasses the loaders.
+- Internal links in every enabled output HTML target emitted paths. Product pages
+  are exactly `/create` and `/integrations`, with canonical metadata/sitemap entries.
+  App links use configured `PUBLIC_APP_URL` and existing protected routes; History
+  guidance starts with selection, with no fabricated comparison/job ids.
+- `npm audit --audit-level=high` passed: no high/critical findings; the existing
+  Astro version reports one moderate advisory group. No dependency was added or
+  changed in this stream.
+- Four local Chromium journeys passed native-disclosure Enter/Tab/focus checks,
+  main-navigation accessible names, expanded-menu visibility, no horizontal overflow
+  at 390px/1440px, and no page errors. External requests were blocked.
+- Screenshots contain only public explanatory UI and no identities, credentials,
+  gallery fixtures or provider-generated media:
+  `home-desktop-light.png`, `home-mobile-dark.png`, `create-desktop-dark.png`,
+  `integrations-mobile-light.png`.
+
+The marketing check verifies app destination construction. Real deployed sign-in,
+onboarding and feature activation smoke checks are operator work after merge/deploy;
+this session makes no production change. The separate app stream tests its existing
+protected-route return behavior.
+
+Operator checklist and exact public GitHub repository build inputs are in
+`marketing/README.md`. Operator decisions remain real media/content rights,
+licence/NOTICE/removal contact, community moderation, backend/account availability
+and activation. Eventual integration order: **05/04, then 01, then 02/03**.

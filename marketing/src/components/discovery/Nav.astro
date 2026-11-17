@@ -1,0 +1,59 @@
+---
+import { loadGallery } from '../../lib/gallery-recipes';
+import { comparisons, comparePath } from '../../lib/gallery-compare';
+import { loadCommunity, appUrlFrom } from '../../lib/community';
+const gallery = await loadGallery();
+const community = await loadCommunity();
+const pairs = gallery.on ? comparisons(gallery.recipes, gallery.config.compareMin) : [];
+const app = appUrlFrom();
+const groups = [
+  { label: 'Create', links: [ { label: 'Workflow guide', href: '/create' }, { label: 'Image Studio', href: `${app}/create/image` }, { label: 'Video Studio', href: `${app}/create/video` }, { label: 'Chat', href: `${app}/chat` } ] },
+  { label: 'Explore', links: [ ...(gallery.on ? [{ label: 'Gallery', href: '/gallery' }] : []), ...pairs.map(pair => ({label: `Compare ${pair.a} / ${pair.b}`, href: comparePath(pair.a,pair.b)})), ...(community.on ? [{ label: 'Community', href: '/community' }] : []), { label: 'Models', href: '/models' } ] },
+  { label: 'Developers', links: [ { label: 'Integrations', href: '/integrations' }, { label: 'Documentation', href: '/docs' }, { label: 'MCP setup', href: '/docs#mcp' }, { label: 'n8n workflows', href: '/docs#n8n' }, { label: 'SDK compatibility', href: '/docs#openai-compat' }, { label: 'Self-hosting', href: '/docs#self-hosting' } ] },
+];
+---
+<header data-discovery-nav class="gd-discovery-header">
+  <div class="gd-discovery-top">
+    <a class="gd-discovery-brand" href="/" aria-label="Godance home"><svg
+        width="30" height="30" viewBox="0 0 512 512" role="img" aria-hidden="true"
+        fill="none" xmlns="http://www.w3.org/2000/svg" style="color: var(--color-fg)"
+      >
+        <path d="M341 149A150 150 0 1 0 341 363" stroke="currentColor" stroke-width="31" stroke-linecap="round" />
+        <path d="M154 208H231" stroke="currentColor" stroke-width="23" stroke-linecap="round" />
+        <path d="M154 256H245" stroke="currentColor" stroke-width="23" stroke-linecap="round" />
+        <path d="M154 304H226" stroke="currentColor" stroke-width="23" stroke-linecap="round" />
+        <path d="M245 256H294C315 256 315 220 337 220H394" stroke="currentColor" stroke-width="25" stroke-linecap="round" />
+        <circle cx="420" cy="220" r="32" fill="var(--color-bg)" stroke="#06B6D4" stroke-width="18" />
+      </svg><span>Godance</span></a>
+    <div class="gd-discovery-account">
+      <button id="discovery-theme" type="button" aria-label="Toggle dark mode">◐ Theme</button>
+      <a href={`${app}/login`}>Sign in</a>
+    </div>
+  </div>
+  <nav aria-label="Main navigation" class="gd-discovery-groups">
+    {groups.map(group => <details><summary>{group.label}</summary><ul>{group.links.map(link => <li><a class="nav-link" href={link.href} aria-current={Astro.url.pathname.replace(/\/$/,'') === link.href ? 'page' : undefined}>{link.label}</a></li>)}</ul></details>)}
+    <a href="/pricing" aria-current={Astro.url.pathname.replace(/\/$/,'') === '/pricing' ? 'page' : undefined}>Pricing</a>
+  </nav>
+</header>
+<style is:inline>
+  .gd-discovery-header {position:relative;z-index:20;background:var(--color-surface);border-bottom:1px solid var(--color-border);padding:1rem max(1.25rem,calc((100% - 1120px)/2));}
+  .gd-discovery-top,.gd-discovery-account,.gd-discovery-groups {display:flex;align-items:center;justify-content:space-between;gap:1rem;}
+  .gd-discovery-brand {display:inline-flex;align-items:center;gap:.5rem;font-size:1.35rem;font-weight:750;letter-spacing:-.04em;}
+  .gd-discovery-account {font-size:.85rem;}
+  .gd-discovery-account button {border:1px solid var(--color-border);border-radius:.4rem;padding:.35rem .6rem;}
+  .gd-discovery-groups {margin-top:1rem;justify-content:flex-start;gap:2rem;font-size:.95rem;}
+  .gd-discovery-groups details {position:relative;}
+  .gd-discovery-groups summary {cursor:pointer;padding:.25rem 0;}
+  .gd-discovery-groups ul {position:absolute;min-width:15rem;max-width:calc(100vw - 3rem);padding:.5rem;background:var(--color-surface);border:1px solid var(--color-border);border-radius:.5rem;box-shadow:0 12px 28px #0002;}
+  .gd-discovery-groups a {display:block;padding:.4rem;overflow-wrap:anywhere;}
+  .gd-discovery-header a:hover,.gd-discovery-header [aria-current] {color:var(--color-primary);}
+  .gd-discovery-header :focus-visible {outline:3px solid var(--color-primary);outline-offset:4px;}
+  @media(max-width:600px) {.gd-discovery-groups {display:grid;grid-template-columns:1fr 1fr;gap:.5rem 1rem;align-items:start;}.gd-discovery-groups ul {position:static;min-width:0;box-shadow:none;}.gd-discovery-account {gap:.65rem;}}
+</style>
+<script is:inline>
+  document.getElementById('discovery-theme')?.addEventListener('click', function () {
+    var next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    try { localStorage.setItem('gd-theme', next); } catch (e) {}
+  });
+</script>

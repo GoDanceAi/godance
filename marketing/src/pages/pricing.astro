@@ -1,6 +1,8 @@
 ---
 import Layout from '../layouts/Layout.astro';
 import { loadCatalog } from '../lib/catalog';
+import { discoveryEnabled } from '../lib/site-discovery';
+const discovery = discoveryEnabled();
 
 const title = 'Pricing — Godance';
 const description =
@@ -60,10 +62,10 @@ const MODALITY_LABEL: Record<string, string> = {
       <div class="card" style="border: 2px solid var(--color-primary)">
         <h2 class="text-xl font-semibold text-fg">Enterprise</h2>
         <p class="text-3xl font-bold mt-3 text-fg">Talk to us</p>
-        <p class="mt-2 text-sm text-fg-faint">For volume, SLAs, or your own provider keys.</p>
+        <p class="mt-2 text-sm text-fg-faint">{discovery ? 'For volume, SLAs, or procurement.' : 'For volume, SLAs, or your own provider keys.'}</p>
         <ul class="mt-6 space-y-2 text-fg-muted">
           <li class="flex gap-2"><span style="color: var(--color-primary)">✓</span> Volume discounts on the platform fee</li>
-          <li class="flex gap-2"><span style="color: var(--color-primary)">✓</span> Bring your own provider API keys</li>
+          {!discovery && <li class="flex gap-2"><span style="color: var(--color-primary)">✓</span> Bring your own provider API keys</li>}
           <li class="flex gap-2"><span style="color: var(--color-primary)">✓</span> Uptime SLA + dedicated incident contact</li>
           <li class="flex gap-2"><span style="color: var(--color-primary)">✓</span> Procurement + DPA workflows</li>
         </ul>
@@ -74,7 +76,7 @@ const MODALITY_LABEL: Record<string, string> = {
         </a>
         <!--/email_off-->
       </div>
-    </div>
+    </div>{discovery && <p class="mt-4 text-fg-muted">Provider keys are conditional on operator and account support, rather than an enterprise plan. See <a href="/docs#byok" class="underline">provider-key availability and limits</a>.</p>}
 
     <h2 class="text-2xl font-bold mt-16 mb-2 text-fg">What that actually costs</h2>
     <p class="text-fg-muted mb-6">

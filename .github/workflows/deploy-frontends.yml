@@ -113,6 +113,15 @@ jobs:
         env:
           SITE_URL: https://godance.ai
           PUBLIC_API_BASE: https://api.godance.ai
+          # Public build inputs: empty repository variables preserve off defaults.
+          PUBLIC_SITE_DISCOVERY_ENABLED: ${{ vars.PUBLIC_SITE_DISCOVERY_ENABLED }}
+          PUBLIC_APP_URL: ${{ vars.PUBLIC_APP_URL }}
+          GALLERY_MEDIA_BASE_URL: ${{ vars.GALLERY_MEDIA_BASE_URL }}
+          GALLERY_REMOVAL_CONTACT: ${{ vars.GALLERY_REMOVAL_CONTACT }}
+          GALLERY_OUTPUT_LICENCE: ${{ vars.GALLERY_OUTPUT_LICENCE }}
+          GALLERY_RUN_THIS: ${{ vars.GALLERY_RUN_THIS }}
+          GALLERY_COMPARE_MIN: ${{ vars.GALLERY_COMPARE_MIN }}
+          COMMUNITY_ENABLED: ${{ vars.COMMUNITY_ENABLED }}
         run: |
           npm ci
           npm run lint
