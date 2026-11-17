@@ -48,16 +48,16 @@ test.describe('billing top-up', () => {
     await expect(page.getByRole('button', { name: 'Continue to Stripe' })).toBeEnabled();
   });
 
-  test('an amount outside $1–$1,000 cannot be checked out', async ({ page, api }) => {
+  test('invalid amounts are refused locally while deployment bounds remain server authoritative', async ({ page, api }) => {
     await page.goto('/billing');
     const amount = page.getByRole('spinbutton');
     const pay = page.getByRole('button', { name: 'Continue to Stripe' });
 
     await amount.fill('0');
     await expect(pay).toBeDisabled();
-    await amount.fill('1001');
+    await amount.fill('1.001');
     await expect(pay).toBeDisabled();
-    await amount.fill('1000');
+    await amount.fill('1001');
     await expect(pay).toBeEnabled();
     expect(api.callsTo('POST', '/v1/billing/topup')).toHaveLength(0);
   });

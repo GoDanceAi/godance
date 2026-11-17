@@ -217,6 +217,12 @@ export class MockApi {
       .on('GET', '/v1/recipe-batches', { json: [] })
       // Settings lists provider keys. Bring your own key ships with no provider offered.
       .on('GET', '/v1/provider-credentials', { json: [] })
+      // Billing reads existing session-only configuration and recent usage.
+      .on('GET', '/v1/billing/auto-recharge', { json: {
+        enabled: false, threshold_cents: null, topup_cents: null,
+        payment_method_on_file: false, last_failure_at: null, last_failure_reason: null,
+      } })
+      .on('GET', '/v1/usage', { json: [] })
       // Handed in once after a sign-in that follows a signed-out page load (lib/first-touch).
       .on('POST', '/v1/attribution/first-touch', { status: 204 });
   }
