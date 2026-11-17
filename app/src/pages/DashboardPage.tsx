@@ -97,10 +97,11 @@ function RecentGenerations() {
 
   useEffect(() => {
     let cancelled = false;
-    listJobs({ limit: 4 })
+    const controller = new AbortController();
+    listJobs({ limit: 4 }, controller.signal)
       .then((page) => { if (!cancelled) setJobs(page.slice(0, 4)); })
       .catch(() => { /* the strip stays hidden */ });
-    return () => { cancelled = true; };
+    return () => { cancelled = true; controller.abort(); };
   }, []);
 
   if (jobs.length === 0) return null;

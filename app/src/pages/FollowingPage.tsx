@@ -99,6 +99,7 @@ function Feed() {
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [moreFailed, setMoreFailed] = useState(false);
+  const moreRead = useRef<AbortController | null>(null);
   // Read again when someone is followed or unfollowed here, not when the list is first read.
   const followingKey = following?.join(' ') ?? null;
   const seenKey = useRef<string | null>(null);
@@ -111,7 +112,12 @@ function Feed() {
 
   useEffect(() => {
     let cancelled = false;
-    getFeed({ limit: PAGE_SIZE }).then(
+    const controller = new AbortController();
+    moreRead.current?.abort();
+    moreRead.current = null;
+    setLoadingMore(false);
+    setMoreFailed(false);
+    getFeed({ limit: PAGE_SIZE }, controller.signal).then(
       (page) => {
         if (cancelled) return;
         setRecipes(page);
@@ -120,25 +126,29 @@ function Feed() {
       },
       () => { if (!cancelled) setFailed(true); },
     );
-    return () => { cancelled = true; };
+    return () => { cancelled = true; controller.abort(); moreRead.current?.abort(); };
   }, [reads]);
 
   const loadMore = async () => {
     const last = recipes?.at(-1);
     if (!last) return;
+    const controller = new AbortController();
+    moreRead.current?.abort();
+    moreRead.current = controller;
     setLoadingMore(true);
     setMoreFailed(false);
     try {
-      const page = await getFeed({ limit: PAGE_SIZE, before: last.public_id });
+      const page = await getFeed({ limit: PAGE_SIZE, before: last.public_id }, controller.signal);
+      if (controller.signal.aborted) return;
       setRecipes((cur) => {
         const seen = new Set(cur?.map((recipe) => recipe.public_id));
         return [...(cur ?? []), ...page.filter((recipe) => !seen.has(recipe.public_id))];
       });
       setHasMore(page.length === PAGE_SIZE);
     } catch {
-      setMoreFailed(true);
+      if (!controller.signal.aborted) setMoreFailed(true);
     } finally {
-      setLoadingMore(false);
+      if (!controller.signal.aborted) setLoadingMore(false);
     }
   };
 

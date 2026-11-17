@@ -128,11 +128,13 @@ export function ReferralProvider({ children }: { children: ReactNode }) {
 
   useAfterSignIn((account) => {
     let current = true;
+    const controller = new AbortController();
     void (async () => {
       await claimStoredReferralCode();
+      if (!current) return;
       let info: ReferralInfo | null = null;
       try {
-        info = await apiFetch<ReferralInfo>('/v1/referrals/me');
+        info = await apiFetch<ReferralInfo>('/v1/referrals/me', { signal: controller.signal });
       } catch {
         info = null;
       }
@@ -140,6 +142,7 @@ export function ReferralProvider({ children }: { children: ReactNode }) {
     })();
     return () => {
       current = false;
+      controller.abort();
     };
   });
 

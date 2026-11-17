@@ -47,3 +47,12 @@ Community discovery requires account permission and a readable approved public i
 This branch accepts only the same site's canonical `/community` or `/community/` final URL, successful readable HTML and actual published-recipe links. It changes no headers, flags or production settings itself. Backend community eligibility, the Community build setting and approved readable public-site output remain independent gates; an empty/error/unreadable site is never advertised as available. Production activation and deployed handoff smoke checks remain operator decisions.
 
 Suggested eventual integration order: 05/04, then 01, then 02/03. All five PRs target main from the common B0; merging, deployment and activation remain operator actions.
+
+
+## Review follow-up — abort obsolete private reads
+
+The existing account tags and cancelled callbacks prevented stale feature data from rendering, but did not stop the shared fetch wrapper from dispatching its global session-expiry event on an obsolete 401. Synthetic browser reproduction confirmed that a delayed response for account A could send a newly signed-in B account to Sign in even while B's session cookie remained valid.
+
+Discovery reads for profile/referrals/admin/follows now receive AbortSignals and abort on account/session cleanup. The same lifecycle cancellation covers bookmark reads, Dashboard job reads, Recipes initial/pagination reads, and Following feed initial/pagination reads. An obsolete referral task also stops before launching its GET after the existing claim promise resolves. Current-account 401 responses keep their existing logout behavior. The global API/auth wrappers, request/response contracts, referral mutations/rewards and all production flags are unchanged.
+
+Validation uses synthetic accounts only. Before the fix, the first tracked regression run had 16 stale-session failures and 8 passing current-expiry cases. The final focused command covers all eight read paths, different-account and same-account sessions, current-session expiry, and existing navigation/library/referral/admin/recipe/profile flows: **164 passed** on desktop/mobile (37.5 seconds). `npm run lint` and `npm run build` passed. The account-switch regression uses a client-side Dashboard link after sign-in; it never reloads the document before releasing the old response. Full combined integration and final latest-head CI are recorded in the PR description; earlier-head CI is not used for this correction.

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ApiError, type UserRecipe } from '../lib/api';
 import { formatCents } from '../lib/auth';
@@ -22,10 +22,12 @@ function RecipesLibrary() {
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [moreFailed, setMoreFailed] = useState(false);
+  const moreRead = useRef<AbortController | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    listRecipes({ limit: PAGE_SIZE })
+    const controller = new AbortController();
+    listRecipes({ limit: PAGE_SIZE }, controller.signal)
       .then((page) => {
         if (cancelled) return;
         setRecipes(page);
@@ -34,25 +36,29 @@ function RecipesLibrary() {
       .catch((err: unknown) => {
         if (!cancelled) setError(err instanceof ApiError ? err.detail || err.message : 'Could not load your recipes.');
       });
-    return () => { cancelled = true; };
+    return () => { cancelled = true; controller.abort(); moreRead.current?.abort(); };
   }, []);
 
   const loadMore = async () => {
     const last = recipes?.at(-1);
     if (!last) return;
+    const controller = new AbortController();
+    moreRead.current?.abort();
+    moreRead.current = controller;
     setLoadingMore(true);
     setMoreFailed(false);
     try {
-      const page = await listRecipes({ limit: PAGE_SIZE, before: last.id });
+      const page = await listRecipes({ limit: PAGE_SIZE, before: last.id }, controller.signal);
+      if (controller.signal.aborted) return;
       setRecipes((cur) => {
         const seen = new Set(cur?.map((r) => r.id));
         return [...(cur ?? []), ...page.filter((r) => !seen.has(r.id))];
       });
       setHasMore(page.length === PAGE_SIZE);
     } catch {
-      setMoreFailed(true);
+      if (!controller.signal.aborted) setMoreFailed(true);
     } finally {
-      setLoadingMore(false);
+      if (!controller.signal.aborted) setLoadingMore(false);
     }
   };
 

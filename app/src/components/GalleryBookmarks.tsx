@@ -20,16 +20,17 @@ export default function GalleryBookmarks() {
 
   useEffect(() => {
     let active = true;
+    const controller = new AbortController();
     setSaved(null);
     setError(null);
     setBusy(null);
     if (!account) return;
-    listSavedRecipes().then(
+    listSavedRecipes(controller.signal).then(
       (list) => { if (active) setSaved(list); },
       (err: unknown) => { if (active) setError(err instanceof ApiError && err.status === 404
         ? 'Gallery bookmarks are unavailable for this account.' : 'Could not load your gallery bookmarks.'); },
     );
-    return () => { active = false; };
+    return () => { active = false; controller.abort(); };
   }, [account, read]);
 
   useEffect(() => {

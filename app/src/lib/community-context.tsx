@@ -43,24 +43,32 @@ export function CommunityProvider({ children }: { children: ReactNode }) {
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [following, setFollowingList] = useState<{ userId: string; handles: string[] } | null>(null);
   const asked = useRef<string | null>(null);
+  const followingRead = useRef<AbortController | null>(null);
   const session = useRef({ userId });
   if (session.current.userId !== userId) session.current = { userId };
   const currentSession = session.current;
 
   useEffect(() => {
+    followingRead.current?.abort();
+    followingRead.current = null;
     setLoaded(null);
     setFollowingList(null);
     asked.current = null;
+    return () => { followingRead.current?.abort(); };
   }, [userId]);
 
   useAfterSignIn((account) => {
     let current = true;
-    getProfile().then(
+    const controller = new AbortController();
+    getProfile(controller.signal).then(
       (profile) => { if (current) setLoaded({ userId: account, profile }); },
       () => { if (current) setLoaded({ userId: account, profile: null }); },
     );
     return () => {
       current = false;
+      // Cancel the fetch itself: a stale 401 must not reach apiFetch's
+      // global session-expiry handler for the next signed-in account.
+      controller.abort();
     };
   });
 
@@ -74,7 +82,10 @@ export function CommunityProvider({ children }: { children: ReactNode }) {
   const loadFollowing = useCallback(() => {
     if (!userId || asked.current === userId) return;
     asked.current = userId;
-    listFollowing().then(
+    const controller = new AbortController();
+    followingRead.current?.abort();
+    followingRead.current = controller;
+    listFollowing(controller.signal).then(
       (handles) => { if (session.current === currentSession) setFollowingList({ userId, handles }); },
       () => { if (session.current === currentSession) asked.current = null; },
     );
