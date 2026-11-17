@@ -367,16 +367,16 @@ test.describe('the dashboard and the nav', () => {
     await page.goto('/dashboard');
     const nav = page.getByRole('navigation', { name: 'Main' });
     await expect(nav.getByRole('link')).toHaveText(
-      ['Dashboard', 'Chat', 'Create', 'History', 'Recipes', 'API keys', 'Billing', 'Settings']);
+      ['Dashboard', 'Image Studio', 'Video Studio', 'Chat', 'History', 'Recipes', 'Batches', 'API keys', 'MCP documentation', 'Billing', 'Settings']);
     // Nothing overflows the page sideways, phone included.
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 
-    await nav.getByRole('link', { name: 'Create' }).click();
+    await nav.getByRole('link', { name: 'Image Studio' }).click();
     await expect(page).toHaveURL('/create/image');
-    await expect(nav.getByRole('link', { name: 'Create' })).toHaveAttribute('aria-current', 'page');
+    await expect(nav.getByRole('link', { name: 'Image Studio' })).toHaveAttribute('aria-current', 'page');
     await page.getByRole('link', { name: 'Video', exact: true }).click();
     await expect(page).toHaveURL('/create/video');
-    await expect(nav.getByRole('link', { name: 'Create' })).toHaveAttribute('aria-current', 'page');
+    await expect(nav.getByRole('link', { name: 'Video Studio' })).toHaveAttribute('aria-current', 'page');
 
     await nav.getByRole('link', { name: 'History' }).click();
     await expect(page).toHaveURL('/history');

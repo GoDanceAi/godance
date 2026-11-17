@@ -5,11 +5,7 @@ const TABS = [
   { to: '/batches', label: 'Batches' },
 ];
 
-/**
- * "Recipes | Batches": the two lists under Recipes in the main navigation.
- * Batches have no entry of their own up there, so the navigation stays one
- * row on a phone.
- */
+/** The related recipe and batch lists, also reachable from the Library menu. */
 export default function RecipesTabs() {
   return (
     <nav aria-label="Recipes and batches" className="inline-flex rounded-md border border-border bg-surface p-0.5">

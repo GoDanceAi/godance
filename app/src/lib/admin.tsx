@@ -45,7 +45,8 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       return;
     }
     let cancelled = false;
-    apiFetch<AdminMeResponse>('/v1/admin/me')
+    const controller = new AbortController();
+    apiFetch<AdminMeResponse>('/v1/admin/me', { signal: controller.signal })
       .then(
         (me) => ({ role: me.role, needsTwoFactor: false }),
         (err: unknown) => ({
@@ -54,7 +55,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
         }),
       )
       .then((result) => { if (!cancelled) setProbe({ userId, ...result }); });
-    return () => { cancelled = true; };
+    return () => { cancelled = true; controller.abort(); };
   }, [userId, twoFactorEnabled]);
 
   const resolved = userId !== null && probe?.userId === userId;

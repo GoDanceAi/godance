@@ -202,10 +202,10 @@ test.describe('the referral page', () => {
     api.on('GET', '/v1/referrals/me', { json: ENABLED });
 
     await page.goto('/dashboard');
-    // Invite comes after Billing, in the header row or, on a phone, the row below it.
+    // Invite is in the same Account group on desktop and mobile.
     const nav = page.getByRole('navigation', { name: 'Main' });
     await expect(nav.getByRole('link')).toHaveText(
-      ['Dashboard', 'Chat', 'Create', 'History', 'Recipes', 'API keys', 'Billing', 'Invite', 'Settings']);
+      ['Dashboard', 'Image Studio', 'Video Studio', 'Chat', 'History', 'Recipes', 'Batches', 'API keys', 'MCP documentation', 'Billing', 'Settings', 'Invite']);
     // The extra entry doesn't push the page sideways, phone included.
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     await nav.getByRole('link', { name: 'Invite' }).click();

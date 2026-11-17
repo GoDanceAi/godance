@@ -236,8 +236,8 @@ export function refusal(err: unknown, fallback: string): string {
 
 export const isCommunityDisabled = (err: unknown) => codeOf(err) === 'community_disabled';
 
-export function getProfile(): Promise<OwnProfile> {
-  return apiFetch<OwnProfile>('/v1/profile');
+export function getProfile(signal?: AbortSignal): Promise<OwnProfile> {
+  return apiFetch<OwnProfile>('/v1/profile', { signal });
 }
 
 export function putProfile(body: { handle: string; display_name: string; link: string | null }): Promise<OwnProfile> {
@@ -288,8 +288,8 @@ export function getPublicProfile(handle: string): Promise<PublicProfile> {
   return apiFetch<PublicProfile>(`/v1/public/profiles/${encodeURIComponent(handle)}`, { auth: false });
 }
 
-export function listFollowing(): Promise<string[]> {
-  return apiFetch<string[]>('/v1/follows');
+export function listFollowing(signal?: AbortSignal): Promise<string[]> {
+  return apiFetch<string[]>('/v1/follows', { signal });
 }
 
 export function follow(handle: string): Promise<void> {
@@ -301,10 +301,10 @@ export function unfollow(handle: string): Promise<void> {
 }
 
 /** The newest public recipes of the authors the caller follows; `before` is the last public id of the page before. */
-export function getFeed(query: { limit: number; before?: string }): Promise<PublicRecipe[]> {
+export function getFeed(query: { limit: number; before?: string }, signal?: AbortSignal): Promise<PublicRecipe[]> {
   const params = new URLSearchParams({ limit: String(query.limit) });
   if (query.before) params.set('before', query.before);
-  return apiFetch<PublicRecipe[]>(`/v1/follows/feed?${params}`);
+  return apiFetch<PublicRecipe[]>(`/v1/follows/feed?${params}`, { signal });
 }
 
 export function report(body: { kind: ReportKind; id: string; reason: string }): Promise<void> {

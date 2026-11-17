@@ -139,10 +139,10 @@ test.describe('batches sit under Recipes', () => {
     await expect(strip(page).getByRole('link', { name: 'Batches' })).toHaveAttribute('aria-current', 'page');
     await expect(strip(page).getByRole('link', { name: 'Recipes' })).not.toHaveAttribute('aria-current', 'page');
 
-    // Batches have no entry of their own up there: the same eight, with Recipes as the current one.
+    // Batches have their own current link in the Library group.
     await expect(mainNav(page).getByRole('link')).toHaveText(
-      ['Dashboard', 'Chat', 'Create', 'History', 'Recipes', 'API keys', 'Billing', 'Settings']);
-    await expect(mainNav(page).getByRole('link', { name: 'Recipes' })).toHaveAttribute('aria-current', 'page');
+      ['Dashboard', 'Image Studio', 'Video Studio', 'Chat', 'History', 'Recipes', 'Batches', 'API keys', 'MCP documentation', 'Billing', 'Settings']);
+    await expect(mainNav(page).getByRole('link', { name: 'Batches' })).toHaveAttribute('aria-current', 'page');
     await expect(mainNav(page).locator('[aria-current="page"]')).toHaveCount(1);
     // One line each, and the page does not scroll sideways, phone included.
     const heights = await mainNav(page).getByRole('link').evaluateAll((links) => links.map((link) => (link as HTMLElement).offsetHeight));
@@ -155,7 +155,7 @@ test.describe('batches sit under Recipes', () => {
     expect(await noOverflow(page)).toBe(true);
   });
 
-  test('on a batch page and on a new-batch page, Recipes is the current link in the main navigation', async ({ page, api }) => {
+  test('batch pages mark Batches current; a new batch keeps its source Recipes current', async ({ page, api }) => {
     const batch = makeBatch();
     serveBatch(api, { batch, rows: makeRows(120, 41, 2, [7]) });
     serveRecipes(api, [makeRecipe()]);
@@ -163,7 +163,7 @@ test.describe('batches sit under Recipes', () => {
     await open(page, api, `/batches/${batch.id}`);
 
     await expect(page.getByText('41 of 120 rows finished')).toBeVisible();
-    await expect(mainNav(page).getByRole('link', { name: 'Recipes' })).toHaveAttribute('aria-current', 'page');
+    await expect(mainNav(page).getByRole('link', { name: 'Batches' })).toHaveAttribute('aria-current', 'page');
     await expect(mainNav(page).getByRole('link', { name: 'History' })).not.toHaveAttribute('aria-current', 'page');
 
     await page.goto(`/recipes/${recipeId(1)}/batch`);

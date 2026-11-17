@@ -123,13 +123,18 @@ export function ReferralProvider({ children }: { children: ReactNode }) {
   // its very first render, before the request below has even started.
   const [loaded, setLoaded] = useState<{ userId: string; info: ReferralInfo | null } | null>(null);
 
+  // A later session for the same account must discover its permissions afresh.
+  useEffect(() => { setLoaded(null); }, [userId]);
+
   useAfterSignIn((account) => {
     let current = true;
+    const controller = new AbortController();
     void (async () => {
       await claimStoredReferralCode();
+      if (!current) return;
       let info: ReferralInfo | null = null;
       try {
-        info = await apiFetch<ReferralInfo>('/v1/referrals/me');
+        info = await apiFetch<ReferralInfo>('/v1/referrals/me', { signal: controller.signal });
       } catch {
         info = null;
       }
@@ -137,6 +142,7 @@ export function ReferralProvider({ children }: { children: ReactNode }) {
     })();
     return () => {
       current = false;
+      controller.abort();
     };
   });
 
