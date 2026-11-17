@@ -58,7 +58,15 @@ node marketing/scripts/discovery/output-parity.mjs BASE_DIST CANDIDATE_DIST
   and no credentials header or recipe/profile wildcard.
 - A local Chromium integration check transpiles the actual 01 app probe and serves
   real built headers across separate origins. Available content passes both direct
-  and canonical-redirect reads; rollout-off, empty and API-failed cases return false.
+  and canonical-redirect reads; rollout-off, empty and API-failed cases return false
+  in this emitted-rule-only fixture. The local server does not model Cloudflare's
+  default response headers or redirect processing. Cloudflare Pages normally adds
+  [`Access-Control-Allow-Origin: *` to static responses](https://developers.cloudflare.com/pages/configuration/serving-pages/#headers),
+  so the fixture's rollout-off result is not a deployed availability or security
+  guarantee. Community remains independently gated by backend/account permission,
+  its build setting and approved readable content; it does not require discovery
+  rollout activation. Other hosts may need their own CORS configuration. See
+  [Cloudflare header and redirect rules](https://developers.cloudflare.com/pages/configuration/headers/#match-a-path).
   Reproduce with `marketing/scripts/discovery/public-index-cors.mjs`, passing the
   01 probe source and an existing app Playwright core module (no new dependency).
 - New enabled-shell cases verify available/empty Gallery, comparison threshold,

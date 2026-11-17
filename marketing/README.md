@@ -99,10 +99,19 @@ at the existing shared-run threshold, and Community requires
 `loadCommunity().on`. Run this remains independently gated. The two new product
 pages explain existing workflows, with no fabricated results or activation claims.
 Documentation updates are independent of the rollout flag. When discovery is enabled and
-approved Community output was actually emitted, a post-build hook adds public,
-credential-free CORS read access to `/community` and `/community/` only. No
+approved Community output was actually emitted, a post-build hook emits an explicit,
+credential-free CORS header declaration for `/community` and `/community/` only. No
 credentials header or recipe/profile wildcard is added. Off/empty/failed builds
 retain the original `_headers` bytes.
+
+This custom header declaration is not a Community availability or security gate.
+[Cloudflare Pages normally supplies `Access-Control-Allow-Origin: *` on static
+responses](https://developers.cloudflare.com/pages/configuration/serving-pages/#headers),
+so a readable approved Community index may be discoverable even when
+`PUBLIC_SITE_DISCOVERY_ENABLED=false`. Community keeps its independent backend,
+account, build and approved-content gates. Other hosts must supply suitable CORS
+headers for cross-origin reads. [Custom headers and redirect handling follow the
+hosting platform's rules](https://developers.cloudflare.com/pages/configuration/headers/#match-a-path).
 
 Required local checks (CI currently does not run the marketing Node suite):
 
@@ -172,5 +181,10 @@ node scripts/discovery/public-index-cors.mjs \
 ```
 
 It tests direct/canonical index reads across separate browser origins for
-available, rollout-off, empty-content and failed-API builds. This extra local
-check does not add a marketing browser dependency or change CI prerequisites.
+available, rollout-off, empty-content and failed-API builds. Its local server applies
+the emitted `_headers` declarations only; it does not reproduce Cloudflare's default
+headers or redirect processing. In particular, the fixture's rollout-off rejection
+does not prove that a deployed Community index is unavailable while discovery is
+off. Deployed availability is checked separately during the operator smoke check.
+This extra local check does not add a marketing browser dependency or change CI
+prerequisites.
