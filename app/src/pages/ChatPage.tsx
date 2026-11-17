@@ -3,18 +3,15 @@ import type { FormEvent } from 'react';
 import {
   apiFetch,
   isVirtualModel,
-  streamChat,
   type ModelEntry,
   type ModelListResponse,
 } from '../lib/api';
-import { useAuth } from '../lib/auth';
+import { useAuth, formatCents } from '../lib/auth';
+import { localMessage, streamChatTurn } from '../lib/chat-history';
+import { useSavedChat } from '../lib/use-saved-chat';
+import { formatDateTime } from '../lib/time';
 import { sendError, type SendError } from '../lib/send-error';
 import SendErrorNotice from '../components/SendErrorNotice';
-
-interface Message {
-  role: 'system' | 'user' | 'assistant';
-  content: string;
-}
 
 interface ModelOption { id: string; label: string; }
 
@@ -73,20 +70,32 @@ function resolvePresets(textModels: ModelEntry[]): Record<PresetKey, string> {
 }
 
 export default function ChatPage() {
+  const { user } = useAuth();
+  return <AccountChat key={`${user?.id}:${user?.ageStatus}`} adult={user?.ageStatus === 'ADULT'} />;
+}
+
+function AccountChat({ adult }: { adult: boolean }) {
   const { refresh } = useAuth();
+  const history = useSavedChat(adult);
+  const { messages, update } = history;
   const [models, setModels] = useState<ModelOption[]>(FALLBACK_MODELS);
   const [presets, setPresets] = useState<Record<PresetKey, string>>(FALLBACK_PRESETS);
   const [activePreset, setActivePreset] = useState<PresetKey | null>('smart');
   const [advancedModel, setAdvancedModel] = useState<string>(FALLBACK_MODELS[1].id);
   const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<SendError | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
-  // Leaving the page ends a stream in progress, so the request stops running.
-  useEffect(() => () => abortRef.current?.abort(), []);
+  const requestRef = useRef<object | null>(null);
+  const sending = useRef(false);
+  const alive = useRef(true);
+  // A different account/age-state mounts a fresh chat, and late callbacks are fenced.
+  useEffect(() => {
+    alive.current = true;
+    return () => { alive.current = false; requestRef.current = null; abortRef.current?.abort(); };
+  }, []);
 
   // Effective model: a preset resolves to its bound id; Advanced uses the
   // explicitly chosen one. Either way the request always carries a real id.
@@ -113,56 +122,59 @@ export default function ChatPage() {
 
   const send = async (e: FormEvent) => {
     e.preventDefault();
-    if (!input.trim() || streaming) return;
+    if (!input.trim() || sending.current || streaming || history.busy || history.readOnly) return;
+    sending.current = true;
+    if (!await history.prepareSend() || !alive.current) { sending.current = false; return; }
     setError(null);
-
-    const userMsg: Message = { role: 'user', content: input.trim() };
-    const assistantPlaceholder: Message = { role: 'assistant', content: '' };
-    const next: Message[] = [...messages, userMsg, assistantPlaceholder];
-    setMessages(next);
+    const userMsg = localMessage('user', input.trim());
+    const assistant = { ...localMessage('assistant', '', false), model };
+    const next = [...history.transcript.current, userMsg, assistant];
+    update(next);
     setInput('');
     setStreaming(true);
-
     const controller = new AbortController();
+    const request = {};
+    requestRef.current = request;
     abortRef.current = controller;
-
-    // Index of the placeholder we'll mutate as deltas arrive.
-    const assistantIdx = next.length - 1;
-
+    let complete = false;
     try {
-      const requestMessages = next
-        .slice(0, -1)                  // exclude the empty assistant placeholder
+      const requestMessages = next.slice(0, -1).filter((message) => message.content.trim() !== '')
         .map(({ role, content }) => ({ role, content }));
-
-      const stream = streamChat('/v1/chat/completions',
-        { model, messages: requestMessages, stream: true },
-        controller.signal);
-
-      for await (const chunk of stream) {
-        const delta = chunk.choices[0]?.delta?.content;
+      for await (const event of streamChatTurn({ model, messages: requestMessages, stream: true }, controller.signal)) {
+        if (!alive.current || requestRef.current !== request) return;
+        if ('complete' in event) { complete = true; continue; }
+        const delta = event.chunk.choices[0]?.delta?.content;
         if (!delta) continue;
-        setMessages((cur) => {
-          const copy = cur.slice();
-          const existing = copy[assistantIdx];
-          if (existing) {
-            copy[assistantIdx] = { ...existing, content: existing.content + delta };
-          }
-          return copy;
-        });
+        update((current) => current.map((message) => message.localId === assistant.localId
+          ? { ...message, content: message.content + delta, model: event.chunk.model || model } : message));
       }
     } catch (err) {
-      if ((err as Error).name === 'AbortError') {
-        // user cancelled — leave the partial assistant content in place
-      } else {
+      if (!alive.current || requestRef.current !== request) return;
+      if ((err as Error).name !== 'AbortError') {
         setError(sendError(err, 'Chat failed'));
-        // Roll back the empty placeholder if we never wrote into it.
-        setMessages((cur) => (cur[assistantIdx]?.content === '' ? cur.slice(0, -1) : cur));
+        update((current) => current.filter((message) => message.localId !== assistant.localId || message.content !== ''));
       }
     } finally {
-      setStreaming(false);
-      abortRef.current = null;
-      void refresh();   // balance moved; re-fetch /me
+      sending.current = false;
+      if (alive.current && requestRef.current === request) {
+        update((current) => current.map((message) => message.localId === assistant.localId
+          ? { ...message, complete: complete && !controller.signal.aborted } : message));
+        setStreaming(false);
+        requestRef.current = null;
+        abortRef.current = null;
+        void refresh();
+        // Only a conversation the adult chose to save appends subsequent turns.
+        // A persistence error pauses saving; later model turns never retry writes.
+        if (adult && history.selected && !history.readOnly) void history.persist(false);
+      }
     }
+  };
+
+  const newChat = () => {
+    if (!streaming && !history.busy && history.newChat()) { setInput(''); setError(null); }
+  };
+  const openChat = async (id: string) => {
+    if (!streaming && await history.open(id)) { setInput(''); setError(null); }
   };
 
   const stop = () => abortRef.current?.abort();
@@ -173,11 +185,11 @@ export default function ChatPage() {
   };
 
   return (
-    <div className="mx-auto max-w-3xl px-6 py-8 flex flex-col h-[calc(100vh-8rem)]">
+    <div className="mx-auto max-w-3xl px-6 py-8 flex flex-col min-h-[calc(100vh-8rem)]">
       <div className="mb-4">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <h1 className="text-xl font-semibold text-fg">Chat</h1>
-          <div className="flex items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-1.5">
             {PRESETS.map((p) => (
               <button
                 key={p.key}
@@ -226,14 +238,59 @@ export default function ChatPage() {
         )}
       </div>
 
-      <div className="flex-1 overflow-y-auto card p-4 space-y-4">
+      {adult && (
+        <section aria-label="Saved chat controls" className="mb-4 card space-y-3">
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className="btn btn-secondary btn-sm" onClick={newChat} disabled={streaming || history.busy}>New chat</button>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => void history.loadList()}
+              disabled={streaming || history.busy || history.listLoading}>Saved chats</button>
+            {!history.selected && <button type="button" className="btn btn-primary btn-sm" onClick={() => void history.persist()}
+              disabled={streaming || history.busy || !messages.some((message) => message.complete && message.content.trim()) || history.problem?.kind === 'unknown-create'}>Save this chat</button>}
+            {history.selected && <button type="button" className="btn btn-ghost btn-sm" onClick={() => void history.archive()}
+              disabled={streaming || history.busy || history.readOnly}>Archive chat</button>}
+          </div>
+          <p aria-live="polite" className="break-words text-xs text-fg-muted">
+            {history.selected ? history.archiveUncertain ? 'Archival is unconfirmed. This chat is read-only until its status is checked.'
+              : history.readOnly ? 'Archived chat · Read-only. It leaves the active list and is removed for good after 30 days.'
+              : history.problem ? `Saving paused for “${history.selected.title}”. Your current messages remain visible here.`
+              : `Saving is on for “${history.selected.title}”. Completed messages are saved; partial replies stay only on this page.`
+              : 'Ephemeral chat · New chats stay only on this page until you choose Save this chat. Saving retains the conversation in your account until you archive it; it is removed for good 30 days after archival.'}
+          </p>
+          {history.busy && <p role="status" className="text-sm text-fg-muted">Checking or saving chat…</p>}
+          {history.problem && <div className="space-y-2">
+            <p role="alert" className="text-sm text-danger">{history.problem.text}</p>
+            {(history.problem.kind === 'rejected' || history.problem.kind === 'reconciled') && <button type="button" className="btn btn-secondary btn-sm"
+              disabled={streaming || history.busy || history.readOnly} onClick={() => void history.persist()}>{history.problem.kind === 'rejected' ? 'Retry save' : 'Continue saving'}</button>}
+            {history.problem.kind === 'unknown-append' && <button type="button" className="btn btn-secondary btn-sm"
+              disabled={streaming || history.busy} onClick={() => void history.checkSavedCopy()}>Check saved copy</button>}
+          </div>}
+          {history.historyError && <p role="alert" className="text-sm text-danger">{history.historyError}</p>}
+          {history.archiveUncertain && <button type="button" className="btn btn-secondary btn-sm" disabled={streaming || history.busy}
+            onClick={() => void history.prepareSend()}>Check chat status</button>}
+          {history.listOpen && <section aria-labelledby="saved-chat-list" className="border-t border-border pt-3">
+            <h2 id="saved-chat-list" className="text-sm font-semibold text-fg">Your saved chats</h2>
+            {history.listLoading && <p className="mt-2 text-sm text-fg-muted">Loading saved chats…</p>}
+            {!history.listLoading && history.list?.length === 0 && <p className="mt-2 text-sm text-fg-muted">No active saved chats yet.</p>}
+            {history.list && <ul className="mt-2 space-y-2">
+              {history.list.map((conversation) => <li key={conversation.id}>
+                <button type="button" className="max-w-full text-left text-sm font-medium text-brand-600 hover:underline break-words"
+                  aria-pressed={history.selected?.id === conversation.id} disabled={streaming || history.busy || history.listLoading}
+                  onClick={() => void openChat(conversation.id)}>{conversation.title}</button>
+                <span className="ml-2 text-xs text-fg-faint">{formatDateTime(conversation.updatedAt)}</span>
+              </li>)}
+            </ul>}
+          </section>}
+        </section>
+      )}
+
+      <div aria-label="Chat messages" className="flex-1 min-h-64 max-h-[60vh] overflow-y-auto card p-4 space-y-4">
         {messages.length === 0 && (
           <p className="text-sm text-fg-faint text-center py-12">
             Type a prompt below. Responses stream as tokens arrive.
           </p>
         )}
-        {messages.map((m, i) => (
-          <div key={i} className={m.role === 'user' ? 'text-right' : ''}>
+        {messages.map((m) => (
+          <div key={m.localId} className={m.role === 'user' ? 'text-right' : ''}>
             <span className="text-xs font-semibold uppercase tracking-wider text-fg-faint">
               {m.role}
             </span>
@@ -244,8 +301,15 @@ export default function ChatPage() {
                   : 'bubble-assistant text-fg'
               }`}
             >
-              {m.content || <span className="text-fg-faint">…</span>}
+              {m.content || <span className="text-fg-faint">{streaming ? '…' : 'No text returned. Not saved.'}</span>}
             </div>
+            {m.role === 'assistant' && !m.complete && !streaming && <p className="mt-1 text-xs text-fg-muted">Partial or interrupted reply · Not saved</p>}
+            {m.saved && <p className="mt-1 text-xs text-fg-faint">
+              Saved {formatDateTime(m.saved.createdAt)}{m.saved.model ? ` · ${m.saved.model}` : ''}
+              {m.saved.input_tokens != null ? ` · ${m.saved.input_tokens} input tokens` : ''}
+              {m.saved.output_tokens != null ? ` · ${m.saved.output_tokens} output tokens` : ''}
+              {m.saved.cost_cents != null ? ` · ${formatCents(m.saved.cost_cents)}` : ''}
+            </p>}
           </div>
         ))}
       </div>
@@ -264,14 +328,14 @@ export default function ChatPage() {
           placeholder="Ask anything…  (Enter to send, Shift+Enter for newline)"
           rows={2}
           className="input flex-1 resize-none"
-          disabled={streaming}
+          disabled={streaming || history.busy || history.readOnly}
         />
         {streaming ? (
           <button type="button" onClick={stop} className="btn btn-secondary">
             Stop
           </button>
         ) : (
-          <button type="submit" disabled={!input.trim()} className="btn btn-primary">
+          <button type="submit" disabled={!input.trim() || history.busy || history.readOnly} className="btn btn-primary">
             Send
           </button>
         )}
