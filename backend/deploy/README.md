@@ -78,6 +78,10 @@ docker compose -f deploy/docker-compose.prod.yml \
                up -d --build
 ```
 
+This is for the first install only. Once deploys run, every later `up` of the
+backend needs `BACKEND_TAG` set; see
+[Never `up` the backend without `BACKEND_TAG`](#never-up-the-backend-without-backend_tag).
+
 The first run takes ~3 minutes:
 - Builds the backend image (Maven download + compile)
 - Pulls postgres / redis / caddy images
@@ -103,18 +107,78 @@ image (`BACKEND_TAG=<sha>`). It passes only once `/healthz` reports that
 commit and `/actuator/health` (PostgreSQL and Redis included) is `UP`.
 No manual step needed.
 
-To deploy by hand (e.g. CI is down):
+### Never `up` the backend without `BACKEND_TAG`
+
+The compose file runs `godance-backend:${BACKEND_TAG:-latest}`. Deploys pull
+`:<sha>` only, so the droplet's local `:latest` stays on whatever build last
+put it there and grows older with every release. Any `up` of the backend with
+`BACKEND_TAG` unset, `--force-recreate` included, replaces the running release
+with that old build. Nothing fails loudly: `/healthz` still answers 200, but
+newer features are gone and Quartz can flag jobs the old code doesn't know as
+`ERROR` (see [below](#after-an-old-build-has-run)).
+
+`docker compose restart backend` is safe. It restarts the same container and
+image, but it doesn't pick up changes to `deploy/.env.prod`.
+
+To recreate the backend on the release it is running, for example after
+editing `deploy/.env.prod`:
+
+```bash
+cd /opt/godance/backend
+C="docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env.prod"
+img=$(docker inspect --format '{{.Config.Image}}' "$($C ps -q backend)")
+echo "$img"     # must end in a 40-character commit sha; stop if it ends in :latest
+export BACKEND_TAG=${img##*:}
+$C up -d --no-build backend
+$C ps backend                                   # IMAGE ends in the same sha
+curl -s https://api.godance.ai/healthz | jq .git_sha
+```
+
+If the image ends in `:latest`, the backend is already on an old build.
+Redeploy `main` instead (next section).
+
+### Deploying by hand
+
+If the build job passed and only the deploy failed, or you need to redeploy
+`main`, run it again from GitHub: Actions → Backend CI/CD → Run workflow, on
+`main`. It builds, logs the droplet in to GHCR, and runs the same checks. That
+is the usual way to deploy by hand.
+
+If GitHub Actions itself is down, build on the droplet. The image is tagged with
+the commit, so the restart above finds it later:
 
 ```bash
 cd /opt/godance
-git pull
-docker compose -f backend/deploy/docker-compose.prod.yml \
-               --env-file backend/deploy/.env.prod \
-               up -d --build backend
+git pull --ff-only
+export BACKEND_TAG=$(git rev-parse HEAD)
+cd backend
+C="docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env.prod"
+$C build --build-arg GIT_SHA="$BACKEND_TAG" backend
+$C up -d --no-build backend
+curl -s https://api.godance.ai/healthz | jq .git_sha    # the first 7 characters of HEAD
 ```
 
-Only the `backend` service is rebuilt; postgres/redis/caddy keep
-running with their volumes intact.
+The build takes a few minutes and runs on the droplet's own CPU while the old
+container keeps serving. Only the `backend` service is replaced;
+postgres/redis/caddy keep running with their volumes intact.
+
+### After an old build has run
+
+An old build doesn't know newer Quartz jobs, and it marks their triggers
+`ERROR`. Quartz never clears that state, so the jobs stay stopped after the
+right release is back. Once `/healthz` reports the right sha, check and reset
+them:
+
+```bash
+cd /opt/godance/backend
+C="docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env.prod"
+pg() { $C exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d godance' ; }
+echo "select trigger_name, trigger_state from qrtz_triggers where trigger_state = 'ERROR';" | pg
+echo "update qrtz_triggers set trigger_state = 'WAITING' where trigger_state = 'ERROR';" | pg
+```
+
+Run the `select` again a minute later. Each trigger should be `WAITING` or
+`ACQUIRED`, with none left in `ERROR`.
 
 ## Changing the Caddyfile
 
@@ -152,6 +216,13 @@ docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env.prod pul
 docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env.prod up -d --no-build backend
 curl -s https://api.godance.ai/healthz | jq .git_sha    # the first 7 characters of that sha
 ```
+
+The package is private, and each deploy logs the droplet out of GHCR when it
+finishes, so `pull` can fail with `unauthorized`. Recent releases are usually
+still on the droplet; list them with `docker image ls
+ghcr.io/godanceai/godance-backend`. If the sha is listed, skip `pull`.
+Otherwise log in first with a token that has `read:packages`:
+`docker login ghcr.io`, then `docker logout ghcr.io` afterwards.
 
 Flyway migrations only move forward: an image older than the newest
 migration still starts, but check that release's migrations before rolling

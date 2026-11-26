@@ -47,8 +47,10 @@ services:
     # Deploys pull this prebuilt image from GHCR (see .github/workflows/deploy.yml).
     # BACKEND_TAG pins it to one commit's build; the deploy job sets it to the
     # commit it built, and a rollback sets it to an earlier one. Unset, it
-    # falls back to :latest. The build: block is kept as a fallback for
-    # manual `up -d --build backend`.
+    # falls back to :latest, which deploys never update: an `up` without
+    # BACKEND_TAG starts an old build (deploy/README.md, "Never `up` the
+    # backend without BACKEND_TAG"). The build: block is for the first
+    # install and for building on the droplet when CI is down.
     image: ghcr.io/godanceai/godance-backend:${BACKEND_TAG:-latest}
     build:
       context: ..
